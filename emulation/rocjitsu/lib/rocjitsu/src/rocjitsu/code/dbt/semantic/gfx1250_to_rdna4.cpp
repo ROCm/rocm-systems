@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
@@ -4531,6 +4532,189 @@ std::vector<uint32_t> expand_v_max_i64_vop3(const Instruction &inst, uint32_t, u
                                             const LaneLayout *) {
   constexpr uint16_t kOpCmpGtI64 = 84;
   return expand_v_minmax_64_vop3(inst, liveness, kOpCmpGtI64);
+}
+
+ExpandResult expand_v_add_minmax_32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                         std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                         TranslationContext &context, const LaneLayout *,
+                                         const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (src.op < gfx1250::kVAddMaxI32Vop3 || src.op > gfx1250::kVAddMinU32Vop3)
+    return ExpandResult::not_handled();
+  if (src.abs != 0 || src.opsel != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " uses unsupported source or result modifiers");
+  if (src.src0 == 254 || src.src1 == 254 || src.src2 == 254)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not support literal64 operands");
+  if (src.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src.src0))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support DPP source modifiers");
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255)
+    literal_word = simm32_literal_word(inst, 0);
+  else if (src.src1 == 255)
+    literal_word = simm32_literal_word(inst, 1);
+  else if (src.src2 == 255)
+    literal_word = simm32_literal_word(inst, 2);
+  if ((src.src0 == 255 || src.src1 == 255 || src.src2 == 255) && !literal_word)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32 operand");
+
+  uint8_t sum = static_cast<uint8_t>(src.vdst);
+  if (const auto clamp_vgpr = vgpr_index(static_cast<uint16_t>(src.src2));
+      clamp_vgpr && *clamp_vgpr == src.vdst) {
+    std::vector<uint8_t> avoid{static_cast<uint8_t>(src.vdst)};
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src0));
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src1));
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src2));
+    const auto scratch = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
+    if (!scratch)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate an alias-safe sum VGPR");
+    sum = static_cast<uint8_t>(*scratch);
+    context.require_vgprs(static_cast<uint32_t>(sum) + 1u);
+  }
+
+  constexpr uint16_t kOpAddNcU32 = 293;
+  constexpr uint16_t kOpMinI32 = 273;
+  constexpr uint16_t kOpMaxI32 = 274;
+  constexpr uint16_t kOpMinU32 = 275;
+  constexpr uint16_t kOpMaxU32 = 276;
+  uint16_t minmax_op = 0;
+  switch (src.op) {
+  case gfx1250::kVAddMaxI32Vop3:
+    minmax_op = kOpMaxI32;
+    break;
+  case gfx1250::kVAddMaxU32Vop3:
+    minmax_op = kOpMaxU32;
+    break;
+  case gfx1250::kVAddMinI32Vop3:
+    minmax_op = kOpMinI32;
+    break;
+  case gfx1250::kVAddMinU32Vop3:
+    minmax_op = kOpMinU32;
+    break;
+  default:
+    return ExpandResult::not_handled();
+  }
+
+  std::vector<uint32_t> words;
+  words.reserve(7);
+  append_vop3(words, kOpAddNcU32, sum, static_cast<uint16_t>(src.src0),
+              static_cast<uint16_t>(src.src1), 0,
+              (src.src0 == 255 || src.src1 == 255) ? literal_word : std::nullopt);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, minmax_op, static_cast<uint8_t>(src.vdst), vgpr_src(sum),
+              static_cast<uint16_t>(src.src2), 0, src.src2 == 255 ? literal_word : std::nullopt);
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_v_ashr_pk_i8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
+                                      const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const bool signed_result = src.op == gfx1250::kVAshrPkI8I32Vop3;
+  if (!signed_result && src.op != gfx1250::kVAshrPkU8I32Vop3)
+    return ExpandResult::not_handled();
+  if (src.abs != 0 || (src.opsel & 0x7u) != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " uses unsupported source or result modifiers");
+  if (src.src0 == 254 || src.src1 == 254 || src.src2 == 254)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not support literal64 operands");
+  if (src.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src.src0))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support DPP source modifiers");
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255)
+    literal_word = simm32_literal_word(inst, 0);
+  else if (src.src1 == 255)
+    literal_word = simm32_literal_word(inst, 1);
+  else if (src.src2 == 255)
+    literal_word = simm32_literal_word(inst, 2);
+  if ((src.src0 == 255 || src.src1 == 255 || src.src2 == 255) && !literal_word)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32 operand");
+
+  std::vector<uint8_t> avoid{static_cast<uint8_t>(src.vdst)};
+  add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src0));
+  add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src1));
+  add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src2));
+  const auto scratch = find_free_vgpr_run_avoiding(inst, liveness, 2, avoid);
+  if (!scratch)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot allocate two packed-shift scratch VGPRs");
+  const uint8_t lo = static_cast<uint8_t>(*scratch);
+  const uint8_t hi = static_cast<uint8_t>(*scratch + 1u);
+  context.require_vgprs(static_cast<uint32_t>(hi) + 1u);
+
+  constexpr uint16_t kOpMinI32 = 273;
+  constexpr uint16_t kOpMaxI32 = 274;
+  constexpr uint16_t kOpAshrrevI32 = 282;
+  constexpr uint8_t kOpLshlrevB32 = 24;
+  constexpr uint8_t kOpAndB32 = 27;
+  constexpr uint8_t kOpOrB32 = 28;
+
+  std::vector<uint32_t> words;
+  words.reserve(48);
+  auto append_shift_and_clamp = [&](uint8_t dst, uint16_t value) {
+    append_vop3(words, kOpAshrrevI32, dst, static_cast<uint16_t>(src.src2), value, 0,
+                (src.src2 == 255 || value == 255) ? literal_word : std::nullopt);
+    append_wait_valu_vgpr(words);
+
+    std::optional<uint32_t> lower_literal;
+    const uint32_t lower = signed_result ? 0xFFFFFF80u : 0u;
+    const uint16_t lower_src = literal_or_inline_u32(lower, lower_literal);
+    append_vop3(words, kOpMaxI32, dst, lower_src, vgpr_src(dst), 0, lower_literal);
+    append_wait_valu_vgpr(words);
+
+    std::optional<uint32_t> upper_literal;
+    const uint32_t upper = signed_result ? 127u : 255u;
+    const uint16_t upper_src = literal_or_inline_u32(upper, upper_literal);
+    append_vop3(words, kOpMinI32, dst, upper_src, vgpr_src(dst), 0, upper_literal);
+    append_wait_valu_vgpr(words);
+  };
+
+  append_shift_and_clamp(lo, static_cast<uint16_t>(src.src0));
+  append_shift_and_clamp(hi, static_cast<uint16_t>(src.src1));
+
+  std::optional<uint32_t> byte_mask;
+  append_vop2(words, kOpAndB32, lo, literal_or_inline_u32(0xFFu, byte_mask), lo, byte_mask);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpLshlrevB32, hi, scalar_positive_inline_u32(8), hi);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpOrB32, lo, vgpr_src(hi), lo);
+  append_wait_valu_vgpr(words);
+
+  std::optional<uint32_t> result_mask;
+  append_vop2(words, kOpAndB32, lo, literal_or_inline_u32(0xFFFFu, result_mask), lo, result_mask);
+  append_wait_valu_vgpr(words);
+  const bool dst_high = (src.opsel & 0x8u) != 0;
+  if (dst_high) {
+    append_vop2(words, kOpLshlrevB32, lo, scalar_positive_inline_u32(16), lo);
+    append_wait_valu_vgpr(words);
+  }
+  std::optional<uint32_t> preserve_mask;
+  const uint32_t preserve = dst_high ? 0x0000FFFFu : 0xFFFF0000u;
+  append_vop2(words, kOpAndB32, static_cast<uint8_t>(src.vdst),
+              literal_or_inline_u32(preserve, preserve_mask), static_cast<uint8_t>(src.vdst),
+              preserve_mask);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpOrB32, static_cast<uint8_t>(src.vdst), vgpr_src(lo),
+              static_cast<uint8_t>(src.vdst));
+  return ExpandResult::success(std::move(words));
 }
 
 [[nodiscard]] std::optional<uint16_t> pk_f32_lane_src(uint16_t src, bool select_high) {
@@ -12175,6 +12359,56 @@ constexpr uint16_t kOpDsLoadTr8B64 = 0xFD;
 #define RJ_VOP3_EXPAND_RULE(ENC, OP, FN)                                                           \
   { ENC, OP, RuleAction::Expand, 0, 0, nullptr, RJ_GFX1250_EXPAND(FN), nullptr, nullptr }
 
+#define RJ_VOP3_ADD_MINMAX_RULES(ENC)                                                              \
+  {ENC,                                                                                            \
+   gfx1250::kVAddMaxI32Vop3,                                                                       \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_v_add_minmax_32_vop3,                                                                    \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+      {ENC,                                                                                        \
+       gfx1250::kVAddMaxU32Vop3,                                                                   \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_v_add_minmax_32_vop3,                                                                \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVAddMinI32Vop3,                                                                   \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_v_add_minmax_32_vop3,                                                                \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVAddMinU32Vop3, RuleAction::Expand, 0, 0, nullptr, expand_v_add_minmax_32_vop3, \
+        nullptr, nullptr                                                                           \
+  }
+
+#define RJ_VOP3_ASHR_PK_I8_RULES(ENC)                                                              \
+  {ENC,                                                                                            \
+   gfx1250::kVAshrPkI8I32Vop3,                                                                     \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_v_ashr_pk_i8_vop3,                                                                       \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+  {                                                                                                \
+    ENC, gfx1250::kVAshrPkU8I32Vop3, RuleAction::Expand, 0, 0, nullptr, expand_v_ashr_pk_i8_vop3,  \
+        nullptr, nullptr                                                                           \
+  }
+
+#define RJ_VOP3_INTEGER_ALU_RULES(ENC) RJ_VOP3_ADD_MINMAX_RULES(ENC), RJ_VOP3_ASHR_PK_I8_RULES(ENC)
+
 #define RJ_VOP1_CVT_NORM_F16_RULES(ENC)                                                            \
   {ENC,                                                                                            \
    kOpVCvtNormI16F16Vop1,                                                                          \
@@ -12651,6 +12885,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_0, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_0),
     {kEncVop3_0, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_0, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12687,6 +12922,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_1, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_1),
     {kEncVop3_1, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_1, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12723,6 +12959,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_2, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_2),
     {kEncVop3_2, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_2, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12759,6 +12996,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_3, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_3),
     {kEncVop3_3, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_3, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12799,7 +13037,9 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_4, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_ADD_MINMAX_RULES(kEncVop3_4),
     RJ_VOP3_PERMLANE_FAMILY_RULES(kEncVop3_4),
+    RJ_VOP3_ASHR_PK_I8_RULES(kEncVop3_4),
     {kEncVop3_4, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_4, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12836,6 +13076,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_5, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_5),
     RJ_VOP3_SCALED_CVT_RULES(kEncVop3_5),
     {kEncVop3_5, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
@@ -12873,6 +13114,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_6, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_6),
     {kEncVop3_6, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_6, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12923,6 +13165,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_lshl_add_u64_vop3), nullptr, nullptr},
     {kEncVop3_7, kOpVLshlOrB32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshl_or_b32_vop3), nullptr, nullptr},
+    RJ_VOP3_INTEGER_ALU_RULES(kEncVop3_7),
     {kEncVop3_7, kOpVMadNcU64U32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_nc_64_32_vop3), nullptr, nullptr},
     {kEncVop3_7, kOpVMadNcI64I32Vop3, RuleAction::Expand, 0, 0, nullptr,

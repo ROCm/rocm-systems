@@ -19,8 +19,6 @@ REFERENCE_OUTPUT_DIRS = (
 )
 
 EXPECTED_XFAILS = {
-    "add_minmax_ops": "EXPAND not yet implemented for v_add_max_i32",
-    "ashr_pk_i8_ops": "EXPAND not yet implemented for v_ashr_pk_i8_i32",
     "bf16_tanh_transcendental_ops": "EXPAND not yet implemented for v_rcp_bf16_e32",
     "cluster_global_async_memory_ops": "EXPAND not yet implemented for cluster_load_b64",
     "cos_bf16_ops": "EXPAND not yet implemented for v_cos_bf16_e32",

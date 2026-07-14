@@ -2958,6 +2958,54 @@ TEST(BinaryTranslator, Gfx1250PrefetchHintsLowerToNoops) {
   EXPECT_EQ(patched.back(), kGfx1250SEndpgm);
 }
 
+TEST(BinaryTranslator, Gfx1250IntegerTernaryOpsLowerToRdna4Sequences) {
+  std::vector<uint32_t> text_words;
+  auto append_vop3 = [&](uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2,
+                         uint8_t opsel = 0) {
+    gfx1250::Vop3MachineInst inst{};
+    inst.vdst = vdst;
+    inst.opsel = opsel;
+    inst.op = op;
+    inst.encoding = 0x35;
+    inst.src0 = src0;
+    inst.src1 = src1;
+    inst.src2 = src2;
+    const size_t start = text_words.size();
+    text_words.resize(start + sizeof(inst) / sizeof(uint32_t));
+    std::memcpy(text_words.data() + start, &inst, sizeof(inst));
+  };
+
+  // The first add aliases its clamp input with VDST, which requires staging
+  // the wrapped sum before the min/max operation.
+  append_vop3(gfx1250::kVAddMaxI32Vop3, 3, 256, 257, 259);
+  append_vop3(gfx1250::kVAddMaxU32Vop3, 8, 260, 261, 262);
+  append_vop3(gfx1250::kVAddMinI32Vop3, 9, 256, 257, 258);
+  append_vop3(gfx1250::kVAddMinU32Vop3, 10, 260, 261, 262);
+  append_vop3(gfx1250::kVAshrPkI8I32Vop3, 4, 260, 258, 257, 0x8);
+  append_vop3(gfx1250::kVAshrPkU8I32Vop3, 0, 256, 258, 257);
+  text_words.push_back(0xBFB00000u); // s_endpgm
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *translations = find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  for (uint16_t opcode : {273u, 274u, 275u, 276u, 282u, 293u})
+    EXPECT_TRUE(section_contains_vop3_opcode(translations, opcode)) << "opcode " << opcode;
+  EXPECT_FALSE(section_contains_vop3_opcode(translations, gfx1250::kVAddMaxI32Vop3));
+  EXPECT_FALSE(section_contains_vop3_opcode(translations, gfx1250::kVAshrPkI8I32Vop3));
+}
+
 TEST(BinaryTranslator, Gfx1250DirectVglobalWaitsOnValuVgprBeforeMemory) {
   constexpr uint32_t kGfx1250GlobalLoadB32W0 = 0xEE050004u;
   constexpr uint32_t kGfx1250GlobalLoadB32W1 = 0x00000001u;
