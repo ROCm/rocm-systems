@@ -84,11 +84,14 @@ void WriteMetadataSlot(void* metadata_ring, uint64_t slot_index, uint64_t mask,
   reinterpret_cast<MetadataPacket*>(metadata_ring)[slot_index & mask] = metadata;
 }
 
+constexpr size_t kMaskedAqlBodySize = sizeof(AqlPacket) - sizeof(uint16_t) - sizeof(hsa_signal_t);
+static_assert(kMaskedAqlBodySize == 54, "Unexpected masked AQL body size.");
+
 bool MaskedPacketMatch(const AqlPacket& a, const AqlPacket& b) {
   return AqlPacket::type(a.packet.header) == AqlPacket::type(b.packet.header) &&
       (a.packet.header & ~kMutableAqlHeaderFlags) == (b.packet.header & ~kMutableAqlHeaderFlags) &&
       memcmp(reinterpret_cast<const uint8_t*>(&a) + 2, reinterpret_cast<const uint8_t*>(&b) + 2,
-             54) == 0;
+             kMaskedAqlBodySize) == 0;
 }
 
 bool CompletionSignalMatch(const AqlPacket& a, const AqlPacket& b) {
