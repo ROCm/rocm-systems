@@ -222,6 +222,11 @@ private:
    RocJpegBackend backend_; // RocJpeg backend
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination
+   // Scratch buffers for the batched NV12→RGB kernel parameter array.
+   // Host vector is filled per group in DecodeBatched; device buffer grows on demand.
+   std::vector<NV12ToRGBBatchParams> nv12_rgb_batch_params_host_;
+   NV12ToRGBBatchParams *nv12_rgb_batch_params_dev_ = nullptr;
+   size_t nv12_rgb_batch_params_dev_capacity_ = 0;
 };
 
 #endif //ROC_JPEG_DECODER_H_

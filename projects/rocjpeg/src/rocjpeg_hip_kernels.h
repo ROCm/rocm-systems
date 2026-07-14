@@ -302,6 +302,39 @@ void ConvertPackedYUYVToPlanarYUV(hipStream_t stream, uint32_t dst_width, uint32
     uint32_t dst_chroma_stride_in_bytes, const uint8_t *src_image, uint32_t src_image_stride_in_bytes);
 
 /**
+ * @brief Per-image parameters for the batched NV12→RGB kernel.
+ *
+ * One element per image. The array is passed as a device pointer to
+ * ColorConvertNV12ToRGBBatched; hipBlockIdx_z selects the element.
+ * Field layout mirrors the arguments of ColorConvertNV12ToRGBKernel exactly.
+ */
+struct NV12ToRGBBatchParams {
+    uint8_t       *dst_image;
+    uint32_t       dst_image_stride_in_bytes;
+    uint32_t       dst_image_stride_in_bytes_comp;
+    const uint8_t *src_luma_image;
+    uint32_t       src_luma_image_stride_in_bytes;
+    uint32_t       src_luma_image_stride_in_bytes_comp;
+    const uint8_t *src_chroma_image;
+    uint32_t       src_chroma_image_stride_in_bytes;
+    uint32_t       dst_width_comp;
+    uint32_t       dst_height_comp;
+};
+
+/**
+ * @brief Converts a batch of NV12 images to packed RGB in a single kernel launch.
+ *
+ * @param stream           HIP stream.
+ * @param max_width_comp   Maximum dst_width_comp across the batch  (sizes grid X).
+ * @param max_height_comp  Maximum dst_height_comp across the batch (sizes grid Y).
+ * @param d_params         Device pointer to NV12ToRGBBatchParams[n_images].
+ * @param n_images         Number of images — also the Z dimension of the launch grid.
+ */
+void ColorConvertNV12ToRGBBatched(hipStream_t stream,
+    uint32_t max_width_comp, uint32_t max_height_comp,
+    const NV12ToRGBBatchParams *d_params, uint32_t n_images);
+
+/**
  * @brief Structure representing an array of 6 unsigned integers.
  *
  * This structure is used to store an array of 6 unsigned integers.
