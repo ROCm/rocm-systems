@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include "common/join.hpp"
+
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
 
 #include <cstdint>
 #include <iosfwd>
 #include <ostream>
-#include <sstream>
 #include <string>
 
 struct log_entry;
@@ -58,18 +59,7 @@ private:
                                   bool);
 };
 
-template <typename... Args>
-inline std::string
-join_va(Args&&... args)
-{
-    std::ostringstream oss;
-    oss << std::boolalpha;  // render bool args as "true"/"false", not 1/0
-    const char* sep = "";
-    ((oss << sep << args, sep = " "), ...);
-    return oss.str();
-}
-
 #define ROCPROFSYS_ADD_LOG_ENTRY(...)                                                    \
     log_entry::add_log_entry(                                                            \
         { log_entry::source_location{ __FUNCTION__, __FILE__, __LINE__ },                \
-          join_va(__VA_ARGS__) })
+          ::rocprofsys::join(" ", __VA_ARGS__) })
