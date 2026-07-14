@@ -293,6 +293,16 @@ __device__ void Context::getmem_nbi_wave(void* dest, const void* source,
   DISPATCH(getmem_nbi_wave(dest, source, size, pe));
 }
 
+__device__ int Context::broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, 
+                                          int nelement, int PE_root){
+  DISPATCH_RET(broadcastmem_wave(team, dest, source, nelement, PE_root));
+}
+
+__device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, 
+                                        int nelement, int PE_root){
+  DISPATCH(broadcastmem_wg(team, dest, source, nelement, PE_root));
+}
+
 #define CONTEXT_PUTMEM_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)                                           \
   __device__ void Context::putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
                                                  uint64_t *sig_addr, uint64_t signal, int sig_op, \

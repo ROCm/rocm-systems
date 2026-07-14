@@ -7,6 +7,10 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -1490,6 +1494,55 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
   EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
                           << " should contain LDS data, not the VGPR sentinel";
+}
+
+// L1ScalarCache::writeback_all() must write each dirty K$ line back under its
+// own owning vmid (from the line tag), not the caller-supplied vmid. A CU can
+// retain dirty K$ lines from process A and then be flushed while processing
+// process B (e.g. from an acquire fence or SDMA path). If the bulk writeback
+// used the caller vmid, A's dirty line would be published through B's page
+// table and corrupt B's address space. Two page tables map the same GPU VA to
+// different host pages; a store under VMID 7 followed by writeback_all(8) must
+// land in VMID 7's backing, not VMID 8's.
+TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kSharedVa = 0x40000; // page-aligned, aliased across procs.
+  constexpr uint32_t kStoreWord = 0xA5A5A5A5u;
+
+  amdgpu::GpuMemory mem("test.vram");
+
+  // Two processes whose page tables map the same VA to different host buffers.
+  KfdProcess proc_a(kVmidA);
+  KfdProcess proc_b(kVmidB);
+  alignas(4096) std::array<uint8_t, 4096> backing_a{};
+  alignas(4096) std::array<uint8_t, 4096> backing_b{};
+  proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
+  proc_b.map_pages(kSharedVa, backing_b.data(), backing_b.size());
+  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_);
+  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_);
+
+  amdgpu::L2Cache l2("test.l2");
+  l2.set_backing_memory(&mem);
+
+  amdgpu::L1ScalarCache k_cache(&l2);
+  k_cache.set_memory(&mem);
+
+  // Store a dword under VMID A, leaving a dirty K$ line owned by VMID A.
+  k_cache.store(kSharedVa, /*num_dwords=*/1, &kStoreWord, kVmidA);
+
+  // Flush the K$ as if servicing VMID B, then flush L2 to backing. The line
+  // must be published through VMID A's page table (its owner), not B's.
+  k_cache.writeback_all(kVmidB);
+  l2.flush_all();
+
+  EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord)
+      << "dirty K$ line must be written back under its owner VMID A";
+  EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord)
+      << "line must NOT leak into VMID B's address space";
+
+  mem.unregister_process(kVmidA);
+  mem.unregister_process(kVmidB);
 }
 
 } // namespace

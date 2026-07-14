@@ -716,6 +716,11 @@ namespace elf {
 
       const char* data() override { assert(buffer); return buffer; }
       uint64_t size() override;
+      // Size in bytes of the raw backing buffer this image was initialized
+      // from, or 0 if the image is not buffer-backed. Unlike size(), this is
+      // not derived from attacker-controlled ELF header fields and is therefore
+      // safe to use for bounds checks.
+      size_t getBufferSize() const { return bufferSize; }
 
       bool push();
 
@@ -841,7 +846,16 @@ namespace elf {
 
     const char* GElfSegment::data() const
     {
-      return (const char*) elf->data() + phdr.p_offset;
+      if (!elf->buffer || elf->bufferSize == 0) {
+        return nullptr;
+      }
+      if (phdr.p_offset > elf->bufferSize) {
+        return nullptr;
+      }
+      if (phdr.p_filesz > elf->bufferSize - phdr.p_offset) {
+        return nullptr;
+      }
+      return elf->buffer + phdr.p_offset;
     }
 
     bool GElfImage::Freeze()
