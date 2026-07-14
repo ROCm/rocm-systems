@@ -1525,7 +1525,6 @@ main(int argc, char** argv)
     }
 
     std::unordered_set<object_t*>    objects   = {};
-    std::unordered_set<module_t*>    modules   = {};
     std::unordered_set<procedure_t*> functions = {};
 
     //----------------------------------------------------------------------------------//
@@ -1566,7 +1565,6 @@ main(int argc, char** argv)
             if(itr->getModule())
             {
                 functions.emplace(itr);
-                modules.emplace(itr->getModule());
                 if(itr->getModule()->getObject())
                     objects.emplace(itr->getModule()->getObject());
             }
@@ -1590,7 +1588,7 @@ main(int argc, char** argv)
         verbprintf(0, "Warning! No functions in application...\n");
     }
 
-    // The procedure pointers have been copied into the objects/modules/functions
+    // The procedure pointers have been copied into the objects/functions
     // sets and module_function entries
     app_functions.reset();
 
