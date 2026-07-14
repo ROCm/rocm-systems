@@ -228,7 +228,8 @@ jobs:
             if ! rocjitsu \
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
-              tests/test_corpus.py -vv \
+              --durations=0 \
+              tests/test_corpus.py \
               -n auto \
               --target "${name}" \
               --suite iree,kernels,cts \
