@@ -540,7 +540,7 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
 // behavior and should be reconciled when the fix lands.
 TEST(HotswapRewrite, RuntimeLoadRewrittenCodeObjectIsDebuggerVisible) {
   ResetRuntimeTestEnv();
-  if (!NewComgrHotswapApiAvailable()) return;
+  if (!ComgrHotswapOptionsApiAvailable()) return;
   LoadRecorder load;
   hsa_loaded_code_object_t loaded{};
   const hsa_executable_t executable = MakeTestExecutable(0x511);
