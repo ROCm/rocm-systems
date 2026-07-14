@@ -12,6 +12,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kByteCount = 64;
@@ -46,12 +47,15 @@ size_t FileSize(const std::string& path) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x5A);
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
@@ -63,8 +67,6 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
   // feature unsupported) and, on success, produce a non-empty file on disk.
   const hipError_t status = hipGraphDebugDotPrint(graph, path.c_str(), 0);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST("Graph dot export is not supported by this runtime path.");
   }
   HIP_CHECK(status);
@@ -72,15 +74,15 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
   REQUIRE(FileSize(path) > 0);
 
   std::remove(path.c_str());
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted) {
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   const std::string path = UniqueDotPath();
@@ -91,7 +93,6 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted) {
   const hipError_t status =
       hipGraphDebugDotPrint(graph, path.c_str(), hipGraphDebugDotFlagsVerbose);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
     HIP_SKIP_TEST("Graph dot export is not supported by this runtime path.");
   }
   HIP_CHECK(status);
@@ -99,5 +100,4 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted) {
   REQUIRE(FileSize(path) > 0);
 
   std::remove(path.c_str());
-  HIP_CHECK(hipGraphDestroy(graph));
 }

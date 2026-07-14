@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 // Skips the test when no device is visible so that the stream memory operation
@@ -42,11 +43,14 @@ void RequireStreamWaitValueSupport() {
 HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint32_t)));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint32_t initial = 0u;
@@ -62,19 +66,19 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder)
   uint32_t observed = 0u;
   HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost));
   REQUIRE(observed == sentinel);
-
-  HIP_CHECK(hipFree(device_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   uint64_t* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint64_t)));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint64_t initial = 0ull;
@@ -89,21 +93,22 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder)
   uint64_t observed = 0ull;
   HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
   REQUIRE(observed == sentinel);
-
-  HIP_CHECK(hipFree(device_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   uint32_t* gate_ptr = nullptr;
   uint32_t* done_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint32_t)));
+  cleanup.Add([&] { (void)hipFree(gate_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint32_t)));
+  cleanup.Add([&] { (void)hipFree(done_ptr); });
 
   const uint32_t initial = 0u;
   HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice));
@@ -128,22 +133,22 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   uint32_t observed = 0u;
   HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost));
   REQUIRE(observed == done);
-
-  HIP_CHECK(hipFree(done_ptr));
-  HIP_CHECK(hipFree(gate_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   uint64_t* gate_ptr = nullptr;
   uint64_t* done_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint64_t)));
+  cleanup.Add([&] { (void)hipFree(gate_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint64_t)));
+  cleanup.Add([&] { (void)hipFree(done_ptr); });
 
   const uint64_t initial = 0ull;
   HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
@@ -169,22 +174,22 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
   uint64_t observed = 0ull;
   HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
   REQUIRE(observed == done);
-
-  HIP_CHECK(hipFree(done_ptr));
-  HIP_CHECK(hipFree(gate_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   uint32_t* value32_ptr = nullptr;
   uint64_t* value64_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value32_ptr), sizeof(uint32_t)));
+  cleanup.Add([&] { (void)hipFree(value32_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value64_ptr), sizeof(uint64_t)));
+  cleanup.Add([&] { (void)hipFree(value64_ptr); });
 
   const uint32_t initial32 = 0u;
   const uint64_t initial64 = 0ull;
@@ -213,9 +218,6 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
     // Batch memory operations are an optional capability on some runtime paths
     // even when scalar stream wait/write value is supported; an unsupported
     // report is a contract-compliant outcome.
-    HIP_CHECK(hipFree(value64_ptr));
-    HIP_CHECK(hipFree(value32_ptr));
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamBatchMemOp is not supported on this device");
   }
   HIP_CHECK(batch_status);
@@ -230,18 +232,16 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   // drains, exactly as a sequence of scalar writes would have been.
   REQUIRE(observed32 == sentinel32);
   REQUIRE(observed64 == sentinel64);
-
-  HIP_CHECK(hipFree(value64_ptr));
-  HIP_CHECK(hipFree(value32_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
   RequireDevice();
   RequireStreamWaitValueSupport();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // A null address is a caller error. When the write API is supported it must be
   // rejected with hipErrorInvalidValue rather than silently succeeding; when the
@@ -249,7 +249,6 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
   // path and the test skips cleanly.
   const hipError_t write_status = hipStreamWriteValue32(stream, nullptr, 0u, 0);
   if (write_status == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamWriteValue32 is not supported on this device");
   }
   REQUIRE(write_status == hipErrorInvalidValue);
@@ -258,10 +257,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
   const hipError_t wait_status =
       hipStreamWaitValue32(stream, nullptr, 0u, hipStreamWaitValueGte);
   if (wait_status == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamWaitValue32 is not supported on this device");
   }
   REQUIRE(wait_status == hipErrorInvalidValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }

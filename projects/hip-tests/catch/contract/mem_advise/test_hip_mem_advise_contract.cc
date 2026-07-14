@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kRangeBytes = sizeof(int);
@@ -59,26 +60,25 @@ bool QueryRangeAttributeOrSkip(void* data, size_t data_size, hipMemRangeAttribut
 
 HIP_TEST_CASE(Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetReadMostly, device)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemAdviseSetReadMostly is not supported by this runtime path.");
   }
 
   int read_mostly = 0;
   if (!QueryRangeAttributeOrSkip(&read_mostly, sizeof(read_mostly),
                                  hipMemRangeAttributeReadMostly, data, kRangeBytes)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemRangeAttributeReadMostly query is not supported by this runtime path.");
   }
 
   if (read_mostly == 0) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST(
         "hipMemAdviseSetReadMostly succeeded but the range attribute did not report the advice as "
         "observable on this device/runtime path.");
@@ -94,33 +94,30 @@ HIP_TEST_CASE(Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
       REQUIRE(cleared == 0);
     }
   }
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetPreferredLocation, device)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemAdviseSetPreferredLocation is not supported by this runtime path.");
   }
 
   int preferred = -1;
   if (!QueryRangeAttributeOrSkip(&preferred, sizeof(preferred),
                                  hipMemRangeAttributePreferredLocation, data, kRangeBytes)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST(
         "hipMemRangeAttributePreferredLocation query is not supported by this runtime path.");
   }
 
   if (preferred != device) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST(
         "hipMemAdviseSetPreferredLocation succeeded but the range attribute did not report the "
         "current device as preferred location on this device/runtime path.");
@@ -137,56 +134,52 @@ HIP_TEST_CASE(Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevic
       REQUIRE(unset != device);
     }
   }
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_MemAdvise_SetAccessedBy_RangeAttributeReflectsDevice) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetAccessedBy, device)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemAdviseSetAccessedBy is not supported by this runtime path.");
   }
 
   int accessed_by[1] = {-1};
   if (!QueryRangeAttributeOrSkip(accessed_by, sizeof(accessed_by),
                                  hipMemRangeAttributeAccessedBy, data, kRangeBytes)) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemRangeAttributeAccessedBy query is not supported by this runtime path.");
   }
 
   if (accessed_by[0] != device) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST(
         "hipMemAdviseSetAccessedBy succeeded but the range attribute did not list the current "
         "device on this device/runtime path.");
   }
 
   REQUIRE(accessed_by[0] == device);
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   const bool read_mostly_set =
       ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetReadMostly, device);
   const bool preferred_set =
       ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetPreferredLocation, device);
   if (!read_mostly_set && !preferred_set) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemAdvise is not supported by this runtime path.");
   }
 
@@ -200,7 +193,6 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) 
   const hipError_t status =
       hipMemRangeGetAttributes(results, result_sizes, attributes, 2, data, kRangeBytes);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("hipMemRangeGetAttributes is not supported by this runtime path.");
   }
   HIP_CHECK(status);
@@ -216,13 +208,10 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) 
   }
 
   if (!observable) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST(
         "hipMemRangeGetAttributes succeeded but neither advice was reported as observable on this "
         "device/runtime path.");
   }
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_MemAdvise_NullPointer_IsRejected) {
@@ -237,14 +226,14 @@ HIP_TEST_CASE(Contract_MemAdvise_NullPointer_IsRejected) {
 
 HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   const hipError_t status = hipMemRangeGetAttribute(
       nullptr, sizeof(int), hipMemRangeAttributeReadMostly, data, sizeof(int));
 
   REQUIRE(status != hipSuccess);
-
-  HIP_CHECK(hipFree(data));
 }

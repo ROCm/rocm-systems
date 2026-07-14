@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kRangeBytes = 4096;
@@ -86,10 +87,13 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // Discarding a batch of managed ranges must either be honored or reported
   // unsupported. When honored, the stream must drain cleanly afterward.
@@ -100,17 +104,17 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
   if (status == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // The combined discard-and-prefetch batch, targeting the current device as the
   // prefetch destination, must be accepted or reported unsupported.
@@ -124,17 +128,17 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsup
   if (status == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // The driver-style discard batch takes device pointers and must likewise be
   // accepted or reported unsupported.
@@ -145,17 +149,17 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) 
   if (status == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // The driver-style combined discard-and-prefetch batch mirrors the runtime
   // variant with device pointers.
@@ -169,16 +173,15 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUn
   if (status == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // A batch with a null range must not silently succeed. On a runtime that
   // supports the path the call must reject the null input; on a runtime that
@@ -191,8 +194,6 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
   const hipError_t status = hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream);
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
@@ -200,10 +201,13 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
   if (!IsDiscreteDevice()) {
     HIP_SKIP_TEST("Batch prefetch is only exercised on discrete GPUs.");
   }
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // Prefetching a batch of managed ranges to the current device must be accepted
   // or reported unsupported. When honored, the stream must drain cleanly.
@@ -217,7 +221,4 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
   if (status == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }

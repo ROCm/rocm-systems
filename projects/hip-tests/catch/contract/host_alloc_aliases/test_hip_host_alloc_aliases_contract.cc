@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kElementCount = 64;
@@ -34,39 +35,39 @@ void WriteAndVerifyHostBytes(void* host_ptr, const std::array<uint8_t, kElementC
 }  // namespace
 
 HIP_TEST_CASE(Contract_HostAllocAliases_HostAlloc_ReturnsUsablePinnedPointer) {
+  hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x12);
 
   HIP_CHECK(hipHostAlloc(&host_ptr, kElementCount, hipHostAllocDefault));
+  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);
-
-  HIP_CHECK(hipFreeHost(host_ptr));
 }
 
 HIP_TEST_CASE(Contract_HostAllocAliases_MallocHost_ReturnsUsablePointer) {
+  hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x34);
 
   HIP_CHECK(hipMallocHost(&host_ptr, kElementCount));
+  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);
-
-  HIP_CHECK(hipFreeHost(host_ptr));
 }
 
 HIP_TEST_CASE(Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer) {
+  hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x56);
 
   HIP_CHECK(hipMemAllocHost(&host_ptr, kElementCount));
+  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);
-
-  HIP_CHECK(hipFreeHost(host_ptr));
 }
 
 HIP_TEST_CASE(Contract_HostAllocAliases_FreeHost_NullSucceeds_InvalidPointerRejected) {

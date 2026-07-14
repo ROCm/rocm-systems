@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #include <cstdint>
 #include <cstring>
@@ -115,10 +116,11 @@ HIP_TEST_CASE(Contract_Library_LoadData_FromRtc_Succeeds) {
 
   // A HIPRTC-produced code object must load into a non-null library handle and
   // unload again without error.
+  hip::contract::ContractCleanup cleanup;
   hipLibrary_t library = nullptr;
   HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_LoadData_NullImage_IsRejected) {
@@ -135,33 +137,35 @@ HIP_TEST_CASE(Contract_Library_LoadData_ValidImage_CanResolveKernel) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // A HIPRTC-produced code object must load and resolve a known kernel symbol.
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
   REQUIRE(kernel != nullptr);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetKernel_ResolvesKnownSymbol) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // A symbol that exists in the loaded library must resolve to a non-null
   // kernel handle.
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
   REQUIRE(kernel != nullptr);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetKernel_UnknownSymbol_IsRejected) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // Resolving a symbol that the library does not define must fail rather than
   // return a bogus handle. The exact error code is backend-specific, so only a
@@ -169,14 +173,14 @@ HIP_TEST_CASE(Contract_Library_GetKernel_UnknownSymbol_IsRejected) {
   hipKernel_t kernel = nullptr;
   const hipError_t status = hipLibraryGetKernel(&kernel, library, "no_such_kernel");
   REQUIRE(status != hipSuccess);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetKernelCount_MatchesLowerBound) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // The source defines two kernels, so the reported count must be at least two.
   // The exact value is not pinned because the runtime may inject helper kernels
@@ -184,14 +188,14 @@ HIP_TEST_CASE(Contract_Library_GetKernelCount_MatchesLowerBound) {
   unsigned int count = 0;
   HIP_CHECK(hipLibraryGetKernelCount(&count, library));
   REQUIRE(count >= 2);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // Enumerating with a maximum of zero must not write into the caller's buffer.
   // A sentinel guard slot is used to detect an out-of-contract write.
@@ -199,14 +203,14 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched) {
   hipKernel_t buffer[1] = {guard};
   HIP_CHECK(hipLibraryEnumerateKernels(buffer, 0, library));
   REQUIRE(buffer[0] == guard);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_EnumerateKernels_HandlesResolveToFunctions) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   unsigned int count = 0;
   HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -222,14 +226,14 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_HandlesResolveToFunctions) {
     HIP_CHECK(hipKernelGetFunction(&function, kernels[i]));
     REQUIRE(function != nullptr);
   }
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetKernel_RepeatedLookupIsStable) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // Repeated lookups of the same symbol against the same library must return the
   // same stable kernel handle.
@@ -239,14 +243,14 @@ HIP_TEST_CASE(Contract_Library_GetKernel_RepeatedLookupIsStable) {
   HIP_CHECK(hipLibraryGetKernel(&second, library, kWriteKernelName));
   REQUIRE(first != nullptr);
   REQUIRE(first == second);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_KernelGetName_ReturnsRequestedSymbol) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
@@ -258,14 +262,14 @@ HIP_TEST_CASE(Contract_Library_KernelGetName_ReturnsRequestedSymbol) {
   HIP_CHECK(hipKernelGetName(&name, kernel));
   REQUIRE(name != nullptr);
   REQUIRE(std::strcmp(name, kWriteKernelName) == 0);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
@@ -278,6 +282,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Launch the resolved function through the driver-style module launch entry
@@ -290,15 +295,14 @@ HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
   REQUIRE(result == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetGlobal_ReturnsAddressAndSize) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   // A device global defined in the library must resolve to a non-null device
   // address with a size that covers the declared type. The exact address is not
@@ -308,8 +312,6 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_ReturnsAddressAndSize) {
   HIP_CHECK(hipLibraryGetGlobal(&device_address, &byte_count, library, kGlobalName));
   REQUIRE(device_address != nullptr);
   REQUIRE(byte_count >= sizeof(int));
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
@@ -317,6 +319,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
+  hip::contract::ContractCleanup cleanup;
 
   // Loading the same code object through the module and library entry points
   // must resolve the same global to structurally equivalent results: both a
@@ -324,6 +327,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   // identity across two independent loads is not part of the contract.
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   hipDeviceptr_t module_address = 0;
@@ -333,6 +337,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
 
   hipLibrary_t library = nullptr;
   HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
 
   void* library_address = nullptr;
@@ -341,15 +346,14 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   REQUIRE(library_address != nullptr);
 
   REQUIRE(module_bytes == library_bytes);
-
-  HIP_CHECK(hipLibraryUnload(library));
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Library_KernelGetLibrary_RoundTrips) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
@@ -360,8 +364,6 @@ HIP_TEST_CASE(Contract_Library_KernelGetLibrary_RoundTrips) {
   hipLibrary_t resolved = nullptr;
   HIP_CHECK(hipKernelGetLibrary(&resolved, kernel));
   REQUIRE(resolved == library);
-
-  HIP_CHECK(hipLibraryUnload(library));
 }
 
 #endif  // HT_AMD

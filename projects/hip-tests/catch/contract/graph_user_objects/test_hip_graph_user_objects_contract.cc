@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 // Plain destructor callback for user objects. It only increments the integer
@@ -85,7 +86,9 @@ HIP_TEST_CASE(Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime) 
   }
   REQUIRE(object != nullptr);
 
+  hip::contract::ContractCleanup cleanup;
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // The graph takes its own reference on the object, and then releases it. This
   // reference is independent of the standalone initial reference, so releasing
@@ -100,8 +103,6 @@ HIP_TEST_CASE(Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime) 
   HIP_CHECK(hipUserObjectRelease(object, 1));
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(counter == 1);
-
-  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 HIP_TEST_CASE(Contract_GraphUserObjects_CreateNullObject_ReturnsInvalidValue) {

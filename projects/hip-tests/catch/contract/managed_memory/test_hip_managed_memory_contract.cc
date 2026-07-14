@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr int kHostValue = 0x1234;
@@ -43,22 +44,25 @@ void SkipIfManagedMemoryUnsupported() {
 
 HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   REQUIRE(data != nullptr);
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
   int* observed = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
   HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
+  cleanup.Add([&] { (void)hipFree(observed); });
   *data = kHostValue;
   HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
 
@@ -70,18 +74,18 @@ HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchron
   int host_observed = 0;
   HIP_CHECK(hipMemcpy(&host_observed, observed, sizeof(host_observed), hipMemcpyDeviceToHost));
   REQUIRE(host_observed == 1);
-
-  HIP_CHECK(hipFree(observed));
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
   int* observed = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
   HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
+  cleanup.Add([&] { (void)hipFree(observed); });
   *data = kHostValue;
   HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
 
@@ -91,9 +95,6 @@ HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchron
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(*data == kDeviceValue);
-
-  HIP_CHECK(hipFree(observed));
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
@@ -106,6 +107,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
 
 HIP_TEST_CASE(Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
   int device = 0;
   int concurrent_managed_access = 0;
@@ -119,10 +121,9 @@ HIP_TEST_CASE(Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported) {
   }
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemPrefetchAsync(data, sizeof(*data), device, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(data));
 }

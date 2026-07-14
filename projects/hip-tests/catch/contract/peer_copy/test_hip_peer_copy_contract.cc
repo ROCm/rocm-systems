@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 8;
@@ -54,6 +55,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
   // A peer copy where the source and destination device are the same device is
   // a valid degenerate case: it must behave like an ordinary device-to-device
   // copy. This keeps the positive contract runnable on a single-GPU host.
+  hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x11);
   std::array<uint8_t, kByteCount> dst{};
@@ -61,19 +63,19 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
   int* device_src = nullptr;
   int* device_dst = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_dst); });
   HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
 
   HIP_CHECK(hipMemcpyPeer(device_dst, device, device_src, device, kByteCount));
 
   HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost));
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device_dst));
-  HIP_CHECK(hipFree(device_src));
 }
 
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x22);
   std::array<uint8_t, kByteCount> dst{};
@@ -82,8 +84,11 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
   int* device_dst = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_dst); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
 
   // The async self-peer copy must complete and be visible after the stream is
@@ -93,15 +98,12 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
 
   HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost));
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_dst));
-  HIP_CHECK(hipFree(device_src));
 }
 
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   // The 3D peer copy with matching source and destination device must round-trip
   // a pitched extent like an ordinary same-device 3D copy.
+  hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x33);
   std::array<uint8_t, kByteCount> dst{};
@@ -112,10 +114,11 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   if (!TryMalloc3D(&device_src, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_src.ptr); });
   if (!TryMalloc3D(&device_dst, extent)) {
-    HIP_CHECK(hipFree(device_src.ptr));
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_dst.ptr); });
 
   // Seed the source pitched allocation via a host->device 3D copy.
   hipMemcpy3DParms up{};
@@ -142,12 +145,10 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   HIP_CHECK(hipMemcpy3D(&down));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device_dst.ptr));
-  HIP_CHECK(hipFree(device_src.ptr));
 }
 
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x44);
   std::array<uint8_t, kByteCount> dst{};
@@ -159,11 +160,13 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
   if (!TryMalloc3D(&device_src, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_src.ptr); });
   if (!TryMalloc3D(&device_dst, extent)) {
-    HIP_CHECK(hipFree(device_src.ptr));
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_dst.ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms up{};
   up.srcPtr = make_hipPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kWidth, kHeight);
@@ -189,10 +192,6 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
   HIP_CHECK(hipMemcpy3D(&down));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_dst.ptr));
-  HIP_CHECK(hipFree(device_src.ptr));
 }
 
 HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
@@ -200,13 +199,16 @@ HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
   // The exact error code is backend-specific, so only a non-success status is
   // required. Buffers are valid so the rejection is attributable to the device
   // ordinal rather than a null pointer.
+  hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const int invalid_device = DeviceCount();  // one past the last valid ordinal
 
   int* device_src = nullptr;
   int* device_dst = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_dst); });
 
   HIP_CHECK(hipGetLastError());
   const hipError_t status =
@@ -216,7 +218,4 @@ HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
   // consume it, then confirm the error state is clear.
   HIP_CHECK_ERROR(hipGetLastError(), status);
   HIP_CHECK(hipGetLastError());
-
-  HIP_CHECK(hipFree(device_dst));
-  HIP_CHECK(hipFree(device_src));
 }

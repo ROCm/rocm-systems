@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kRangeBytes = 4096;
@@ -48,9 +49,11 @@ void SkipIfManagedMemoryUnsupported() {
 
 HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // The location-based advise must either accept the read-mostly hint or report
   // that the path is unsupported on this runtime. Any other status is a contract
@@ -62,15 +65,15 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
   if (status != hipSuccess && status != hipErrorNotSupported) {
     HIP_CHECK(status);
   }
-
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   const hipMemLocation location = CurrentDeviceLocation();
 
@@ -87,32 +90,28 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsu
   if (unset_status != hipSuccess && unset_status != hipErrorNotSupported) {
     HIP_CHECK(unset_status);
   }
-
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_MemAdviseV2_PrefetchAsync_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // The location-based prefetch must either succeed (and complete after the
   // stream is synchronized) or report that prefetch is unsupported.
   const hipMemLocation location = CurrentDeviceLocation();
   const hipError_t status = hipMemPrefetchAsync_v2(ptr, kRangeBytes, location, 0, stream);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(ptr));
     HIP_SKIP_TEST("Location-based prefetch is not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_MemAdviseV2_NullPointer_IsRejected) {

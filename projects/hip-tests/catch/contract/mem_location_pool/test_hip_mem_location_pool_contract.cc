@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 bool MemoryPoolsSupported() {
@@ -66,18 +67,20 @@ HIP_TEST_CASE(Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool) {
 
 HIP_TEST_CASE(Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   hipMemLocation location = CurrentDeviceLocation();
   hipStream_t stream = nullptr;
   void* pooled = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const hipError_t alloc_status = hipMallocAsync(&pooled, 256, stream);
   if (alloc_status == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("Stream-ordered allocation is not supported by this device/runtime path.");
   }
   HIP_CHECK(alloc_status);
+  cleanup.Add([&] { (void)hipFreeAsync(pooled, stream); });
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(pooled != nullptr);
 
@@ -88,8 +91,4 @@ HIP_TEST_CASE(Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation
   HIP_CHECK(hipMemGetAccess(&flags, &location, pooled));
   REQUIRE((flags == hipMemAccessFlagsProtNone || flags == hipMemAccessFlagsProtRead ||
            flags == hipMemAccessFlagsProtReadWrite));
-
-  HIP_CHECK(hipFreeAsync(pooled, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
 }

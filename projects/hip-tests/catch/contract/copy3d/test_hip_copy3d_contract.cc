@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 7;
@@ -46,22 +47,23 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_Copy3D_Malloc3D_ReturnsPitchedPtr) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   const auto extent = ByteExtent(kWidth, kHeight, kDepth);
 
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   REQUIRE(device.ptr != nullptr);
   REQUIRE(device.pitch >= kWidth);
   REQUIRE(device.xsize == kWidth);
   REQUIRE(device.ysize == kHeight);
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x12);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -70,6 +72,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);
@@ -86,11 +89,10 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
   HIP_CHECK(hipMemcpy3D(&d2h));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x56);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -99,6 +101,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);
@@ -117,8 +120,6 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
   for (size_t i = 0; i < kWidth * kHeight; ++i) {
     REQUIRE(dst[i] == src[i]);
   }
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_Copy3D_Free3DAllocation_Succeeds) {

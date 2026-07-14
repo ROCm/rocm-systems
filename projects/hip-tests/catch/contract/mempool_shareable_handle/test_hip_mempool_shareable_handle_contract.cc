@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 // Tiny deterministic allocation size for the pointer export/import round trip.
@@ -70,11 +71,12 @@ bool ExportToFdOrSkip(hipMemPool_t pool, int* fd) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   int fd = -1;
   if (!ExportToFdOrSkip(pool, &fd)) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
 
@@ -87,18 +89,17 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
   HIP_CHECK(hipMemPoolImportFromShareableHandle(
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor, 0));
+  cleanup.Add([&] { (void)hipMemPoolDestroy(imported); });
   REQUIRE(imported != nullptr);
-
-  HIP_CHECK(hipMemPoolDestroy(imported));
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }
 
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   int fd = -1;
   if (!ExportToFdOrSkip(pool, &fd)) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
   REQUIRE(fd >= 0);
@@ -107,14 +108,17 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
   HIP_CHECK(hipMemPoolImportFromShareableHandle(
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor, 0));
+  cleanup.Add([&] { (void)hipMemPoolDestroy(imported); });
   REQUIRE(imported != nullptr);
 
   // Allocations for pointer export must come from the original (exportable) pool
   // via a stream-ordered allocation; imported pools cannot create allocations.
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   void* dev_ptr = nullptr;
   HIP_CHECK(hipMallocFromPoolAsync(&dev_ptr, kAllocSize, pool, stream));
+  cleanup.Add([&] { (void)hipFreeAsync(dev_ptr, stream); });
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(dev_ptr != nullptr);
 
@@ -126,17 +130,12 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
   void* imported_ptr = nullptr;
   HIP_CHECK(hipMemPoolImportPointer(&imported_ptr, imported, &export_data));
   REQUIRE(imported_ptr != nullptr);
-
-  HIP_CHECK(hipFreeAsync(dev_ptr, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemPoolDestroy(imported));
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }
 
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_NullArgs_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   // A null output handle is invalid input. The export API documents
   // hipErrorInvalidValue for this, and must reject the call with a non-success
@@ -149,6 +148,4 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_NullArgs_IsRejected) {
   // Clear the sticky error left by the intentionally rejected call so it does
   // not leak into later tests.
   (void)hipGetLastError();
-
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }

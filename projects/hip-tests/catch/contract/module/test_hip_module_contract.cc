@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #include <string>
 #include <vector>
@@ -89,6 +90,7 @@ void LoadContractModule(hipModule_t& module) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_Module_LoadData_FromRtc_Succeeds) {
+  hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
@@ -98,8 +100,8 @@ HIP_TEST_CASE(Contract_Module_LoadData_FromRtc_Succeeds) {
   // unload again without error.
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Module_LoadData_NullImage_IsRejected) {
@@ -112,21 +114,23 @@ HIP_TEST_CASE(Contract_Module_LoadData_NullImage_IsRejected) {
 }
 
 HIP_TEST_CASE(Contract_Module_GetFunction_ResolvesKnownSymbol) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   // A symbol that exists in the loaded module must resolve to a non-null
   // function handle.
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
   REQUIRE(function != nullptr);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Module_GetFunction_UnknownSymbol_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   // Resolving a symbol that the module does not define must fail rather than
   // return a bogus handle. The exact error code is backend-specific, so only a
@@ -134,13 +138,13 @@ HIP_TEST_CASE(Contract_Module_GetFunction_UnknownSymbol_IsRejected) {
   hipFunction_t function = nullptr;
   const hipError_t status = hipModuleGetFunction(&function, module, "no_such_kernel");
   REQUIRE(status != hipSuccess);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Module_LaunchKernel_WritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
@@ -148,6 +152,7 @@ HIP_TEST_CASE(Contract_Module_LaunchKernel_WritesExpectedValue) {
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Launch the resolved function through the driver-style module launch entry
@@ -160,14 +165,13 @@ HIP_TEST_CASE(Contract_Module_LaunchKernel_WritesExpectedValue) {
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
   REQUIRE(result == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Module_GetGlobal_ReturnsAddressAndSize) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   // A device global defined in the module must resolve to a non-null device
   // address with a size that covers the declared type. The exact address is not
@@ -177,13 +181,13 @@ HIP_TEST_CASE(Contract_Module_GetGlobal_ReturnsAddressAndSize) {
   HIP_CHECK(hipModuleGetGlobal(&device_address, &byte_count, module, "g_value"));
   REQUIRE(device_address != 0);
   REQUIRE(byte_count >= sizeof(int));
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_Module_FuncGetAttribute_ReturnsSaneValues) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
@@ -199,6 +203,4 @@ HIP_TEST_CASE(Contract_Module_FuncGetAttribute_ReturnsSaneValues) {
   int num_registers = 0;
   HIP_CHECK(hipFuncGetAttribute(&num_registers, HIP_FUNC_ATTRIBUTE_NUM_REGS, function));
   REQUIRE(num_registers >= 0);
-
-  HIP_CHECK(hipModuleUnload(module));
 }

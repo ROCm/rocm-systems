@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 17;
@@ -37,6 +38,7 @@ void SkipPitchedAllocationUnsupported() {
 }  // namespace
 
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
+  hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
   std::array<uint8_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -45,6 +47,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint8_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D8(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                           kWidth * sizeof(uint8_t), kHeight));
@@ -52,11 +55,10 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
                         kWidth * sizeof(uint8_t), kHeight, hipMemcpyDeviceToHost));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
+  hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
   std::array<uint16_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -65,6 +67,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint16_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                            kWidth * sizeof(uint16_t), kHeight));
@@ -72,11 +75,10 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
                         kWidth * sizeof(uint16_t), kHeight, hipMemcpyDeviceToHost));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
+  hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
   std::array<int, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -85,6 +87,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(int), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                            kWidth * sizeof(int), kHeight));
@@ -92,11 +95,10 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
                         kHeight, hipMemcpyDeviceToHost));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x3c;
   std::array<uint8_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -106,7 +108,9 @@ HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint8_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                kWidth * sizeof(uint8_t), kHeight, stream));
@@ -115,12 +119,10 @@ HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
                         kWidth * sizeof(uint8_t), kHeight, hipMemcpyDeviceToHost));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
+  hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x7b;
   std::array<uint8_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -129,14 +131,13 @@ HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemset2D(device_ptr, pitch, pattern, kWidth, kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight,
                         hipMemcpyDeviceToHost));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverMemset2D_NullDestination_IsRejected) {

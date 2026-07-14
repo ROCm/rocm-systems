@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kByteCount = 64;
@@ -41,12 +42,14 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_NullMode_IsRejected) {
 #endif
 
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCapture) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
   unsigned long long capture_id = 0;
   hipGraph_t graph = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status, &capture_id, &graph, nullptr, nullptr));
 
@@ -55,21 +58,21 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCap
   REQUIRE(graph != nullptr);
 
   EndCaptureAndDestroyGraph(stream);
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsNoneOutsideCapture) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   hipStreamCaptureStatus status = hipStreamCaptureStatusActive;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status));
 
   REQUIRE(status == hipStreamCaptureStatusNone);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
   hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
@@ -78,7 +81,9 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode)
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemsetAsync(device_ptr, 0x5a, kByteCount, stream));
   HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status, nullptr, nullptr, &dependencies,
@@ -91,16 +96,15 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode)
   REQUIRE(node_type == hipGraphNodeTypeMemset);
 
   EndCaptureAndDestroyGraph(stream);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_NullStatus_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   unsigned long long capture_id = 0;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   REQUIRE(hipStreamGetCaptureInfo_v2(stream, nullptr, &capture_id, nullptr, nullptr, nullptr) !=
           hipSuccess);
-  HIP_CHECK(hipStreamDestroy(stream));
 }

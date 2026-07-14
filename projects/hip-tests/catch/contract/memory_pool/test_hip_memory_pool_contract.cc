@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 bool MemoryPoolsSupported() {
@@ -83,33 +84,32 @@ HIP_TEST_CASE(Contract_MemoryPool_GetSetReleaseThreshold_RoundTripsValue) {
 
 HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, 128, stream));
   REQUIRE(ptr != nullptr);
   HIP_CHECK(hipFreeAsync(ptr, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_MemoryPool_MallocAsync_MemoryUsableAfterStreamSynchronize) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
   uint8_t value = 0;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, sizeof(value), stream));
+  cleanup.Add([&] { (void)hipFreeAsync(ptr, stream); });
   HIP_CHECK(hipMemsetAsync(ptr, 0x5a, sizeof(value), stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy(&value, ptr, sizeof(value), hipMemcpyDeviceToHost));
 
   REQUIRE(value == 0x5a);
-
-  HIP_CHECK(hipFreeAsync(ptr, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
 }

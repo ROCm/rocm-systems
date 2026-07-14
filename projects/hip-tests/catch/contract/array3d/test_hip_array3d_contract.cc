@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 4;
@@ -35,24 +36,26 @@ hipExtent ArrayExtent() { return make_hipExtent(kWidth, kHeight, kDepth); }
 
 HIP_TEST_CASE(Contract_Array3D_Malloc3DArray_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
 
   REQUIRE(array != nullptr);
-
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x6a);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
 
   hipMemcpy3DParms h2a{};
   h2a.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()));
@@ -69,8 +72,6 @@ HIP_TEST_CASE(Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes) {
   HIP_CHECK(hipMemcpy3D(&a2h));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_Array3D_FreeArray_Succeeds) {

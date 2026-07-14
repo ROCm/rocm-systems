@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kLinearBytes = 256;
@@ -56,39 +57,40 @@ bool CreateTextureOrSkip(hipTextureObject_t* texture, const HIP_RESOURCE_DESC* r
 
 HIP_TEST_CASE(Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
   const auto texture_desc = TextureDesc();
   hipTextureObject_t texture = 0;
 
   if (!CreateTextureOrSkip(&texture, &resource, &texture_desc, nullptr)) {
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
+  cleanup.Add([&] { (void)hipTexObjectDestroy(texture); });
 
   REQUIRE(texture != 0);
-
-  HIP_CHECK(hipTexObjectDestroy(texture));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
   const auto texture_desc = TextureDesc();
   hipTextureObject_t texture = 0;
 
   if (!CreateTextureOrSkip(&texture, &resource, &texture_desc, nullptr)) {
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
+  cleanup.Add([&] { (void)hipTexObjectDestroy(texture); });
 
   HIP_RESOURCE_DESC returned{};
   HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture));
@@ -98,16 +100,15 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
   REQUIRE(returned.res.linear.format == resource.res.linear.format);
   REQUIRE(returned.res.linear.numChannels == resource.res.linear.numChannels);
   REQUIRE(returned.res.linear.sizeInBytes == resource.res.linear.sizeInBytes);
-
-  HIP_CHECK(hipTexObjectDestroy(texture));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
   auto texture_desc = TextureDesc();
@@ -115,9 +116,9 @@ HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
   hipTextureObject_t texture = 0;
 
   if (!CreateTextureOrSkip(&texture, &resource, &texture_desc, nullptr)) {
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
+  cleanup.Add([&] { (void)hipTexObjectDestroy(texture); });
 
   HIP_TEXTURE_DESC returned{};
   HIP_CHECK(hipTexObjectGetTextureDesc(&returned, texture));
@@ -127,43 +128,41 @@ HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
   REQUIRE(returned.addressMode[2] == texture_desc.addressMode[2]);
   REQUIRE(returned.filterMode == texture_desc.filterMode);
   REQUIRE(returned.flags == texture_desc.flags);
-
-  HIP_CHECK(hipTexObjectDestroy(texture));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   hipArray_t array = nullptr;
   const auto channel = hipCreateChannelDesc<uint8_t>();
   HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
 
   const auto resource = ArrayResourceDesc(array);
   const auto texture_desc = TextureDesc();
   hipTextureObject_t texture = 0;
 
   if (!CreateTextureOrSkip(&texture, &resource, &texture_desc, nullptr)) {
-    HIP_CHECK(hipFreeArray(array));
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
+  cleanup.Add([&] { (void)hipTexObjectDestroy(texture); });
 
   HIP_RESOURCE_DESC returned{};
   HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture));
 
   REQUIRE(returned.resType == HIP_RESOURCE_TYPE_ARRAY);
   REQUIRE(returned.res.array.hArray == array);
-
-  HIP_CHECK(hipTexObjectDestroy(texture));
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupported) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   hipArray_t array = nullptr;
   const auto channel = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, 1));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
 
   const auto resource = ArrayResourceDesc(array);
   const auto texture_desc = TextureDesc();
@@ -175,31 +174,28 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupporte
   hipTextureObject_t texture = 0;
 
   if (!CreateTextureOrSkip(&texture, &resource, &texture_desc, &view)) {
-    HIP_CHECK(hipFreeArray(array));
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
+  cleanup.Add([&] { (void)hipTexObjectDestroy(texture); });
 
   HIP_RESOURCE_VIEW_DESC returned{};
   const hipError_t status = hipTexObjectGetResourceViewDesc(&returned, texture);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipTexObjectDestroy(texture));
-    HIP_CHECK(hipFreeArray(array));
     HIP_SKIP_TEST("hipTexObjectGetResourceViewDesc is not supported by this runtime path.");
   }
   HIP_CHECK(status);
 
   REQUIRE(returned.format == view.format);
   REQUIRE(returned.width == view.width);
-
-  HIP_CHECK(hipTexObjectDestroy(texture));
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_DriverTexture_Create_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
   const auto texture_desc = TextureDesc();
@@ -208,6 +204,4 @@ HIP_TEST_CASE(Contract_DriverTexture_Create_InvalidArgs_AreRejected) {
   REQUIRE(hipTexObjectCreate(nullptr, &resource, &texture_desc, nullptr) != hipSuccess);
   REQUIRE(hipTexObjectCreate(&texture, nullptr, &texture_desc, nullptr) != hipSuccess);
   REQUIRE(hipTexObjectCreate(&texture, &resource, nullptr, nullptr) != hipSuccess);
-
-  HIP_CHECK(hipFree(device_ptr));
 }

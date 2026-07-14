@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #if HT_AMD
 #include <hip/hip_ext.h>
@@ -79,8 +80,10 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // A cooperative launch of the host-function pointer with a single-thread grid
@@ -92,8 +95,6 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
@@ -158,8 +159,10 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
 }
 
 HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // A minimal extended-launch configuration (single-thread grid, no dynamic
@@ -177,17 +180,17 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
 }
 
 #if HT_AMD
 HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // The AMD extended launch entry point (no start/stop events, no flags) must
@@ -197,7 +200,5 @@ HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
 }
 #endif  // HT_AMD

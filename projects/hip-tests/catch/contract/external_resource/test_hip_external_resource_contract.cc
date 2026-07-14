@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 // The external memory and semaphore interop APIs require a valid handle exported
 // by another API (Vulkan, a DMA-buf producer, a D3D/NvSci object, etc.), which a
@@ -77,29 +78,29 @@ HIP_TEST_CASE(Contract_ExternalResource_DestroySemaphore_NullHandle_IsRejected) 
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // Signalling a batch that contains a null external-semaphore handle must be
   // rejected rather than enqueuing an operation on an invalid object.
   hipExternalSemaphore_t semaphores[1] = {nullptr};
   hipExternalSemaphoreSignalParams params[1] = {};
   RequireRejected(hipSignalExternalSemaphoresAsync(semaphores, params, 1, stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // Waiting on a batch that contains a null external-semaphore handle must be
   // rejected rather than enqueuing an operation on an invalid object.
   hipExternalSemaphore_t semaphores[1] = {nullptr};
   hipExternalSemaphoreWaitParams params[1] = {};
   RequireRejected(hipWaitExternalSemaphoresAsync(semaphores, params, 1, stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_GetMappedMipmappedArray_NullHandle_IsRejected) {

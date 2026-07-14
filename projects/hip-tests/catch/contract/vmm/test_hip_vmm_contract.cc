@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kElementCount = 128;
@@ -80,30 +81,31 @@ HIP_TEST_CASE(Contract_Vmm_GetAllocationGranularity_ReturnsPositiveValue) {
 
 HIP_TEST_CASE(Contract_Vmm_AddressReserveFree_Succeeds) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
   const size_t size = AllocationGranularity();
   void* address = nullptr;
 
   HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  cleanup.Add([&] { (void)hipMemAddressFree(address, size); });
 
   REQUIRE(address != nullptr);
-
-  HIP_CHECK(hipMemAddressFree(address, size));
 }
 
 HIP_TEST_CASE(Contract_Vmm_CreateReleaseAllocationHandle_SucceedsWhenSupported) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
   const size_t size = AllocationGranularity();
   hipMemGenericAllocationHandle_t handle{};
 
   if (!CreateAllocationHandle(&handle, size)) {
     HIP_SKIP_TEST("hipMemCreate is not supported by this device/runtime path.");
   }
-
-  HIP_CHECK(hipMemRelease(handle));
+  cleanup.Add([&] { (void)hipMemRelease(handle); });
 }
 
 HIP_TEST_CASE(Contract_Vmm_MapUnmap_SucceedsWhenSupported) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
   const size_t size = AllocationGranularity();
   void* address = nullptr;
   hipMemGenericAllocationHandle_t handle{};
@@ -111,23 +113,22 @@ HIP_TEST_CASE(Contract_Vmm_MapUnmap_SucceedsWhenSupported) {
   if (!CreateAllocationHandle(&handle, size)) {
     HIP_SKIP_TEST("hipMemCreate is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipMemRelease(handle); });
 
   HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  cleanup.Add([&] { (void)hipMemAddressFree(address, size); });
+
   const hipError_t map_status = hipMemMap(address, size, 0, handle, 0);
   if (map_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemAddressFree(address, size));
-    HIP_CHECK(hipMemRelease(handle));
     HIP_SKIP_TEST("hipMemMap is not supported by this device/runtime path.");
   }
   HIP_CHECK(map_status);
-
-  HIP_CHECK(hipMemUnmap(address, size));
-  HIP_CHECK(hipMemAddressFree(address, size));
-  HIP_CHECK(hipMemRelease(handle));
+  cleanup.Add([&] { (void)hipMemUnmap(address, size); });
 }
 
 HIP_TEST_CASE(Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x33);
   std::array<uint8_t, kElementCount> dst{};
   const size_t size = AllocationGranularity();
@@ -137,15 +138,17 @@ HIP_TEST_CASE(Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported) {
   if (!CreateAllocationHandle(&handle, size)) {
     HIP_SKIP_TEST("hipMemCreate is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipMemRelease(handle); });
 
   HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  cleanup.Add([&] { (void)hipMemAddressFree(address, size); });
+
   const hipError_t map_status = hipMemMap(address, size, 0, handle, 0);
   if (map_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemAddressFree(address, size));
-    HIP_CHECK(hipMemRelease(handle));
     HIP_SKIP_TEST("hipMemMap is not supported by this device/runtime path.");
   }
   HIP_CHECK(map_status);
+  cleanup.Add([&] { (void)hipMemUnmap(address, size); });
 
   hipMemAccessDesc access{};
   access.location.type = hipMemLocationTypeDevice;
@@ -157,8 +160,4 @@ HIP_TEST_CASE(Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported) {
   HIP_CHECK(hipMemcpy(dst.data(), address, dst.size(), hipMemcpyDeviceToHost));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipMemUnmap(address, size));
-  HIP_CHECK(hipMemAddressFree(address, size));
-  HIP_CHECK(hipMemRelease(handle));
 }

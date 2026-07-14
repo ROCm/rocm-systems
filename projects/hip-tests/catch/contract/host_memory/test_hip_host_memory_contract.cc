@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kElementCount = 128;
@@ -24,9 +25,11 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
+  hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, hipHostMallocDefault));
+  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
 
@@ -38,8 +41,6 @@ HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
   for (size_t i = 0; i < pattern.size(); ++i) {
     REQUIRE(bytes[i] == pattern[i]);
   }
-
-  HIP_CHECK(hipHostFree(host_ptr));
 }
 
 HIP_TEST_CASE(Contract_HostMemory_HostFree_Succeeds) {
@@ -57,12 +58,14 @@ HIP_TEST_CASE(Contract_HostMemory_HostRegisterUnregister_Succeeds) {
 }
 
 HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x41);
   std::array<uint8_t, kElementCount> dst{};
   void* host_ptr = nullptr;
   void* device_visible_ptr = nullptr;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, src.size(), hipHostMallocMapped));
+  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
   HIP_CHECK(hipHostGetDevicePointer(&device_visible_ptr, host_ptr, 0));
 
   REQUIRE(device_visible_ptr != nullptr);
@@ -71,19 +74,17 @@ HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
   HIP_CHECK(hipMemcpy(dst.data(), device_visible_ptr, dst.size(), hipMemcpyDeviceToHost));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipHostFree(host_ptr));
 }
 
 HIP_TEST_CASE(Contract_HostMemory_HostGetFlags_IncludesRequestedFlags) {
+  hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   unsigned int flags = 0;
   constexpr unsigned int requested_flags = hipHostMallocMapped;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, requested_flags));
+  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
   HIP_CHECK(hipHostGetFlags(&flags, host_ptr));
 
   REQUIRE((flags & requested_flags) == requested_flags);
-
-  HIP_CHECK(hipHostFree(host_ptr));
 }

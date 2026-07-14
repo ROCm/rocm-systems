@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kByteCount = 64;
@@ -43,6 +44,7 @@ bool TrySetEnabled(hipGraphExec_t graph_exec, hipGraphNode_t node, unsigned int 
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DefaultEnabled_ReportsOne) {
+  hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
@@ -50,31 +52,28 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DefaultEnabled_ReportsOne) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, device_ptr, host.data(), host.size(),
                                     hipMemcpyHostToDevice));
 
   // The enable/disable APIs operate on an instantiated executable graph, so the
   // graph must be instantiated before the node's enabled flag can be queried.
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
 
   unsigned int enabled = 0;
   if (!TryGetEnabled(graph_exec, node, &enabled)) {
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST("Graph node enable/disable APIs are not supported by this runtime path.");
   }
 
   // A freshly instantiated node must report as enabled by default.
   REQUIRE(enabled == 1);
-
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DisableThenQuery_ReportsZero) {
+  hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
@@ -82,16 +81,16 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisableThenQuery_ReportsZero) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, device_ptr, host.data(), host.size(),
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
 
   // Disabling the node must be reflected by a subsequent query reporting zero.
   if (!TrySetEnabled(graph_exec, node, 0)) {
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST("Graph node enable/disable APIs are not supported by this runtime path.");
   }
 
@@ -104,10 +103,6 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisableThenQuery_ReportsZero) {
   enabled = 0;
   REQUIRE(TryGetEnabled(graph_exec, node, &enabled));
   REQUIRE(enabled == 1);
-
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
@@ -116,6 +111,7 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
   source.fill(kSourcePattern);
   destination.fill(0);
 
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -124,12 +120,14 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
   hipGraphNode_t d2h_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, source.size()));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   // Pre-seed the device buffer with a baseline pattern distinct from the source
   // so that a disabled host-to-device copy leaves the baseline observable.
   HIP_CHECK(hipMemset(device_ptr, kBaselinePattern, source.size()));
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // The host-to-device node writes the source pattern into the device buffer,
   // and the device-to-host node reads the device buffer back into the host
@@ -141,17 +139,16 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
                                     destination.size(), hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
 
   // Disabling the host-to-device node must make it behave as an empty node, so
   // it no longer overwrites the pre-seeded baseline in the device buffer.
   if (!TrySetEnabled(graph_exec, h2d_node, 0)) {
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST("Graph node enable/disable APIs are not supported by this runtime path.");
   }
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -162,9 +159,4 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
     REQUIRE(byte == kBaselinePattern);
     REQUIRE(byte != kSourcePattern);
   }
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }

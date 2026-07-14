@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 // Accepts a status that is either success or one of the documented
@@ -92,8 +93,9 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable) {
   }
   HIP_CHECK(reset_status);
 
+  hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 64));
+  cleanup.Add([&] { (void)hipFree(ptr); });
   REQUIRE(ptr != nullptr);
-  HIP_CHECK(hipFree(ptr));
 }

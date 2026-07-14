@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kAttachBytes = sizeof(int);
@@ -33,66 +34,66 @@ void SkipIfManagedMemoryUnsupported() {
 
 HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  cleanup.Add([&] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamAttachMemAsync(stream, data, 0, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   HIP_CHECK(hipStreamAttachMemAsync(nullptr, data, 0, hipMemAttachGlobal));
   HIP_CHECK(hipStreamSynchronize(nullptr));
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  cleanup.Add([&] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamAttachMemAsync(stream, data, kAttachBytes, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(hipStreamAttachMemAsync(stream, nullptr, kAttachBytes, hipMemAttachSingle) != hipSuccess);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamAttach_NullStreamAttachSingle_IsRejected) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   REQUIRE(hipStreamAttachMemAsync(nullptr, data, 0, hipMemAttachSingle) != hipSuccess);
-
-  HIP_CHECK(hipFree(data));
 }

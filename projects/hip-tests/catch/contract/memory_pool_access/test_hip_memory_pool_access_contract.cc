@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 bool MemoryPoolsSupported() {
@@ -59,25 +60,25 @@ hipMemAccessDesc CurrentDeviceAccessDesc(hipMemAccessFlags flags) {
 
 HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessCurrentDevice_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;
   const auto access = CurrentDeviceAccessDesc(hipMemAccessFlagsProtReadWrite);
 
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t status = hipMemPoolSetAccess(pool, &access, 1);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }
 
 HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFlags) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;
   const auto access = CurrentDeviceAccessDesc(hipMemAccessFlagsProtReadWrite);
   hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
@@ -85,10 +86,10 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFla
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t set_status = hipMemPoolSetAccess(pool, &access, 1);
   if (set_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
   HIP_CHECK(set_status);
@@ -96,22 +97,21 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFla
   HIP_CHECK(hipMemPoolGetAccess(&flags, pool, &location));
 
   REQUIRE((flags & hipMemAccessFlagsProtReadWrite) == hipMemAccessFlagsProtReadWrite);
-
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }
 
 HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected) {
   SkipIfMemoryPoolsUnsupported();
+  hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;
   auto access = CurrentDeviceAccessDesc(hipMemAccessFlagsProtReadWrite);
 
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t set_status = hipMemPoolSetAccess(pool, &access, 1);
   if (set_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
   HIP_CHECK(set_status);
@@ -119,10 +119,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected) {
   access.flags = hipMemAccessFlagsProtNone;
   const hipError_t revoke_status = hipMemPoolSetAccess(pool, &access, 1);
   if (revoke_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemPoolDestroy(pool));
     HIP_SKIP_TEST("hipMemPoolSetAccess with hipMemAccessFlagsProtNone is not supported by this device/runtime path.");
   }
   REQUIRE((revoke_status == hipErrorInvalidDevice || revoke_status == hipErrorInvalidValue));
-
-  HIP_CHECK(hipMemPoolDestroy(pool));
 }

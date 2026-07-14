@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 bool ContainsNode(const hipGraphNode_t* nodes, size_t count, hipGraphNode_t expected) {
@@ -32,7 +33,9 @@ TwoNodeGraph CreateTwoNodeGraph() {
 }
 
 HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
+  hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
+  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
   size_t node_count = 0;
 
   HIP_CHECK(hipGraphGetNodes(graph.graph, nullptr, &node_count));
@@ -44,12 +47,12 @@ HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
   REQUIRE(node_count == 2);
   REQUIRE(ContainsNode(nodes.data(), node_count, graph.root));
   REQUIRE(ContainsNode(nodes.data(), node_count, graph.dependent));
-
-  HIP_CHECK(hipGraphDestroy(graph.graph));
 }
 
 HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
+  hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
+  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
   size_t root_count = 0;
 
   HIP_CHECK(hipGraphGetRootNodes(graph.graph, nullptr, &root_count));
@@ -60,12 +63,12 @@ HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
 
   REQUIRE(root_count == 1);
   REQUIRE(roots[0] == graph.root);
-
-  HIP_CHECK(hipGraphDestroy(graph.graph));
 }
 
 HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
+  hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
+  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
   size_t edge_count = 0;
 
   HIP_CHECK(hipGraphGetEdges(graph.graph, nullptr, nullptr, &edge_count));
@@ -78,12 +81,12 @@ HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
   REQUIRE(edge_count == 1);
   REQUIRE(from[0] == graph.root);
   REQUIRE(to[0] == graph.dependent);
-
-  HIP_CHECK(hipGraphDestroy(graph.graph));
 }
 
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependency) {
+  hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
+  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
   size_t dependency_count = 0;
 
   HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, nullptr, &dependency_count));
@@ -94,12 +97,12 @@ HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependenc
 
   REQUIRE(dependency_count == 1);
   REQUIRE(dependencies[0] == graph.root);
-
-  HIP_CHECK(hipGraphDestroy(graph.graph));
 }
 
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent) {
+  hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
+  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
   size_t dependent_count = 0;
 
   HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, nullptr, &dependent_count));
@@ -110,6 +113,4 @@ HIP_TEST_CASE(Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent) 
 
   REQUIRE(dependent_count == 1);
   REQUIRE(dependents[0] == graph.dependent);
-
-  HIP_CHECK(hipGraphDestroy(graph.graph));
 }

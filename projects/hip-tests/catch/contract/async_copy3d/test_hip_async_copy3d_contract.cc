@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 7;
@@ -62,6 +63,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_VisibleAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = Make3DPattern(0x23);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -71,7 +73,9 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_Visi
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);
@@ -89,12 +93,10 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_Visi
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
+  hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x6d;
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -103,6 +105,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   HIP_CHECK(hipMemset3D(device, pattern, extent));
 
@@ -114,19 +117,17 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
   HIP_CHECK(hipMemcpy3D(&d2h));
 
   RequireAllEqual(dst, pattern);
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpy3DAsync(nullptr, stream);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);
@@ -134,38 +135,38 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected) {
 }
 
 HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_RoundTripsBytes_VisibleAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakeLinearPattern(0x45);
   std::array<uint8_t, kLinearBytes> dst{};
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyWithStream(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyWithStream(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_InvalidKind_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakeLinearPattern(0x67);
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpyWithStream(device_ptr, src.data(), src.size(),
                                                 static_cast<hipMemcpyKind>(-1), stream);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_ptr));
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);

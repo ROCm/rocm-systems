@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 7;
@@ -82,12 +83,15 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   const auto src = MakePattern(0x40);
   std::array<uint8_t, kElems> dst{};
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // A 3D memcpy node added to the graph must, when the graph is launched,
   // deliver the full extent to the device buffer exactly like a direct
@@ -98,9 +102,6 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph) {
   LaunchGraph(graph);
   ReadBack(&dst, device);
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
@@ -109,11 +110,14 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   const auto src = MakePattern(0x50);
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   hipMemcpy3DParms params = MakeH2DParams(src.data(), device);
   HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
 
@@ -127,9 +131,6 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
   REQUIRE(retrieved.extent.depth == kDepth);
   REQUIRE(retrieved.srcPtr.ptr == src.data());
   REQUIRE(retrieved.dstPtr.ptr == device.ptr);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstantiate) {
@@ -138,6 +139,8 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   const auto first = MakePattern(0x11);
   const auto second = MakePattern(0x88);
   std::array<uint8_t, kElems> dst{};
@@ -145,6 +148,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Create the node reading from the first host buffer, then re-point it at the
   // second buffer before instantiation. The launched graph must copy the second
@@ -158,9 +162,6 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
   LaunchGraph(graph);
   ReadBack(&dst, device);
   REQUIRE(dst == second);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate) {
@@ -169,6 +170,8 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   const auto first = MakePattern(0x22);
   const auto second = MakePattern(0x99);
   std::array<uint8_t, kElems> dst{};
@@ -176,12 +179,14 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   hipMemcpy3DParms initial = MakeH2DParams(first.data(), device);
   HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &initial));
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-point the instantiated node at the second buffer through the executable
   // setter. The next launch must copy the second buffer without re-instantiate.
@@ -189,14 +194,10 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   HIP_CHECK(hipGraphExecMemcpyNodeSetParams(exec, node, &updated));
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   ReadBack(&dst, device);
   REQUIRE(dst == second);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }

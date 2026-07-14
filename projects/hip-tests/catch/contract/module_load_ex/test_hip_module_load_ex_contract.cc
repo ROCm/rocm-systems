@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #include <string>
 #include <vector>
@@ -88,6 +89,7 @@ void LoadContractModuleEx(hipModule_t& module) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
+  hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
@@ -98,11 +100,12 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
   // non-null module handle and unload again without error.
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr));
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
+  hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
@@ -125,6 +128,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
     HIP_SKIP_TEST("This runtime path does not support the requested JIT option.");
   }
   HIP_CHECK(status);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   // A symbol that exists in the loaded module must resolve to a non-null
@@ -132,8 +136,6 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
   REQUIRE(function != nullptr);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
@@ -147,8 +149,10 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
 }
 
 HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModuleEx(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
@@ -156,6 +160,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Launch the resolved function through the driver-style module launch entry
@@ -168,7 +173,4 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
   REQUIRE(result == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
-  HIP_CHECK(hipModuleUnload(module));
 }

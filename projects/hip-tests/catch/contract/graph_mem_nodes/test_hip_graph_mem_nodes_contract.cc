@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kAllocBytes = 4096;
@@ -91,22 +92,23 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
+  // The trailing graph-memory trim restores the baseline after the graph is
+  // destroyed; registering it first means it runs last (after hipGraphDestroy)
+  // when the guard unwinds.
+  cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
 
   REQUIRE(params.dptr != nullptr);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
@@ -114,15 +116,16 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
+  cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
 
@@ -133,9 +136,6 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   REQUIRE(retrieved.poolProps.allocType == hipMemAllocationTypePinned);
   REQUIRE(retrieved.poolProps.location.type == hipMemLocationTypeDevice);
   REQUIRE(retrieved.poolProps.location.id == CurrentDevice());
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
@@ -143,23 +143,22 @@ HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
   hipGraphNode_t free_node = nullptr;
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
+  cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
   REQUIRE(params.dptr != nullptr);
 
   if (!TryAddMemFreeNode(&free_node, graph, &alloc_node, 1, params.dptr)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory free nodes are not supported by this runtime path.");
   }
 
@@ -168,9 +167,6 @@ HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
   void* retrieved = nullptr;
   HIP_CHECK(hipGraphMemFreeNodeGetParams(free_node, &retrieved));
   REQUIRE(retrieved == params.dptr);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
@@ -245,16 +241,17 @@ HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
   hipGraphNode_t free_node = nullptr;
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
+  cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
   REQUIRE(params.dptr != nullptr);
@@ -266,8 +263,6 @@ HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
   // paths), matching the runtime free-node contract in this domain.
   if (!TryAddDrvMemFreeNode(&free_node, graph, &alloc_node, 1,
                             reinterpret_cast<hipDeviceptr_t>(params.dptr))) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
     HIP_SKIP_TEST("Driver graph memory free nodes are not supported by this runtime path.");
   }
   REQUIRE(free_node != nullptr);
@@ -276,8 +271,5 @@ HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
   hipGraphNodeType type{};
   HIP_CHECK(hipGraphNodeGetType(free_node, &type));
   REQUIRE(type == hipGraphNodeTypeMemFree);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  TryTrimGraphMemory();
 }
 #endif  // HT_AMD

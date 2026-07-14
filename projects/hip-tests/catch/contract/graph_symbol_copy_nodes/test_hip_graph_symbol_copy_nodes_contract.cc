@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 // The graph symbol-copy nodes resolve a device global through the public symbol
 // copy APIs, which look symbols up by their registered external name. The device
@@ -50,6 +51,7 @@ int ReadSymbol() {
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue) {
   ResetSymbol();
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
   hipStream_t stream = nullptr;
@@ -57,7 +59,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue) {
   hipGraphNode_t from_node = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // A to-symbol node writes a host value into the device global; a dependent
   // from-symbol node reads it back into a host destination. Launching the graph
@@ -72,20 +76,18 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue) {
                                             hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(result == kFirstValue);
   REQUIRE(ReadSymbol() == kFirstValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNodes) {
   ResetSymbol();
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
   hipStream_t stream = nullptr;
@@ -93,7 +95,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNo
   hipGraphNode_t from_node = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Build the graph with a first source, then rewrite both nodes on the graph
   // (pre-instantiation) to use a second source/destination. The launched graph
@@ -117,20 +121,18 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNo
                                                   sizeof(second_result), 0, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(second_result == kSecondValue);
   REQUIRE(ReadSymbol() == kSecondValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExecutable) {
   ResetSymbol();
 
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
   hipStream_t stream = nullptr;
@@ -138,7 +140,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExe
   hipGraphNode_t from_node = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   int first_source = kFirstValue;
   int first_result = -1;
@@ -150,6 +154,7 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExe
                                             sizeof(first_result), 0, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
 
   // Rewrite both nodes on the executable graph before launch. The launched graph
   // must observe the updated source/destination.
@@ -169,8 +174,4 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExe
 
   REQUIRE(second_result == kSecondValue);
   REQUIRE(ReadSymbol() == kSecondValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
 }

@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kSmallAllocSize = 4096;
@@ -15,14 +16,14 @@ constexpr uintptr_t kDevicePointerAlignment = 256;
 }
 
 HIP_TEST_CASE(Contract_Memory_MallocBasic_ReturnsAlignedPointer) {
+  hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
 
   HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   REQUIRE(ptr != nullptr);
   REQUIRE(reinterpret_cast<uintptr_t>(ptr) % kDevicePointerAlignment == 0);
-
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_Memory_MallocZeroSize_ReturnsNull) {

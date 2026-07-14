@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #if HT_AMD
 namespace {
@@ -60,30 +61,30 @@ bool CreateStreamWithMaskOrSkip(hipStream_t* stream, const std::vector<uint32_t>
 }  // namespace
 
 HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
+  hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
 
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const auto returned_mask = QueryCuMask(stream, default_mask.size());
   REQUIRE(returned_mask == default_mask);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
+  hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
 
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(stream != nullptr);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
@@ -98,6 +99,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
 }
 
 HIP_TEST_CASE(Contract_StreamCuMask_GetRejectsInvalidArgs) {
+  hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   std::vector<uint32_t> mask(default_mask.size(), 0);
   hipStream_t stream = nullptr;
@@ -105,12 +107,11 @@ HIP_TEST_CASE(Contract_StreamCuMask_GetRejectsInvalidArgs) {
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const hipError_t null_mask_status =
       hipExtStreamGetCUMask(stream, static_cast<uint32_t>(mask.size()), nullptr);
   const hipError_t zero_size_status = hipExtStreamGetCUMask(stream, 0, mask.data());
-
-  HIP_CHECK(hipStreamDestroy(stream));
 
   REQUIRE(null_mask_status == hipErrorInvalidValue);
   REQUIRE(zero_size_status == hipErrorInvalidValue);

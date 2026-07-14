@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr int kInitialValue = 7;
@@ -41,6 +42,7 @@ void HostNoop(void* /*user_data*/) {}
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) {
+  hip::contract::ContractCleanup cleanup;
   int initial = kInitialValue;
   int updated = kUpdatedValue;
   int* device_value = nullptr;
@@ -50,9 +52,12 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) 
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Add the node with the initial value, then mutate its parameters on the graph
   // node (pre-instantiation) to the updated value. The instantiated graph must
@@ -77,18 +82,15 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) 
   REQUIRE(read_back.blockDim.x == 1);
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(ReadDeviceInt(device_value) == kUpdatedValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource) {
+  hip::contract::ContractCleanup cleanup;
   constexpr size_t kBytes = sizeof(int);
   int source_a = kInitialValue;
   int source_b = kUpdatedValue;
@@ -100,8 +102,11 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource)
   hipGraphNode_t memcpy_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, kBytes));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Add a host-to-device copy from source_a, then rewrite the node to copy from
   // source_b before instantiation. The launched graph must observe the updated
@@ -112,25 +117,23 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource)
                                           hipMemcpyHostToDevice));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   HIP_CHECK(hipMemcpy(&host_result, device_value, kBytes, hipMemcpyDeviceToHost));
   REQUIRE(host_result == kUpdatedValue);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserData) {
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t host_node = nullptr;
   int first_user_data = 0;
   int second_user_data = 0;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   hipHostNodeParams initial_params{};
   initial_params.fn = HostNoop;
@@ -148,11 +151,10 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserDat
   HIP_CHECK(hipGraphHostNodeGetParams(host_node, &read_back));
   REQUIRE(read_back.fn == HostNoop);
   REQUIRE(read_back.userData == &second_user_data);
-
-  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvents) {
+  hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t record_node = nullptr;
   hipGraphNode_t wait_node = nullptr;
@@ -160,8 +162,11 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvent
   hipEvent_t second = nullptr;
 
   HIP_CHECK(hipEventCreate(&first));
+  cleanup.Add([&] { (void)hipEventDestroy(first); });
   HIP_CHECK(hipEventCreate(&second));
+  cleanup.Add([&] { (void)hipEventDestroy(second); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Both the event-record and event-wait nodes must accept a swapped event and
   // report it back through their getters.
@@ -176,13 +181,10 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvent
   hipEvent_t wait_event = nullptr;
   HIP_CHECK(hipGraphEventWaitNodeGetEvent(wait_node, &wait_event));
   REQUIRE(wait_event == second);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(second));
-  HIP_CHECK(hipEventDestroy(first));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDestination) {
+  hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;
   hipGraph_t graph = nullptr;
@@ -190,8 +192,10 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDes
   hipGraphNode_t dest_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -211,7 +215,4 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDes
   HIP_CHECK(hipGraphKernelNodeGetAttribute(dest_node, hipKernelNodeAttributeCooperative,
                                            &dest_attr));
   REQUIRE(dest_attr.cooperative == source_attr.cooperative);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_value));
 }

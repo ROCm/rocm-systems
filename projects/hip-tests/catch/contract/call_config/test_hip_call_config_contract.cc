@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr int kExpectedValue = 0x1234;
@@ -26,8 +27,10 @@ int ReadDeviceInt(int* device_ptr) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // The legacy call-configuration path stages a launch in three steps: configure
@@ -44,15 +47,16 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
   HIP_CHECK(hipDeviceSynchronize());
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndependent) {
+  hip::contract::ContractCleanup cleanup;
   int* first = nullptr;
   int* second = nullptr;
   HIP_CHECK(hipMalloc(&first, sizeof(*first)));
+  cleanup.Add([&] { (void)hipFree(first); });
   HIP_CHECK(hipMalloc(&second, sizeof(*second)));
+  cleanup.Add([&] { (void)hipFree(second); });
   HIP_CHECK(hipMemset(first, 0, sizeof(*first)));
   HIP_CHECK(hipMemset(second, 0, sizeof(*second)));
 
@@ -75,7 +79,4 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndepend
 
   REQUIRE(ReadDeviceInt(first) == first_value);
   REQUIRE(ReadDeviceInt(second) == second_value);
-
-  HIP_CHECK(hipFree(first));
-  HIP_CHECK(hipFree(second));
 }

@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 8;
@@ -30,40 +31,41 @@ hipChannelFormatDesc ByteChannelDesc() { return hipCreateChannelDesc<uint8_t>();
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x12);
   std::array<uint8_t, kByteCount> dst{};
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpyToArray(array, 0, 0, src.data(), src.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpyFromArray(dst.data(), array, 0, 0, dst.size(), hipMemcpyDeviceToHost));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x34);
   std::array<uint8_t, kByteCount> dst{};
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpyHtoA(array, 0, src.data(), src.size()));
   HIP_CHECK(hipMemcpyAtoH(dst.data(), array, 0, dst.size()));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x56);
   std::array<uint8_t, kByteCount> dst{};
   hipArray_t array = nullptr;
@@ -71,7 +73,9 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpy2DToArrayAsync(array, 0, 0, src.data(), kWidth, kWidth, kHeight,
                                     hipMemcpyHostToDevice, stream));
@@ -80,9 +84,6 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFreeArray(array));
 }
 
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
@@ -102,6 +103,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
 HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> dst{};
   hipArray_t array = nullptr;
   hipStream_t stream = nullptr;
@@ -109,13 +111,12 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected) 
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  cleanup.Add([&] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpy2DFromArrayAsync(
       dst.data(), kWidth, array, 0, 0, kWidth, kHeight, static_cast<hipMemcpyKind>(-1), stream);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFreeArray(array));
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);

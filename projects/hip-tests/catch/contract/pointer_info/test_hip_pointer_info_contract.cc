@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kAllocationBytes = 4096;
@@ -57,11 +58,13 @@ bool QueryPointerAttributeOrSkip(void* data, hipPointer_attribute attribute, hip
 }  // namespace
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceType) {
+  hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
   HIP_CHECK(hipPointerGetAttributes(&attributes, data));
@@ -69,44 +72,44 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceT
   REQUIRE(IsDeviceMemoryType(attributes.type));
   REQUIRE(attributes.device == device);
   REQUIRE(attributes.devicePointer == data);
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_HostAllocation_ReportsHostType) {
+  hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipHostMalloc(&data, kAllocationBytes, hipHostMallocDefault));
+  cleanup.Add([&] { (void)hipHostFree(data); });
 
   hipPointerAttribute_t attributes{};
   HIP_CHECK(hipPointerGetAttributes(&attributes, data));
 
   REQUIRE(IsHostMemoryType(attributes.type));
   REQUIRE(attributes.hostPointer == data);
-
-  HIP_CHECK(hipHostFree(data));
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_ManagedAllocation_ReportsManagedOrUnified) {
   SkipIfManagedMemoryUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
   void* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kAllocationBytes, hipMemAttachGlobal));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
   HIP_CHECK(hipPointerGetAttributes(&attributes, data));
 
   REQUIRE(IsManagedMemoryType(attributes.type));
   REQUIRE(attributes.device == device);
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttribute_MemoryType_MatchesGetAttributes) {
+  hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
   HIP_CHECK(hipPointerGetAttributes(&attributes, data));
@@ -114,19 +117,18 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttribute_MemoryType_MatchesGetAttributes)
   unsigned int memory_type = 0;
   if (!QueryPointerAttributeOrSkip(&memory_type, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
                                    reinterpret_cast<hipDeviceptr_t>(data))) {
-    HIP_CHECK(hipFree(data));
     HIP_SKIP_TEST("HIP_POINTER_ATTRIBUTE_MEMORY_TYPE query is not supported by this runtime path.");
   }
 
   REQUIRE(IsDeviceMemoryType(static_cast<hipMemoryType>(memory_type)));
   REQUIRE(IsDeviceMemoryType(attributes.type));
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize) {
+  hip::contract::ContractCleanup cleanup;
   char* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   hipDeviceptr_t base = 0;
   size_t size = 0;
@@ -137,8 +139,6 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize) {
   REQUIRE(size >= kAllocationBytes);
   REQUIRE(reinterpret_cast<std::uintptr_t>(data + kInteriorOffset) <
           reinterpret_cast<std::uintptr_t>(base) + size);
-
-  HIP_CHECK(hipFree(data));
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
@@ -152,10 +152,10 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_NullOutput_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, sizeof(int)));
+  cleanup.Add([&] { (void)hipFree(data); });
 
   REQUIRE(hipPointerGetAttributes(nullptr, data) != hipSuccess);
-
-  HIP_CHECK(hipFree(data));
 }

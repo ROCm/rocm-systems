@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 8;
@@ -36,32 +37,32 @@ HIP_ARRAY3D_DESCRIPTOR Array3DDesc() {
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   auto desc = Array2DDesc();
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
+  cleanup.Add([&] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
-
-  HIP_CHECK(hipArrayDestroy(array));
 }
 
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   auto desc = Array2DDesc();
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
+  cleanup.Add([&] { (void)hipArrayDestroy(array); });
   HIP_CHECK(hipArrayGetDescriptor(&returned_desc, array));
 
   REQUIRE(returned_desc.Width == desc.Width);
   REQUIRE(returned_desc.Height == desc.Height);
   REQUIRE(returned_desc.Format == desc.Format);
   REQUIRE(returned_desc.NumChannels == desc.NumChannels);
-
-  HIP_CHECK(hipArrayDestroy(array));
 }
 
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
@@ -77,39 +78,41 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   auto desc = Array2DDesc();
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
+  cleanup.Add([&] { (void)hipArrayDestroy(array); });
 
   REQUIRE(hipArrayGetDescriptor(nullptr, array) != hipSuccess);
   REQUIRE(hipArrayGetDescriptor(&returned_desc, nullptr) != hipSuccess);
-
-  HIP_CHECK(hipArrayDestroy(array));
 }
 
 HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   auto desc = Array3DDesc();
 
   HIP_CHECK(hipArray3DCreate(&array, &desc));
+  cleanup.Add([&] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
-
-  HIP_CHECK(hipArrayDestroy(array));
 }
 
 HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags) {
   CHECK_IMAGE_SUPPORT;
 
+  hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
   auto desc = Array3DDesc();
   HIP_ARRAY3D_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArray3DCreate(&array, &desc));
+  cleanup.Add([&] { (void)hipArrayDestroy(array); });
   HIP_CHECK(hipArray3DGetDescriptor(&returned_desc, array));
 
   REQUIRE(returned_desc.Width == desc.Width);
@@ -118,6 +121,4 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags)
   REQUIRE(returned_desc.Format == desc.Format);
   REQUIRE(returned_desc.NumChannels == desc.NumChannels);
   REQUIRE(returned_desc.Flags == desc.Flags);
-
-  HIP_CHECK(hipArrayDestroy(array));
 }

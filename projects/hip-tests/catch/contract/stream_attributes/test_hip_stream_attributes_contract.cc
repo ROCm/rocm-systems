@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWindowBytes = 256;
@@ -25,6 +26,7 @@ void RequireDevice() {
 
 HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   int least_priority = 0;
   int greatest_priority = 0;
@@ -36,6 +38,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   // back through hipStreamGetAttribute.
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, greatest_priority));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   hipStreamAttrValue get_value{};
@@ -44,7 +47,6 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   if (get_status == hipErrorNotSupported) {
     // Reading the priority attribute is an optional capability on some
     // backends; an unsupported report is a contract-compliant outcome.
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamGetAttribute(priority) is not supported on this device");
   }
   HIP_CHECK(get_status);
@@ -54,15 +56,15 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   // inclusive range regardless of any backend-specific coercion.
   REQUIRE(greatest_priority <= get_value.priority);
   REQUIRE(get_value.priority <= least_priority);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   hipStreamAttrValue set_value{};
   set_value.syncPolicy = hipSyncPolicyBlockingSync;
@@ -72,7 +74,6 @@ HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
   if (set_status == hipErrorNotSupported) {
     // Setting the synchronization policy attribute is an optional capability on
     // some backends; an unsupported report is a contract-compliant outcome.
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamSetAttribute(syncPolicy) is not supported on this device");
   }
   HIP_CHECK(set_status);
@@ -84,12 +85,11 @@ HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
   // The synchronization policy must round-trip as the exact value that was set;
   // it is a discrete enum that the runtime records verbatim.
   REQUIRE(get_value.syncPolicy == hipSyncPolicyBlockingSync);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   int current_device = -1;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -106,7 +106,9 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   hipStream_t stream = nullptr;
   void* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(&device_ptr, kWindowBytes));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   hipStreamAttrValue set_value{};
   set_value.accessPolicyWindow.base_ptr = device_ptr;
@@ -123,8 +125,6 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
     // when a nonzero device window size is reported, and report the attribute as
     // unsupported (hipErrorNotSupported) or reject it as an invalid attribute
     // (hipErrorInvalidValue). Both are contract-compliant unsupported outcomes.
-    HIP_CHECK(hipFree(device_ptr));
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("hipStreamSetAttribute(accessPolicyWindow) is not supported on this device");
   }
   HIP_CHECK(set_status);
@@ -138,18 +138,18 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   REQUIRE(get_value.accessPolicyWindow.hitRatio == 0.5f);
   REQUIRE(get_value.accessPolicyWindow.hitProp == hipAccessPropertyPersisting);
   REQUIRE(get_value.accessPolicyWindow.missProp == hipAccessPropertyNormal);
-
-  HIP_CHECK(hipFree(device_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t src_stream = nullptr;
   hipStream_t dst_stream = nullptr;
   HIP_CHECK(hipStreamCreate(&src_stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(src_stream); });
   HIP_CHECK(hipStreamCreate(&dst_stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(dst_stream); });
 
   hipStreamAttrValue set_value{};
   set_value.syncPolicy = hipSyncPolicyBlockingSync;
@@ -159,8 +159,6 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
   if (set_status == hipErrorNotSupported) {
     // Setting the synchronization policy attribute is an optional capability on
     // some backends; an unsupported report is a contract-compliant outcome.
-    HIP_CHECK(hipStreamDestroy(dst_stream));
-    HIP_CHECK(hipStreamDestroy(src_stream));
     HIP_SKIP_TEST("hipStreamSetAttribute(syncPolicy) is not supported on this device");
   }
   HIP_CHECK(set_status);
@@ -169,8 +167,6 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
   if (copy_status == hipErrorNotSupported) {
     // Copying stream attributes is an optional capability on some backends; an
     // unsupported report is a contract-compliant outcome.
-    HIP_CHECK(hipStreamDestroy(dst_stream));
-    HIP_CHECK(hipStreamDestroy(src_stream));
     HIP_SKIP_TEST("hipStreamCopyAttributes is not supported on this device");
   }
   HIP_CHECK(copy_status);
@@ -182,16 +178,15 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
   // Copying attributes must propagate the source stream's synchronization
   // policy to the destination stream verbatim.
   REQUIRE(get_value.syncPolicy == hipSyncPolicyBlockingSync);
-
-  HIP_CHECK(hipStreamDestroy(dst_stream));
-  HIP_CHECK(hipStreamDestroy(src_stream));
 }
 
 HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // A null value-out pointer is a caller error and must be rejected with
   // hipErrorInvalidValue rather than silently succeeding.
@@ -211,6 +206,4 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
       hipStreamGetAttribute(stream, invalid_attr, &get_value);
   REQUIRE(invalid_attr_status == hipErrorInvalidValue);
 #endif  // __HIP_PLATFORM_AMD__
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }

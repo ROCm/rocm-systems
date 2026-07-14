@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 7;
@@ -88,6 +89,7 @@ void CopyDeviceToHost(std::array<uint8_t, kWidth * kHeight * kDepth>* dst, hipPi
 }  // namespace
 
 HIP_TEST_CASE(Contract_DriverCopy3D_HostToDevice_RoundTripsExtent) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x23);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -96,17 +98,17 @@ HIP_TEST_CASE(Contract_DriverCopy3D_HostToDevice_RoundTripsExtent) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   auto h2d = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&h2d));
   CopyDeviceToHost(&dst, device, extent);
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x45);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr src_device{};
@@ -116,10 +118,11 @@ HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
   if (!TryMalloc3D(&src_device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(src_device.ptr); });
   if (!TryMalloc3D(&dst_device, extent)) {
-    HIP_CHECK(hipFree(src_device.ptr));
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(dst_device.ptr); });
 
   auto h2d = HostToDeviceCopy(src_device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&h2d));
@@ -128,12 +131,10 @@ HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
   CopyDeviceToHost(&dst, dst_device, extent);
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(dst_device.ptr));
-  HIP_CHECK(hipFree(src_device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x67);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -142,6 +143,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   auto initialize = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&initialize));
@@ -150,11 +152,10 @@ HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
   CopyDeviceToHost(&dst, device, extent);
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x89);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
   hipPitchedPtr device{};
@@ -164,7 +165,9 @@ HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   auto h2d = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3DAsync(&h2d, stream));
@@ -172,12 +175,10 @@ HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
   CopyDeviceToHost(&dst, device, extent);
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverCopy3D_NullInnerPointer_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kWidth * kHeight * kDepth> host{};
   hipPitchedPtr device{};
   hipStream_t stream = nullptr;
@@ -186,7 +187,9 @@ HIP_TEST_CASE(Contract_DriverCopy3D_NullInnerPointer_IsRejected) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipGetLastError());
   auto null_src = HostToDeviceCopy(device, nullptr, extent);
@@ -208,9 +211,6 @@ HIP_TEST_CASE(Contract_DriverCopy3D_NullInnerPointer_IsRejected) {
 
   auto valid_copy = HostToDeviceCopy(device, host.data(), extent);
   HIP_CHECK(hipDrvMemcpy3D(&valid_copy));
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device.ptr));
 
   REQUIRE(sync_null_src_status != hipSuccess);
   REQUIRE(async_null_src_status != hipSuccess);

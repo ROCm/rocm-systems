@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 #include <string>
 #include <vector>
@@ -105,8 +106,10 @@ bool CooperativeLaunchSupported() {
 }  // namespace
 
 HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   // A module that defines at least one kernel must report a positive function
   // count. The exact count is backend-specific (backends may expose helper
@@ -114,26 +117,26 @@ HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
   unsigned int count = 0;
   HIP_CHECK(hipModuleGetFunctionCount(&count, module));
   REQUIRE(count >= 1);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   // Querying the function count into a null out pointer must not silently
   // succeed. The exact error code is backend-specific, so only a non-success
   // status is required.
   const hipError_t status = hipModuleGetFunctionCount(nullptr, module);
   REQUIRE(status != hipSuccess);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableValues) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   ResolveWriteValue(module, function);
@@ -146,13 +149,13 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableVa
   HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, function, 0, 0));
   REQUIRE(block_size > 0);
   REQUIRE(min_grid_size >= 0);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   ResolveWriteValue(module, function);
@@ -163,13 +166,13 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeVal
   HIP_CHECK(
       hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks, function, 64, 0));
   REQUIRE(num_blocks >= 0);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   ResolveWriteValue(module, function);
@@ -188,13 +191,13 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
       &num_blocks_with_flags, function, 64, 0, hipOccupancyDefault));
   REQUIRE(num_blocks_with_flags >= 0);
   REQUIRE(num_blocks_with_flags == num_blocks_default);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDefault) {
+  hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   ResolveWriteValue(module, function);
@@ -224,23 +227,24 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDe
   REQUIRE(grid_flags >= 0);
   REQUIRE(block_flags == block_default);
   REQUIRE(grid_flags == grid_default);
-
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }
+  hip::contract::ContractCleanup cleanup;
 
   hipModule_t module = nullptr;
   LoadContractModule(module);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   ResolveWriteValue(module, function);
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // A cooperative launch of the resolved function with a single-thread grid must
@@ -253,9 +257,6 @@ HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
   REQUIRE(result == kExpectedValue);
-
-  HIP_CHECK(hipFree(device_value));
-  HIP_CHECK(hipModuleUnload(module));
 }
 
 HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected) {

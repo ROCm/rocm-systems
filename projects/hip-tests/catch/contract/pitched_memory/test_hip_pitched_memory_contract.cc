@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kWidth = 13;
@@ -41,20 +42,21 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
 }  // namespace
 
 HIP_TEST_CASE(Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   size_t pitch = 0;
 
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   REQUIRE(device_ptr != nullptr);
   REQUIRE(pitch >= kWidth);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x24);
   std::array<uint8_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -63,6 +65,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemcpy2D(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight,
                         hipMemcpyHostToDevice));
@@ -70,11 +73,10 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
                         hipMemcpyDeviceToHost));
 
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
+  hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x63);
   std::array<uint8_t, kWidth * kHeight> dst{};
   void* device_ptr = nullptr;
@@ -83,6 +85,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, 1)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemcpy2D(device_ptr, pitch, src.data(), kWidth, kWidth, 1,
                         hipMemcpyHostToDevice));
@@ -92,8 +95,6 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
   for (size_t i = 0; i < kWidth; ++i) {
     REQUIRE(dst[i] == src[i]);
   }
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_PitchedMemory_FreePitchedAllocation_Succeeds) {

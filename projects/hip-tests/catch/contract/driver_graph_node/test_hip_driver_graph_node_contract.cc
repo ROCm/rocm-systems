@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 // The driver-style graph node entry points (hipDrvGraphAddMemcpyNode,
 // hipDrvGraphAddMemsetNode, and their get/set/exec-set params) take a driver
@@ -97,10 +98,12 @@ void LaunchGraph(hipGraph_t graph) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   const auto src = MakePattern(0x40);
   std::array<uint8_t, kElems> dst{};
@@ -109,6 +112,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // A driver-style 3D memcpy node bound to the current context must, when the
   // graph is launched, deliver the full extent to the device buffer exactly
@@ -119,16 +123,15 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
   LaunchGraph(graph);
   ReadBack(&dst, device);
   REQUIRE(dst == src);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   const auto src = MakePattern(0x50);
   const hipCtx_t ctx = CurrentContext();
@@ -136,6 +139,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   HIP_MEMCPY3D copy = HostToDeviceCopy(device, src.data());
   HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &copy, ctx));
 
@@ -151,16 +155,15 @@ HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
 
   // The graph-node setter accepts the same parameters back.
   HIP_CHECK(hipDrvGraphMemcpyNodeSetParams(node, &copy));
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAfterInstantiate) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   const auto first = MakePattern(0x22);
   const auto second = MakePattern(0x99);
@@ -170,12 +173,14 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
   HIP_MEMCPY3D initial = HostToDeviceCopy(device, first.data());
   HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &initial, ctx));
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-point the instantiated driver node at the second host buffer through the
   // executable setter. The next launch must copy the second buffer without a
@@ -184,23 +189,21 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
   HIP_CHECK(hipDrvGraphExecMemcpyNodeSetParams(exec, node, &updated, ctx));
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   ReadBack(&dst, device);
   REQUIRE(dst == second);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   std::array<uint8_t, kElems> dst{};
   const hipCtx_t ctx = CurrentContext();
@@ -208,6 +211,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // A driver-style memset node writes one row of the pitched allocation. The
   // memset covers width*height elements of a single-byte element, matched to the
@@ -227,16 +231,15 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
   ReadBack(&dst, device);
   REQUIRE(dst[0] == 0x5A);
   REQUIRE(dst[kWidth - 1] == 0x5A);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfterInstantiate) {
+  hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipFree(device.ptr); });
 
   std::array<uint8_t, kElems> dst{};
   const hipCtx_t ctx = CurrentContext();
@@ -244,6 +247,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfter
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   hipMemsetParams params{};
   params.dst = device.ptr;
@@ -257,6 +261,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfter
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-parameterize the instantiated driver memset node with a new byte value
   // through the executable setter. The next launch must write the updated value.
@@ -265,16 +270,12 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfter
   HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(exec, node, &updated, ctx));
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   ReadBack(&dst, device);
   REQUIRE(dst[0] == 0x22);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device.ptr));
 }
 
 #endif  // HT_AMD

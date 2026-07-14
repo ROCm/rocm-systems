@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 // The symbol copy contracts resolve device globals through the public symbol
 // copy APIs. Those APIs look the symbols up by their registered external name,
@@ -130,9 +131,11 @@ HIP_TEST_CASE(Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes) {
 HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder) {
   RequireDevice();
   TouchAndSyncSymbols();
+  hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
   // A stream-ordered write followed by a stream-ordered read on the same stream
   // must round-trip the value once the stream is synchronized.
@@ -147,8 +150,6 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStre
   HIP_CHECK(hipStreamSynchronize(stream));
 
   REQUIRE(read_back == kSentinel);
-
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {

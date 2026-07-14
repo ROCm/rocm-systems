@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 // Tiny deterministic allocation size for IPC mem-handle probes. IPC handles
@@ -92,9 +93,11 @@ void SkipIfIpcMemHandleUnsupported() {
 
 HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
   const hipError_t status = hipIpcGetMemHandle(&handle, ptr);
@@ -102,7 +105,6 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
   // hipErrorInvalidValue WSL/dxg returns for unimplemented IPC) means the
   // platform cannot produce IPC handles and the test skips rather than fails.
   if (IsIpcUnsupportedFromValidCall(status)) {
-    HIP_CHECK(hipFree(ptr));
     HIP_SKIP_TEST("IPC memory handles are not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
@@ -110,14 +112,15 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
   // The handle is an opaque, fixed-size descriptor. Its exact byte contents are
   // backend-specific and not part of the public contract, so the contract only
   // asserts that the call succeeded and produced the handle out-parameter.
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
   const hipError_t get_status = hipIpcGetMemHandle(&handle, ptr);
@@ -125,7 +128,6 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
   // hipErrorInvalidValue for unimplemented IPC) is a platform skip, not a
   // failure.
   if (IsIpcUnsupportedFromValidCall(get_status)) {
-    HIP_CHECK(hipFree(ptr));
     HIP_SKIP_TEST("IPC memory handles are not supported by this device/runtime path.");
   }
   HIP_CHECK(get_status);
@@ -140,27 +142,26 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
   // limitations of a same-process round trip rather than contract violations, so
   // any non-success result is treated as a skip after cleanup.
   if (open_status != hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
     HIP_SKIP_TEST(
         "Opening an IPC memory handle in the same process is not supported by this "
         "device/runtime path.");
   }
+  cleanup.Add([&] { (void)hipIpcCloseMemHandle(mapped); });
 
   // A successfully opened handle must yield a usable mapping. The mapped pointer
   // is not required to alias the original allocation, so the contract only
   // requires a non-null mapping.
   REQUIRE(mapped != nullptr);
-
-  HIP_CHECK(hipIpcCloseMemHandle(mapped));
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   RequireDevice();
   SkipIfIpcMemHandleUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  cleanup.Add([&] { (void)hipFree(ptr); });
 
   // A null output handle is invalid input and must be rejected with a public
   // invalid-argument error rather than treated as an unsupported-capability
@@ -174,31 +175,31 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   hipIpcMemHandle_t handle{};
   HIP_CHECK_ERRORS(hipIpcGetMemHandle(&handle, nullptr), hipErrorInvalidValue,
                    hipErrorInvalidHandle);
-
-  HIP_CHECK(hipFree(ptr));
 }
 
 HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   // An event created without hipEventInterprocess cannot back an IPC handle, so
   // hipIpcGetEventHandle must not report success for it. Backends differ in the
   // exact error code, so the contract only requires a non-success result.
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  cleanup.Add([&] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
   const hipError_t status = hipIpcGetEventHandle(&handle, event);
   REQUIRE(status != hipSuccess);
-
-  HIP_CHECK(hipEventDestroy(event));
 }
 
 HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
   RequireDevice();
+  hip::contract::ContractCleanup cleanup;
 
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
+  cleanup.Add([&] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
   const hipError_t get_status = hipIpcGetEventHandle(&handle, event);
@@ -207,7 +208,6 @@ HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
   // hipErrorInvalidValue WSL/dxg returns for unimplemented IPC) means the
   // platform cannot export IPC event handles and the test skips.
   if (IsIpcUnsupportedFromValidCall(get_status)) {
-    HIP_CHECK(hipEventDestroy(event));
     HIP_SKIP_TEST("IPC event handles are not supported by this device/runtime path.");
   }
   HIP_CHECK(get_status);
@@ -219,17 +219,14 @@ HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
   // context) or report the capability as unsupported; both are platform
   // limitations rather than contract violations, so they are treated as skips.
   if (open_status != hipSuccess) {
-    HIP_CHECK(hipEventDestroy(event));
     HIP_SKIP_TEST(
         "Opening an IPC event handle in the same process is not supported by this "
         "device/runtime path.");
   }
+  // An opened IPC event is owned by the caller and released with hipEventDestroy,
+  // mirroring the lifetime used by the HIP IPC event unit tests.
+  cleanup.Add([&] { (void)hipEventDestroy(opened); });
 
   // When the same-process open does succeed, it must hand back a usable event.
   REQUIRE(opened != nullptr);
-
-  // An opened IPC event is owned by the caller and released with hipEventDestroy,
-  // mirroring the lifetime used by the HIP IPC event unit tests.
-  HIP_CHECK(hipEventDestroy(opened));
-  HIP_CHECK(hipEventDestroy(event));
 }

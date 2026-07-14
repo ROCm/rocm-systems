@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr int kInitialValue = 7;
@@ -32,13 +33,16 @@ hipKernelNodeParams KernelNodeParams(void** args) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
+  hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -52,8 +56,6 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
   const hipError_t set_status = hipGraphKernelNodeSetAttribute(
       kernel_node, hipKernelNodeAttributeCooperative, &set_value);
   if (set_status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_value));
     HIP_SKIP_TEST("Cooperative kernel node attribute is not supported by this runtime path.");
   }
   HIP_CHECK(set_status);
@@ -63,16 +65,11 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
   const hipError_t get_status = hipGraphKernelNodeGetAttribute(
       kernel_node, hipKernelNodeAttributeCooperative, &get_value);
   if (get_status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_value));
     HIP_SKIP_TEST("Cooperative kernel node attribute is not supported by this runtime path.");
   }
   HIP_CHECK(get_status);
 
   REQUIRE(get_value.cooperative == 1);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
@@ -89,6 +86,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
     HIP_SKIP_TEST("Access policy windows are not supported on this device.");
   }
 
+  hip::contract::ContractCleanup cleanup;
   constexpr size_t kBufferSize = 256;
   int value = kInitialValue;
   int* device_value = nullptr;
@@ -97,8 +95,11 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipMalloc(&device_buffer, kBufferSize));
+  cleanup.Add([&] { (void)hipFree(device_buffer); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -117,9 +118,6 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
   const hipError_t set_status = hipGraphKernelNodeSetAttribute(
       kernel_node, hipKernelNodeAttributeAccessPolicyWindow, &set_value);
   if (set_status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_buffer));
-    HIP_CHECK(hipFree(device_value));
     HIP_SKIP_TEST("Access policy window kernel node attribute is not supported by this runtime path.");
   }
   HIP_CHECK(set_status);
@@ -129,9 +127,6 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
   const hipError_t get_status = hipGraphKernelNodeGetAttribute(
       kernel_node, hipKernelNodeAttributeAccessPolicyWindow, &get_value);
   if (get_status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipFree(device_buffer));
-    HIP_CHECK(hipFree(device_value));
     HIP_SKIP_TEST("Access policy window kernel node attribute is not supported by this runtime path.");
   }
   HIP_CHECK(get_status);
@@ -141,13 +136,10 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
   REQUIRE(get_value.accessPolicyWindow.hitRatio == set_value.accessPolicyWindow.hitRatio);
   REQUIRE(get_value.accessPolicyWindow.hitProp == set_value.accessPolicyWindow.hitProp);
   REQUIRE(get_value.accessPolicyWindow.missProp == set_value.accessPolicyWindow.missProp);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_buffer));
-  HIP_CHECK(hipFree(device_value));
 }
 
 HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
+  hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;
   hipGraph_t graph = nullptr;
@@ -155,7 +147,9 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
   hipGraphNode_t empty_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([&] { (void)hipFree(device_value); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -181,7 +175,4 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
   const auto invalid_attr = static_cast<hipKernelNodeAttrID>(0x7fffffff);
   REQUIRE(hipGraphKernelNodeSetAttribute(kernel_node, invalid_attr,
                                          &attr_value) == hipErrorInvalidValue);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_value));
 }

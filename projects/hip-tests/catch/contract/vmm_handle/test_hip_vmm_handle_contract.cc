@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 int CurrentDevice() {
@@ -108,41 +109,47 @@ bool CreateMappedAllocation(MappedAllocation* out) {
   return true;
 }
 
-void DestroyMappedAllocation(MappedAllocation* a) {
-  if (a->mapped) {
-    HIP_CHECK(hipMemUnmap(a->address, a->size));
-  }
-  if (a->address != nullptr) {
-    HIP_CHECK(hipMemAddressFree(a->address, a->size));
-  }
-  HIP_CHECK(hipMemRelease(a->handle));
+// Registers the reverse teardown (unmap -> address free -> release) for a mapped
+// allocation on the cleanup guard, so it runs even if a later assertion throws.
+// Registered release-first so the guard unwinds it last.
+void RegisterMappedAllocationCleanup(hip::contract::ContractCleanup& cleanup,
+                                     MappedAllocation& alloc) {
+  cleanup.Add([&] { (void)hipMemRelease(alloc.handle); });
+  cleanup.Add([&] {
+    if (alloc.address != nullptr) (void)hipMemAddressFree(alloc.address, alloc.size);
+  });
+  cleanup.Add([&] {
+    if (alloc.mapped) (void)hipMemUnmap(alloc.address, alloc.size);
+  });
 }
 }  // namespace
 
 HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
   if (!CreateMappedAllocation(&alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
+  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // Retaining the allocation handle for a mapped address must return a usable
   // handle that can be released independently of the original.
   hipMemGenericAllocationHandle_t retained{};
   HIP_CHECK(hipMemRetainAllocationHandle(&retained, alloc.address));
   HIP_CHECK(hipMemRelease(retained));
-
-  DestroyMappedAllocation(&alloc);
 }
 
 HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
   if (!CreateMappedAllocation(&alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
+  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // The properties queried from the handle must reflect what the allocation was
   // created with: pinned type on the current device location.
@@ -151,17 +158,17 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   REQUIRE(prop.type == hipMemAllocationTypePinned);
   REQUIRE(prop.location.type == hipMemLocationTypeDevice);
   REQUIRE(prop.location.id == CurrentDevice());
-
-  DestroyMappedAllocation(&alloc);
 }
 
 HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
   SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
   if (!CreateMappedAllocation(&alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
+  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // Exporting a dma-buf file descriptor for the mapped range is an OS/driver
   // capability. When supported it must yield a non-negative fd; when not, the
@@ -172,16 +179,14 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
       &fd, reinterpret_cast<hipDeviceptr_t>(alloc.address), alloc.size,
       hipMemRangeHandleTypeDmaBufFd, 0);
   if (status != hipSuccess) {
-    DestroyMappedAllocation(&alloc);
     HIP_SKIP_TEST("dma-buf handle export is not supported by this device/runtime path.");
   }
   REQUIRE(fd >= 0);
-
-  DestroyMappedAllocation(&alloc);
 }
 
 HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
   SkipIfShareableHandleUnavailable();
+  hip::contract::ContractCleanup cleanup;
 
   // Create a physical allocation that requests a POSIX-fd shareable handle.
   const auto prop = PosixFdAllocationProp();
@@ -199,6 +204,7 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
     HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
   }
   HIP_CHECK(create_status);
+  cleanup.Add([&] { (void)hipMemRelease(handle); });
 
   // Export the allocation to a POSIX file descriptor. A supported path yields a
   // non-negative descriptor; an unsupported one reports a clean status and skips.
@@ -206,7 +212,6 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
   const hipError_t export_status =
       hipMemExportToShareableHandle(&fd, handle, hipMemHandleTypePosixFileDescriptor, 0);
   if (export_status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemRelease(handle));
     HIP_SKIP_TEST("VMM shareable-handle export is not supported by this device/runtime path.");
   }
   HIP_CHECK(export_status);
@@ -219,6 +224,4 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(imported));
-
-  HIP_CHECK(hipMemRelease(handle));
 }

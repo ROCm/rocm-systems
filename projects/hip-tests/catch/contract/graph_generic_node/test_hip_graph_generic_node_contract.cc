@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kByteCount = 64;
@@ -53,12 +54,15 @@ uint8_t LaunchAndReadFirstByte(hipGraph_t graph, void* device_ptr) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // A memset node added through the generic hipGraphAddNode entry point must
   // behave exactly like one added through the typed hipGraphAddMemsetNode
@@ -72,18 +76,18 @@ HIP_TEST_CASE(Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue) {
   REQUIRE(type == hipGraphNodeTypeMemset);
 
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x5A);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphGenericNode_NodeSetParams_UpdatesValueBeforeInstantiate) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   // Create the node with one value, then re-parameterize it through the generic
   // pre-instantiation setter. The launched graph must reflect the updated value.
@@ -94,18 +98,18 @@ HIP_TEST_CASE(Contract_GraphGenericNode_NodeSetParams_UpdatesValueBeforeInstanti
   HIP_CHECK(hipGraphNodeSetParams(node, &updated));
 
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x22);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 HIP_TEST_CASE(Contract_GraphGenericNode_ExecNodeSetParams_UpdatesValueAfterInstantiate) {
+  hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  cleanup.Add([&] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
 
   hipGraphNodeParams initial = MakeMemsetNodeParams(device_ptr, 0x33);
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial));
@@ -113,6 +117,7 @@ HIP_TEST_CASE(Contract_GraphGenericNode_ExecNodeSetParams_UpdatesValueAfterInsta
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-parameterize the already-instantiated node through the generic
   // executable-graph setter. The next launch must use the updated value, so the
@@ -121,15 +126,11 @@ HIP_TEST_CASE(Contract_GraphGenericNode_ExecNodeSetParams_UpdatesValueAfterInsta
   HIP_CHECK(hipGraphExecNodeSetParams(exec, node, &updated));
 
   HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   uint8_t host = 0;
   HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
   REQUIRE(host == 0x44);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(device_ptr));
 }
