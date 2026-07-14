@@ -181,6 +181,8 @@ Backend behavior:
   ``ROCSHMEM_DISABLE_MIXED_IPC``), the buffer is also exposed to those peers
   over IPC, and their accesses use the IPC path in preference to the NIC; the
   NIC registration remains in place and is used for all other peers.
+* **RO (reverse offload) backend:** symmetric user-buffer registration is not
+  supported; this routine returns ``NULL``.
 
 ROCSHMEM_BUFFER_UNREGISTER_SYMMETRIC
 ------------------------------------
