@@ -674,13 +674,19 @@ void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {
 
 int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
                                  uint32_t ring_buf_phys_size_bytes) const {
+
 #ifdef __linux__
   int fd;
 #ifdef HAVE_MEMFD_CREATE
-#ifdef __FreeBSD__
   fd = memfd_create(ring_buf_shm_path, 0);
 #else
   fd = syscall(__NR_memfd_create, ring_buf_shm_path, 0);
+#endif
+  if (fd == -1) return -1;
+#elif defined(__FreeBSD__)
+  int fd;
+  fd = memfd_create(ring_buf_shm_path, 0);
+  if (fd == -1) return -1;
 #endif
 
   if (fd == -1) return -1;

@@ -46,11 +46,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
-
-#ifdef __FreeBSD__
-#include <stdatomic.h>
 #include <atomic>
-#endif
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"

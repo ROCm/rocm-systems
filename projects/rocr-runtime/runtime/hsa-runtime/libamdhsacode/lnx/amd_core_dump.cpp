@@ -66,8 +66,11 @@
 #include "core/inc/amd_aql_queue.h"
 
 #ifdef __FreeBSD__
-#include <sys/thr.h>
-#define SYS_gettid thr_self(0)
+#include <pthread_np.h>
+#define SYS_gettid pthread_getthreadid_np()
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#define SYS_gettid syscall(SYS_gettid)
 #endif
 
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
