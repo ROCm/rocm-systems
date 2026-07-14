@@ -474,7 +474,6 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-
 rocprofiler_status_t
 check_firmware_compatibility(const rocprofiler_agent_t*       agent,
                              rocprofiler_pc_sampling_method_t method)

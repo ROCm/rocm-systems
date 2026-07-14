@@ -237,7 +237,7 @@ typedef struct rocprofiler_agent_v0_t
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
     rocprofiler_agent_firmware_info_v0_t
         fw_info;  ///< GPU only. Detailed firmware version information
-                        ///< for the agent's microcontrollers and engines.
+                  ///< for the agent's microcontrollers and engines.
 
     /// @var fw_version
     /// @brief GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0

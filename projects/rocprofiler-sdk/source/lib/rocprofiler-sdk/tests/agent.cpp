@@ -31,8 +31,8 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
@@ -541,7 +541,8 @@ read_sysfs_fw_info(std::string_view fname, uint32_t drm_render_minor)
 {
     namespace sdk = ::rocprofiler::sdk;
 
-    auto fw_path = fmt::format("/sys/class/drm/renderD{}/device/fw_version/{}", drm_render_minor, fname);
+    auto fw_path =
+        fmt::format("/sys/class/drm/renderD{}/device/fw_version/{}", drm_render_minor, fname);
     auto fw_file = std::ifstream{fw_path};
     if(!fw_file) return ROCPROFILER_FIRMWARE_VERSION_NONE;
 
@@ -567,7 +568,7 @@ read_sysfs_fw_info(std::string_view fname, uint32_t drm_render_minor)
 void
 expect_fw_info_matches_sysfs(const rocprofiler_agent_t* agent)
 {
-    const auto msg = fmt::format("gpu agent-{}", agent->node_id);
+    const auto msg   = fmt::format("gpu agent-{}", agent->node_id);
     const auto minor = agent->drm_render_minor;
 
     const auto check = [&](uint32_t actual, std::string_view sysfs_fname, const char* field) {
