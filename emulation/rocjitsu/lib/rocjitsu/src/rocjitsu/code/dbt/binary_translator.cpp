@@ -132,6 +132,7 @@ constexpr uint8_t kSoppWaitKmcnt = 71u;
 constexpr uint8_t kGfx1250SoppWaitXcnt = 69u;
 constexpr uint64_t kSoppBranchMaxForwardBytes =
     static_cast<uint64_t>(std::numeric_limits<int16_t>::max()) * sizeof(uint32_t);
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
 // Tensile StreamK kernels can initialize an SRD thousands of instructions
 // before the first buffer access. Keep the scan bounded, but large enough to
 // see those long descriptor setup regions.
@@ -5608,6 +5609,59 @@ struct KernelTranslationScope {
   std::vector<BasicBlock *> blocks;
 };
 
+[[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
+  if (inst.size() != sizeof(uint32_t) || inst.mnemonic() != "s_setpc_b64")
+    return false;
+  return static_cast<uint16_t>(word & 0xffu) == ssrc0;
+}
+
+[[nodiscard]] std::vector<BasicBlock *>
+function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
+                       const std::unordered_set<BasicBlock *> &allowed_blocks) {
+  std::vector<BasicBlock *> returns;
+  std::vector<BasicBlock *> stack{&callee};
+  std::unordered_set<BasicBlock *> visited;
+
+  while (!stack.empty()) {
+    BasicBlock *block = stack.back();
+    stack.pop_back();
+    if (block == nullptr || !allowed_blocks.contains(block) || !visited.insert(block).second)
+      continue;
+
+    const Instruction *term = block->terminator();
+    if (term != nullptr && s_setpc_from_sreg(*term, read_u32(text, term->src_loc()), return_sreg)) {
+      returns.push_back(block);
+      continue;
+    }
+
+    for (BasicBlock *successor : block->successors())
+      stack.push_back(successor);
+  }
+  return returns;
+}
+
+[[nodiscard]] std::unordered_set<uint64_t>
+scoped_call_return_offsets(std::span<BasicBlock *const> blocks, std::span<const uint8_t> text) {
+  std::unordered_set<BasicBlock *> allowed_blocks(blocks.begin(), blocks.end());
+  std::unordered_set<uint64_t> returns;
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      if (call.callee == nullptr || call.continuation == nullptr ||
+          !allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation)) {
+        continue;
+      }
+      for (BasicBlock *return_block :
+           function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
+        if (const Instruction *term = return_block->terminator())
+          returns.insert(term->src_loc());
+      }
+    }
+  }
+  return returns;
+}
+
 using HighBankBlockModeMap = std::unordered_map<BasicBlock *, uint8_t>;
 using HighBankBlockModeSetMap = std::unordered_map<BasicBlock *, std::bitset<256>>;
 using HighBankBlockSet = std::unordered_set<BasicBlock *>;
@@ -6456,6 +6510,8 @@ supports_expanded_text_copy(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
                             uint64_t protected_text_bytes,
                             std::span<const KdTranslation> descriptor_translations,
                             std::span<const KernelTranslationScope> scopes) {
+  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return true;
   if (guest_arch != ROCJITSU_CODE_ARCH_GFX1250 || host_arch != ROCJITSU_CODE_ARCH_RDNA4)
     return false;
   if (text_size <= kSoppBranchMaxForwardBytes)
@@ -6504,6 +6560,16 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
           kernel_entries.contains(succ->start_offset()))
         continue;
       stack.push_back(succ);
+    }
+    for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      BasicBlock *callee = call.callee;
+      if (callee == nullptr)
+        continue;
+      if (callee->start_offset() != entry.start_offset() &&
+          kernel_entries.contains(callee->start_offset())) {
+        continue;
+      }
+      stack.push_back(callee);
     }
   }
 
@@ -7079,6 +7145,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       std::ranges::any_of(descriptor_translations, [](const KdTranslation &translation) {
         return translation.needs_virtual_lds_buffer;
       });
+  const bool cdna4_to_cdna3_relocation =
+      guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA3;
+  // The CDNA compatibility path predates appended translation caves and its
+  // public contract is a compact replacement .text.  GFX1250 translations, on
+  // the other hand, deliberately preserve the original addresses and append a
+  // relocated copy.  Keep those placement policies explicit here.
+  const uint64_t expanded_text_base_bytes = cdna4_to_cdna3_relocation ? 0 : text.size();
   if (supports_expanded_text_copy(guest_arch_, host_arch_, text.size(),
                                   covered_range_bytes(protected_ranges), descriptor_translations,
                                   scopes)) {
@@ -7164,6 +7237,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       std::vector<uint32_t> scope_word_group_sizes;
       std::vector<ExpandedTextBranchFixup> direct_branches;
       std::unordered_map<uint64_t, uint64_t> scope_offsets;
+      const auto valid_call_return_offsets =
+          cdna4_to_cdna3_relocation
+              ? scoped_call_return_offsets(KernelBlockScope(scope.blocks), text)
+              : std::unordered_set<uint64_t>{};
+      std::vector<IndirectCallFixup> recovered_indirect_fixups;
+      std::unordered_set<uint64_t> recovered_indirect_call_offsets;
+      if (cdna4_to_cdna3_relocation) {
+        for (BasicBlock *block : scope.blocks) {
+          if (block == nullptr)
+            continue;
+          for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
+            recovered_indirect_fixups.push_back(fixup);
+            recovered_indirect_call_offsets.insert(fixup.source_call_offset);
+          }
+        }
+      }
 
       uint64_t consumed_until = 0;
       for (BasicBlock *block : scope.blocks) {
@@ -7199,6 +7288,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
           const uint64_t translated_offset = scope_words.size() * sizeof(uint32_t);
           scope_offsets.emplace(offset, translated_offset);
+
+          const auto direct_branch_delta = inst.branch_offset_bytes();
+          if (cdna4_to_cdna3_relocation &&
+              (inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
+              !recovered_indirect_call_offsets.contains(offset) &&
+              !valid_call_return_offsets.contains(offset) && !direct_branch_delta) {
+            append_error(result.diagnostics, DiagnosticKind::Legalization,
+                         "indirect branch or call target recovery is not implemented for relocated "
+                         "kernel text",
+                         offset, std::string(inst.mnemonic()));
+            return leave_unchanged();
+          }
 
           uint32_t source_size = inst_size;
           std::vector<uint32_t> words;
@@ -7295,6 +7396,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             words = translate_instruction_words(inst, offset, liveness, expanded_context, text,
                                                 scope.translation->rdna4_grid_x_sgpr,
                                                 scope.translation->rdna4_grid_yz_sgpr);
+          if (cdna4_to_cdna3_relocation && has_error_diagnostic(result.diagnostics)) {
+            if (!continue_after_failure)
+              return leave_unchanged();
+            words = copy_instruction_words(text, offset, inst_size);
+          }
           if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
             rewrite_gfx1250_zero_sgpr_v_mov_sources(words, inst, instructions.begin(), inst_it);
             rewrite_gfx1250_zero_sgpr_scalar_sources(words, inst, instructions.begin(), inst_it,
@@ -7311,15 +7417,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
 
           if (source_size == inst_size) {
-            if (auto branch_delta = inst.branch_offset_bytes()) {
+            if (direct_branch_delta) {
               if (words.size() != 1 || inst_size != sizeof(uint32_t)) {
                 fail_expanded_copy("expanded text copy cannot relocate non-SOPP direct branch " +
                                    std::string(inst.mnemonic()));
                 break;
               }
-              const int64_t target =
-                  static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*branch_delta);
+              const int64_t target = static_cast<int64_t>(offset + inst_size) +
+                                     static_cast<int64_t>(*direct_branch_delta);
               if (target < 0) {
+                if (cdna4_to_cdna3_relocation) {
+                  append_error(result.diagnostics, DiagnosticKind::Legalization,
+                               "direct branch target is outside the source .text range", offset,
+                               std::string(inst.mnemonic()));
+                  return leave_unchanged();
+                }
                 fail_expanded_copy("expanded text copy branch target is before .text for " +
                                    std::string(inst.mnemonic()));
                 break;
@@ -7398,6 +7510,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (direct_branches.empty())
           return true;
 
+        if (cdna4_to_cdna3_relocation) {
+          for (const ExpandedTextBranchFixup &branch : direct_branches) {
+            if (!scope_offsets.contains(branch.target_offset)) {
+              append_error(result.diagnostics, DiagnosticKind::Legalization,
+                           "direct branch target is not present in the kernel-local relocated "
+                           "body",
+                           std::nullopt, branch.mnemonic);
+              return false;
+            }
+          }
+        }
+
         std::vector<std::pair<uint64_t, uint64_t>> offset_map;
         offset_map.reserve(scope_offsets.size());
         for (const auto &[source_offset, translated_offset] : scope_offsets)
@@ -7416,8 +7540,71 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         return true;
       };
 
-      if (!relocate_direct_branches() || !expanded_copy_ok)
+      if (!relocate_direct_branches()) {
+        if (cdna4_to_cdna3_relocation && has_error_diagnostic(result.diagnostics))
+          return leave_unchanged();
         break;
+      }
+      if (!expanded_copy_ok)
+        break;
+
+      if (cdna4_to_cdna3_relocation) {
+        std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> rewritten_regions;
+        for (const IndirectCallFixup &fixup : recovered_indirect_fixups) {
+          const auto getpc_it = scope_offsets.find(fixup.source_getpc_offset);
+          const auto recovery_begin_it = scope_offsets.find(fixup.source_recovery_begin_offset);
+          const auto recovery_end_it = scope_offsets.find(fixup.source_recovery_end_offset);
+          const auto target_it = scope_offsets.find(fixup.source_target_offset);
+          if (getpc_it == scope_offsets.end() || recovery_begin_it == scope_offsets.end() ||
+              recovery_end_it == scope_offsets.end() || target_it == scope_offsets.end()) {
+            append_error(result.diagnostics, DiagnosticKind::Legalization,
+                         "recovered indirect call target is not present in the kernel-local "
+                         "relocated body",
+                         fixup.source_call_offset, "indirect branch");
+            return leave_unchanged();
+          }
+
+          const auto rewrite_key =
+              std::pair{recovery_end_it->second, static_cast<uint64_t>(target_it->second)};
+          auto [rewrite_it, inserted] =
+              rewritten_regions.emplace(recovery_begin_it->second, rewrite_key);
+          if (!inserted) {
+            if (rewrite_it->second != rewrite_key) {
+              append_error(result.diagnostics, DiagnosticKind::Legalization,
+                           "recovered indirect branch builder is reused for incompatible targets",
+                           fixup.source_call_offset, "indirect branch");
+              return leave_unchanged();
+            }
+            continue;
+          }
+
+          const int64_t delta = static_cast<int64_t>(target_it->second) -
+                                static_cast<int64_t>(getpc_it->second + sizeof(uint32_t));
+          std::vector<uint32_t> replacement_words;
+          if (!append_pc_delta_builder(replacement_words, host_arch_, fixup.source_call_sreg,
+                                       delta)) {
+            append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                         "target ISA cannot encode canonical recovered indirect branch builder",
+                         fixup.source_call_offset, "indirect branch");
+            return leave_unchanged();
+          }
+
+          const uint64_t recovery_size = recovery_end_it->second - recovery_begin_it->second;
+          const uint64_t replacement_size = replacement_words.size() * sizeof(uint32_t);
+          if (replacement_size > recovery_size) {
+            append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                         "recovered indirect branch builder does not fit in its source range",
+                         fixup.source_call_offset, "indirect branch");
+            return leave_unchanged();
+          }
+
+          const size_t begin_word = recovery_begin_it->second / sizeof(uint32_t);
+          std::copy(replacement_words.begin(), replacement_words.end(),
+                    scope_words.begin() + begin_word);
+          for (uint64_t byte = replacement_size; byte < recovery_size; byte += sizeof(uint32_t))
+            scope_words[begin_word + byte / sizeof(uint32_t)] = build_s_nop(0, host_arch_);
+        }
+      }
 
       const uint32_t required_vgprs =
           std::max(scope.translation->target_vgpr_count, expanded_context.required_vgpr_count);
@@ -7500,6 +7687,69 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         return true;
       };
 
+      if (cdna4_to_cdna3_relocation && scope.translation->has_kernarg_preload) {
+        const uint64_t launch_stub_bytes =
+            (scope.translation->prologue_words.size() + 1) * sizeof(uint32_t);
+        if (launch_stub_bytes > kKernargPreloadSkipBytes) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernel descriptor prologue does not fit in the 256-byte kernarg preload "
+                       "compatibility window; leaving code object unchanged",
+                       scope.translation->entry_text_offset);
+          return leave_unchanged();
+        }
+
+        const auto preload_it =
+            scope_offsets.find(scope.translation->kernarg_preload_entry_text_offset);
+        if (preload_it == scope_offsets.end()) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernarg preload firmware entry offset is not present in the relocated "
+                       "body",
+                       scope.translation->kernarg_preload_entry_text_offset);
+          return leave_unchanged();
+        }
+
+        const uint64_t current_bytes = expanded_words.size() * sizeof(uint32_t);
+        const uint64_t entry_residue = scope.translation->entry_text_offset % 256;
+        const uint64_t launch_padding = (entry_residue + 256 - current_bytes % 256) % 256;
+        expanded_words.insert(expanded_words.end(), launch_padding / sizeof(uint32_t),
+                              build_s_nop(0, host_arch_));
+        const uint64_t launch_offset = expanded_words.size() * sizeof(uint32_t);
+        const uint64_t body_offset = launch_offset + kKernargPreloadSkipBytes + launch_stub_bytes;
+        expanded_words.resize(body_offset / sizeof(uint32_t), build_s_nop(0, host_arch_));
+        if (!relocate_static_pc_relative_fixups(body_offset))
+          break;
+        expanded_words.insert(expanded_words.end(), scope_words.begin(), scope_words.end());
+
+        auto write_launch_stub = [&](uint64_t stub_offset, uint64_t target_offset) {
+          const size_t stub_word = stub_offset / sizeof(uint32_t);
+          std::copy(scope.translation->prologue_words.begin(),
+                    scope.translation->prologue_words.end(), expanded_words.begin() + stub_word);
+          const uint64_t branch_pc =
+              stub_offset + scope.translation->prologue_words.size() * sizeof(uint32_t);
+          int16_t branch_dwords = 0;
+          if (!compute_sopp_branch_offset(branch_pc, target_offset, branch_dwords))
+            return false;
+          expanded_words[branch_pc / sizeof(uint32_t)] = build_s_branch(branch_dwords, host_arch_);
+          return true;
+        };
+
+        const uint64_t body_entry = body_offset + entry_it->second;
+        const uint64_t preload_body_entry = body_offset + preload_it->second;
+        if (!write_launch_stub(launch_offset, body_entry) ||
+            !write_launch_stub(launch_offset + kKernargPreloadSkipBytes, preload_body_entry)) {
+          append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                       "kernel descriptor prologue branch range exceeds s_branch simm16; leaving "
+                       "code object unchanged",
+                       scope.translation->entry_text_offset);
+          return leave_unchanged();
+        }
+
+        copied_entry_offsets.emplace(scope.translation->entry_text_offset, launch_offset);
+        scope.translation->target_entry_text_offset = launch_offset;
+        scope.translation->target_body_entry_text_offset = body_entry;
+        continue;
+      }
+
       std::optional<uint16_t> prologue_long_branch_pair;
       std::optional<uint16_t> prologue_long_branch_scc;
       if (!scope.translation->prologue_words.empty()) {
@@ -7518,7 +7768,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
 
       const ExpandedTextScopePlacementRequest placement_request{
-          .original_text_size_bytes = text.size(),
+          .original_text_size_bytes = expanded_text_base_bytes,
           .current_tail_size_bytes = expanded_words.size() * sizeof(uint32_t),
           .original_entry_offset = scope.translation->entry_text_offset,
           .translated_entry_offset = entry_it->second,
@@ -7545,6 +7795,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         expanded_words.insert(expanded_words.end(), scope_words.begin(), scope_words.end());
         copied_entry_offsets.emplace(scope.translation->entry_text_offset,
                                      scope_placement->descriptor_entry_offset);
+        scope.translation->target_entry_text_offset = scope_placement->descriptor_entry_offset;
+        scope.translation->target_body_entry_text_offset = scope_base + entry_it->second;
       } else {
         expanded_words.insert(expanded_words.end(),
                               scope_placement->padding_bytes / sizeof(uint32_t),
@@ -7566,10 +7818,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         expanded_words.insert(expanded_words.end(), scope_words.begin(), scope_words.end());
         copied_entry_offsets.emplace(scope.translation->entry_text_offset,
                                      scope_placement->descriptor_entry_offset);
+        scope.translation->target_entry_text_offset = scope_placement->descriptor_entry_offset;
+        scope.translation->target_body_entry_text_offset = scope_base + entry_it->second;
       }
     }
 
+    if (continue_after_failure && has_error_diagnostic(result.diagnostics))
+      return leave_unchanged();
+
     if (expanded_copy_ok) {
+      if (cdna4_to_cdna3_relocation) {
+        while (expanded_words.size() * sizeof(uint32_t) < text.size())
+          expanded_words.push_back(build_s_nop(0, host_arch_));
+        translated_text.clear();
+      }
       if (!expanded_words.empty()) {
         const auto *expanded_bytes = reinterpret_cast<const uint8_t *>(expanded_words.data());
         translated_text.insert(translated_text.end(), expanded_bytes,
@@ -7590,7 +7852,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         copied_entry_map.emplace_back(entry_text_offset, copied_entry_offset);
 
       const auto descriptor_plan = plan_expanded_text_descriptor_redirections(
-          descriptor_entries, copied_entry_map, text.size());
+          descriptor_entries, copied_entry_map, expanded_text_base_bytes);
       if (!descriptor_plan.success) {
         result.warnings.push_back(descriptor_plan.message);
         return leave_unchanged();
@@ -7660,6 +7922,26 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       warnings_ = nullptr;
       diagnostics_ = nullptr;
       return result;
+    }
+  }
+
+  // The CDNA4-to-RDNA4 in-place path materializes descriptor ABI prologues in
+  // the appended translation section and returns to the original kernel entry
+  // with a SOPP branch.  Reject an image whose shortest possible return already
+  // exceeds simm16 instead of emitting a descriptor that cannot launch safely.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
+    for (const KdTranslation &translation : descriptor_translations) {
+      if (translation.prologue_words.empty())
+        continue;
+      const uint64_t branch_pc = text.size() + translation.prologue_words.size() * sizeof(uint32_t);
+      int16_t branch_dwords = 0;
+      if (!compute_sopp_branch_offset(branch_pc, translation.entry_text_offset, branch_dwords)) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "kernel descriptor prologue branch range exceeds s_branch simm16; leaving "
+                     "code object unchanged",
+                     translation.entry_text_offset);
+        return leave_unchanged();
+      }
     }
   }
 
@@ -8342,11 +8624,15 @@ std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
   auto expansion = semantic_translator_->try_lower_expand_with_opcode(
       inst, offset, orig_text, liveness, context, source_opcode);
   if (expansion.status == ExpandStatus::Failed) {
-    if (warnings_)
-      warnings_->push_back(expansion.message.empty()
-                               ? "semantic EXPAND rule matched, but could not safely lower"
-                               : expansion.message);
-    return finish_words(nop_words(inst_size, host_arch_));
+    if (diagnostics_)
+      append_error(*diagnostics_, DiagnosticKind::ExpandFailed,
+                   expansion.message.empty()
+                       ? "semantic EXPAND rule matched, but could not safely lower"
+                       : expansion.message,
+                   offset, std::string(inst.mnemonic()), std::move(expansion.required_work));
+    if (options_.debug_continue_after_failure)
+      return finish_words(copy_instruction_words(orig_text, offset, inst_size));
+    return {};
   }
   if (expansion.status == ExpandStatus::Success) {
     append_hardware_pending_warning(warnings_, inst.mnemonic());
@@ -8354,15 +8640,25 @@ std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
   }
 
   if (leg && leg->action == Action::Expand) {
-    if (warnings_)
-      warnings_->push_back("EXPAND not yet implemented for " + std::string(inst.mnemonic()));
-    return finish_words(nop_words(inst_size, host_arch_));
+    if (diagnostics_)
+      append_error(*diagnostics_, DiagnosticKind::ExpandMissing,
+                   "legalization requires EXPAND, but no expansion rule is implemented", offset,
+                   std::string(inst.mnemonic()),
+                   {"Add a semantic expansion rule for this mnemonic."});
+    if (options_.debug_continue_after_failure)
+      return finish_words(copy_instruction_words(orig_text, offset, inst_size));
+    return {};
   }
 
   if (requires_semantic_expansion(guest_arch_, inst)) {
-    if (warnings_)
-      warnings_->push_back("EXPAND not yet implemented for " + std::string(inst.mnemonic()));
-    return finish_words(nop_words(inst_size, host_arch_));
+    if (diagnostics_)
+      append_error(*diagnostics_, DiagnosticKind::ExpandMissing,
+                   "legalization requires EXPAND, but no expansion rule is implemented", offset,
+                   std::string(inst.mnemonic()),
+                   {"Add a semantic expansion rule for this mnemonic."});
+    if (options_.debug_continue_after_failure)
+      return finish_words(copy_instruction_words(orig_text, offset, inst_size));
+    return {};
   }
 
   if (!encoding_translate_)

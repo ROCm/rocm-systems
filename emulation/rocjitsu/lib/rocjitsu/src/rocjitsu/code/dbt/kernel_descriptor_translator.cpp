@@ -49,6 +49,7 @@ static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 constexpr uint32_t kMaxVgprGranulatedField = 63;
 constexpr uint32_t kMaxSgprGranulatedField = 15;
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -818,6 +819,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
   result.entry_text_offset = entry_text_offset;
+  result.target_entry_text_offset = entry_text_offset;
+  result.target_body_entry_text_offset = entry_text_offset;
+  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
+  result.kernarg_preload_entry_text_offset =
+      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
   result.symbol_name = std::string(symbol_name);
   const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
   result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);

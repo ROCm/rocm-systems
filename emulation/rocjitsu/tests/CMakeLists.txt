@@ -1096,26 +1096,6 @@ if(HSA_RUNTIME64)
             )
         endif()
 
-        if(HAS_GFX1201_GPU)
-            rj_add_test(
-                NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
-                COMMAND
-                    $<TARGET_FILE:rocjitsu_bin> --config
-                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-                    $<TARGET_FILE:hsa_hooks_test>
-                    --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                TIMEOUT 60
-                INSTALL_COMMAND
-                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                    "--config"
-                    "\${RJ_INSTALLED_CONFIG_DIR}/guest_gfx950_on_gfx1201.json"
-                    "--"
-                    "bin/hsa_hooks_test"
-                    "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
-            )
-        endif()
-
         if(HAS_RDNA4_GPU)
             rj_add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"

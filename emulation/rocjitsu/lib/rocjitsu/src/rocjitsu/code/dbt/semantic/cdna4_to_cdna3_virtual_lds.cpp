@@ -913,7 +913,7 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 /// @brief Return true when @p inst uses the CDNA4 DS encoding family.
 [[nodiscard]] bool is_cdna4_ds_encoding(const Instruction &inst) {
   return inst.encoding_id() >= cdna4::encoding::kDs &&
-         inst.encoding_id() <= cdna4::encoding::kDsOpHi7;
+         inst.encoding_id() <= cdna4::encoding::kDsHi7;
 }
 
 /// @brief Return true when a CDNA4 MUBUF instruction targets LDS.

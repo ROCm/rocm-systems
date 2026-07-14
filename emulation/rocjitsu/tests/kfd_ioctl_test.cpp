@@ -103,6 +103,7 @@ protected:
   std::unique_ptr<simdojo::SimulationEngine> engine_;
   rocjitsu::SoC *soc_ = nullptr;
   rocjitsu::SimulatedKfd *driver_ = nullptr;
+  rocjitsu::amdgpu::GpuMemory *memory_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {

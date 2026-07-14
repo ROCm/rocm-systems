@@ -51,25 +51,15 @@ void validate_guest_device_geometry(const KfdDeviceConfig &device) {
 
 } // namespace
 
-void validate_guest_device_geometry(const KfdDeviceConfig &device) {
-  if (!device.present || device.simd_count == 0)
-    return;
-
-  const uint64_t expected_simds =
-      static_cast<uint64_t>(device.num_shader_engines) * device.num_cu_per_sh * device.simd_per_cu;
-  if (expected_simds == device.simd_count)
-    return;
-
-  // DBT guest configs are written verbatim into synthetic KFD sysfs. Reject
-  // internally inconsistent CU/SIMD geometry before ROCR observes properties
-  // that disagree with each other during guest-agent discovery.
-  throw std::runtime_error("dbt_guest.guest_device simd_count (" +
-                           std::to_string(device.simd_count) +
-                           ") must equal num_shader_engines * num_cu_per_sh * simd_per_cu (" +
-                           std::to_string(expected_simds) + ")");
+const char *dbt_execution_backend_name(DbtExecutionBackend backend) {
+  switch (backend) {
+  case DbtExecutionBackend::Hardware:
+    return "hardware";
+  case DbtExecutionBackend::Simulator:
+    return "simulator";
+  }
+  return "unknown";
 }
-
-} // namespace
 
 DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   DbtGuestConfig config;

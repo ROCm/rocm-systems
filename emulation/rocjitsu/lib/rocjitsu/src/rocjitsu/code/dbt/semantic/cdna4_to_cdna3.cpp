@@ -93,37 +93,6 @@ build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint
   return cdna3::build_vop3p_mfma(op, fields);
 }
 
-[[nodiscard]] std::array<uint32_t, 2> build_cdna3_ds(uint16_t op, uint8_t vdst, uint8_t addr,
-                                                     uint8_t data0 = 0, uint8_t data1 = 0,
-                                                     uint8_t offset0 = 0, uint8_t offset1 = 0) {
-  cdna3::DsBuilderFields fields{};
-  fields.offset0 = offset0;
-  fields.offset1 = offset1;
-  fields.addr = addr;
-  fields.data0 = data0;
-  fields.data1 = data1;
-  fields.vdst = vdst;
-  return cdna3::build_ds(op, fields);
-}
-
-[[nodiscard]] std::array<uint32_t, 2> build_cdna3_mubuf(const cdna4::MubufMachineInst &src,
-                                                        uint16_t op, uint8_t vdata) {
-  cdna3::MubufBuilderFields fields{};
-  fields.offset = src.offset;
-  fields.offen = src.offen;
-  fields.idxen = src.idxen;
-  fields.sc0 = src.sc0;
-  fields.sc1 = src.sc1;
-  fields.lds = 0;
-  fields.nt = src.nt;
-  fields.vaddr = src.vaddr;
-  fields.vdata = vdata;
-  fields.srsrc = src.srsrc;
-  fields.acc = 0;
-  fields.soffset = src.soffset;
-  return cdna3::build_mubuf(op, fields);
-}
-
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
   const auto inst = cdna3::build_sop1(cdna3::kSMovB32, {.ssrc0 = 0xFF, .sdst = sdst});
@@ -1893,13 +1862,21 @@ const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
      expand_v_bitop3_b32_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkF16F32Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_cvt_pk_f16_f32_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkBf16F32, RuleAction::Expand, 0, 0, nullptr,
+     expand_cvt_pk_bf16_f32_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3p, cdna4::kVDot2F32Bf16, RuleAction::Expand, 0, 0, nullptr,
+     expand_dot2_f32_bf16_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32Bf16, RuleAction::Expand, 0, 0, nullptr,
+     expand_mfma_f32_16x16x32_bf16_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16Bf16, RuleAction::Expand, 0, 0, nullptr,
+     expand_mfma_f32_32x32x16_bf16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32F16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
-    {cdna4::encoding::kDsOpHi7, cdna4::kDsReadB64TrB16Ds, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kDsHi7, cdna4::kDsReadB64TrB16Ds, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordMubuf, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dword_lds_cdna4_to_cdna3, nullptr, nullptr},

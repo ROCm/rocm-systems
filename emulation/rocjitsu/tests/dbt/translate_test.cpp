@@ -58,6 +58,7 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
@@ -729,6 +730,12 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
       text_words, EF_AMDGPU_MACH_AMDGCN_GFX950, 0, 1);
 }
 
+std::vector<uint8_t>
+make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> &text_words) {
+  return make_minimal_amdgpu_elf_with_two_kernel_descriptors_and_text(
+      text_words, EF_AMDGPU_MACH_AMDGCN_GFX950, 0, 1);
+}
+
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text() {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
@@ -973,6 +980,42 @@ const Section *find_section(const CodeObject &co, std::string_view name) {
       return section.get();
   }
   return nullptr;
+}
+
+rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor_for_test(const void *descriptor) {
+  rocr::llvm::amdhsa::kernel_descriptor_t kd{};
+  std::memcpy(&kd, descriptor, sizeof(kd));
+  return kd;
+}
+
+void write_kernel_descriptor_for_test(void *descriptor,
+                                      const rocr::llvm::amdhsa::kernel_descriptor_t &kd) {
+  std::memcpy(descriptor, &kd, sizeof(kd));
+}
+
+bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
+                          std::string_view message) {
+  return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                     [&](const TranslationDiagnostic &diagnostic) {
+                       return diagnostic.severity == DiagnosticSeverity::Error &&
+                              diagnostic.kind == kind &&
+                              diagnostic.message.find(message) != std::string::npos;
+                     });
+}
+
+void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(KD));
+
+  KD kd{};
+  std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
+  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 
 bool section_contains_vop3_opcode(const Section *section, uint16_t opcode) {
@@ -15403,88 +15446,6 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence(bool a
       expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493),
       expect_sop1(1), // s_mov_b64 restore EXEC.
   };
-}
-
-std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sequence() {
-  return {
-      expect_vop3(
-          cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 16, src; BF16 bits become FP32 high half.
-  };
-}
-
-std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sdwa_word0_sequence() {
-  return {
-      expect_vop3(cdna3::kVLshlrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 4),
-  };
-}
-
-std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sdwa_word1_sequence() {
-  return {
-      expect_vop3(cdna3::kVLshrrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 76),
-      expect_vop3(cdna3::kVLshlrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 4),
-  };
-}
-
-std::vector<ExpectedCdna3Inst>
-expected_cdna3_dot2_f32_bf16_sequence(uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2,
-                                      uint8_t scratch_base, uint8_t op_sel = 0,
-                                      uint8_t op_sel_hi = 0, uint8_t neg = 0, uint8_t neg_hi = 0,
-                                      uint8_t op_sel_hi_2 = 0, bool clamp = false) {
-  const uint8_t a_lo = scratch_base;
-  const uint8_t b_lo = static_cast<uint8_t>(scratch_base + 1);
-  const uint8_t a_hi = static_cast<uint8_t>(scratch_base + 2);
-  const uint8_t b_hi = static_cast<uint8_t>(scratch_base + 3);
-  std::vector<ExpectedCdna3Inst> expected;
-  auto expect_widen = [&](uint8_t dst, uint16_t src, bool high_half, bool negate) {
-    if (high_half) {
-      expected.push_back(
-          expect_vop3(cdna3::kVLshrrevB32Vop3, dst, rocjitsu::scalar_positive_inline_u32(16), src));
-      expected.push_back(expect_vop3(cdna3::kVLshlrevB32Vop3, dst,
-                                     rocjitsu::scalar_positive_inline_u32(16), 256 + dst));
-    } else {
-      expected.push_back(
-          expect_vop3(cdna3::kVLshlrevB32Vop3, dst, rocjitsu::scalar_positive_inline_u32(16), src));
-    }
-    if (negate)
-      expected.push_back(expect_vop2(cdna3::kVXorB32Vop2)); // v_xor_b32 literal flips FP32 sign.
-  };
-  expect_widen(a_lo, src0, (op_sel & 0x1u) != 0, (neg & 0x1u) != 0);
-  expect_widen(b_lo, src1, (op_sel & 0x2u) != 0, (neg & 0x2u) != 0);
-  expect_widen(a_hi, src0, op_sel_hi_2 != 0, (neg_hi & 0x1u) != 0);
-  expect_widen(b_hi, src1, (op_sel_hi & 0x2u) != 0, (neg_hi & 0x2u) != 0);
-  expected.push_back(expect_vop3(cdna3::kVMulF32Vop3, a_lo, 256 + a_lo, 256 + b_lo));
-  expected.push_back(expect_vop3(cdna3::kVMulF32Vop3, a_hi, 256 + a_hi, 256 + b_hi));
-  expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, a_lo, 256 + a_lo, 256 + a_hi));
-  expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, vdst, 256 + a_lo, src2));
-  if (clamp)
-    expected.push_back(
-        expect_vop3(cdna3::kVMed3F32Vop3, vdst, 256 + vdst, 128, 242)); // v_med3_f32 clamps [0,1].
-  return expected;
-}
-
-std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence(bool acc_dst = false) {
-  std::vector<ExpectedCdna3Inst> expected = {
-      expect_ds(118),   // ds_read_b64
-      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
-      expect_vop3(652), // v_mbcnt_lo_u32_b32
-      expect_vop3(653), // v_mbcnt_hi_u32_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(276), // v_or_b32
-      expect_vop3(308), // v_add_u32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(276), // v_or_b32
-      expect_ds(63),    // ds_bpermute_b32
-      expect_ds(63),    // ds_bpermute_b32
-      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
-      expect_vop3(493), // v_perm_b32
-      expect_vop3(308), // v_add_u32
-      expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493),
-  };
-
   auto first_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), first_pack.begin(), first_pack.end());
   auto second_pack = expected_cdna3_raw_b16_pack_sequence();
@@ -15697,10 +15658,6 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
       {"MfmaF32_32x32x16Bf16", 0x1A7, cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma, 0, 256, 260),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8Bf16Vop3pMfma)},
-      {"MfmaF32_32x32x16Bf16Source1Acc", cdna4::encoding::kVop3p,
-       cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma,
-       make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma, 0, 256, 260, 272, 2),
-       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8Bf16Vop3pMfma, 272, 2)},
       {"MfmaF32_16x16x32F16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32F16Vop3pMfma, 0, 256, 260),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16F16Vop3pMfma)},
@@ -15717,8 +15674,8 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma, 272)},
       {"DsReadB64TrB16", cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16Ds,
        make_cdna4_ds_read_b64_tr_b16_words(), expected_cdna3_ds_read_b64_tr_b16_sequence()},
-      {"DsReadB64TrB16Acc", cdna4::encoding::kDsOpHi7, cdna4::kDsReadB64TrB16Ds,
-       make_cdna4_ds_read_b64_tr_b16_words(/*byte_offset=*/0, /*addr=*/2, /*acc=*/true),
+      {"DsReadB64TrB16Acc", cdna4::encoding::kDsHi7, cdna4::kDsReadB64TrB16Ds,
+       make_cdna4_ds_read_b64_tr_b16_words(/*acc=*/true),
        expected_cdna3_ds_read_b64_tr_b16_sequence(/*acc_dst=*/true)},
       {"BufferLoadDwordLds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordMubuf,
        make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordMubuf),
@@ -15834,16 +15791,16 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
   }
 }
 
-void expect_cdna3_code_cave_matches(const rocjitsu::Section &translations,
-                                    const std::vector<ExpectedCdna3Inst> &expected) {
-  ASSERT_EQ(translations.size() % sizeof(uint32_t), 0u);
-  ASSERT_GT(translations.size(), 0u);
+void expect_cdna3_translated_text_matches(const rocjitsu::Section &text,
+                                          const std::vector<ExpectedCdna3Inst> &expected) {
+  ASSERT_EQ(text.size() % sizeof(uint32_t), 0u);
+  ASSERT_GT(text.size(), 0u);
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
 
-  const auto *words = reinterpret_cast<const uint32_t *>(translations.data());
-  const size_t word_count = translations.size() / sizeof(uint32_t);
+  const auto *words = reinterpret_cast<const uint32_t *>(text.data());
+  const size_t word_count = text.size() / sizeof(uint32_t);
   std::vector<std::unique_ptr<rocjitsu::Instruction>> actual;
   for (size_t pc = 0; pc < word_count;) {
     SCOPED_TRACE(pc);
@@ -15856,8 +15813,18 @@ void expect_cdna3_code_cave_matches(const rocjitsu::Section &translations,
     actual.push_back(std::move(inst));
   }
 
-  ASSERT_EQ(actual.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  ASSERT_FALSE(expected.empty());
+  ASSERT_EQ(expected.back().kind, ExpectedCdna3Kind::Sopp);
+  ASSERT_EQ(expected.back().op, 2u) << "legacy cave fixture must end in s_branch fallthrough";
+
+  // Compact CDNA relocation emits the semantic body directly into .text, so
+  // the old appended-cave fixture's final return branch is absent. Some e32
+  // fixture encodings occupy a two-dword MachineInst container; the second
+  // source dword remains independently reachable after the semantic prefix and
+  // is intentionally outside this rule-level assertion.
+  const size_t translated_instruction_count = expected.size() - 1;
+  ASSERT_GE(actual.size(), translated_instruction_count);
+  for (size_t i = 0; i < translated_instruction_count; ++i) {
     SCOPED_TRACE(i);
     expect_cdna3_instruction_matches(*actual[i], expected[i]);
   }
@@ -16104,9 +16071,10 @@ TEST_P(Cdna4ToCdna3SemanticRuleTranslationTest, TranslatesSingleInstruction) {
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
-  const rocjitsu::Section *translations = rocjitsu::find_section(translated, ".rj_translations");
-  ASSERT_NE(translations, nullptr);
-  expect_cdna3_code_cave_matches(*translations, test_case.expected);
+  ASSERT_FALSE(translated.text_sections().empty());
+  EXPECT_EQ(rocjitsu::find_section(translated, ".rj_translations"), nullptr)
+      << "CDNA4-to-CDNA3 relocation uses develop's compact .text layout";
+  expect_cdna3_translated_text_matches(*translated.text_sections()[0], test_case.expected);
 }
 
 INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTest,

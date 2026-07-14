@@ -17,6 +17,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
@@ -1246,8 +1247,12 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
     return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
 
   assert(InterposerContext::real().ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->mmap(addr, length, prot, flags, offset);
+  if (auto *remote = InterposerContext::ctx.remote_lookup(fd)) {
+    void *ret = remote->mmap(addr, length, prot, flags, offset);
+    if (ret != MAP_FAILED)
+      rocjitsu::KfdProcess::notify_host_mappings_changed();
+    return ret;
+  }
 
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
     void *ret = drv->mmap(addr, length, prot, flags, offset);
@@ -1257,10 +1262,19 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
   }
 
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->mmap(addr, length, prot, flags, offset);
-    if (auto *drv = InterposerContext::ctx.driver())
-      return drv->mmap(addr, length, prot, flags, offset);
+    if (auto *remote =
+            InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+      void *ret = remote->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
+    if (auto *drv = InterposerContext::ctx.driver()) {
+      void *ret = drv->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
   }
 
   if (InterposerContext::ctx.is_drm(fd)) {
@@ -1300,7 +1314,10 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
       }
     }
   }
-  return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+  void *ret = InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+  if (ret != MAP_FAILED)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
@@ -1310,7 +1327,10 @@ RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
     errno = EPERM;
     return -1;
   }
-  return InterposerContext::real().mprotect(addr, length, prot);
+  int ret = InterposerContext::real().mprotect(addr, length, prot);
+  if (ret == 0)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
@@ -1343,7 +1363,10 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
       return ret;
     }
   }
-  return InterposerContext::real().munmap(addr, length);
+  int ret = InterposerContext::real().munmap(addr, length);
+  if (ret == 0)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 } // extern "C"
