@@ -1805,11 +1805,6 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
     return ROCSHMEM_ERROR;
   }
 
-  if (segment_elems > segment_capacity) {
-    LOGD_WARN("Tile reduce segment exceeds IPC pWrk capacity");
-    return ROCSHMEM_ERROR;
-  }
-
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   T *my_pWrk = &pWrk[my_pe_in_team * segment_capacity];
 
