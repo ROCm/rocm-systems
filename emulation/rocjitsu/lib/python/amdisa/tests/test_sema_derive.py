@@ -984,9 +984,9 @@ class TestDeriveVectorUnary:
         )
         assert decode_helper in cpp
         assert encode_helper in cpp
-        assert 'util::e8m0_to_f32' in cpp
-        assert '((inst_.opsel & 0x3u) * 8u)' in cpp
-        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' not in cpp
+        assert 'util::e8m0_to_f32' not in cpp
+        assert '((inst_.opsel & 0x3u) * 8u)' not in cpp
+        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' in cpp
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
         assert 'wf.cu().write_vgpr' in cpp
@@ -1024,7 +1024,7 @@ class TestDeriveVectorUnary:
         assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' in cpp
         assert 'util::e8m0_to_f32' not in cpp
         assert 'pack_scaled_dst(index' in cpp
-        assert 'read_scaled_input(index) / scale' in cpp
+        assert 'read_scaled_input(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
 
 

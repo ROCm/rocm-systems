@@ -11269,36 +11269,6 @@ void append_extract_packed_code(std::vector<uint32_t> &words, uint8_t result, ui
   append_wait_valu_vgpr(words);
 }
 
-void append_materialize_e8m0_scale(std::vector<uint32_t> &words, uint8_t scale, uint8_t tmp,
-                                   uint16_t encoded_src, uint8_t byte_index, uint8_t predicate,
-                                   std::optional<uint32_t> literal) {
-  constexpr uint8_t kOpMovB32 = 1;
-  constexpr uint8_t kOpLshlrevB32 = 24;
-  constexpr uint8_t kOpLshrrevB32 = 25;
-  constexpr uint8_t kOpAndB32 = 27;
-  constexpr uint16_t kOpCmpEqU32 = 74;
-  constexpr uint16_t kOpCndmaskB32 = 257;
-  constexpr uint8_t kSoppWaitAlu = 8;
-  append_vop1(words, kOpMovB32, tmp, encoded_src, literal);
-  if (byte_index != 0) {
-    append_wait_valu_vgpr(words);
-    append_vop2(words, kOpLshrrevB32, tmp,
-                scalar_positive_inline_u32(static_cast<uint16_t>(byte_index * 8u)), tmp);
-  }
-  append_wait_valu_vgpr(words);
-  append_vop2(words, kOpAndB32, tmp, 255, tmp, 0xFFu);
-  append_wait_valu_vgpr(words);
-  append_vop2(words, kOpLshlrevB32, scale, scalar_positive_inline_u32(23), tmp);
-  append_vop3(words, kOpCmpEqU32, predicate, vgpr_src(tmp), scalar_positive_inline_u32(0));
-  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
-  append_vop3(words, kOpCndmaskB32, scale, vgpr_src(scale), 255, predicate, 0x00400000u);
-  append_wait_valu_vgpr(words);
-  append_vop3(words, kOpCmpEqU32, predicate, vgpr_src(tmp), 255, 0, 0xFFu);
-  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
-  append_vop3(words, kOpCndmaskB32, scale, vgpr_src(scale), 255, predicate, 0x7FC00000u);
-  append_wait_valu_vgpr(words);
-}
-
 ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, uint64_t,
                                            std::span<const uint8_t>,
                                            const LivenessAnalysis &liveness,
@@ -11319,8 +11289,7 @@ ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, ui
   const uint8_t destination_words = spec->pack ? packed_words : wide_word_count;
 
   if (src.vdst == 255 || static_cast<uint16_t>(src.vdst) + destination_words > 256u ||
-      src.abs != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0 ||
-      (spec->pack ? src.opsel != 0 : (src.opsel & ~0x3u) != 0))
+      src.abs != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0 || src.opsel != 0)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " uses unsupported scaled-conversion modifiers");
   const auto source_base = src_vgpr_base_for_run(static_cast<uint16_t>(src.src0), source_words);
@@ -11372,7 +11341,6 @@ ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, ui
   const uint8_t pred = static_cast<uint8_t>(*predicate);
 
   constexpr uint8_t kOpMovB32 = 1;
-  constexpr uint8_t kOpRcpF32 = 42;
   constexpr uint8_t kOpMulF32 = 8;
   constexpr uint8_t kOpLshlrevB32 = 24;
   constexpr uint8_t kOpAndB32 = 27;
@@ -11387,10 +11355,9 @@ ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, ui
 
   std::vector<uint32_t> words;
   words.reserve(spec->count * 48u + 64u);
+  append_vop1(words, kOpMovB32, scale, scale_src, scale_src == 255 ? literal : std::nullopt);
+  append_wait_valu_vgpr(words);
   if (spec->pack) {
-    append_vop1(words, kOpMovB32, scale, scale_src, scale_src == 255 ? literal : std::nullopt);
-    append_wait_valu_vgpr(words);
-    append_vop1(words, kOpRcpF32, scale, vgpr_src(scale));
     if (spec->stochastic)
       append_vop1(words, kOpMovB32, seed, seed_src, seed_src == 255 ? literal : std::nullopt);
     for (uint8_t word = 0; word < packed_words; ++word)
@@ -11434,10 +11401,6 @@ ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, ui
     for (uint8_t word = 0; word < packed_words; ++word)
       append_vop1(words, kOpMovB32, static_cast<uint8_t>(state + word),
                   vgpr_src(static_cast<uint8_t>(*source_base + word)));
-    append_materialize_e8m0_scale(words, scale, t6, scale_src,
-                                  static_cast<uint8_t>(src.opsel & 0x3u), pred,
-                                  scale_src == 255 ? literal : std::nullopt);
-
     for (uint8_t index = 0; index < spec->count; ++index) {
       if (spec->lowp == ScaledLowpFormat::Fp8 || spec->lowp == ScaledLowpFormat::Bf8) {
         const uint8_t src_word = static_cast<uint8_t>(state + index / 4u);

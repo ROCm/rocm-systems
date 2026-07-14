@@ -3358,9 +3358,9 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   cu->reset_all_wf();
 }
 
-TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
-  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_e8m0_mem");
-  amdgpu::L2Cache l2("gfx1250_cvt_scale_e8m0_l2");
+TEST(Gfx1250CvtScaleTest, ScaledConversionsMultiplyByF32Scale) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_f32_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_scale_f32_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
@@ -3380,34 +3380,47 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   wf->set_exec(1);
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  const uint32_t e8m0_scales = 0x817E807Fu; // 1.0, 2.0, 0.5, 4.0
-
   cu->write_vgpr(vb + 0, 0, 0x38383838u);
   cu->write_vgpr(vb + 1, 0, 0x38383838u);
-  cu->write_vgpr(vb + 10, 0, e8m0_scales);
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(2.0f));
 
-  // v_cvt_scale_pk8_f32_fp8 v[2:9], v[0:1], v10 scale_sel:2
-  const uint32_t pk8_words[] = {0xD6AA1002U, 0x02021500U};
+  // v_cvt_scale_pk8_f32_fp8 v[2:9], v[0:1], v10
+  const uint32_t pk8_words[] = {0xD6AA0002U, 0x02021500U};
   std::unique_ptr<Instruction> pk8_inst(decoder->decode(pk8_words));
   ASSERT_NE(pk8_inst, nullptr);
   ASSERT_EQ(std::string_view(pk8_inst->mnemonic()), "v_cvt_scale_pk8_f32_fp8");
   cu->execute_instruction(pk8_inst.get(), *wf);
   for (uint32_t i = 2; i <= 9; ++i)
-    EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(0.5f)) << "vgpr=" << i;
+    EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
 
   cu->write_vgpr(vb + 0, 0, 0x08208208u);
   cu->write_vgpr(vb + 1, 0, 0x82082082u);
   cu->write_vgpr(vb + 2, 0, 0x20820820u);
-  cu->write_vgpr(vb + 10, 0, e8m0_scales);
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(2.0f));
 
-  // v_cvt_scale_pk16_f32_fp6 v[18:33], v[0:2], v10 scale_sel:1
-  const uint32_t pk16_words[] = {0xD6C90812U, 0x02021500U};
+  // v_cvt_scale_pk16_f32_fp6 v[18:33], v[0:2], v10
+  const uint32_t pk16_words[] = {0xD6C90012U, 0x02021500U};
   std::unique_ptr<Instruction> pk16_inst(decoder->decode(pk16_words));
   ASSERT_NE(pk16_inst, nullptr);
   ASSERT_EQ(std::string_view(pk16_inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
   cu->execute_instruction(pk16_inst.get(), *wf);
   for (uint32_t i = 18; i <= 33; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
+
+  for (uint32_t i = 0; i < 8; ++i)
+    cu->write_vgpr(vb + 32 + i, 0, std::bit_cast<uint32_t>(static_cast<float>(i + 1)));
+  cu->write_vgpr(vb + 8, 0, std::bit_cast<uint32_t>(0.5f));
+
+  // v_cvt_scalef32_pk8_fp4_f32 v9, v[32:39], v8
+  const uint32_t pack_words[] = {0xD6B00009U, 0x02021120U};
+  std::unique_ptr<Instruction> pack_inst(decoder->decode(pack_words));
+  ASSERT_NE(pack_inst, nullptr);
+  ASSERT_EQ(std::string_view(pack_inst->mnemonic()), "v_cvt_scalef32_pk8_fp4_f32");
+  cu->execute_instruction(pack_inst.get(), *wf);
+  uint32_t expected = 0;
+  for (uint32_t i = 0; i < 8; ++i)
+    expected |= static_cast<uint32_t>(util::f32_to_fp4_e2m1_rne((i + 1) * 0.5f)) << (i * 4);
+  EXPECT_EQ(cu->read_vgpr(vb + 9, 0), expected);
 
   cu->reset_all_wf();
 }

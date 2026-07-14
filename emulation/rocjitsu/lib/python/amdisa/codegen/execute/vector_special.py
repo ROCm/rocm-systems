@@ -1238,14 +1238,6 @@ def _scale_source_reader(src_fmt: str) -> list[str]:
     raise ValueError(f'unsupported scaled conversion source format: {src_fmt}')
 
 
-def _scale_e8m0_unpack_scale(scale_src: str) -> list[str]:
-    return [
-        f'    uint32_t scale_payload = {scale_src}.read_lane(wf, lane);',
-        '    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;',
-        '    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));',
-    ]
-
-
 def gen_vector_cvt_scale(
     dst: list[str],
     src: list[str],
@@ -1275,12 +1267,9 @@ def gen_vector_cvt_scale(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
     scale_src = src[2] if stochastic else src[1]
-    if direction == 'unpack':
-        L.extend(_scale_e8m0_unpack_scale(scale_src))
-    else:
-        L.append(
-            f'    float scale = std::bit_cast<float>({scale_src}.read_lane(wf, lane));'
-        )
+    L.append(
+        f'    float scale = std::bit_cast<float>({scale_src}.read_lane(wf, lane));'
+    )
     if stochastic:
         L.append(
             f'    uint32_t seed = static_cast<uint32_t>({src[1]}.read_lane(wf, lane));'
@@ -1344,7 +1333,7 @@ def gen_vector_cvt_scale(
         L.append('        dst_words[word + 1u] |= code >> (32u - shift);')
         L.append('    };')
         L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-        L.append('      float value = read_scaled_input(index) / scale;')
+        L.append('      float value = read_scaled_input(index) * scale;')
         if stochastic:
             L.append(
                 f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed', arch_name)});"
