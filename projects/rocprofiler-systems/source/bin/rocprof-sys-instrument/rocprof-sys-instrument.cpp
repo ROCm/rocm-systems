@@ -3,15 +3,17 @@
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
@@ -22,7 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
@@ -178,18 +179,17 @@ bool                                            dump_info_enabled    = false;
 std::string                                     modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-strvec_t lib_search_paths = tim::delimit(
-    rocprofsys::join(':', path::get_internal_libdir(),
-                     rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-                     rocprofsys::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-                     rocprofsys::get_env<std::string>("LD_LIBRARY_PATH")),
+strvec_t lib_search_paths = rocprofsys::delimit(
+    fmt::format("{}:{}:{}:{}", path::get_internal_libdir(),
+                rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+                rocprofsys::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+                rocprofsys::get_env<std::string>("LD_LIBRARY_PATH")),
     ":");
-strvec_t bin_search_paths = tim::delimit(rocprofsys::get_env<std::string>("PATH"), ":");
+strvec_t bin_search_paths =
+    rocprofsys::delimit(rocprofsys::get_env<std::string>("PATH"), ":");
 
-auto _dyn_api_rt_paths = tim::delimit(
-    rocprofsys::join(":", path::get_internal_libdir(),
-                     rocprofsys::join("/", path::get_internal_libdir(), "rocprofsys")),
-    ":");
+const auto libdir            = path::get_internal_libdir();
+strvec_t   _dyn_api_rt_paths = { libdir, libdir + "/rocprofsys" };
 
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _paths);
@@ -289,53 +289,49 @@ main(int argc, char** argv)
 {
     argv0 = argv[0];
 
-    auto _omni_root = rocprofsys::get_env<std::string>(
+    auto rocprofsys_root = rocprofsys::get_env<std::string>(
         "rocprofiler_systems_ROOT",
         rocprofsys::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
-    if(!_omni_root.empty() && exists(_omni_root))
+    if(!rocprofsys_root.empty() && exists(rocprofsys_root))
     {
-        bin_search_paths.emplace_back(JOIN('/', _omni_root, "bin"));
-        bin_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems"));
-        bin_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "bin"));
-        lib_search_paths.emplace_back(JOIN('/', _omni_root, "lib"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "lib"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "lib64"));
-        ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
-                                 "::", "rocprofiler-systems root path: ", _omni_root);
+        bin_search_paths.emplace_back(rocprofsys_root + "/bin");
+        bin_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems");
+        bin_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems/bin");
+
+        lib_search_paths.emplace_back(rocprofsys_root + "/lib");
+        lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems");
+        lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems/lib");
+        lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems/lib64");
+        ROCPROFSYS_ADD_LOG_ENTRY(
+            argv[0], "::", "rocprofiler-systems root path: ", rocprofsys_root);
     }
 
-    auto _omni_exe_path = path::realpath(get_absolute_exe_filepath(argv[0]));
-    if(!exists(_omni_exe_path))
-        _omni_exe_path =
+    auto _rocprofsys_exe_filepath = path::realpath(get_absolute_exe_filepath(argv[0]));
+    if(!exists(_rocprofsys_exe_filepath))
+        _rocprofsys_exe_filepath =
             path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
-    bin_search_paths.emplace_back(filepath::dirname(_omni_exe_path));
+    bin_search_paths.emplace_back(filepath::dirname(_rocprofsys_exe_filepath));
 
-    auto _omni_lib_path =
-        JOIN('/', filepath::dirname(filepath::dirname(_omni_exe_path)), "lib");
-    bin_search_paths.emplace_back(JOIN('/', _omni_lib_path, "rocprofiler-systems"));
-    bin_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "bin"));
-    lib_search_paths.emplace_back(_omni_lib_path);
-    lib_search_paths.emplace_back(JOIN('/', _omni_lib_path, "rocprofiler-systems"));
-    lib_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "lib"));
-    lib_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "lib64"));
+    auto _rocprofsys_lib_path =
+        filepath::dirname(filepath::dirname(_rocprofsys_exe_filepath)) + "/lib";
+    bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems");
+    bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/bin");
 
-    auto _omni_internal_libexec_path =
-        JOIN('/', filepath::dirname(filepath::dirname(_omni_exe_path)), "libexec",
-             "rocprofiler-systems");
+    lib_search_paths.emplace_back(_rocprofsys_lib_path);
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems");
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/lib");
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/lib64");
 
-    ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys bin path: ", _omni_exe_path);
-    ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys lib path: ", _omni_lib_path);
+    auto _rocprofsys_internal_libexec_path =
+        filepath::dirname(filepath::dirname(_rocprofsys_exe_filepath)) +
+        "/libexec/rocprofiler-systems";
+
+    ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
+                             "::", "rocprofsys bin path: ", _rocprofsys_exe_filepath);
+    ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
+                             "::", "rocprofsys lib path: ", _rocprofsys_lib_path);
     ROCPROFSYS_ADD_LOG_ENTRY(
-        argv[0], "::", "rocprofsys libexec path: ", _omni_internal_libexec_path);
+        argv[0], "::", "rocprofsys libexec path: ", _rocprofsys_internal_libexec_path);
 
     for(const auto& itr : rocprofsys_get_link_map(nullptr))
     {
@@ -666,8 +662,8 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "-L", "--library" },
-            TIMEMORY_JOIN("", "Libraries with instrumentation routines (default: \"",
-                          inputlib.front(), "\")"))
+            fmt::format(R"(Libraries with instrumentation routines (default: "{}"))",
+                        inputlib.front()))
         .action([&inputlib](parser_t& p) { inputlib = p.get<strvec_t>("library"); });
     parser
         .add_argument({ "-m", "--main-function" },
@@ -803,9 +799,6 @@ main(int argc, char** argv)
                 _internal.erase(itr);
         });
 
-    using timemory::join::array_config;
-    using timemory::join::join;
-
     auto available_linkage    = std::vector<symbol_linkage_t>{};
     auto available_visibility = std::vector<symbol_visibility_t>{};
 
@@ -826,9 +819,8 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "--linkage" },
-            join("", "Only instrument functions with specified linkage (default: ",
-                 join(array_config{ ", ", "", "" }, _get_strvec(default_enabled_linkage)),
-                 ")"))
+            fmt::format("Only instrument functions with specified linkage (default: {})",
+                        fmt::join(_get_strvec(default_enabled_linkage), ", ")))
         .min_count(1)
         .choices(_get_strvec(available_linkage))
         .set_default(_get_strvec(default_enabled_linkage))
@@ -846,10 +838,9 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "--visibility" },
-            join("", "Only instrument functions with specified visibility (default: ",
-                 join(array_config{ ", ", "", "" },
-                      _get_strvec(default_enabled_visibility)),
-                 ")"))
+            fmt::format(
+                "Only instrument functions with specified visibility (default: {})",
+                fmt::join(_get_strvec(default_enabled_visibility), ", ")))
         .min_count(1)
         .choices(_get_strvec(available_visibility))
         .set_default(_get_strvec(default_enabled_visibility))
@@ -1094,8 +1085,8 @@ main(int argc, char** argv)
             {
                 if(iitr.second && iitr.second->get_config_updated())
                 {
-                    env_config_variables.emplace_back(TIMEMORY_JOIN(
-                        '=', iitr.second->get_env_name(), iitr.second->as_string()));
+                    env_config_variables.emplace_back(fmt::format(
+                        "{}={}", iitr.second->get_env_name(), iitr.second->as_string()));
                     verbprintf(1, "Exporting known config value :: %s\n",
                                env_config_variables.back().c_str());
                 }
@@ -1103,7 +1094,7 @@ main(int argc, char** argv)
             for(auto&& iitr : _settings->get_unknown_configs())
             {
                 env_config_variables.emplace_back(
-                    TIMEMORY_JOIN('=', iitr.first, iitr.second));
+                    fmt::format("{}={}", iitr.first, iitr.second));
                 verbprintf(1, "Exporting unknown config value :: %s\n",
                            env_config_variables.back().c_str());
             }
@@ -1122,7 +1113,7 @@ main(int argc, char** argv)
                        "Option '--%s' specified but '--%s <N>' was not specified. "
                        "Setting %s to %s...\n",
                        _exists.c_str(), _not_exists.c_str(), _msg.c_str(),
-                       TIMEMORY_JOIN("", _value).c_str());
+                       fmt::format("{}", _value).c_str());
             _field = _value;
         }
     };
@@ -1210,12 +1201,12 @@ main(int argc, char** argv)
     if(binary_rewrite && outfile.empty())
     {
         auto _is_local = (path::realpath(cmdv0) ==
-                          TIMEMORY_JOIN('/', get_cwd(), ::basename(cmdv0.c_str())));
+                          fmt::format("{}/{}", get_cwd(), ::basename(cmdv0.c_str())));
         auto _cmd      = std::string{ ::basename(cmdv0.c_str()) };
         if(_cmd.find('.') == std::string::npos)
         {
             // there is no extension, assume it is an exe
-            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
         else if(_cmd.find("lib") == 0 || _cmd.find(".so") != std::string::npos ||
                 _cmd.find(".a") == _cmd.length() - 2)
@@ -1223,11 +1214,11 @@ main(int argc, char** argv)
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
             // different directory
-            outfile = (_is_local) ? TIMEMORY_JOIN('/', "instrumented", _cmd) : _cmd;
+            outfile = (_is_local) ? "instrumented/" + _cmd : _cmd;
         }
         else
         {
-            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
         verbprintf(0,
                    "Binary rewrite was activated via '-o' but no filename was provided. "
@@ -1253,7 +1244,7 @@ main(int argc, char** argv)
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
         if(!filepath::open(*log_ofs, logfile))
-            throw std::runtime_error(JOIN(" ", "Error opening log output file", logfile));
+            throw std::runtime_error("Error opening log output file " + logfile);
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }
@@ -1267,9 +1258,9 @@ main(int argc, char** argv)
     {
         //  Helper function for adding regex expressions
         auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-            ROCPROFSYS_ADD_DETAILED_LOG_ENTRY("", "Adding regular expression \"",
-                                              regex_expr, "\" to regex_array@",
-                                              &regex_array);
+            ROCPROFSYS_ADD_LOG_ENTRY(
+                fmt::format(R"(Adding regular expression "{}" to regex_array@{})",
+                            regex_expr, fmt::ptr(&regex_array)));
             if(!regex_expr.empty())
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
@@ -1422,13 +1413,13 @@ main(int argc, char** argv)
     env_vars.reserve(env_vars.size() + env_config_variables.size());
     for(auto&& itr : env_config_variables)
         env_vars.emplace_back(itr);
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MODE, instr_mode));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::MODE, instr_mode));
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_INIT, "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_FINALIZE, "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_CODE_COVERAGE,
-                                        (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
+        fmt::format("{}={}", rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
+    env_vars.emplace_back(fmt::format("{}=OFF", rocprofsys::env_vars::MPI_INIT));
+    env_vars.emplace_back(fmt::format("{}=OFF", rocprofsys::env_vars::MPI_FINALIZE));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_CODE_COVERAGE,
+                                      (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
                                               binary_rewrite, mutname);
 
@@ -1693,7 +1684,8 @@ main(int argc, char** argv)
         };
         for(auto& lname : lnames)
             lname = _get_library_ext(lname);
-        ROCPROFSYS_ADD_LOG_ENTRY("Using library:", lnames);
+        ROCPROFSYS_ADD_LOG_ENTRY("Using library:",
+                                 fmt::format("[{}]", fmt::join(lnames, ", ")));
         return lnames;
     };
 
@@ -1900,8 +1892,8 @@ main(int argc, char** argv)
         }
 
         // check standard function signature if no user-specified matches
-        if(add_instr_library(_name, TIMEMORY_JOIN("", "rocprofsys_register_" + _name),
-                             TIMEMORY_JOIN("", "rocprofsys_deregister_" + _name)))
+        if(add_instr_library(_name, "rocprofsys_register_" + _name,
+                             "rocprofsys_deregister_" + _name))
             continue;
 
     found_instr_functions:
@@ -2019,15 +2011,15 @@ main(int argc, char** argv)
     if(!binary_rewrite) env_vars.clear();
 
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', rocprofsys::env_vars::INIT_ENABLED,
-                      (user_start_func && user_stop_func) ? "OFF" : "ON"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_MPIP,
-                                        (binary_rewrite && use_mpi) ? "ON" : "OFF"));
+        fmt::format("{}={}", rocprofsys::env_vars::INIT_ENABLED,
+                    (user_start_func && user_stop_func) ? "OFF" : "ON"));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
+                                      (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi)
-        env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_PID, "ON"));
+        env_vars.emplace_back(fmt::format("{}=ON", rocprofsys::env_vars::USE_PID));
 
-    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::SCRIPT_PATH,
-                                        _omni_internal_libexec_path));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::SCRIPT_PATH,
+                                      _rocprofsys_internal_libexec_path));
 
     for(auto& itr : env_vars)
     {
@@ -2229,7 +2221,7 @@ main(int argc, char** argv)
                            const string_t& _reason, const string_t& _name,
                            const std::string& _extra = {}) {
         static std::map<std::string, strset_t> already_reported{};
-        auto _key = TIMEMORY_JOIN('_', _type, _action, _reason, _name, _extra);
+        auto _key = fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
         if(already_reported[_key].count(_name) == 0)
         {
             verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
@@ -2407,36 +2399,36 @@ main(int argc, char** argv)
         if(_mode == "modules")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name, "]"));
+                _insert(itr.module_name, fmt::format("[{}]", itr.module_name));
         }
         else if(_mode == "functions")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.function_name, "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}][{}]", itr.function_name, itr.num_instructions));
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name, fmt::format("[{}][{}]", itr.signature.get(),
+                                                     itr.num_instructions));
         }
         else if(_mode == "pair")
         {
             for(const auto& itr : _modset)
             {
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name,
-                                                       "] --> [", itr.function_name, "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}] --> [{}][{}]", itr.module_name,
+                                    itr.function_name, itr.num_instructions));
             }
         }
         else if(_mode == "pair+")
         {
             for(const auto& itr : _modset)
             {
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name,
-                                                       "] --> [", itr.signature.get(),
-                                                       "][", itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}] --> [{}][{}]", itr.module_name,
+                                    itr.signature.get(), itr.num_instructions));
             }
         }
         else
@@ -2717,7 +2709,7 @@ canonicalize(std::string _path)
         _path = _path.insert(0, get_cwd() + "/");
 
     auto _leading_dash = (_path.find('/') == 0);
-    auto _pieces       = tim::delimit(_path, "/");
+    auto _pieces       = rocprofsys::delimit(_path, "/");
     std::reverse(_pieces.begin(), _pieces.end());
     auto _tree = std::vector<std::string>{};
     for(size_t i = 0; i < _pieces.size(); ++i)
@@ -2746,7 +2738,7 @@ std::string
 absolute(std::string _path)
 {
     if(_path.find('/') == 0) return canonicalize(_path);
-    return canonicalize(JOIN('/', get_cwd(), _path));
+    return canonicalize(fmt::format("{}/{}", get_cwd(), _path));
 }
 
 //======================================================================================//
@@ -2764,8 +2756,8 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
             for(const auto& pitr :
-                { absolute(JOIN('/', itr, _name)),
-                  absolute(JOIN('/', itr, filepath::basename(_name))) })
+                { absolute(fmt::format("{}/{}", itr, _name)),
+                  absolute(fmt::format("{}/{}", itr, filepath::basename(_name))) })
             {
                 _exists = exists(pitr) && is_file(pitr);
                 if(_exists)
@@ -2781,9 +2773,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
 
         if(!exists(_name))
         {
-            using array_config_t = timemory::join::array_config;
-            auto _search_paths_v =
-                timemory::join::join(array_config_t{ ", ", "", "" }, bin_search_paths);
+            auto _search_paths_v = fmt::format("{}", fmt::join(bin_search_paths, ", "));
             verbprintf(
                 0, "Warning! File path to '%s' could not be determined... search: %s\n",
                 _name.c_str(), _search_paths_v.c_str());
@@ -2901,12 +2891,10 @@ find_dyn_api_rt()
 
     if(exists(_dyn_api_rt_abs))
     {
-        namespace join = ::timemory::join;
         rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
         rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
-                                      join::join(join::array_config{ ":", "", "" },
-                                                 dirname(_dyn_api_rt_abs),
-                                                 lib_search_paths),
+                                      fmt::format("{}:{}", dirname(_dyn_api_rt_abs),
+                                                  fmt::join(lib_search_paths, ":")),
                                       1);
     }
 
