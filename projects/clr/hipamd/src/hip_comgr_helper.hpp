@@ -113,8 +113,9 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                       const std::string& isa, const std::vector<std::string>& exeOptions,
                       std::string& buildLog, std::vector<char>& executable, bool spirv_bc = false);
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                          const std::string& isa, const std::vector<std::string>& linkOptions,
-                          std::string& buildLog, std::vector<char>& linkedSPIRVBitcode);
+                          const std::string& isa, std::vector<std::string>& linkOptions,
+                          std::string& buildLog,
+                          comgr_helper::ComgrDataSetUniqueHandle& linkOutputs);
 bool demangleName(const std::string& mangledName, std::string& demangledName);
 std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,

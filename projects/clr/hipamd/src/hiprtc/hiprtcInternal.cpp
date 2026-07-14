@@ -164,16 +164,10 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
     // check if spirv output is requested
     if (isaName == "amdgcnspirv") {
-      isa_ = "spir64-amd-amdhsa--" + isaName;
+      isa_ = "spirv64-amd-amdhsa-unknown-" + isaName;
       bc_type_ = hip::helpers::kSPIRV;
     }
     settings_.offloadArchProvided = true;
-    // Don't use O3 optimization for SPIRV output
-    if (bc_type_ == hip::helpers::kSPIRV) {
-      compile_options.erase(
-        std::remove(compile_options.begin(), compile_options.end(), std::string("-O3")),
-        compile_options.end());
-    }
     return true;
   }
   // App has not provided the gpu archiecture, need to find it
