@@ -677,6 +677,13 @@ Full gfx950 support means:
   209/209 with the four-patch limit in 179.96 seconds (187.37 seconds wrapped).
   Inline-shadow is the final broad profile and uses one patch plus `hw_id`
   ownership.
+- 2026-07-14: `X1BIS` is `DONE` and `X1BG` is reached. Inline-shadow passes
+  209/209 with `RJ_CONSAN_MAX_PATCHES=1` and `hw_id` ownership in 178.32
+  seconds (186.32 seconds wrapped). Thus the no-hook baseline and all four
+  broad sanitizer profiles each pass 209/209 serially, with no waiver,
+  timeout, unexpected guest fault, or post-failure continuation. `X1B` now
+  awaits only accepted-revision focused/non-vacuity reruns from the rebuilt
+  external emulator tree.
 
 ## DAG Overview
 
@@ -929,8 +936,8 @@ flowchart LR
   X1BSC["X1BSC: SuperCollider Broad IREE"]:::done
   X1BRR["X1BRR: Record/Replay Broad IREE"]:::done
   X1BSA["X1BSA: Sampled Broad IREE"]:::done
-  X1BIS["X1BIS: Inline-Shadow Broad IREE"]:::active
-  X1BG{"X1BG: Broad Emulator Gate"}:::target
+  X1BIS["X1BIS: Inline-Shadow Broad IREE"]:::done
+  X1BG{"X1BG: Broad Emulator Gate"}:::done
   X1B{"X1B: gfx1201 Emulator Regression Evidence"}:::target
   M0{"M0: gfx950 Fully Supported"}:::target
 
@@ -2692,8 +2699,8 @@ Sub-DAG:
 - `X1I0` (DONE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
   launcher without changing the existing gfx950 build.
 - `X1IS` (DONE): run guarded selected IREE profiles with non-vacuity checks.
-- `X1BSC`/`X1BRR`/`X1BSA` (DONE) and `X1BIS` (ACTIVE): run and independently
-  reduce the four broad profiles; `X1BG` collects their accepted results.
+- `X1BSC`, `X1BRR`, `X1BSA`, and `X1BIS` (DONE): all four broad profiles pass
+  209/209, and `X1BG` collects their accepted results.
 
 Done criteria:
 
