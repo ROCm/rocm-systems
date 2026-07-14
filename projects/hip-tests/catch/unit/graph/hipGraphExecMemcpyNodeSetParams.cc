@@ -215,7 +215,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction) {
-  int *host, *dev, *src, *dst;
+  int *host = nullptr, *dev = nullptr, *src = nullptr, *dst = nullptr;
   HIP_CHECK(hipHostMalloc(&host, sizeof(int)));
   HIP_CHECK(hipMalloc(&dev, sizeof(int)));
 
@@ -240,7 +240,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Dire
     dst = dev;
     break;
   default:
-    REQUIRE(false);
+    FAIL("Unhandled enumerator encountered, test requires an update");
     assert(false);
   }
 

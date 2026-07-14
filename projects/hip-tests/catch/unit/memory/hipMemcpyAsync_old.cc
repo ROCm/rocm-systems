@@ -17,6 +17,7 @@ This testcase verifies the following scenarios
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <atomic>
+#include <vector>
 
 static constexpr auto NUM_ELM{1024 * 1024};
 
@@ -203,7 +204,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float
   HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
-  std::thread T[NUM_THREADS];
+  std::vector<std::thread> T(NUM_THREADS);
   for (int i = 0; i < NUM_THREADS; i++) {
     T[i] = std::thread(Thread_func<TestType>, A_d, B_d, C_d, C_h, Nbytes, mystream);
   }
@@ -233,7 +234,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float
 HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream, int, float,
                    double) {
   const int NUM_THREADS = isQuickLevel() ? 4 : 16;
-  std::thread T[NUM_THREADS];
+  std::vector<std::thread> T(NUM_THREADS);
   for (int i = 0; i < NUM_THREADS; i++) {
     T[i] = std::thread(Thread_func_MultiStream<TestType>);
   }

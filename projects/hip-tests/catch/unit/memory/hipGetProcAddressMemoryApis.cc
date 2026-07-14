@@ -9,6 +9,8 @@
 #include <utils.hh>
 #include "../device/hipGetProcAddressHelpers.hh"
 
+#include <vector>
+
 /**
  * Test Description
  * ------------------------
@@ -1447,7 +1449,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(hostMem != nullptr);
     fillHostArray(hostMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1481,7 +1483,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1515,7 +1517,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1552,7 +1554,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1585,7 +1587,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1619,7 +1621,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1653,7 +1655,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1688,7 +1690,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1722,7 +1724,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1755,7 +1757,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1789,7 +1791,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1823,7 +1825,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1861,7 +1863,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1894,7 +1896,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1928,7 +1930,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1962,7 +1964,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1997,7 +1999,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2032,7 +2034,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2065,7 +2067,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2099,7 +2101,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2133,7 +2135,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2294,7 +2296,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2332,7 +2334,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2370,7 +2372,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2429,7 +2431,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2541,7 +2543,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
     HIP_CHECK(dyn_hipMemset2DAsync_ptr(devMem, pitch, 5, width, height, 0));
     HIP_CHECK(hipStreamSynchronize(0));
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
