@@ -665,6 +665,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -2197,6 +2203,32 @@ typedef enum
 } amd_dbgapi_wave_creation_t;
 
 /**
+ * The kinds of wave launch trap on entry behavior.
+ *
+ * When enabled, all waves will trap immediately upon launch before executing
+ * any instructions.  This allows the debugger to gain control of waves at
+ * the earliest possible point.  The hardware will report the wave as stopped
+ * with ::AMD_DBGAPI_INSTRUCTION_KIND_TRAP.
+ *
+ * This setting applies to all agents of the specified process and affects all
+ * waves created after the setting is applied.  It has no effect on waves that
+ * have already been created.
+ */
+typedef enum
+{
+  /**
+   * Normal behavior - waves execute immediately upon launch.
+   */
+  AMD_DBGAPI_WAVE_LAUNCH_TRAP_ON_ENTRY_DISABLED = 0,
+  /**
+   * Trap on entry - waves trap immediately upon launch before executing any
+   * instructions.
+   */
+  AMD_DBGAPI_WAVE_LAUNCH_TRAP_ON_ENTRY_ENABLED = 1
+} amd_dbgapi_wave_launch_trap_on_entry_t;
+
+
+/**
  * Set the wave creation mode for a process.
  *
  * The setting applies to all agents of the specified process.
@@ -2227,6 +2259,52 @@ typedef enum
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_set_wave_creation (
     amd_dbgapi_process_id_t process_id,
     amd_dbgapi_wave_creation_t creation) AMD_DBGAPI_VERSION_0_76;
+
+/**
+ * Set the wave launch trap on entry mode for a process.
+ *
+ * When enabled, all newly created waves will trap immediately upon launch
+ * before executing any instructions.  This allows the debugger to gain control
+ * of waves at the earliest possible point in their execution.
+ *
+ * The setting applies to all agents of the specified process and takes effect
+ * immediately.  Waves created after enabling this setting will trap on entry.
+ * Waves that have already been created are not affected.
+ *
+ * The setting can be changed at any time, including while waves are executing.
+ *
+ * \param[in] process_id The process being controlled.
+ *
+ * \param[in] trap_on_entry The wave launch trap on entry mode being set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the wave launch trap on entry mode has been set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  The trap on entry mode setting is not changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p trap_on_entry is
+ * invalid.  The trap on entry mode setting is not changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN The process is frozen.
+ * The trap on entry mode setting cannot be changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED The requested \p
+ * trap_on_entry is not supported by the architecture of all the
+ * agents of \p process_id.  No configuration is changed.
+ */
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_process_set_wave_launch_trap_on_entry (
+    amd_dbgapi_process_id_t process_id,
+    amd_dbgapi_wave_launch_trap_on_entry_t trap_on_entry)
+    AMD_DBGAPI_VERSION_0_81;
+
 
 /** \defgroup coredump_support Generating a core dump of a process
  *

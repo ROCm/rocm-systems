@@ -295,6 +295,8 @@ public:
   bool is_address_class_supported (
     const address_class_t &address_class) const override;
 
+  bool trap_on_entry_supported () const override { return false; }
+
   std::vector<os_watch_id_t>
   triggered_watchpoints (const wave_t &wave) const override;
 
@@ -3913,6 +3915,7 @@ protected:
 
   bool can_halt_at_endpgm () const override { return true; }
   bool has_architected_flat_scratch () const override { return true; };
+  bool trap_on_entry_supported () const override { return true; }
 };
 
 amdgcn_architecture_t::exception_mask_t
@@ -5610,6 +5613,7 @@ public:
            && r_version > 8;
   }
   bool has_architected_flat_scratch () const override { return true; };
+  bool trap_on_entry_supported () const override { return true; }
 };
 
 amdgcn_architecture_t::exception_mask_t

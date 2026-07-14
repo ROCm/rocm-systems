@@ -562,6 +562,20 @@ process_t::set_precise_alu_exceptions (bool enabled)
                  to_cstring (status));
 }
 
+void
+process_t::set_trap_on_entry (bool enabled)
+{
+  if (!m_supports_trap_on_entry)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  if (enabled)
+    set_wave_launch_trap_override (os_wave_launch_trap_mask_t::wave_start,
+                                   os_wave_launch_trap_mask_t::wave_start);
+  else
+    set_wave_launch_trap_override (os_wave_launch_trap_mask_t::none,
+                                   os_wave_launch_trap_mask_t::wave_start);
+}
+
 std::vector<process_t *>
 process_t::match (amd_dbgapi_process_id_t process_id)
 {
@@ -649,6 +663,7 @@ process_t::update_agents ()
 
   std::optional<bool> precise_memory_supported;
   std::optional<bool> precise_alu_exceptions_supported;
+  std::optional<bool> trap_on_entry_supported;
 
   /* Add new agents to the process.  */
   for (auto &&agent_info : agent_infos)
@@ -690,6 +705,10 @@ process_t::update_agents ()
           precise_alu_exceptions_supported
             = precise_alu_exceptions_supported.value_or (true)
               && agent_info.precise_alu_exceptions_supported;
+
+          trap_on_entry_supported
+            = trap_on_entry_supported.value_or (true)
+              && agent->architecture ()->trap_on_entry_supported ();
         }
     }
 
@@ -712,6 +731,7 @@ process_t::update_agents ()
   m_supports_precise_memory = precise_memory_supported.value_or (false);
   m_supports_precise_alu_exceptions
     = precise_alu_exceptions_supported.value_or (false);
+  m_supports_trap_on_entry = trap_on_entry_supported.value_or (false);
 }
 
 void
@@ -1663,6 +1683,9 @@ process_t::runtime_enable (os_runtime_info_t runtime_info)
     fatal_error ("Could not set the wave launch trap override for %s (%s).",
                  to_cstring (id ()), to_cstring (status));
 
+  if ((m_wave_trap_mask & os_wave_launch_trap_mask_t::wave_start) != 0)
+    supported_wave_trap_mask |= os_wave_launch_trap_mask_t::wave_start;
+
   if ((m_wave_trap_mask & ~supported_wave_trap_mask) != 0)
     fatal_error ("Unsupported wave trap mask (%s) requested for %s",
                  to_cstring (m_wave_trap_mask & ~supported_wave_trap_mask),
@@ -2564,6 +2587,36 @@ amd_dbgapi_process_unfreeze (amd_dbgapi_process_id_t process_id)
          AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
          AMD_DBGAPI_STATUS_ERROR_PROCESS_NOT_FROZEN,
          AMD_DBGAPI_STATUS_ERROR_NOT_IMPLEMENTED);
+  TRACE_END ();
+}
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_process_set_wave_launch_trap_on_entry (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_wave_launch_trap_on_entry_t trap_on_entry)
+{
+  TRACE_BEGIN (param_in (process_id), param_in (trap_on_entry));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    if (process->is_frozen ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN);
+
+    process->set_trap_on_entry (
+      trap_on_entry == AMD_DBGAPI_WAVE_LAUNCH_TRAP_ON_ENTRY_ENABLED);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }
 

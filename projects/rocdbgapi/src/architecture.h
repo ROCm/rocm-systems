@@ -307,6 +307,8 @@ public:
   is_address_class_supported (const address_class_t &address_class) const
     = 0;
 
+  virtual bool trap_on_entry_supported () const = 0;
+
   virtual std::vector<agent_t::aperture_t>
   get_apertures (const os_agent_info_t &os) const = 0;
 
