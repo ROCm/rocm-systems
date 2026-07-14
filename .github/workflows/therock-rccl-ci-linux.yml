@@ -7,6 +7,9 @@ on:
         type: string
       artifact_group:
         type: string
+      event_name:
+        type: string
+        default: ''
       package_version:
         type: string
         required: true
@@ -146,6 +149,17 @@ jobs:
     if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ github.run_id }}
+
+  therock-test-jax-collective:
+    name: "Test JAX collective (scheduled)"
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}

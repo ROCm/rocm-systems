@@ -1,6 +1,8 @@
 name: TheRock CI for rccl
 
 on:
+  schedule:
+    - cron: '17 6 * * 0'  # Weekly, Sunday 06:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -17,12 +19,7 @@ concurrency:
 jobs:
   setup:
     runs-on: ubuntu-24.04
-    env:
-      # The commit being checked out is the merge commit for a PR. Its first
-      # parent will be the tip of the base branch.
-      BASE_REF: HEAD^
     outputs:
-      enable_therock_ci: ${{ steps.configure.outputs.enable_therock_ci }}
       run_linux_ci: ${{ steps.rccl_check.outputs.run_linux_ci }}
 
     steps:
@@ -32,10 +29,6 @@ jobs:
           # We need the parent commit to do a diff
           fetch-depth: 2
 
-      - name: "Configuring CI options"
-        id: configure
-        run: python .github/scripts/therock_configure_ci.py
-
       - name: "Detect RCCL file changes"
         id: rccl_check
         shell: bash
@@ -43,7 +36,10 @@ jobs:
           echo "Changed files:"
           git diff --name-only HEAD^
 
-          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled/manual run — always run CI"
+          elif git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
             echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
             echo "RCCL changes detected"
           else
@@ -67,6 +63,8 @@ jobs:
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
+      event_name: ${{ github.event_name }}
+      package_version: ADHOCBUILD
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON
