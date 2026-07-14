@@ -3,6 +3,12 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## (unreleased) rocJPEG 1.6.1
+
+### Changed
+
+* Improved VAAPI batch grouping by using reusable surface bucket dimensions to reduce decode batch fragmentation.
+
 ## rocJPEG 1.6.0 for ROCm 7.14
 
 ### Added

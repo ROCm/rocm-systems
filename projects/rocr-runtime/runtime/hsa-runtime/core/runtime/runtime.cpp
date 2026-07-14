@@ -987,12 +987,22 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
   auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    if (allocation_map_.find(ptr) == allocation_map_.end())
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   hsa_status_t err = driver.MakeMemoryUnresident(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   err = driver.DeregisterMemory(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    allocation_map_.erase(ptr);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2566,8 +2576,14 @@ hsa_status_t Runtime::Load() {
   // Initialize IPC support mode
   InitIPCDmaBufSupport();
 
-  // Load svm profiler
+  // Load svm profiler (Linux-only: relies on KFD SMI events via poll/eventfd)
+#if defined(__linux__)
   svm_profile_.reset(new AMD::SvmProfileControl);
+#else
+  if (!flag_.svm_profile().empty()) {
+    debug_warning("HSA_SVM_PROFILE=%s is only supported on Linux; ignoring.", flag_.svm_profile().c_str());
+  }
+#endif
 
   return HSA_STATUS_SUCCESS;
 }
