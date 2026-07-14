@@ -47,6 +47,12 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
 RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
     return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode(handle, jpeg_stream_handle, decode_params, destination);
 }
+RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
+    return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode_async(handle, jpeg_stream_handle, decode_params, destination);
+}
+RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination) {
+    return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_sync_surface(handle, destination);
+}
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
     return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode_batched(handle, jpeg_stream_handles, batch_size, decode_params, destinations);
 }

@@ -45,7 +45,7 @@ THE SOFTWARE.
 
 // Increment the ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION when new runtime API functions are added.
 // If the corresponding ROCJPEG_RUNTIME_API_TABLE_MAJOR_VERSION increases reset the ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION to zero.
-#define ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION 0
+#define ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION 1
 
 // rocJPEG API interface
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegStreamCreate)(RocJpegStreamHandle *jpeg_stream_handle);
@@ -55,6 +55,8 @@ typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegCreate)(RocJpegBackend backend, int
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDestroy)(RocJpegHandle handle);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegGetImageInfo)(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecode)(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeAsync)(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegSyncSurface)(RocJpegHandle handle, RocJpegImage *destination);
 typedef RocJpegStatus (ROCJPEGAPI *PfnRocJpegDecodeBatched)(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 typedef const char* (ROCJPEGAPI *PfnRocJpegGetErrorName)(RocJpegStatus rocjpeg_status);
 
@@ -75,6 +77,11 @@ struct RocJpegDispatchTable {
 
     // PLEASE DO NOT EDIT ABOVE!
     // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1
+    PfnRocJpegDecodeAsync pfn_rocjpeg_decode_async;
+    PfnRocJpegSyncSurface pfn_rocjpeg_sync_surface;
+
+    // PLEASE DO NOT EDIT ABOVE!
+    // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 2
 
     // ******************************************************************************************* //
     //                                            READ BELOW

@@ -313,6 +313,30 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
 
 RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+ * @ingroup group_amd_rocjpeg
+ * @brief Submits a JPEG decode operation without waiting for the output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param jpeg_stream_handle The rocJPEG stream handle.
+ * @param decode_params The decoding parameters.
+ * @param destination The output image.
+ * @return A RocJpegStatus indicating the success or failure of the submit operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
+ * @ingroup group_amd_rocjpeg
+ * @brief Synchronizes a pending asynchronous JPEG decode.
+ *
+ * @param handle The rocJPEG handle.
+ * @param destination A pointer to RocJpegImage where the decoded image will be stored.
+ * @return A RocJpegStatus indicating the success or failure of the sync operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
+
 
 /**
  * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
