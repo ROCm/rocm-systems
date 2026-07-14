@@ -1610,6 +1610,217 @@ void ColorConvertNV12ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_
                         src_chroma_image_stride_in_bytes, dst_width_comp, dst_height_comp, src_luma_image_stride_in_bytes_comp);
 }
 
+// Batched NV12→RGB kernel. hipBlockIdx_z is the image index into params[].
+// The pixel math is identical to ColorConvertNV12ToRGBKernel — only the parameter
+// source differs (struct fields vs direct kernel args).
+__global__ void ColorConvertNV12ToRGBBatchedKernel(const NV12ToRGBBatchParams *params, uint32_t n_images) {
+    if (hipBlockIdx_z >= n_images) return;
+    const NV12ToRGBBatchParams &p = params[hipBlockIdx_z];
+
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+
+    if ((x < p.dst_width_comp) && (y < p.dst_height_comp)) {
+        uint32_t src_y0_idx = y * p.src_luma_image_stride_in_bytes_comp + (x << 3);
+        uint32_t src_y1_idx = src_y0_idx + p.src_luma_image_stride_in_bytes;
+        uint32_t src_uv_idx = y * p.src_chroma_image_stride_in_bytes + (x << 3);
+        uint2 y0 = *((uint2 *)(&p.src_luma_image[src_y0_idx]));
+        uint2 y1 = *((uint2 *)(&p.src_luma_image[src_y1_idx]));
+        uint2 uv = *((uint2 *)(&p.src_chroma_image[src_uv_idx]));
+
+        uint32_t rgb0_idx = y * p.dst_image_stride_in_bytes_comp + (x * 24);
+        uint32_t rgb1_idx = rgb0_idx + p.dst_image_stride_in_bytes;
+
+        float4 f;
+        uint2 u0, u1;
+        uint2 v0, v1;
+
+        f.x = hipUnpack0(uv.x);
+        f.y = f.x;
+        f.z = hipUnpack2(uv.x);
+        f.w = f.z;
+        u0.x = hipPack(f);
+
+        f.x = hipUnpack0(uv.y);
+        f.y = f.x;
+        f.z = hipUnpack2(uv.y);
+        f.w = f.z;
+        u0.y = hipPack(f);
+
+        u1.x = u0.x;
+        u1.y = u0.y;
+
+        f.x = hipUnpack1(uv.x);
+        f.y = f.x;
+        f.z = hipUnpack3(uv.x);
+        f.w = f.z;
+        v0.x = hipPack(f);
+
+        f.x = hipUnpack1(uv.y);
+        f.y = f.x;
+        f.z = hipUnpack3(uv.y);
+        f.w = f.z;
+        v0.y = hipPack(f);
+
+        v1.x = v0.x;
+        v1.y = v0.y;
+
+        float2 cr = make_float2( 0.0000f,  1.5748f);
+        float2 cg = make_float2(-0.1873f, -0.4681f);
+        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float3 yuv;
+        DUINT6 rgb0, rgb1;
+
+        yuv = make_float3(hipUnpack0(y0.x), hipUnpack0(u0.x), hipUnpack0(v0.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.x = fmaf(cr.y, yuv.z, yuv.x);
+        f.y = fmaf(cg.x, yuv.y, yuv.x);
+        f.y = fmaf(cg.y, yuv.z, f.y);
+        f.z = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack1(y0.x), hipUnpack1(u0.x), hipUnpack1(v0.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.w = fmaf(cr.y, yuv.z, yuv.x);
+        rgb0.data[0] = hipPack(f);
+
+        f.x = fmaf(cg.x, yuv.y, yuv.x);
+        f.x = fmaf(cg.y, yuv.z, f.x);
+        f.y = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack2(y0.x), hipUnpack2(u0.x), hipUnpack2(v0.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.z = fmaf(cr.y, yuv.z, yuv.x);
+        f.w = fmaf(cg.x, yuv.y, yuv.x);
+        f.w = fmaf(cg.y, yuv.z, f.w);
+        rgb0.data[1] = hipPack(f);
+
+        f.x = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack3(y0.x), hipUnpack3(u0.x), hipUnpack3(v0.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.y = fmaf(cr.y, yuv.z, yuv.x);
+        f.z = fmaf(cg.x, yuv.y, yuv.x);
+        f.z = fmaf(cg.y, yuv.z, f.z);
+        f.w = fmaf(cb.x, yuv.y, yuv.x);
+        rgb0.data[2] = hipPack(f);
+
+        yuv = make_float3(hipUnpack0(y0.y), hipUnpack0(u0.y), hipUnpack0(v0.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.x = fmaf(cr.y, yuv.z, yuv.x);
+        f.y = fmaf(cg.x, yuv.y, yuv.x);
+        f.y = fmaf(cg.y, yuv.z, f.y);
+        f.z = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack1(y0.y), hipUnpack1(u0.y), hipUnpack1(v0.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.w = fmaf(cr.y, yuv.z, yuv.x);
+        rgb0.data[3] = hipPack(f);
+
+        f.x = fmaf(cg.x, yuv.y, yuv.x);
+        f.x = fmaf(cg.y, yuv.z, f.x);
+        f.y = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack2(y0.y), hipUnpack2(u0.y), hipUnpack2(v0.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.z = fmaf(cr.y, yuv.z, yuv.x);
+        f.w = fmaf(cg.x, yuv.y, yuv.x);
+        f.w = fmaf(cg.y, yuv.z, f.w);
+        rgb0.data[4] = hipPack(f);
+
+        f.x = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack3(y0.y), hipUnpack3(u0.y), hipUnpack3(v0.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.y = fmaf(cr.y, yuv.z, yuv.x);
+        f.z = fmaf(cg.x, yuv.y, yuv.x);
+        f.z = fmaf(cg.y, yuv.z, f.z);
+        f.w = fmaf(cb.x, yuv.y, yuv.x);
+        rgb0.data[5] = hipPack(f);
+
+        yuv = make_float3(hipUnpack0(y1.x), hipUnpack0(u1.x), hipUnpack0(v1.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.x = fmaf(cr.y, yuv.z, yuv.x);
+        f.y = fmaf(cg.x, yuv.y, yuv.x);
+        f.y = fmaf(cg.y, yuv.z, f.y);
+        f.z = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack1(y1.x), hipUnpack1(u1.x), hipUnpack1(v1.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.w = fmaf(cr.y, yuv.z, yuv.x);
+        rgb1.data[0] = hipPack(f);
+
+        f.x = fmaf(cg.x, yuv.y, yuv.x);
+        f.x = fmaf(cg.y, yuv.z, f.x);
+        f.y = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack2(y1.x), hipUnpack2(u1.x), hipUnpack2(v1.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.z = fmaf(cr.y, yuv.z, yuv.x);
+        f.w = fmaf(cg.x, yuv.y, yuv.x);
+        f.w = fmaf(cg.y, yuv.z, f.w);
+        rgb1.data[1] = hipPack(f);
+
+        f.x = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack3(y1.x), hipUnpack3(u1.x), hipUnpack3(v1.x));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.y = fmaf(cr.y, yuv.z, yuv.x);
+        f.z = fmaf(cg.x, yuv.y, yuv.x);
+        f.z = fmaf(cg.y, yuv.z, f.z);
+        f.w = fmaf(cb.x, yuv.y, yuv.x);
+        rgb1.data[2] = hipPack(f);
+
+        yuv = make_float3(hipUnpack0(y1.y), hipUnpack0(u1.y), hipUnpack0(v1.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.x = fmaf(cr.y, yuv.z, yuv.x);
+        f.y = fmaf(cg.x, yuv.y, yuv.x);
+        f.y = fmaf(cg.y, yuv.z, f.y);
+        f.z = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack1(y1.y), hipUnpack1(u1.y), hipUnpack1(v1.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.w = fmaf(cr.y, yuv.z, yuv.x);
+        rgb1.data[3] = hipPack(f);
+
+        f.x = fmaf(cg.x, yuv.y, yuv.x);
+        f.x = fmaf(cg.y, yuv.z, f.x);
+        f.y = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack2(y1.y), hipUnpack2(u1.y), hipUnpack2(v1.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.z = fmaf(cr.y, yuv.z, yuv.x);
+        f.w = fmaf(cg.x, yuv.y, yuv.x);
+        f.w = fmaf(cg.y, yuv.z, f.w);
+        rgb1.data[4] = hipPack(f);
+
+        f.x = fmaf(cb.x, yuv.y, yuv.x);
+        yuv = make_float3(hipUnpack3(y1.y), hipUnpack3(u1.y), hipUnpack3(v1.y));
+        yuv.y -= 128.0f;
+        yuv.z -= 128.0f;
+        f.y = fmaf(cr.y, yuv.z, yuv.x);
+        f.z = fmaf(cg.x, yuv.y, yuv.x);
+        f.z = fmaf(cg.y, yuv.z, f.z);
+        f.w = fmaf(cb.x, yuv.y, yuv.x);
+        rgb1.data[5] = hipPack(f);
+
+        *((DUINT6 *)(&p.dst_image[rgb0_idx])) = rgb0;
+        *((DUINT6 *)(&p.dst_image[rgb1_idx])) = rgb1;
+    }
+}
+
+void ColorConvertNV12ToRGBBatched(hipStream_t stream,
+    uint32_t max_width_comp, uint32_t max_height_comp,
+    const NV12ToRGBBatchParams *d_params, uint32_t n_images) {
+    uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_width_comp) / 16));
+    uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_height_comp) / 4));
+    ColorConvertNV12ToRGBBatchedKernel<<<dim3(grid_x, grid_y, n_images),
+                                         dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
+}
+
 __global__ void ColorConvertNV12ToRGBPlanarKernel(
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_luma_image, uint32_t src_luma_image_stride_in_bytes,
