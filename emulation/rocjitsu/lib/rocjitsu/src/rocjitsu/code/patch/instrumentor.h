@@ -39,7 +39,6 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
@@ -86,14 +85,12 @@ struct InstrumentationPoint {
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
 
-  // filter_flags / force_full_exec are not used yet. The validator rejects any
-  // non-default value to keep the contract honest until each field is actually
-  // implemented.
-  // TODO: consume force_full_exec when EXEC policy management lands; consume
-  // filter_flags to filter based on InstFlags.
+  // Not used yet. The validator rejects any non-default value to keep the
+  // contract honest until each field is actually implemented.
+  // TODO: consume probe_obj / probe_symbol when probe-call
+  // trampolines are supported; consume force_full_exec when EXEC policy
+  // management lands; consume filter_flags to filter based on InstFlags
   uint32_t filter_flags = 0;
-  // probe_obj / probe_symbol are consumed: set both to request a probe-call
-  // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
   bool force_full_exec = false;
@@ -108,12 +105,6 @@ struct ResolvedInstrumentationSite {
   uint32_t original_size = 0;
   std::vector<uint8_t> original_bytes;
   std::string mnemonic; // Diagnostic/debug only.
-
-  // Index into the deduped probe registry produced by resolve_points()
-  // (ResolvedPoints::probes); nullopt for the inline nop.
-  std::optional<size_t> probe_index;
-
-  [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
 
 /// @brief Per-site patch record, for testing and debugging.
@@ -129,13 +120,6 @@ struct InstrumentationPatch {
   uint64_t return_target;
   std::vector<uint8_t> original_bytes;
   std::vector<uint8_t> patched_anchor_bytes;
-
-  // Probe-call details, populated for probe-call sites
-  bool is_probe_call = false;
-  std::string probe_symbol;
-  uint64_t probe_target_offset = 0; // .text-relative offset of the copied body.
-  uint16_t link_pair_base = 0;      // cc-derived return-link pair.
-  uint16_t target_pair_base = 0;    // dead pair holding the materialized address.
 };
 
 /// @brief Result of Instrumentor::patch().
@@ -358,16 +342,6 @@ private:
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
-
-  // Everything one resolution pass produces.
-  struct ResolvedPoints {
-    std::vector<ResolvedInstrumentationSite> sites;
-    std::vector<ProbeCallable> probes;
-    std::vector<std::string> errors;
-  };
-
-  // Validate and resolve every queued point in one pass.
-  [[nodiscard]] ResolvedPoints resolve_points();
 };
 
 } // namespace rocjitsu

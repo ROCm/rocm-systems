@@ -16,7 +16,6 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -201,43 +200,31 @@ TEST(Validator, RejectsNonBeforeInstKind) {
   }
 }
 
-TEST(Validator, RejectsProbeObjWithoutSymbol) {
+TEST(Validator, RejectsNonNullProbeObj) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
   auto text = dummy_text();
   InstrumentationPoint pt;
-  static const AmdGpuCodeObject *kSentinel = reinterpret_cast<const AmdGpuCodeObject *>(0x1);
-  pt.probe_obj = kSentinel; // symbol left empty
-
-  std::string err;
-  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
-  EXPECT_FALSE(err.empty());
-}
-
-TEST(Validator, RejectsProbeSymbolWithoutObj) {
-  static constexpr uint32_t kRaw = 0xDEADBEEFu;
-  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
-  auto text = dummy_text();
-  InstrumentationPoint pt;
-  pt.probe_symbol = "my_probe"; // probe_obj left null
-
-  std::string err;
-  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
-  EXPECT_FALSE(err.empty());
-}
-
-TEST(Validator, AcceptsProbeObjWithSymbol) {
-  static constexpr uint32_t kRaw = 0xDEADBEEFu;
-  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
-  auto text = dummy_text();
-  InstrumentationPoint pt;
+  // The struct stores a const AmdGpuCodeObject*. Any non-null value triggers
+  // the guardrail; we never dereference it.
   static const AmdGpuCodeObject *kSentinel = reinterpret_cast<const AmdGpuCodeObject *>(0x1);
   pt.probe_obj = kSentinel;
+
+  std::string err;
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(err.empty());
+}
+
+TEST(Validator, RejectsNonEmptyProbeSymbol) {
+  static constexpr uint32_t kRaw = 0xDEADBEEFu;
+  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
+  auto text = dummy_text();
+  InstrumentationPoint pt;
   pt.probe_symbol = "my_probe";
 
   std::string err;
-  EXPECT_TRUE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
-      << err;
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(err.empty());
 }
 
 TEST(Validator, RejectsForceFullExec) {
@@ -1462,263 +1449,6 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   const RegisterSet spill_hit = compute_spill_set(make_sgpr_set({plan.target_pair_base}), clobbers);
   EXPECT_TRUE(has_sgpr(spill_hit, plan.target_pair_base));
   EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
-}
-
-//==============================================================================
-// Section 7: Instrumentor probe-call patch end-to-end
-//
-// Patches a 2-nop target with a call to a probe exported from a separate code
-// object. The cave is laid out as [probe body][trampoline], so for a target
-// whose .text is 8 bytes and a 1-word probe body:
-//   probe_target_offset = cave_start    = text_size = 8
-//   trampoline_offset   = 8 + 4 (body)  = 12
-//   anchor at offset 4, return_target   = 4 + 4 = 8
-//==============================================================================
-
-// s_setpc_b64 s[30:31] (GFX9 family): a minimal self-contained probe body that
-// returns through the link pair, so build_probe_callable accepts it.
-constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
-
-// gfx950 ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in
-// an executable .text. Mirrors the symtab layout in probe_symbol_test (kept
-// local per the duplication note above). Sections: [1]=.text, [2]=.strtab,
-// [3]=.symtab, [4]=.shstrtab.
-std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
-                                           const std::vector<uint32_t> &body_words) {
-  const uint64_t text_offset = 0x100;
-  const uint64_t text_size = body_words.size() * sizeof(uint32_t);
-
-  std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
-  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
-  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
-  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-
-  std::vector<uint8_t> strtab{'\0'};
-  const uint32_t sym_name = add_elf_name(strtab, symbol);
-
-  // Two symbols: the mandatory null entry plus the probe at .text offset 0.
-  std::array<Elf64_Sym, 2> syms{};
-  syms[1].st_name = sym_name;
-  syms[1].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeFunc); // global func
-  syms[1].st_shndx = 1;                                                   // .text
-  syms[1].st_value = 0;
-  syms[1].st_size = text_size;
-
-  const uint64_t strtab_offset = text_offset + text_size;
-  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  const uint64_t shstrtab_offset = symtab_offset + syms.size() * sizeof(Elf64_Sym);
-  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 5;
-
-  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
-
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_REL;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 4;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-
-  std::memcpy(image.data() + text_offset, body_words.data(), text_size);
-  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
-  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
-  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
-
-  shdrs[2].sh_name = strtab_name;
-  shdrs[2].sh_type = SHT_STRTAB;
-  shdrs[2].sh_offset = strtab_offset;
-  shdrs[2].sh_size = strtab.size();
-  shdrs[2].sh_addralign = 1;
-
-  shdrs[3].sh_name = symtab_name;
-  shdrs[3].sh_type = SHT_SYMTAB;
-  shdrs[3].sh_offset = symtab_offset;
-  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
-  shdrs[3].sh_link = 2; // .strtab
-  shdrs[3].sh_info = 1; // index of first global symbol
-  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
-  shdrs[3].sh_addralign = 8;
-
-  shdrs[4].sh_name = shstrtab_name;
-  shdrs[4].sh_type = SHT_STRTAB;
-  shdrs[4].sh_offset = shstrtab_offset;
-  shdrs[4].sh_size = shstrtab.size();
-  shdrs[4].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
-  return image;
-}
-
-// Copy a named section's bytes out of a reparsed code object as 32-bit words.
-std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::string_view name) {
-  for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
-      continue;
-    std::vector<uint32_t> words(sec->size() / sizeof(uint32_t));
-    std::memcpy(words.data(), sec->data(), words.size() * sizeof(uint32_t));
-    return words;
-  }
-  return {};
-}
-
-TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-  ASSERT_TRUE(obj.is_valid());
-  ASSERT_TRUE(probe_obj.is_valid());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "rj_test_probe";
-  instr.add_point(pt);
-
-  auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  EXPECT_FALSE(result.elf_bytes.empty());
-  ASSERT_EQ(result.patches.size(), 1u);
-
-  const auto &p = result.patches[0];
-  EXPECT_TRUE(p.is_probe_call);
-  EXPECT_EQ(p.probe_symbol, "rj_test_probe");
-  EXPECT_EQ(p.anchor_offset, 4u);
-  EXPECT_EQ(p.probe_target_offset, 8u); // cave_start == text_size.
-  EXPECT_EQ(p.trampoline_offset, 12u);  // one-word probe body precedes it.
-  EXPECT_EQ(p.return_target, 8u);
-  EXPECT_EQ(p.link_pair_base, 30u);
-  EXPECT_EQ(p.target_pair_base % 2u, 0u);
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  EXPECT_TRUE(patched.is_valid());
-}
-
-TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "rj_test_probe";
-  instr.add_point(pt);
-
-  auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 1u);
-
-  // Forward branch from anchor (4) to trampoline (12): simm16 = (12-(4+4))/4 = 1.
-  const auto &p = result.patches[0];
-  ASSERT_EQ(p.patched_anchor_bytes.size(), 4u);
-  uint32_t w = 0;
-  std::memcpy(&w, p.patched_anchor_bytes.data(), sizeof(w));
-  EXPECT_EQ(w, build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4));
-}
-
-TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "rj_test_probe";
-  instr.add_point(pt);
-
-  auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 1u);
-  const auto &p = result.patches[0];
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> cave = section_words(patched, ".rj_trampolines");
-  ASSERT_FALSE(cave.empty());
-
-  // The probe body is copied exactly once, at the front of the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeSetpcS30S31), 1);
-  EXPECT_EQ(cave.front(), kProbeSetpcS30S31);
-
-  // The call is present, through the cc-derived link pair and chosen target pair.
-  const uint32_t swappc =
-      build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
-
-  // Re-derive the call target from the materialization delta and confirm it
-  // lands on the copied body. s_getpc writes the VA of the next instruction; the
-  // 64-bit add chain folds in (probe_target_offset - that VA).
-  const size_t body_words = (p.trampoline_offset - p.probe_target_offset) / sizeof(uint32_t);
-  const uint32_t getpc = build_s_getpc_b64(p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto getpc_it = std::find(cave.begin() + body_words, cave.end(), getpc);
-  ASSERT_NE(getpc_it, cave.end());
-  const size_t cave_idx = static_cast<size_t>(getpc_it - cave.begin());
-  const size_t tramp_idx = cave_idx - body_words; // index within the trampoline.
-  const uint64_t delta = (static_cast<uint64_t>(cave[cave_idx + 4]) << 32) | cave[cave_idx + 2];
-  const uint64_t va_after_getpc = p.trampoline_offset + (tramp_idx + 1) * sizeof(uint32_t);
-  EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
-}
-
-TEST(InstrumentorProbePatch, UnknownProbeSymbolFailsClosed) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "does_not_exist";
-  instr.add_point(pt);
-
-  auto result = instr.patch();
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_FALSE(result.errors.empty());
-}
-
-TEST(InstrumentorProbePatch, ProbeObjWithoutSymbolFailsClosed) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj; // symbol intentionally left empty
-  instr.add_point(pt);
-
-  auto result = instr.patch();
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_FALSE(result.errors.empty());
 }
 
 } // namespace
