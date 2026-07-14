@@ -105,6 +105,7 @@ The first domains are:
 - `profiler`: deprecated profiler start/stop accepted-or-unsupported contracts
 - `driver_entry_point`: driver entry-point symbol resolution contracts
 - `ipc`: capability-gated same-process IPC memory and event handle contracts
+- `external_resource`: external memory and semaphore import, mapping, destroy, and signal/wait invalid-input rejection contracts
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 - `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
 - `module_load_file`: module load-from-file and fat-binary invalid-input contracts
