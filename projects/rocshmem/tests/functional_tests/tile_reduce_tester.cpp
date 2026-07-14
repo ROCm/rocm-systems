@@ -43,20 +43,30 @@ struct Tuple2D {
   __device__ int get(int dim) const { return (dim == 0) ? x : y; }
 };
 
+// Seed modulus chosen so that for any supported PE count (up to 256) and any
+// tile index, the per-element seed value fits in every tested type:
+//   max seed value = (SEED_MOD-1) + (SEED_MOD-1) = 14
+//   max sum across 256 PEs = 256 * 14 = 3584  (<< short max 32767)
+static constexpr int SEED_MOD = 8;
+
+__host__ __device__ inline int tile_seed(int pe, int idx) {
+  return (pe % SEED_MOD) + (idx % SEED_MOD);
+}
+
 template <typename T>
 __device__ T expected_sum_value(int idx, int n_pes) {
   T result = static_cast<T>(0);
   for (int pe = 0; pe < n_pes; pe++) {
-    result += static_cast<T>(pe * 100 + idx);
+    result += static_cast<T>(tile_seed(pe, idx));
   }
   return result;
 }
 
 template <typename T>
 __device__ T expected_max_value(int idx, int n_pes) {
-  T result = static_cast<T>(idx);
+  T result = static_cast<T>(tile_seed(0, idx));
   for (int pe = 1; pe < n_pes; pe++) {
-    T value = static_cast<T>(pe * 100 + idx);
+    T value = static_cast<T>(tile_seed(pe, idx));
     result = max(result, value);
   }
   return result;
@@ -64,9 +74,9 @@ __device__ T expected_max_value(int idx, int n_pes) {
 
 template <typename T>
 __device__ T expected_min_value(int idx, int n_pes) {
-  T result = static_cast<T>(idx);
+  T result = static_cast<T>(tile_seed(0, idx));
   for (int pe = 1; pe < n_pes; pe++) {
-    T value = static_cast<T>(pe * 100 + idx);
+    T value = static_cast<T>(tile_seed(pe, idx));
     result = min(result, value);
   }
   return result;
@@ -415,7 +425,7 @@ void TileReduceTester::resetBuffers([[maybe_unused]] size_t size) {
   int total_size = tile_size * num_teams;
 
   for (int i = 0; i < total_size; i++) {
-    const int value = args.myid * 100 + (i % tile_size);
+    const int value = (args.myid % SEED_MOD) + ((i % tile_size) % SEED_MOD);
     source[i] = static_cast<float>(value);
     sum_dest[i] = -1.0f;
     max_dest[i] = -1.0f;
