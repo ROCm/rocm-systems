@@ -111,4 +111,5 @@ global: amd_dbgapi_architecture_get_info;
         amd_dbgapi_dispatch_get_info;
         amd_dbgapi_wave_get_info;
         amd_dbgapi_workgroup_get_info;
+        amd_dbgapi_process_set_trap_override;
 } @AMD_DBGAPI_NAME@_0.81;
