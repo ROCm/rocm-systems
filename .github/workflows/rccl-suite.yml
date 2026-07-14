@@ -33,6 +33,11 @@ on:
         type: string
         required: false
         default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the compute-node job to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
       rocm_release:
         description: 'ROCm version prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available.'
         type: string
@@ -82,6 +87,11 @@ on:
         type: string
         required: false
         default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the compute-node job to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
       rocm_release:
         description: 'ROCm version prefix (e.g. "7.14"; "7.14.0rc1" pins exactly). Empty = newest available. Cascades release -> prerelease -> nightly, multiarch-first.'
         type: string
@@ -127,6 +137,8 @@ jobs:
       RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
       # SLURM partition for this cluster's compute-node job.
       RCCL_SLURM_PARTITION: ${{ inputs.partition }}
+      # Optional SLURM reservation (e.g. dedicated CI nodes); empty = none.
+      RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
       RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
       # ROCM_RELEASE is a version prefix (e.g. "7.14"); empty => newest available.
@@ -176,6 +188,7 @@ jobs:
             --script "${ci_lib}/${SUITE}.sbatch" \
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
             --partition "${RCCL_SLURM_PARTITION}" \
+            --reservation "${RCCL_SLURM_RESERVATION}" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
 
       - name: Dump compute-node logs

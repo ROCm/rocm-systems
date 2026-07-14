@@ -25,6 +25,11 @@ on:
         type: string
         required: false
         default: 'interactive'
+      reservation:
+        description: 'SLURM reservation to pin the OpenMPI build to (e.g. "rccl_ci"). Empty = none.'
+        type: string
+        required: false
+        default: ''
       rocm_release:
         description: 'ROCm version prefix (e.g. "7.14"); empty = newest available.'
         type: string
@@ -94,6 +99,7 @@ jobs:
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
       RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
       RCCL_SLURM_PARTITION: ${{ inputs.partition }}
+      RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
       RCCL_ROCM_CHANNELS: 'release prerelease nightly'
     steps:
       - name: Checkout repository
@@ -116,4 +122,25 @@ jobs:
             --script "${ci_lib}/build-ompi.sbatch" \
             --chdir "${{ github.workspace }}/.ci-out/ompi-logs" \
             --partition "${RCCL_SLURM_PARTITION}" \
+            --reservation "${RCCL_SLURM_RESERVATION}" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY"
+
+      # Surface the compute-node OpenMPI build logs (rccl-ompi-<jobid>.{out,err})
+      # inline; without this a SLURM-side failure is invisible in the Actions log
+      # and the logs are wiped by the next run's `git clean -ffdx`.
+      - name: Dump OpenMPI build logs
+        if: always()
+        run: |
+          logs_dir="${{ github.workspace }}/.ci-out/ompi-logs"
+          shopt -s nullglob
+          dumped=0
+          for f in "${logs_dir}"/rccl-ompi-*.out "${logs_dir}"/rccl-ompi-*.err; do
+            echo "::group::ompi: $(basename "${f}")"
+            cat "${f}" || true
+            echo "::endgroup::"
+            dumped=1
+          done
+          if [[ "${dumped}" -eq 0 ]]; then
+            echo "No OpenMPI build logs found under ${logs_dir}"
+            ls -la "${logs_dir}" 2>/dev/null || echo "(logs dir missing)"
+          fi
