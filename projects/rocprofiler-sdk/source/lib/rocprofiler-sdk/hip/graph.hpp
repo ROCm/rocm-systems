@@ -38,14 +38,14 @@ namespace graph
 /// Per-launch state held in TLS while inside hipGraphLaunch.
 struct launch_state
 {
-    uint64_t                graph_exec_id  = 0;
-    uint64_t                node_counter   = 0;
-    rocprofiler_timestamp_t start_ts       = {0};
-    uint64_t                dispatch_count = 0;
-    rocprofiler_agent_id_t  agent_id       = {0};
-    rocprofiler_queue_id_t  queue_id       = {0};
-    uint64_t                correlation_id = 0;
-    rocprofiler_thread_id_t thread_id      = 0;
+    uint64_t                     graph_exec_id  = 0;
+    uint64_t                     node_counter   = 0;
+    rocprofiler_timestamp_t      start_ts       = {0};
+    uint64_t                     dispatch_count = 0;
+    rocprofiler_agent_id_t       agent_id       = {0};
+    rocprofiler_queue_id_t       queue_id       = {0};
+    rocprofiler_correlation_id_t correlation_id = {};
+    rocprofiler_thread_id_t      thread_id      = 0;
 };
 
 /// Returns the currently-active launch state on this thread, or nullptr.

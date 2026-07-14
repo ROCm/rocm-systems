@@ -224,7 +224,7 @@ emit_graph_launch_record(const launch_state& s, rocprofiler_timestamp_t end_ts)
 {
     auto tracing_data_v = tracing::tracing_data{};
     tracing::populate_contexts(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                               /*operation*/ 0u,
+                               ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH,
                                tracing_data_v.buffered_contexts,
                                tracing_data_v.external_correlation_ids);
 
@@ -233,8 +233,8 @@ emit_graph_launch_record(const launch_state& s, rocprofiler_timestamp_t end_ts)
     auto record = rocprofiler_buffer_tracing_hip_graph_record_t{
         sizeof(rocprofiler_buffer_tracing_hip_graph_record_t),
         ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-        /*operation*/ 0u,
-        rocprofiler_async_correlation_id_t{},
+        ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH,
+        rocprofiler_correlation_id_t{},
         s.thread_id,
         s.start_ts,
         end_ts,
@@ -245,11 +245,11 @@ emit_graph_launch_record(const launch_state& s, rocprofiler_timestamp_t end_ts)
 
     tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
                                            s.thread_id,
-                                           s.correlation_id,
+                                           s.correlation_id.internal,
                                            tracing_data_v.external_correlation_ids,
-                                           /*ancestor_corr_id*/ uint64_t{0},
+                                           s.correlation_id.ancestor,
                                            ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                                           /*operation*/ 0u,
+                                           ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH,
                                            record);
 }
 
@@ -291,9 +291,9 @@ auto graph_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
         }
         s.thread_id = common::get_tid();
         if(auto* cid = ::rocprofiler::context::get_latest_correlation_id())
-            s.correlation_id = cid->internal;
+            s.correlation_id = {cid->internal, rocprofiler_user_data_t{}, cid->ancestor};
         else
-            s.correlation_id = 0;
+            s.correlation_id = {0, rocprofiler_user_data_t{}, 0};
         s.start_ts = rocprofiler_timestamp_t{common::timestamp_ns()};
         // queue_id stays zero (launches may span multiple HW queues for parallel branches).
         s.agent_id = resolve_launch_stream_agent(stream);

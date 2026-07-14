@@ -23,6 +23,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -509,7 +510,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_GRAPH:
         {
-            // HIP_GRAPH has no sub-operations
+            ops = rocprofiler::hip::graph::get_ids();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
