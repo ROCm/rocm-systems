@@ -269,10 +269,6 @@ private:
 
   void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                           uint8_t byte_mask) const {
-    if (delegate_) {
-      delegate_->simd_notify_read64(wf, lane_mask, byte_mask);
-      return;
-    }
     simd_notify_read64_impl(wf, lane_mask, byte_mask);
   }
 

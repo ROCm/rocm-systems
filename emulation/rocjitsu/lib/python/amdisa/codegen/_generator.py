@@ -4110,7 +4110,7 @@ class CodeGenerator:
             L.append(
                 f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
             )
-            L.append(f'  RegisterAccess regs(cu);')
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
             L.append(
                 f'  auto data_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
             )
@@ -4200,7 +4200,7 @@ class CodeGenerator:
             L.append(
                 f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
             )
-            L.append(f'  RegisterAccess regs(cu);')
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
             L.append(
                 f'  auto src_region = regs.read_vgpr_region(vb + inst_.{src_field}, 1, full_lane_mask);'
             )

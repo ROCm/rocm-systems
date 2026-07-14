@@ -901,6 +901,8 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
 
+    # A D-tagged instoperand is a read of the destination operand's old value
+    # (for accumulator/update forms), not a source-operand alias.
     operand = f'inst.dst{idx}' if tag == 'D' else f'inst.src{idx}'
     if ctx.exec_model == ExecModel.SCALAR:
         value = f'amdgpu::RegisterAccess(wf).read_scalar({operand})'

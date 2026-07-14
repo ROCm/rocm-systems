@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -80,16 +81,17 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
+  uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
+  amdgpu::RegisterAccess regs(cu);
+  auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane(0, lane);
     } else {
-      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
-              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
@@ -111,16 +113,17 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
     saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
                 amdgpu::RegisterAccess(cu).read_sgpr(sb);
   }
+  uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
+  amdgpu::RegisterAccess regs(cu);
+  auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane(0, lane);
     } else {
-      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
-              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane64(0, lane);
     }
     d.per_lane_addr[lane] = saddr_val + vaddr + offset;
   }
@@ -141,11 +144,15 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
     saddr_val = amdgpu::RegisterAccess(cu).read_sgpr(sb);
   }
+  uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
+  amdgpu::RegisterAccess regs(cu);
+  std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
+  if (inst.sve)
+    vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
-    uint32_t vaddr = inst.sve ? amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane) : 0;
+    uint32_t vaddr = inst.sve ? vaddr_region->lane(0, lane) : 0;
     d.per_lane_addr[lane] =
         scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
   }
@@ -166,12 +173,16 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t soffset_val = read_optional_sreg_m0(inst.soffset, wf);
   int64_t ioff = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   assert(!inst.idxen && "Vbuffer idxen not yet supported");
+  amdgpu::RegisterAccess regs(cu);
+  std::optional<amdgpu::RegisterAccess::VgprReadRegion> voffset_region;
+  if (inst.offen)
+    voffset_region.emplace(regs.read_vgpr_region(wf.vgpr_alloc().base + inst.vaddr, 1, exec));
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t voffset = 0;
     if (inst.offen) {
-      voffset = amdgpu::RegisterAccess(cu).read_vgpr(wf.vgpr_alloc().base + inst.vaddr, lane);
+      voffset = voffset_region->lane(0, lane);
     }
     uint32_t offset_part = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
     d.per_lane_addr[lane] = base_addr + offset_part + soffset_val;

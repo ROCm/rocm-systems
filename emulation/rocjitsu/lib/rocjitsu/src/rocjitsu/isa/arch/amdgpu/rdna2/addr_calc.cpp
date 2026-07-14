@@ -51,16 +51,17 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
                 amdgpu::RegisterAccess(cu).read_sgpr(sb);
   }
+  uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+  amdgpu::RegisterAccess regs(cu);
+  auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     uint64_t vaddr;
     if (inst.saddr != 0x7F) {
-      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane(0, lane);
     } else {
-      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
-              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane64(0, lane);
     }
     d.per_lane_addr[lane] = saddr_val + vaddr + offset;
   }

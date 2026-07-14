@@ -1036,7 +1036,8 @@ inline void observe_contiguous_vgpr_reads(auto &cu, uint32_t base, uint32_t reg_
                                           uint32_t wf_size, uint8_t byte_mask = 0xF) {
   if (reg_count == 0)
     return;
-  RegisterAccess(cu).read_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size), byte_mask);
+  (void)RegisterAccess(cu).read_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size),
+                                            byte_mask);
 }
 
 inline void observe_mfma_input_reads(auto &cu, uint32_t base, uint32_t dim, uint32_t K, uint32_t B,

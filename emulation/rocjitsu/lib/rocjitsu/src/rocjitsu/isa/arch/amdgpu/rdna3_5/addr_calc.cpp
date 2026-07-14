@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace rdna3_5 {
@@ -66,13 +67,18 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     }
     uint64_t scratch_base = wf.scratch_base();
     uint32_t lane_stride = wf.scratch_lane_size();
+    amdgpu::RegisterAccess regs(cu);
+    std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
+    if (inst.sve) {
+      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+      vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+    }
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
       uint32_t vaddr = 0;
       if (inst.sve) {
-        uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-        vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+        vaddr = vaddr_region->lane(0, lane);
       }
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
@@ -89,16 +95,17 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
+  uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+  amdgpu::RegisterAccess regs(cu);
+  auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane(0, lane);
     } else {
-      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
-              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
+      vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (inst.seg == 0 && priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)

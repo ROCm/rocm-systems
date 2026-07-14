@@ -99,21 +99,21 @@ public:
   public:
     OperandReadView() = delete;
 
-    bool has_storage() const { return storage_ != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_ != nullptr; }
 
-    uint32_t lane(uint32_t lane) const {
+    [[nodiscard]] uint32_t lane(uint32_t lane) const {
       assert((storage_ || scalar_fallback_) && "OperandReadView has no source");
       return storage_ ? (*storage_)[lane] : scalar_fallback();
     }
 
-    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
       assert((storage_ || scalar_fallback_) && "OperandReadView has no source");
       return storage_ ? storage_->template simd_load<T>(lane_base)
                       : util::broadcast<T>(scalar_fallback());
     }
 
-    template <typename T> util::narrow32<T> load_narrow(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::narrow32<T> load_narrow(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
       assert((storage_ || scalar_fallback_) && "OperandReadView has no source");
       return storage_ ? storage_->template simd_load_narrow<T>(lane_base)
@@ -141,7 +141,7 @@ public:
   public:
     OperandWriteView() = delete;
 
-    bool has_storage() const { return storage_ != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_ != nullptr; }
 
     template <typename T>
     void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
@@ -189,7 +189,7 @@ public:
   public:
     OperandWrite64View() = delete;
 
-    bool has_storage() const { return storage_.lo != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
     template <typename T>
     void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
@@ -228,16 +228,16 @@ public:
   public:
     OperandReadWriteView() = delete;
 
-    bool has_storage() const { return storage_ != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_ != nullptr; }
 
-    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       return storage_ ? storage_->template simd_load<T>(lane_base)
                       : util::broadcast<T>(scalar_fallback());
     }
 
-    template <typename T> util::narrow32<T> load_narrow(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::narrow32<T> load_narrow(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       return storage_ ? storage_->template simd_load_narrow<T>(lane_base)
@@ -298,9 +298,9 @@ public:
   public:
     OperandReadWrite64View() = delete;
 
-    bool has_storage() const { return storage_.lo != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
-    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandReadWrite64View is empty");
       return storage_.lo ? storage_.lo->template simd_load64<T>(*storage_.hi, lane_base)
@@ -352,9 +352,9 @@ public:
   public:
     OperandRead64View() = delete;
 
-    bool has_storage() const { return storage_.lo != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
-    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandRead64View has no source");
       return storage_.lo ? storage_.lo->template simd_load64<T>(*storage_.hi, lane_base)
@@ -382,16 +382,16 @@ public:
   public:
     OperandReadPair32View() = delete;
 
-    bool has_storage() const { return storage_.lo != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
-    template <typename T> util::native<T> load_lo_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_lo_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_lo_native expects 32-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandReadPair32View has no source");
       return storage_.lo ? storage_.lo->template simd_load<T>(lane_base)
                          : util::broadcast<T>(scalar_fallback());
     }
 
-    template <typename T> util::native<T> load_hi_native(uint32_t lane_base) const {
+    template <typename T> [[nodiscard]] util::native<T> load_hi_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_hi_native expects 32-bit lanes");
       assert((storage_.hi || scalar_fallback_) && "OperandReadPair32View has no source");
       return storage_.hi ? storage_.hi->template simd_load<T>(lane_base)
@@ -419,7 +419,7 @@ public:
   public:
     OperandWritePair32View() = delete;
 
-    bool has_storage() const { return storage_.lo != nullptr; }
+    [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
     template <typename T>
     void store_native_pair(uint32_t lane_base, util::native<T> lo, util::native<T> hi,
@@ -460,29 +460,29 @@ public:
   public:
     VgprReadRegion() = delete;
 
-    uint32_t base() const { return base_; }
-    uint32_t reg_count() const { return reg_count_; }
-    uint32_t wf_size() const { return wf_size_; }
-    bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
+    [[nodiscard]] uint32_t base() const { return base_; }
+    [[nodiscard]] uint32_t reg_count() const { return reg_count_; }
+    [[nodiscard]] uint32_t wf_size() const { return wf_size_; }
+    [[nodiscard]] bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
 
-    std::span<const uint32_t> lanes(uint32_t relative_reg = 0) const {
+    [[nodiscard]] std::span<const uint32_t> lanes(uint32_t relative_reg = 0) const {
       assert(cu_ && "VgprReadRegion is empty");
       assert(relative_reg < reg_count_ && "relative VGPR outside read region");
       return {reg_data(relative_reg), wf_size_};
     }
 
-    const uint32_t *reg_data(uint32_t relative_reg = 0) const {
+    [[nodiscard]] const uint32_t *reg_data(uint32_t relative_reg = 0) const {
       assert(cu_ && "VgprReadRegion is empty");
       assert(relative_reg < reg_count_ && "relative VGPR outside read region");
       return reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
     }
 
-    uint32_t lane(uint32_t relative_reg, uint32_t lane) const {
+    [[nodiscard]] uint32_t lane(uint32_t relative_reg, uint32_t lane) const {
       assert(lane < wf_size_ && "lane outside wavefront");
       return lanes(relative_reg)[lane];
     }
 
-    uint64_t lane64(uint32_t relative_reg, uint32_t lane) const {
+    [[nodiscard]] uint64_t lane64(uint32_t relative_reg, uint32_t lane) const {
       assert(relative_reg + 1 < reg_count_ && "64-bit lane read needs two VGPRs");
       uint64_t lo = this->lane(relative_reg, lane);
       uint64_t hi = this->lane(relative_reg + 1, lane);
@@ -505,11 +505,11 @@ public:
   public:
     VgprWriteRegion() = delete;
 
-    uint32_t base() const { return base_; }
-    uint32_t reg_count() const { return reg_count_; }
-    uint32_t wf_size() const { return wf_size_; }
-    uint64_t lane_mask() const { return lane_mask_; }
-    bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
+    [[nodiscard]] uint32_t base() const { return base_; }
+    [[nodiscard]] uint32_t reg_count() const { return reg_count_; }
+    [[nodiscard]] uint32_t wf_size() const { return wf_size_; }
+    [[nodiscard]] uint64_t lane_mask() const { return lane_mask_; }
+    [[nodiscard]] bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
 
     void set_lane(uint32_t relative_reg, uint32_t lane, uint32_t value) const {
       assert(lane < wf_size_ && "lane outside wavefront");
@@ -552,14 +552,14 @@ public:
   public:
     VgprReadWriteRegion() = delete;
 
-    const VgprReadRegion &read() const { return read_; }
-    const VgprWriteRegion &write() const { return write_; }
+    [[nodiscard]] const VgprReadRegion &read() const { return read_; }
+    [[nodiscard]] const VgprWriteRegion &write() const { return write_; }
 
-    std::span<const uint32_t> read_lanes(uint32_t relative_reg = 0) const {
+    [[nodiscard]] std::span<const uint32_t> read_lanes(uint32_t relative_reg = 0) const {
       return read_.lanes(relative_reg);
     }
 
-    uint32_t linear_word(uint32_t linear_index) const {
+    [[nodiscard]] uint32_t linear_word(uint32_t linear_index) const {
       assert(read_.wf_size() != 0 && "VgprReadWriteRegion is empty");
       return read_.lane(linear_index / read_.wf_size(), linear_index % read_.wf_size());
     }
@@ -591,12 +591,16 @@ public:
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
   // ISA-specific resolver/backend.
-  uint32_t read_scalar(const Operand &op) const { return op.read_scalar(wavefront()); }
-  uint64_t read_scalar64(const Operand &op) const { return op.read_scalar64(wavefront()); }
-  uint32_t read_lane(const Operand &op, uint32_t lane) const {
+  [[nodiscard]] uint32_t read_scalar(const Operand &op) const {
+    return op.read_scalar(wavefront());
+  }
+  [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
+    return op.read_scalar64(wavefront());
+  }
+  [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
     return op.read_lane(wavefront(), lane);
   }
-  uint64_t read_lane64(const Operand &op, uint32_t lane) const {
+  [[nodiscard]] uint64_t read_lane64(const Operand &op, uint32_t lane) const {
     return op.read_lane64(wavefront(), lane);
   }
   void write_scalar(const Operand &op, uint32_t value) const {
@@ -622,8 +626,11 @@ public:
   // Logical operand access. These APIs are for instruction helpers that still
   // want operand semantics for scalar fallback, literals, delegates, and
   // 32/64-bit VGPR pairing, but need SIMD-friendly storage when available.
-  OperandReadView read_operand(const Operand &op, uint64_t lane_mask,
-                               uint8_t byte_mask = 0xF) const {
+  // The default byte mask is deliberately conservative: operand width alone
+  // does not identify high-vs-low sub-dword selections such as true16 op_sel.
+  // Callers with precise byte windows can pass a narrower mask explicitly.
+  [[nodiscard]] OperandReadView read_operand(const Operand &op, uint64_t lane_mask,
+                                             uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     const VgprStorage *storage = op.simd_vgpr_storage(wf);
     if (storage)
@@ -631,8 +638,8 @@ public:
     return OperandReadView(op, wf, storage);
   }
 
-  OperandRead64View read_operand64(const Operand &op, uint64_t lane_mask,
-                                   uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] OperandRead64View read_operand64(const Operand &op, uint64_t lane_mask,
+                                                 uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     ConstVgprStoragePair64 storage = op.simd_vgpr_storage64(wf);
     if (storage.lo)
@@ -640,8 +647,8 @@ public:
     return OperandRead64View(op, wf, storage);
   }
 
-  OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
-                                            uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
+                                                          uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     ConstVgprStoragePair64 storage = op.simd_vgpr_storage64(wf);
     if (storage.lo)
@@ -649,7 +656,7 @@ public:
     return OperandReadPair32View(op, wf, storage);
   }
 
-  OperandWriteView write_operand(const Operand &op, uint64_t lane_mask) const {
+  [[nodiscard]] OperandWriteView write_operand(const Operand &op, uint64_t lane_mask) const {
     // Kept at acquisition time so future write-observation plugins can validate
     // the instruction's destination lane set before writable storage is exposed.
     (void)lane_mask;
@@ -657,22 +664,23 @@ public:
     return OperandWriteView(op, wf, op.simd_vgpr_storage_mut(wf));
   }
 
-  OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
+  [[nodiscard]] OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
     // See write_operand().
     (void)lane_mask;
     Wavefront &wf = mutable_wavefront();
     return OperandWrite64View(op, wf, op.simd_vgpr_storage64_mut(wf));
   }
 
-  OperandWritePair32View write_operand_pair32(const Operand &op, uint64_t lane_mask) const {
+  [[nodiscard]] OperandWritePair32View write_operand_pair32(const Operand &op,
+                                                            uint64_t lane_mask) const {
     // See write_operand().
     (void)lane_mask;
     Wavefront &wf = mutable_wavefront();
     return OperandWritePair32View(op, wf, op.simd_vgpr_storage64_mut(wf));
   }
 
-  OperandReadWriteView readwrite_operand(const Operand &op, uint64_t lane_mask,
-                                         uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] OperandReadWriteView readwrite_operand(const Operand &op, uint64_t lane_mask,
+                                                       uint8_t byte_mask = 0xF) const {
     Wavefront &wf = mutable_wavefront();
     VgprStorage *storage = op.simd_vgpr_storage_mut(wf);
     if (storage)
@@ -680,8 +688,8 @@ public:
     return OperandReadWriteView(op, wf, storage);
   }
 
-  OperandReadWrite64View readwrite_operand64(const Operand &op, uint64_t lane_mask,
-                                             uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] OperandReadWrite64View readwrite_operand64(const Operand &op, uint64_t lane_mask,
+                                                           uint8_t byte_mask = 0xF) const {
     Wavefront &wf = mutable_wavefront();
     VgprStoragePair64 storage = op.simd_vgpr_storage64_mut(wf);
     if (storage.lo)
@@ -692,9 +700,11 @@ public:
   // Physical SGPR access. These APIs are for helpers that already know the
   // physical scalar register index. ComputeUnitCore owns SGPR read observation,
   // so reads delegate to the CU accessor rather than exposing raw SGPR storage.
-  uint32_t read_sgpr(uint32_t physical_reg) const { return cu_->read_sgpr(physical_reg); }
+  [[nodiscard]] uint32_t read_sgpr(uint32_t physical_reg) const {
+    return cu_->read_sgpr(physical_reg);
+  }
 
-  uint64_t read_sgpr64(uint32_t physical_reg) const {
+  [[nodiscard]] uint64_t read_sgpr64(uint32_t physical_reg) const {
     uint64_t lo = read_sgpr(physical_reg);
     uint64_t hi = read_sgpr(physical_reg + 1);
     return lo | (hi << 32);
@@ -713,11 +723,13 @@ public:
   // physical register index, such as matrix layout code and generated memory
   // address/data collection. Reads observe the supplied register/lane range
   // before returning views over the raw storage.
-  uint32_t read_vgpr(uint32_t physical_reg, uint32_t lane, uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] uint32_t read_vgpr(uint32_t physical_reg, uint32_t lane,
+                                   uint8_t byte_mask = 0xF) const {
     return read_vgpr_region(physical_reg, 1, uint64_t{1} << lane, byte_mask).lane(0, lane);
   }
 
-  uint64_t read_vgpr64(uint32_t physical_reg, uint32_t lane, uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] uint64_t read_vgpr64(uint32_t physical_reg, uint32_t lane,
+                                     uint8_t byte_mask = 0xF) const {
     return read_vgpr_region(physical_reg, 2, uint64_t{1} << lane, byte_mask).lane64(0, lane);
   }
 
@@ -729,19 +741,20 @@ public:
     write_vgpr_region(physical_reg, 2, uint64_t{1} << lane).set_lane64(0, lane, value);
   }
 
-  VgprReadRegion read_vgpr_region(uint32_t physical_base, uint32_t reg_count, uint64_t lane_mask,
-                                  uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] VgprReadRegion read_vgpr_region(uint32_t physical_base, uint32_t reg_count,
+                                                uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
     observe_vgpr_region(physical_base, reg_count, lane_mask, byte_mask);
     return VgprReadRegion(*cu_, physical_base, reg_count);
   }
 
-  VgprWriteRegion write_vgpr_region(uint32_t physical_base, uint32_t reg_count,
-                                    uint64_t lane_mask) const {
+  [[nodiscard]] VgprWriteRegion write_vgpr_region(uint32_t physical_base, uint32_t reg_count,
+                                                  uint64_t lane_mask) const {
     return VgprWriteRegion(mutable_cu(), physical_base, reg_count, lane_mask);
   }
 
-  VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base, uint32_t reg_count,
-                                            uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
+  [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,
+                                                          uint32_t reg_count, uint64_t lane_mask,
+                                                          uint8_t byte_mask = 0xF) const {
     return VgprReadWriteRegion(read_vgpr_region(physical_base, reg_count, lane_mask, byte_mask),
                                write_vgpr_region(physical_base, reg_count, lane_mask));
   }
