@@ -61,8 +61,7 @@ html_theme_options = {
 html_title = f"AMD SMI {version}"
 html_static_path = ["static"]
 html_css_files = ["amdsmi_docs.css"]
-# Publish the llms.txt index at the docs site root and let
-# rocm-docs-core generate llms-full.txt after each build (the llms.txt standard,
+# Generate llms.txt and llms-full.txt after each build (the llms.txt standard,
 # https://llmstxt.org/). See the rocm-docs-core guide:
 # https://rocm.docs.amd.com/projects/rocm-docs-core/en/latest/user_guide/llms.html
 rocm_docs_generate_llms = True
