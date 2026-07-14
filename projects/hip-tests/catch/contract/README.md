@@ -38,6 +38,7 @@ The first domains are:
 - `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `kernel_launch`: cooperative, extended, symbol, and AMD extension kernel launch contracts
 - `multi_device_launch`: discrete-GPU-gated cooperative, extended, and module-based multi-device kernel launch contracts
+- `driver_launch_ex`: discrete-GPU-gated driver-style extended kernel launch and SM-resource group-split contracts
 - `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel

@@ -795,6 +795,12 @@ contract:
   Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
     tags: [multi_device_launch]
+  Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue:
+    <<: *level_0
+    tags: [driver_launch_ex]
+  Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup:
+    <<: *level_0
+    tags: [driver_launch_ex]
   Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue:
     <<: *level_0
     tags: [graph_batch_mem_op]
