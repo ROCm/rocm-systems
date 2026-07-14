@@ -141,6 +141,22 @@ std::optional<std::string> child_config_path() {
   return std::string(cfg_buf);
 }
 
+void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  // syscall(2) is the libc wrapper, not a raw inline syscall instruction: on
+  // kernel errors it returns -1 and sets errno. For mmap(2), success returns
+  // the mapped address; for munmap(2), success returns exactly 0.
+  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+  if (rc == -1)
+    return MAP_FAILED;
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+}
+
+int raw_munmap_syscall(void *addr, size_t length) {
+  long rc = syscall(SYS_munmap, addr, length);
+  assert(rc == 0 || rc == -1);
+  return static_cast<int>(rc);
+}
+
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -1176,6 +1192,9 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
+    return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+
   assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
@@ -1237,6 +1256,9 @@ RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
+    return raw_munmap_syscall(addr, length);
+
   assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
