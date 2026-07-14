@@ -604,6 +604,20 @@ Full gfx950 support means:
   first encoding CTest passes 1/1 with all four internal module checks under
   true gfx1201 emulation. The four guarded selected profiles are next and run
   serially to keep IREE temporary directories isolated.
+- 2026-07-14: `X1H` passes 179/180 nested hip-moi GTests plus all six tutorial
+  controls under the documented SuperCollider profile. The tutorial helper now
+  honors `CROSSCOMPILING_EMULATOR`; its three controls pass on both gfx1201
+  Rocjitsu and native gfx950. The sole wide-key exact-context failure also
+  reproduces without ConSan and returns 4,096 exact zeros. Passing smaller and
+  sampled-fast variants use far less private scratch; the failure is retained
+  as an active Rocjitsu high-pressure guest-execution bug, not waived.
+- 2026-07-14: `X1SC` now has real unhandled-trap plumbing: the injected
+  `s_trap` raises ROCR `EC_QUEUE_WAVE_TRAP`, aborts sibling waves/workgroups,
+  and reaches `HSA_STATUS_ERROR_EXCEPTION` without an emulator exception or
+  barrier deadlock. The focused GTest still observes `hipSuccess` because its
+  synchronize packet completes just before CLR's asynchronous queue-error
+  callback. Queue/signal ordering remains under reduction; no sleep or weakened
+  expectation is accepted.
 
 ## DAG Overview
 
