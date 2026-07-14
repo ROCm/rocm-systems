@@ -11,6 +11,9 @@ on:
         type: string
       artifact_run_id:
         type: string
+      test_scope:
+        type: string
+        default: 'smoke'
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -21,6 +24,10 @@ on:
         type: string
       artifact_run_id:
         type: string
+      test_scope:
+        description: 'smoke (22 curated tests, ~3min) or all'
+        type: string
+        default: 'smoke'
 
 permissions:
   contents: read
@@ -98,7 +105,8 @@ jobs:
           python rocm-systems/.github/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
-            --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log
+            --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
+            --test-scope ${{ inputs.test_scope || 'smoke' }}
 
       - name: Upload test results
         if: always()

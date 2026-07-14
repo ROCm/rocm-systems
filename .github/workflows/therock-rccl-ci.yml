@@ -9,6 +9,10 @@ on:
         description: 'Reuse artifacts from a previous run ID (skips build)'
         type: string
         default: ''
+      test_scope:
+        description: 'smoke (22 curated tests, ~3min) or all'
+        type: string
+        default: 'smoke'
 
 permissions:
   contents: read
@@ -71,6 +75,7 @@ jobs:
       event_name: ${{ github.event_name }}
       package_version: ADHOCBUILD
       artifact_run_id: ${{ inputs.artifact_run_id }}
+      test_scope: ${{ inputs.test_scope || 'smoke' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

@@ -18,6 +18,9 @@ on:
       artifact_run_id:
         type: string
         default: ''
+      test_scope:
+        type: string
+        default: 'smoke'
 
 permissions:
   contents: read
@@ -169,3 +172,4 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      test_scope: ${{ inputs.test_scope }}

@@ -25,6 +25,31 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
+SMOKE_TESTS = [
+    "test_all_reduce_coalesced_nccl",
+    "test_all_reduce_coalesced_manager_nccl",
+    "test_allgather_base",
+    "test_all_gather_into_tensor_coalesced_manager_nccl",
+    "test_broadcast_coalesced_nccl",
+    "test_broadcast_subgroup",
+    "test_reduce_scatter_base_k",
+    "test_reduce_scatter_tensor_coalesced",
+    "test_non_blocking_p2p",
+    "test_send_recv_subgroup",
+    "test_nccl_barrier_device_ids",
+    "test_reduce_subgroup",
+    "test_scatter_subgroup",
+    "test_gather_subgroup",
+    "test_all_to_all_single",
+    "test_init_wo_backend_str",
+    "test_new_group",
+    "test_pass_nccl_options_high_priority_stream",
+    "test_set_process_group_desc",
+    "test_tensor_dtype_complex",
+    "test_batch_send_recv_subgroup",
+    "test_collectives",
+]
+
 
 def find_rccl_library(artifact_dir: Path) -> Path:
     """Find librccl.so in the artifact directory tree."""
@@ -203,7 +228,7 @@ def print_environment_info() -> None:
     log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
 
 
-def run_tests(pytorch_src: Path, results_log: Path) -> int:
+def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> int:
     """Run pytest on test_c10d_nccl.py and return the exit code."""
     miopen_cache = tempfile.mkdtemp(prefix="miopen_cache_")
     os.environ["MIOPEN_USER_DB_PATH"] = miopen_cache
@@ -211,16 +236,25 @@ def run_tests(pytorch_src: Path, results_log: Path) -> int:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(pytorch_src / "test") + ":" + env.get("PYTHONPATH", "")
 
+    if test_scope == "smoke":
+        k_expr = " or ".join(SMOKE_TESTS)
+        timeout = "60"
+        log.info("Running smoke tests (%d tests)", len(SMOKE_TESTS))
+    else:
+        k_expr = "not NCCLTraceTestDumpOnTimeout"
+        timeout = "600"
+        log.info("Running all tests (excluding NCCLTraceTestDumpOnTimeout)")
+
     cmd = [
         sys.executable,
         "-m",
         "pytest",
         str(pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"),
         "-v",
-        "--timeout=600",
+        f"--timeout={timeout}",
         "--tb=short",
         "-k",
-        "not NCCLTraceTestDumpOnTimeout",
+        k_expr,
     ]
     log.info("Running: %s", " ".join(cmd))
 
@@ -274,6 +308,12 @@ def main() -> None:
         help="Path for test results log file",
     )
     parser.add_argument(
+        "--test-scope",
+        choices=["smoke", "all"],
+        default="smoke",
+        help="Run smoke tests (22 curated tests, ~3min) or all tests (default: smoke)",
+    )
+    parser.add_argument(
         "--discover-only",
         action="store_true",
         help="Only discover library paths and set GITHUB_OUTPUT, then exit",
@@ -303,7 +343,7 @@ def main() -> None:
     # Step 4: Patch missing modules, print environment info, and run tests
     patch_missing_torch_modules()
     print_environment_info()
-    exit_code = run_tests(args.pytorch_src, args.results_log)
+    exit_code = run_tests(args.pytorch_src, args.results_log, args.test_scope)
     sys.exit(exit_code)
 
 
