@@ -90,7 +90,13 @@ while [[ $# -gt 0 ]]; do
     --skip-branch)   SKIP_BRANCH=1;                        shift ;;
     --outdir)        OUTDIR="$2";                          shift 2 ;;
     -h|--help)
-      sed -n '2,/^###$/p' "$0" | head -n -1
+      # /^##\+$/,/^##\+$/ : match lines between those filled with two or more #s
+      # {                 : and execute the following command sequence
+      #    /^##\+$/d;     : match lines filled with two or more #s and delete them
+      #    s/^# \?//;     : match all lines and substitute an initial # (and optional ' ') with ''
+      #    p;             : match all lines and print them
+      # }                 : end the command sequence
+      sed -n '/^##\+$/,/^##\+$/ { /^##\+$/d; s/^# \?//; p; }' "$0"
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
