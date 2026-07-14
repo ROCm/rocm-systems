@@ -1627,7 +1627,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
-                    "RJ_CONSAN_TMP_VGPR=3"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(
@@ -1650,7 +1649,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
-                    "RJ_CONSAN_TMP_VGPR=3"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
                     "RJ_CONSAN_EXPECT_TRAP=1"
             )
@@ -1666,7 +1664,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
-                    "RJ_CONSAN_TMP_VGPR=3"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(
@@ -1681,7 +1678,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=supercollider"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_DELAY=2"
-                    "RJ_CONSAN_TMP_VGPR=3"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(

@@ -5133,12 +5133,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return false;
   }
   const auto load_low = build_flat_load_b32_vaddr_vdst(address_lo_vgpr, prior_low_vgpr, arch);
-  if (!load_low ||
-      !append_add_literal_field(words, address_lo_vgpr, sizeof(uint32_t), tmp_vgpr, arch)) {
+  if (!load_low) {
     errors.emplace_back("ConSan MOI sampled checker could not load the prior slot");
     return false;
   }
   words.insert(words.end(), load_low->begin(), load_low->end());
+  if (!append_add_literal_field(words, address_lo_vgpr, sizeof(uint32_t), tmp_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI sampled checker could not load the prior slot");
+    return false;
+  }
   const auto load_high = build_flat_load_b32_vaddr_vdst(address_lo_vgpr, prior_high_vgpr, arch);
   const auto wait = build_s_wait_flat_load0(arch);
   if (!load_high || !wait) {

@@ -1430,9 +1430,17 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
   if (kernel.stats.ds_other_count > 0)
     blockers.push_back(
         count_reason("unsupported or unclassified ds_* instructions", kernel.stats.ds_other_count));
-  if (kernel.stats.fence_like_count > 0)
+  // Clang emits global_inv as part of the normal gfx12 __syncthreads()
+  // sequence. It invalidates the global cache and does not order LDS, so its
+  // presence does not make SuperCollider's LDS instrumentation unsafe. Keep
+  // every other cache operation fail-closed.
+  const uint64_t unsupported_fence_like_count =
+      std::ranges::count_if(kernel.fence_sites, [](const ConSanFenceSite &site) {
+        return site.mnemonic != "global_inv";
+      });
+  if (unsupported_fence_like_count > 0)
     blockers.push_back(
-        count_reason("unsupported fence/cache-like instructions", kernel.stats.fence_like_count));
+        count_reason("unsupported fence/cache-like instructions", unsupported_fence_like_count));
 
   const uint64_t supported_lds_sites = kernel.stats.lds_read_count + kernel.stats.lds_write_count;
   if (!blockers.empty()) {

@@ -4911,6 +4911,24 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
   std::memcpy(patched_words.data(), text_section->data(), text_section->size());
 
   const uint16_t scratch = *result.patches[1].scratch_vgpr;
+  const uint16_t tmp = static_cast<uint16_t>(scratch + 4u);
+  const auto load_low = build_flat_load_b32_vaddr_vdst(scratch, static_cast<uint16_t>(scratch + 5u),
+                                                       ROCJITSU_CODE_ARCH_RDNA4);
+  const auto address_increment =
+      build_v_mov_b32_e64_literal(tmp, sizeof(uint32_t), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto add_address =
+      build_v_add_nc_u32_words(scratch, vector_source_vgpr(scratch), tmp, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load_high = build_flat_load_b32_vaddr_vdst(
+      scratch, static_cast<uint16_t>(scratch + 6u), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(load_low && address_increment && add_address && load_high);
+  std::vector<uint32_t> ordered_loads;
+  ordered_loads.insert(ordered_loads.end(), load_low->begin(), load_low->end());
+  ordered_loads.insert(ordered_loads.end(), address_increment->begin(), address_increment->end());
+  ordered_loads.insert(ordered_loads.end(), add_address->begin(), add_address->end());
+  ordered_loads.insert(ordered_loads.end(), load_high->begin(), load_high->end());
+  EXPECT_TRUE(contains_subsequence(patched_words, ordered_loads))
+      << "the prior sampled entry low word must be loaded before advancing to its high word";
+
   const auto diagnostic_increment = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       scratch, static_cast<uint16_t>(scratch + 4u), static_cast<uint16_t>(scratch + 4u),
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -10362,6 +10380,31 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_GE(kernel.preflight_reasons.size(), 2u);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST(ConSan, AllowsGfx1201SyncthreadsGlobalInvForLdsProbe) {
+  const std::array<uint32_t, 14> text_words = {
+      0xD8340000u, 0x00000100u, // ds_store_b32 v0, v1
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEE0AC000u, 0x00000000u, // global_inv scope:SCOPE_SE
+      0xBFB00000u,                                                     // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 3;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_EQ(result.kernels.front().stats.fence_like_count, 1u);
+  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
 }
 
 TEST(ConSan, ProbeNopModeEmitsPatchedElfForCandidate) {
