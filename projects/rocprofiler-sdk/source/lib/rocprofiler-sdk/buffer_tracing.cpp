@@ -344,7 +344,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_GRAPH:
         {
-            // HIP_GRAPH has no sub-operations
+            val = rocprofiler::hip::graph::name_by_id(operation);
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
