@@ -230,7 +230,7 @@ jobs:
               -- pytest \
               --durations=0 \
               tests/test_corpus.py -vv \
-              -n 8 \
+              -n 4 \
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
