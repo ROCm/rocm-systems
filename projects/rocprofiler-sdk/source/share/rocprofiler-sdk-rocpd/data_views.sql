@@ -322,6 +322,7 @@ SELECT
     S.sgpr_count,
     S.group_segment_size AS static_lds_size,
     S.private_segment_size AS static_scratch_size,
+    K.event_id,
     E.stack_id,
     E.parent_stack_id,
     E.correlation_id AS corr_id
@@ -547,7 +548,7 @@ SELECT
     A.type AS agent_type,
     G.queue_id,
     Q.name AS queue,
-    'hipGraphLaunch' AS name,
+    'Graph Execution' AS name,
     G.start,
     G.end,
     (G.end - G.start) AS duration,

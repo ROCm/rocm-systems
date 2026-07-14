@@ -106,8 +106,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- 2993533, 2269219937, 2993533
--- 2993533, 2269219937, 2993533
 -- Performance monitoring counters (PMC) descriptions
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_pmc{{uuid}}` (
