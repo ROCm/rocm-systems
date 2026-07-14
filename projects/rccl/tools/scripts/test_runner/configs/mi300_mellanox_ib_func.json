@@ -2626,7 +2626,7 @@
       "tests": [
         {
           "name": "NCCL4Py_BuildSmoke_All",
-          "description": "pip install -e nccl4py + CPU smoke pytest modules; self-skips without librccl.so",
+          "description": "uv/CMake nccl4py wheel build (cmake --build --target nccl4py) + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
           "test_filter": "ALL"
         }
       ]
@@ -3049,7 +3049,7 @@
     },
     {
       "name": "nccl4py Build Smoke",
-      "description": "pip install -e nccl4py + CPU smoke pytest modules; self-skips without librccl.so",
+      "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
       "config": "nccl4py_build_smoke",
       "enabled": true
     }
