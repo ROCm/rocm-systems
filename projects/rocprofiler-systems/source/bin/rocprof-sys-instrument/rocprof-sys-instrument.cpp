@@ -72,6 +72,13 @@ get_default_min_address_range()
     // default to 4096
     return 4 * get_default_min_instructions();
 }
+auto
+get_default_max_library_functions()
+{
+    // default to 20000
+    return rocprofsys::get_env<size_t>(
+        rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
+}
 }  // namespace
 
 using InstrumentMode = ::rocprofsys::dl::InstrumentMode;
@@ -85,11 +92,13 @@ bool   loop_level_instr             = false;
 bool   instr_dynamic_callsites      = false;
 bool   instr_traps                  = false;
 bool   instr_loop_traps             = false;
-bool   parse_all_modules            = false;
-size_t min_address_range            = get_default_min_address_range();  // 4096
-size_t min_loop_address_range       = get_default_min_address_range();  // 4096
-size_t min_instructions             = get_default_min_instructions();   // 1024
-size_t min_loop_instructions        = get_default_min_instructions();   // 1024
+bool   exclude_internal_lib_paths   = false;
+bool   exe_only                     = false;
+size_t min_address_range            = get_default_min_address_range();      // 4096
+size_t min_loop_address_range       = get_default_min_address_range();      // 4096
+size_t min_instructions             = get_default_min_instructions();       // 1024
+size_t min_loop_instructions        = get_default_min_instructions();       // 1024
+size_t max_library_functions        = get_default_max_library_functions();  // 20000
 bool   werror                       = false;
 bool   debug_print                  = false;
 bool   instr_print                  = false;
@@ -948,6 +957,21 @@ main(int argc, char** argv)
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
     parser
+        .add_argument({ "--max-library-functions" },
+                      "Skip shared libraries whose procedure count exceeds this "
+                      "threshold. Useful for keeping instrumentation overhead "
+                      "manageable. The target executable is never gated by this. "
+                      "This check is bypassed by module include/restrict regexes "
+                      "(--module-include/-MI, --module-restrict/-MR) and function "
+                      "include/restrict regexes (--function-include/-I, "
+                      "--function-restrict/-R). 0 = disabled.")
+        .count(1)
+        .dtype("int")
+        .set_default(max_library_functions)
+        .action([](parser_t& p) {
+            max_library_functions = p.get<size_t>("max-library-functions");
+        });
+    parser
         .add_argument(
             { "--coverage" },
             "Enable recording the code coverage. If instrumenting in coverage mode ('-M "
@@ -1007,17 +1031,25 @@ main(int argc, char** argv)
             [](parser_t& p) { allow_overlapping = p.get<bool>("allow-overlapping"); });
     parser
         .add_argument(
-            { "--parse-all-modules" },
-            "By default, rocprof-sys simply requests Dyninst to provide all the "
-            "procedures "
-            "in the application image. If this option is enabled, rocprof-sys will "
-            "iterate "
-            "over all the modules and extract the functions. Theoretically, it should be "
-            "the same but the data is slightly different, possibly due to weak binding "
-            "scopes. In general, enabling option will probably have no visible effect")
+            { "--exclude-internal-lib-paths" },
+            "By default, each internal library is excluded only at the path linked at "
+            "startup. When enabled, every on-disk path matching an internal library's "
+            "filename is excluded. Useful when the application dlopen()s a different "
+            "copy at runtime.")
         .max_count(1)
-        .action(
-            [](parser_t& p) { parse_all_modules = p.get<bool>("parse-all-modules"); });
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            exclude_internal_lib_paths = p.get<bool>("exclude-internal-lib-paths");
+        });
+    parser
+        .add_argument(
+            { "--exe-only" },
+            "Shorthand for excluding every shared library from instrumentation, leaving "
+            "only the main executable. Only takes effect during runtime instrumentation; "
+            "ignored in binary-rewrite mode.")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) { exe_only = p.get<bool>("exe-only"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DYNINST OPTIONS]" }, "");
@@ -1196,6 +1228,14 @@ main(int argc, char** argv)
             simulate        = true;
             include_uninstr = true;
         }
+    }
+
+    // --exe-only is only meaningful for runtime instrumentation
+    if(binary_rewrite && exe_only)
+    {
+        verbprintf(0, "Note: '--exe-only' is ignored in binary-rewrite mode. Disabling "
+                      "it...\n");
+        exe_only = false;
     }
 
     if(binary_rewrite && outfile.empty())
@@ -1446,30 +1486,44 @@ main(int argc, char** argv)
                   (binary_rewrite) ? "ON" : "OFF", (_rewrite) ? "ON" : "OFF");
     }
 
-    process_t*     app_thread = nullptr;
-    binary_edit_t* app_binary = nullptr;
+    //----------------------------------------------------------------------------------//
+    //
+    //  Fetch image, objects, modules, and procedures
+    //
+    //----------------------------------------------------------------------------------//
 
-    // These take little time to execute
-    verbprintf(1, "Getting the address space image, objects, and modules...\n");
-    image_t* app_image   = addr_space->getImage();
-    auto     app_objects = std::vector<object_t*>{};
+    verbprintf(1, "Getting the address space image...\n");
+    image_t* app_image = addr_space->getImage();
+
+    verbprintf(1, "Getting and filtering the address space objects...\n");
+    // Dyninst indicates that shared libs should have one module, and executables have
+    // one or more. However, if the shared lib has debug info, Dyninst will generate a
+    // module per DWARF compilation unit
+    auto app_objects = std::vector<object_t*>{};
     app_image->getObjects(app_objects);  // API does not return objects
-    std::vector<module_t*>* app_modules = app_image->getModules();
+    auto filtered_objects = filter_objects(&app_objects);
 
-    auto objects =
-        std::unordered_set<object_t*>{ app_objects.begin(), app_objects.end() };
-    std::unordered_set<module_t*>    modules   = {};
-    std::unordered_set<procedure_t*> functions = {};
-
-    // This may take a long time for modules that have many procedures
-    verbprintf(
-        2, "Filtering modules based on internal libraries and user-defined filters...\n");
-    auto filtered_modules = filter_modules(app_modules);
+    verbprintf(1, "Getting and filtering the object modules...\n");
+    auto app_modules      = get_modules(&filtered_objects);
+    auto filtered_modules = filter_modules(app_modules.get());
+    app_modules.reset();
     process_modules(filtered_modules);
 
-    verbprintf(1, "Getting available procedures based on filtered modules...\n");
-    std::vector<procedure_t*> app_functions =
-        get_procedures(app_image, &filtered_modules, include_uninstr);
+    verbprintf(1, "Getting available procedures from the modules...\n");
+    auto app_functions = get_procedures(&filtered_modules, include_uninstr);
+    // Procedure filtering is applied later when checking whether to instrument the
+    // procedure as we also output information about how the heuristics affected
+    // the set of instrumented procedures
+
+    if(!app_functions || app_functions->empty())
+    {
+        verbprintf(
+            0, "Warning! No functions detected! Fetching from the image directly...\n");
+        app_functions.reset(app_image->getProcedures(include_uninstr));
+    }
+
+    std::unordered_set<object_t*>    objects   = {};
+    std::unordered_set<procedure_t*> functions = {};
 
     //----------------------------------------------------------------------------------//
     //
@@ -1502,14 +1556,13 @@ main(int argc, char** argv)
         }
     };
 
-    if(!app_functions.empty())
+    if(app_functions && !app_functions->empty())
     {
-        for(auto* itr : app_functions)
+        for(auto* itr : *app_functions)
         {
             if(itr->getModule())
             {
                 functions.emplace(itr);
-                modules.emplace(itr->getModule());
                 if(itr->getModule()->getObject())
                     objects.emplace(itr->getModule()->getObject());
             }
@@ -1530,52 +1583,12 @@ main(int argc, char** argv)
     }
     else
     {
-        verbprintf(
-            0, "Warning! No functions in application. Enabling parsing all modules...\n");
-        parse_all_modules = true;
+        verbprintf(0, "Warning! No functions in application...\n");
     }
 
-    if(parse_all_modules && app_modules && !app_modules->empty())
-    {
-        for(auto* itr : *app_modules)
-        {
-            modules.emplace(itr);
-            if(itr->getObject()) objects.emplace(itr->getObject());
-        }
-
-        verbprintf(2,
-                   "Adding the procedures from %zu modules found in the app image...\n",
-                   modules.size());
-        for(auto* itr : modules)
-        {
-            auto* procedures = itr->getProcedures(include_uninstr);
-            if(procedures)
-            {
-                verbprintf(2, "Processing %zu procedures found in the %s module...\n",
-                           procedures->size(), get_name(itr).data());
-                for(auto* pitr : *procedures)
-                {
-                    if(!pitr->isInstrumentable() && !simulate && !include_uninstr)
-                        continue;
-                    functions.emplace(pitr);
-                    auto _modfn = module_function{ itr, pitr };
-                    module_names.insert(_modfn.module_name);
-                    _insert_module_function(available_module_functions, _modfn);
-                    _add_overlapping(itr, pitr);
-                }
-            }
-        }
-    }
-    else if(parse_all_modules)
-    {
-        verbprintf(0, "Warning! No modules in application...\n");
-    }
-
-    verbprintf(1, "\n");
-    verbprintf(1, "Found %zu functions in %zu modules across %zu objects\n",
-               functions.size(), modules.size(), objects.size());
-    for(auto* obj : objects)
-        verbprintf(1, "  [object] %s\n", obj->name().c_str());
+    // The procedure pointers have been copied into the objects/modules/functions
+    // sets and module_function entries
+    app_functions.reset();
 
     if(debug_print || verbose_level > 2)
     {
@@ -1618,6 +1631,9 @@ main(int argc, char** argv)
     //  Get the derived type of the address space
     //
     //----------------------------------------------------------------------------------//
+
+    process_t*     app_thread = nullptr;
+    binary_edit_t* app_binary = nullptr;
 
     is_static_exe = addr_space->isStaticExecutable();
 

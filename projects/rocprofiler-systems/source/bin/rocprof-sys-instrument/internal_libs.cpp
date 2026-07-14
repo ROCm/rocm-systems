@@ -322,11 +322,14 @@ get_internal_basic_libs_impl()
 
     const auto _3rdparty_libs = strview_init_t{
         // shared libs potentially used by timemory
-        "libcaliper.so", "liblikwid.so", "libprofiler.so", "libtcmalloc.so",
-        "libtcmalloc_and_profiler.so", "libtcmalloc_debug.so", "libtcmalloc_minimal.so",
+        "libcaliper.so",
+        "liblikwid.so",
+        "libprofiler.so",
+        "libtcmalloc.so",
+        "libtcmalloc_and_profiler.so",
+        "libtcmalloc_debug.so",
+        "libtcmalloc_minimal.so",
         "libtcmalloc_minimal_debug.so",
-        // shared libs that Dyninst will fail to instrument correctly
-        "libclang-cpp.so", "libLLVM.so"
     };
 
     for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
@@ -352,7 +355,7 @@ get_internal_libs_impl()
     {
         if(!itr.empty())
         {
-            if(parse_all_modules)
+            if(exclude_internal_lib_paths)
             {
                 auto _lib_v = find_libraries(itr);
                 if(!_lib_v.empty())
