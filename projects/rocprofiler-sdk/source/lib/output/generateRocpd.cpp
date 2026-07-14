@@ -1693,7 +1693,6 @@ write_rocpd(
                                      &get_queue_id](const auto& _gen) {
         auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_graph_launch");
         auto   _deferred         = sql::deferred_transaction{db.conn};
-        size_t launch_idx        = 1;
 
         for(auto pitr : _gen)
         {
@@ -1721,7 +1720,6 @@ write_rocpd(
                     db,
                     "rocpd_graph_launch{{uuid}}",
                     {
-                        insert_value("id", launch_idx++),
                         insert_value("nid", node_id),
                         insert_value("pid", this_pid),
                         insert_value("tid", itr.thread_id),
