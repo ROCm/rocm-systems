@@ -3,28 +3,20 @@
 
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
-  2. Setting LD_LIBRARY_PATH to override JAX's bundled RCCL
-  3. Cloning the matching JAX test sources (sparse checkout of ROCm/jax)
-  4. Setting XLA environment variables for ROCm
-  5. Running 10 collective smoke tests via pytest
+  2. Verifying that LD_LIBRARY_PATH overrides JAX's bundled RCCL
+  3. Cloning the matching JAX test sources (sparse checkout)
+  4. Running pytest on pmap_test.py and shard_map_test.py
 
 Usage from GitHub Actions:
   python .github/scripts/test_jax_collective.py \
       --artifact-dir ./build \
       --jax-src ./jax-src \
       --results-log ./jax_collective_results.log
-
-Local prototyping (no RCCL override):
-  python .github/scripts/test_jax_collective.py \
-      --jax-src ./jax-src \
-      --results-log ./jax_collective_results.log \
-      --skip-rccl-override
 """
 
 import argparse
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +25,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 JAX_REPO = "https://github.com/ROCm/jax.git"
-DEFAULT_BRANCH = "jax-v0.10.2-testing"
+JAX_REF = "66918cf7a6adef25e8f71dbebb954e6dd5393109"  # jax-v0.10.2-testing
 
 SMOKE_TESTS = [
     "tests/pmap_test.py::PythonPmapTest::testBasic",
@@ -112,23 +104,32 @@ def setup_xla_environment() -> None:
         log.info("Set %s=%s", key, value)
 
 
-def clone_jax_test_sources(jax_src: Path, branch: str) -> None:
-    """Sparse-clone ROCm/jax to get test sources and test-requirements.txt."""
+def clone_jax_test_sources(jax_src: Path) -> None:
+    """Sparse-clone ROCm/jax at a pinned commit to get test sources."""
     if jax_src.exists() and (jax_src / "tests" / "pmap_test.py").exists():
         log.info("JAX test sources already present at %s, skipping clone", jax_src)
         return
 
-    log.info("Cloning ROCm/jax (branch=%s, sparse) into %s", branch, jax_src)
+    log.info("Cloning ROCm/jax (commit=%s, sparse) into %s", JAX_REF[:12], jax_src)
     subprocess.run(
         [
             "git", "clone",
             "--depth=1",
-            f"--branch={branch}",
             "--filter=blob:none",
             "--sparse",
             JAX_REPO,
             str(jax_src),
         ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "fetch", "--depth=1", "origin", JAX_REF],
+        cwd=jax_src,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", JAX_REF],
+        cwd=jax_src,
         check=True,
     )
     subprocess.run(
@@ -142,28 +143,6 @@ def clone_jax_test_sources(jax_src: Path, branch: str) -> None:
         log.error("pmap_test.py not found after clone")
         sys.exit(1)
     log.info("JAX test sources ready: %s", jax_src)
-
-
-def _pip_install(args: list[str]) -> None:
-    """Install packages using uv pip (preferred) or pip."""
-    if shutil.which("uv"):
-        cmd = ["uv", "pip", "install"] + args
-    else:
-        cmd = [sys.executable, "-m", "pip", "install"] + args
-    log.info("Running: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
-
-
-def install_test_requirements(jax_src: Path) -> None:
-    """Install test dependencies from build/test-requirements.txt."""
-    req_file = jax_src / "build" / "test-requirements.txt"
-    if not req_file.exists():
-        log.warning("build/test-requirements.txt not found, installing minimal deps")
-        _pip_install(["pytest", "pytest-timeout", "hypothesis", "numpy", "absl-py"])
-        return
-
-    log.info("Installing test requirements from %s", req_file)
-    _pip_install(["-r", str(req_file)])
 
 
 def print_environment_info() -> None:
@@ -185,12 +164,12 @@ def print_environment_info() -> None:
     log.info("--- End Environment Info ---")
 
 
-def run_tests(jax_src: Path, results_log: Path, timeout: int) -> int:
+def run_tests(jax_src: Path, results_log: Path) -> int:
     """Run pytest on the 10 collective smoke tests and return exit code."""
     cmd = [
         sys.executable, "-m", "pytest",
         "-sv",
-        f"--timeout={timeout}",
+        "--timeout=120",
         "--tb=short",
     ] + SMOKE_TESTS
 
@@ -221,13 +200,12 @@ def set_github_output(key: str, value: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--artifact-dir",
         type=Path,
-        default=None,
-        help="Directory containing CI-built RCCL artifacts",
+        required=True,
+        help="Directory containing CI-built artifacts",
     )
     parser.add_argument(
         "--jax-src",
@@ -236,82 +214,44 @@ def main() -> None:
         help="Directory to clone JAX test sources into",
     )
     parser.add_argument(
-        "--jax-branch",
-        default=DEFAULT_BRANCH,
-        help=f"ROCm/jax branch for test sources (default: {DEFAULT_BRANCH})",
-    )
-    parser.add_argument(
         "--results-log",
         type=Path,
         default=Path("jax_collective_results.log"),
         help="Path for test results log file",
     )
     parser.add_argument(
-        "--timeout",
-        type=int,
-        default=120,
-        help="Per-test timeout in seconds (default: 120)",
-    )
-    parser.add_argument(
-        "--skip-rccl-override",
-        action="store_true",
-        help="Skip RCCL library override (use system/wheel-bundled RCCL)",
-    )
-    parser.add_argument(
         "--discover-only",
         action="store_true",
         help="Only discover library paths and set GITHUB_OUTPUT, then exit",
     )
-    parser.add_argument(
-        "--skip-clone",
-        action="store_true",
-        help="Skip cloning JAX sources (assume already present)",
-    )
-    parser.add_argument(
-        "--skip-install-deps",
-        action="store_true",
-        help="Skip installing test dependencies",
-    )
 
     args = parser.parse_args()
 
-    # Step 1: RCCL library discovery and override
-    if not args.skip_rccl_override:
-        if args.artifact_dir is None:
-            log.error("--artifact-dir required unless --skip-rccl-override is set")
-            sys.exit(1)
-        rccl_lib = find_rccl_library(args.artifact_dir)
-        rccl_lib_dir = rccl_lib.parent
-        rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
+    # Step 1: Discover RCCL library path
+    rccl_lib = find_rccl_library(args.artifact_dir)
+    rccl_lib_dir = rccl_lib.parent
+    rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
 
-        set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
-        if rocm_lib_dir:
-            set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
+    set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
+    if rocm_lib_dir:
+        set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
 
-        if args.discover_only:
-            return
-
-        setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
-        verify_rccl_override(rccl_lib_dir)
-    elif args.discover_only:
+    if args.discover_only:
         return
 
-    # Step 2: Set XLA environment variables
+    # Step 2: Set up LD_LIBRARY_PATH and verify override
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    verify_rccl_override(rccl_lib_dir)
+
+    # Step 3: Set XLA environment variables
     setup_xla_environment()
 
-    # Step 3: Clone JAX test sources
-    if not args.skip_clone:
-        clone_jax_test_sources(args.jax_src, args.jax_branch)
+    # Step 4: Clone JAX test sources
+    clone_jax_test_sources(args.jax_src)
 
-    # Step 4: Install test dependencies
-    if not args.skip_install_deps:
-        install_test_requirements(args.jax_src)
-
-    # Step 5: Print environment info (also validates JAX can see GPUs)
+    # Step 5: Print environment info and run tests
     print_environment_info()
-
-    # Step 6: Run smoke tests
-    exit_code = run_tests(args.jax_src, args.results_log, args.timeout)
+    exit_code = run_tests(args.jax_src, args.results_log)
     sys.exit(exit_code)
 
 

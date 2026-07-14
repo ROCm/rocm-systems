@@ -91,9 +91,6 @@ jobs:
       - name: Run JAX collective smoke tests
         timeout-minutes: 10
         env:
-          XLA_PYTHON_CLIENT_ALLOCATOR: default
-          XLA_PYTHON_CLIENT_PREALLOCATE: "false"
-          XLA_FLAGS: "--xla_gpu_force_compilation_parallelism=1 --xla_gpu_enable_nccl_comm_splitting=false --xla_gpu_enable_command_buffer= --xla_gpu_enable_cublaslt=false"
           NCCL_DEBUG: INFO
         run: |
           python rocm-systems/.github/scripts/test_jax_collective.py \
