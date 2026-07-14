@@ -63,15 +63,44 @@ case "${gpu_arch}" in
   *) printf 'unsupported CONSAN_GPU_ARCH: %s\n' "${gpu_arch}" >&2; exit 2 ;;
 esac
 
-tier1_regex() {
+tier1_guarded_regex() {
   case "${gpu_arch}" in
     gfx1201)
-      printf '%s' '^(iree/tests/e2e/matmul/e2e_matmul_rocm_.*rdna4_tileandfusewmma.*rocm_hip|iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan(_configured)?\.mlir)$'
+      printf '%s' '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*large_rdna4_tileandfusewmma.*_rocm_hip$'
       ;;
     gfx950)
       printf '%s' '^(iree/tests/e2e/matmul/e2e_(batch_)?matmul_cdna4_.*tileandfusemfma.*_rocm_hip|iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan_configured\.mlir)$'
       ;;
   esac
+}
+
+tier1_compat_regex() {
+  case "${gpu_arch}" in
+    gfx1201)
+      printf '%s' '^(iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan(_configured)?\.mlir)$'
+      ;;
+    gfx950)
+      printf '%s' ''
+      ;;
+  esac
+}
+
+validate_selection_count() {
+  local build_dir="$1"
+  local regex="$2"
+  local expected="$3"
+  local label="$4"
+  local listing
+  listing="$(ctest --test-dir "${build_dir}" -N -R "${regex}")"
+  local count
+  count="$(grep -c 'Test  *#' <<<"${listing}" || true)"
+  if [[ "${count}" != "${expected}" ]]; then
+    printf '%s\n' "${listing}"
+    printf '%s selection count mismatch: expected=%s actual=%s regex=%s\n' \
+      "${label}" "${expected}" "${count}" "${regex}" >&2
+    return 1
+  fi
+  printf '%s selection validated: %s tests\n' "${label}" "${count}"
 }
 
 tier0_live_regex() {
@@ -123,9 +152,20 @@ run_iree_profile() {
   if [[ -n "${engine}" ]]; then
     profile_env+=("RJ_CONSAN_MOI_ENGINE=${engine}")
   fi
+  if [[ "${gpu_arch}" == gfx1201 ]]; then
+    case "${engine}" in
+      record_replay|sampled)
+        profile_env+=("RJ_CONSAN_MAX_PATCHES=4")
+        ;;
+      inline_shadow)
+        profile_env+=("RJ_CONSAN_MAX_PATCHES=1" "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id")
+        ;;
+    esac
+  fi
   if [[ "${guarded}" == 1 ]]; then
     profile_env+=("RJ_CONSAN_REQUIRE_PATCH=1")
-    if [[ "${engine}" == record_replay || "${engine}" == sampled ]]; then
+    if [[ "${engine}" == record_replay || "${engine}" == sampled || \
+          "${engine}" == inline_shadow ]]; then
       profile_env+=("RJ_CONSAN_MOI_REQUIRE_RECORDS=1")
     fi
   fi
@@ -147,15 +187,34 @@ run_tier0() {
 }
 
 run_tier1() {
-  local regex
-  regex="$(tier1_regex)"
+  local guarded_regex
+  guarded_regex="$(tier1_guarded_regex)"
+  local guarded_count
+  case "${gpu_arch}" in
+    gfx1201) guarded_count=5 ;;
+    gfx950) guarded_count=10 ;;
+  esac
+  validate_selection_count "${iree_build}" "${guarded_regex}" "${guarded_count}" \
+    "tier1 guarded ${gpu_arch} IREE"
   printf '\n=== tier1 architecture: %s ===\n' "${gpu_arch}"
   printf '\n=== tier1: independent hip-moi semantic controls ===\n'
   run_ctest "${hip_moi_build}" '.*' 120
-  run_iree_profile supercollider '' "${regex}" 60 1
-  run_iree_profile moi record_replay "${regex}" 60 1
-  run_iree_profile moi sampled "${regex}" 60 1
-  run_iree_profile moi inline_shadow "${regex}" 60 1
+  run_iree_profile supercollider '' "${guarded_regex}" 60 1
+  run_iree_profile moi record_replay "${guarded_regex}" 60 1
+  run_iree_profile moi sampled "${guarded_regex}" 60 1
+  run_iree_profile moi inline_shadow "${guarded_regex}" 60 1
+
+  local compat_regex
+  compat_regex="$(tier1_compat_regex)"
+  if [[ -n "${compat_regex}" ]]; then
+    validate_selection_count "${iree_build}" "${compat_regex}" 3 \
+      "tier1 compatibility ${gpu_arch} IREE"
+    printf '\n=== tier1: scan/softmax compatibility (unguarded) ===\n'
+    run_iree_profile supercollider '' "${compat_regex}" 60
+    run_iree_profile moi record_replay "${compat_regex}" 60
+    run_iree_profile moi sampled "${compat_regex}" 60
+    run_iree_profile moi inline_shadow "${compat_regex}" 60
+  fi
 }
 
 run_tier2() {
