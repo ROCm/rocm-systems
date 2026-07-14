@@ -618,6 +618,15 @@ Full gfx950 support means:
   synchronize packet completes just before CLR's asynchronous queue-error
   callback. Queue/signal ordering remains under reduction; no sleep or weakened
   expectation is accepted.
+- 2026-07-14: `X1SC` and `X1F` are `DONE`. Commit `6315f2b40d` gives generated
+  `s_trap` semantics to every AMDGPU profile, propagates an unhandled trap
+  through simulated KFD's ROCR error payload/event, blocks the faulted queue,
+  aborts resident siblings, and suppresses normal completion of faulting and
+  fetched successor packets. A VM regression guards the exception mask/event
+  and both pending signals. The intentional trap test disables its own core
+  limit so CLR reports the HIP error instead of deliberately aborting first.
+  The complete corrected gfx1201 emulator focused gate now passes 37/37; the
+  shared WaveTrap plus ConSan unit selection passes 256/256.
 
 ## DAG Overview
 
@@ -861,9 +870,9 @@ flowchart LR
   D2B["D2B: Final Result Tables"]:::done
   X1A["X1A: Local gfx1201 Synthetic Regression"]:::done
   X1E["X1E: gfx1201 Emulator Harness"]:::done
-  X1SC["X1SC: SuperCollider And Trap Semantics"]:::active
+  X1SC["X1SC: SuperCollider And Trap Semantics"]:::done
   X1SA["X1SA: Sampled Immediate Semantics"]:::done
-  X1F["X1F: Focused Emulator Gate"]:::active
+  X1F["X1F: Focused Emulator Gate"]:::done
   X1H["X1H: hip-moi Emulator Tier"]:::active
   X1I0["X1I0: IREE Build And Emulator Launcher"]:::done
   X1IS["X1IS: Selected IREE Emulator Tier"]:::active
@@ -2621,13 +2630,13 @@ Sub-DAG:
 - `X1E` (DONE): build gfx1201 HIP controls and launch them through the
   `gfx1201_r9700.json` Rocjitsu model. Require real hook patch records and a
   forced-spill live-value round trip.
-- `X1SC` (ACTIVE): admit the compiler's non-LDS-ordering `global_inv`, use
+- `X1SC` (DONE): admit the compiler's non-LDS-ordering `global_inv`, use
   automatic scratch selection, and implement correct emulator `s_trap`
   dispatch-failure propagation.
 - `X1SA` (DONE): correct the sampled immediate checker's low-word load order;
   both positive immediate controls pass under emulation.
-- `X1F` (ACTIVE): run the corrected 37-test focused gfx1201 filter. The current
-  result is 36/37; the only residual reaches Rocjitsu's unimplemented trap.
+- `X1F` (DONE): run the corrected 37-test focused gfx1201 filter. The complete
+  focused emulator gate passes 37/37.
 - `X1H` (ACTIVE): build and run every `LOCAL_TESTING.md` hip-moi gfx1201 control
   through the emulator.
 - `X1I0` (DONE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
