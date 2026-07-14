@@ -54,6 +54,16 @@ const char *dbt_execution_backend_name(DbtExecutionBackend backend);
 std::string resolve_dbt_simulator_config_path(const std::string &dbt_config_path,
                                               const std::string &simulator_config);
 
+/// @brief Reject guest limits that exceed a simulator execution target.
+/// @details Simulator-backed discovery must not advertise resource limits that
+/// the selected target cannot execute. Limits not represented in KFD device
+/// topology, such as per-kernel VGPR usage, remain the translator/runtime's
+/// responsibility.
+/// @throws std::runtime_error when an execution-relevant guest limit is not
+/// supported by the simulator device.
+void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
+                                          const KfdDeviceConfig &simulator_device);
+
 /// @brief Convert a generated FlatBuffers DBT guest table into runtime config.
 ///
 /// @details Shared by the DBT-only loader and the full simulation config

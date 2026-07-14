@@ -525,7 +525,7 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
   EXPECT_STREQ(config::dbt_execution_backend_name(dbt.execution_backend), "hardware");
 }
 
-TEST(ConfigLoaderTest, EmptyDbtExecutionBackendUsesHardware) {
+TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
   const std::filesystem::path path =
       write_temp_config("rocjitsu_empty_dbt_backend_config_test.json", R"({
         "dbt_guest": {
@@ -534,10 +534,46 @@ TEST(ConfigLoaderTest, EmptyDbtExecutionBackendUsesHardware) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
   std::filesystem::remove(path);
+}
 
-  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
+TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_misspelled_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backed": "simulator"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
+  config::DbtGuestConfig guest;
+  guest.enabled = true;
+  guest.execution_backend = config::DbtExecutionBackend::Simulator;
+  guest.guest_device.present = true;
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 32;
+  guest.guest_device.max_waves_per_simd = 8;
+  guest.guest_device.wave_front_size = 64;
+
+  config::KfdDeviceConfig simulator;
+  simulator.present = true;
+  simulator.lds_size_kb = 64;
+  simulator.max_slots_scratch_cu = 32;
+  simulator.max_waves_per_simd = 8;
+  simulator.wave_front_size = 64;
+
+  EXPECT_NO_THROW(config::validate_dbt_simulator_device_limits(guest, simulator));
+  guest.guest_device.lds_size_kb = 65;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  guest.guest_device.lds_size_kb = 64;
+  guest.guest_device.max_slots_scratch_cu = 33;
+  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {

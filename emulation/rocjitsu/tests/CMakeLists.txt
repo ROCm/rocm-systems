@@ -533,9 +533,6 @@ set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
 )
-set(RJ_CDNA4_TO_CDNA3_MISSING_SIM_DBT_CONFIG
-    "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_missing_simulator.json"
-)
 set(RJ_HIP_TEST_ARCH
     "gfx950"
     CACHE STRING
@@ -556,11 +553,6 @@ get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
 get_filename_component(
     RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME
     "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}"
-    NAME
-)
-get_filename_component(
-    RJ_CDNA4_TO_CDNA3_MISSING_SIM_DBT_CONFIG_NAME
-    "${RJ_CDNA4_TO_CDNA3_MISSING_SIM_DBT_CONFIG}"
     NAME
 )
 get_filename_component(
@@ -637,20 +629,52 @@ target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
 add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
 rj_add_test(
-    NAME "GuestKfdFailureTest.MissingSimulatorConfigFailsCleanly"
+    NAME "GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_MISSING_SIM_DBT_CONFIG} --
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
-        --gtest_filter=GuestKfdFailureTest.MissingSimulatorConfigFailsCleanly
+        --gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     INSTALL_COMMAND
         "\${RJ_INSTALLED_BINDIR}/rocjitsu"
         "--config"
-        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_TO_CDNA3_MISSING_SIM_DBT_CONFIG_NAME}"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
         "bin/guest_kfd_test"
-        "--gtest_filter=GuestKfdFailureTest.MissingSimulatorConfigFailsCleanly"
+        "--gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
 )
 if(RJ_HAS_GFX1201_GPU)
     add_test(

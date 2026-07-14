@@ -72,7 +72,7 @@ void expect_float_vectors_near(const std::vector<float> &actual, const std::vect
   uint32_t mismatches = 0;
   for (size_t i = 0; i < actual.size(); ++i) {
     const float diff = std::fabs(actual[i] - expected[i]);
-    if (diff > tolerance) {
+    if (!std::isfinite(actual[i]) || !std::isfinite(expected[i]) || diff > tolerance) {
       if (mismatches < 8)
         ADD_FAILURE() << label << " mismatch at i=" << i << ": got=" << actual[i]
                       << " expected=" << expected[i] << " diff=" << diff;
@@ -575,7 +575,8 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
 
 void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
                                     const DispatchTarget &target, uint32_t shared_bytes,
-                                    std::vector<float> *observed = nullptr) {
+                                    std::vector<float> *observed = nullptr,
+                                    std::vector<float> *reference = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
@@ -664,7 +665,18 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   std::vector<float> c_init(kCElements, kSentinel);
   std::vector<float> c_host(kCElements);
   fill_seeded_half_inputs(a_host, 0xA0D4'1001u);
-  fill_seeded_half_inputs(b_host, 0xB0D4'1001u);
+  if (reference) {
+    // An identity RHS gives every output element a cheap closed-form CPU
+    // reference while still exercising the full translated 1024^3 kernel.
+    std::fill(b_host.begin(), b_host.end(), 0);
+    for (uint32_t i = 0; i < kK; ++i)
+      b_host[static_cast<size_t>(i) * kN + i] = 0x3c00; // fp16 1.0
+    reference->resize(kCElements);
+    for (size_t i = 0; i < kCElements; ++i)
+      (*reference)[i] = util::f16_to_f32(a_host[i]);
+  } else {
+    fill_seeded_half_inputs(b_host, 0xB0D4'1001u);
+  }
   ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
@@ -724,7 +736,8 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
 
 void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
                                 const char *symbol_name, uint32_t shared_bytes,
-                                std::vector<float> *observed = nullptr) {
+                                std::vector<float> *observed = nullptr,
+                                std::vector<float> *reference = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
   ASSERT_LE(shared_bytes, 65536u)
@@ -817,9 +830,25 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   std::vector<uint16_t> v_host(kKVElements);
   std::vector<float> o_init(kOElements, -12345.0f);
   std::vector<float> o_host(kOElements);
-  fill_seeded_half_inputs(q_host, 0xF1A5'0001u);
-  fill_seeded_half_inputs(k_host, 0xF1A5'0002u);
-  fill_seeded_half_inputs(v_host, 0xF1A5'0003u);
+  if (reference) {
+    // Zero Q/K makes every attention score equal. Repeating one V row across
+    // all keys means both causal and non-causal softmax produce that row, so
+    // every output element has a full, inexpensive CPU reference.
+    std::fill(q_host.begin(), q_host.end(), 0);
+    std::fill(k_host.begin(), k_host.end(), 0);
+    std::vector<uint16_t> v_row(kHeadDim);
+    fill_seeded_half_inputs(v_row, 0xF1A5'0003u);
+    for (uint32_t kv = 0; kv < kKV; ++kv)
+      std::copy(v_row.begin(), v_row.end(), v_host.begin() + static_cast<size_t>(kv) * kHeadDim);
+    reference->resize(kOElements);
+    for (uint32_t q = 0; q < kQ; ++q)
+      for (uint32_t d = 0; d < kHeadDim; ++d)
+        (*reference)[static_cast<size_t>(q) * kHeadDim + d] = util::f16_to_f32(v_row[d]);
+  } else {
+    fill_seeded_half_inputs(q_host, 0xF1A5'0001u);
+    fill_seeded_half_inputs(k_host, 0xF1A5'0002u);
+    fill_seeded_half_inputs(v_host, 0xF1A5'0003u);
+  }
   ASSERT_EQ(hsa_memory_copy(q_dev, q_host.data(), kQBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(k_dev, k_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(v_dev, v_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
@@ -1004,16 +1033,15 @@ TEST(Cdna4ToCdna3DbtGuestTest, TritonBufferAsyncMatmulDispatchAndRun) {
   DispatchTarget guest = find_gpu_target_named("gfx950");
   ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
                                     << join_seen_isas(guest.seen_gpu_isas);
-
   const std::vector<uint8_t> guest_elf =
       load_gfx950_code_object("triton_cdna4_matmul_buffer_async_1024");
   ASSERT_FALSE(guest_elf.empty());
 
   std::vector<float> observed;
-  ASSERT_NO_FATAL_FAILURE(run_buffer_async_triton_matmul(guest_elf, guest, 65536, &observed));
-  ASSERT_FALSE(observed.empty());
-  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
-                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
+  std::vector<float> expected;
+  ASSERT_NO_FATAL_FAILURE(
+      run_buffer_async_triton_matmul(guest_elf, guest, 65536, &observed, &expected));
+  expect_float_vectors_near(observed, expected, 0.02f, "guest DBT buffer async Triton matmul");
 }
 
 TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
@@ -1025,17 +1053,15 @@ TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
   DispatchTarget guest = find_gpu_target_named("gfx950");
   ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
                                     << join_seen_isas(guest.seen_gpu_isas);
-
   const std::vector<uint8_t> guest_elf =
       load_gfx950_code_object("triton_cdna4_flash_attention_no_async_1024");
   ASSERT_FALSE(guest_elf.empty());
 
   std::vector<float> observed;
+  std::vector<float> expected;
   ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
-      guest_elf, guest, "flash_attention_fwd_no_async_kernel.kd", 65536, &observed));
-  ASSERT_FALSE(observed.empty());
-  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
-                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
+      guest_elf, guest, "flash_attention_fwd_no_async_kernel.kd", 65536, &observed, &expected));
+  expect_float_vectors_near(observed, expected, 0.02f, "guest DBT flash attention no-async");
 }
 
 TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
@@ -1047,17 +1073,15 @@ TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
   DispatchTarget guest = find_gpu_target_named("gfx950");
   ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
                                     << join_seen_isas(guest.seen_gpu_isas);
-
   const std::vector<uint8_t> guest_elf =
       load_gfx950_code_object("triton_cdna4_flash_attention_buffer_async_1024");
   ASSERT_FALSE(guest_elf.empty());
 
   std::vector<float> observed;
+  std::vector<float> expected;
   ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
-      guest_elf, guest, "flash_attention_fwd_async_buffer_kernel.kd", 65536, &observed));
-  ASSERT_FALSE(observed.empty());
-  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
-                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
+      guest_elf, guest, "flash_attention_fwd_async_buffer_kernel.kd", 65536, &observed, &expected));
+  expect_float_vectors_near(observed, expected, 0.02f, "guest DBT flash attention buffer-async");
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {

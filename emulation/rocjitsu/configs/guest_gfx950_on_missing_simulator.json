@@ -1,9 +1,0 @@
-{
-  "dbt_guest": {
-    "enabled": true,
-    "guest_isa": "gfx950",
-    "host_isa": "gfx942",
-    "execution_backend": "simulator",
-    "simulator_config": "missing_simulator_config.json"
-  }
-}

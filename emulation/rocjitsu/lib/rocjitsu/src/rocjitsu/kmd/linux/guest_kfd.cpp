@@ -534,7 +534,7 @@ void GuestKfd::TopologyOverlay::release_after_fork() {
 GuestKfd::GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver)
     : config_(std::move(config)), execution_driver_(execution_driver),
       overlay_(std::make_unique<TopologyOverlay>()),
-      owns_execution_driver_open_(execution_driver != nullptr) {
+      owns_execution_driver_open_(execution_driver && execution_driver->fd() >= 0) {
   libc_passthrough().resolve();
   guest_ = gpu_info_from_config(config_.guest_device,
                                 std::max(1u, config_.guest_device.num_shader_engines));
@@ -608,6 +608,10 @@ bool GuestKfd::ensure_ready() {
     return true;
 
   std::lock_guard lock(mutex_);
+  return ensure_ready_locked();
+}
+
+bool GuestKfd::ensure_ready_locked() {
   if (ready_.load(std::memory_order_acquire))
     return true;
   if (!config_.enabled || !config_.guest_device.present) {
@@ -641,37 +645,44 @@ bool GuestKfd::ensure_ready() {
 bool GuestKfd::prepare_for_discovery() { return ensure_ready(); }
 
 int GuestKfd::open() {
-  for (;;) {
-    if (!ensure_ready())
+  std::lock_guard lock(mutex_);
+  if (!ensure_ready_locked())
+    return -1;
+
+  bool opened_execution_driver = false;
+  if (execution_driver_ && !owns_execution_driver_open_) {
+    const int execution_fd = execution_driver_->open();
+    if (execution_fd < 0)
       return -1;
-    std::lock_guard lock(mutex_);
-    bool opened_execution_driver = false;
-    if (execution_driver_ && !owns_execution_driver_open_) {
-      const int execution_fd = execution_driver_->open();
-      if (execution_fd < 0)
-        return -1;
-      real_kfd_fd_.store(execution_fd, std::memory_order_release);
-      owns_execution_driver_open_ = true;
-      opened_execution_driver = true;
-    }
-    int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
-    if (ready_.load(std::memory_order_acquire) && kfd_fd >= 0) {
-      // Keep the real /dev/kfd fd internal to the driver. Applications receive
-      // ordinary dup fds, so close(fd) releases that fd number immediately while
-      // the hidden real fd keeps host-KFD forwarding alive until the last
-      // app-facing open/dup reference is closed.
-      int app_fd = libc_passthrough().fcntl(kfd_fd, F_DUPFD_CLOEXEC, 0);
-      if (app_fd < 0) {
-        if (opened_execution_driver) {
-          execution_driver_->close();
-          owns_execution_driver_open_ = false;
-        }
-        return -1;
-      }
-      ++open_refs_;
-      return app_fd;
-    }
+    real_kfd_fd_.store(execution_fd, std::memory_order_release);
+    owns_execution_driver_open_ = true;
+    opened_execution_driver = true;
   }
+
+  const int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
+  if (kfd_fd < 0) {
+    if (opened_execution_driver) {
+      execution_driver_->close();
+      owns_execution_driver_open_ = false;
+    }
+    errno = ENODEV;
+    return -1;
+  }
+
+  // Keep the real /dev/kfd fd internal to the driver. Applications receive
+  // ordinary dup fds, so close(fd) releases that fd number immediately while
+  // the hidden real fd keeps host-KFD forwarding alive until the last
+  // app-facing open/dup reference is closed.
+  const int app_fd = libc_passthrough().fcntl(kfd_fd, F_DUPFD_CLOEXEC, 0);
+  if (app_fd < 0) {
+    if (opened_execution_driver) {
+      execution_driver_->close();
+      owns_execution_driver_open_ = false;
+    }
+    return -1;
+  }
+  ++open_refs_;
+  return app_fd;
 }
 
 bool GuestKfd::retain_local_open() {

@@ -116,6 +116,9 @@ private:
   /// @brief Open real KFD, generate topology, and select the host GPU.
   bool ensure_ready();
 
+  /// @brief Prepare guest discovery while mutex_ is already held.
+  bool ensure_ready_locked();
+
   /// @brief Open the process's real /dev/kfd fd while mutex_ is held.
   bool ensure_real_kfd_locked();
 

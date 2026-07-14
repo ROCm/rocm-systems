@@ -13,9 +13,13 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -37,6 +41,72 @@ constexpr int kStressThreadCount = 8;
 constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
+
+std::optional<std::string> read_active_config_path() {
+  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
+  if (!runtime_dir || !*runtime_dir)
+    return std::nullopt;
+
+  std::ifstream active_config(std::filesystem::path(runtime_dir) / "config_path");
+  std::string configured_path;
+  if (!std::getline(active_config, configured_path) || configured_path.empty())
+    return std::nullopt;
+
+  return std::filesystem::absolute(configured_path).lexically_normal().string();
+}
+
+bool install_inline_dbt_config(const std::string &simulator_config, const char *host_isa,
+                               uint32_t lds_size_kb) {
+  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
+  if (!runtime_dir || !*runtime_dir)
+    return false;
+
+  try {
+    const std::filesystem::path runtime(runtime_dir);
+    std::filesystem::create_directories(runtime);
+    const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
+
+    std::ofstream config(config_path);
+    if (!config)
+      return false;
+    config << R"({
+  "dbt_guest": {
+    "enabled": true,
+    "guest_isa": "gfx950",
+    "host_isa": ")"
+           << host_isa << R"(",
+    "execution_backend": "simulator",
+    "simulator_config": ")"
+           << simulator_config << R"(",
+    "guest_device": {
+      "gpu_id": 38144,
+      "gfx_target_version": 90500,
+      "simd_count": 64,
+      "max_waves_per_simd": 8,
+      "num_shader_engines": 4,
+      "num_cu_per_sh": 4,
+      "simd_per_cu": 4,
+      "wave_front_size": 64,
+      "max_slots_scratch_cu": 32,
+      "lds_size_kb": )"
+           << lds_size_kb << R"(
+    }
+  }
+}
+)";
+    config.close();
+    if (!config)
+      return false;
+
+    std::ofstream active_config(runtime / "config_path");
+    if (!active_config)
+      return false;
+    active_config << config_path.string() << '\n';
+    return active_config.good();
+  } catch (const std::filesystem::filesystem_error &) {
+    return false;
+  }
+}
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
   FILE *file = fopen(path.c_str(), "r");
@@ -271,7 +341,39 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   close(fd);
 }
 
-TEST(GuestKfdFailureTest, MissingSimulatorConfigFailsCleanly) {
+TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
+  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
+  ASSERT_NE(runtime_dir, nullptr);
+  const std::string nonexistent =
+      (std::filesystem::path(runtime_dir) / "nonexistent_simulator_config.json").string();
+  ASSERT_TRUE(install_inline_dbt_config(nonexistent, "gfx942", 64));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
+  const auto simulator_config = read_active_config_path();
+  ASSERT_TRUE(simulator_config.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_config, "gfx940", 64));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
+  const auto simulator_config = read_active_config_path();
+  ASSERT_TRUE(simulator_config.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_config, "gfx942", 65));
+
   errno = 0;
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   EXPECT_EQ(fd, -1);

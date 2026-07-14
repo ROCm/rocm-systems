@@ -730,6 +730,12 @@ public:
       return false;
     }
     rj_vm_ = created_vm;
+    if (!rj_vm_->vm || !rj_vm_->vm->driver() || rj_vm_->vm->driver()->fd() < 0) {
+      util::Logger::debug_print("rocjitsu: local VM did not acquire a KFD open");
+      rj_vm_destroy(rj_vm_);
+      rj_vm_ = nullptr;
+      return false;
+    }
 
     if (rj_vm_->soc) {
       std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
@@ -769,6 +775,13 @@ public:
     return true;
   }
 
+  void destroy_local_vm() {
+    if (!rj_vm_)
+      return;
+    rj_vm_destroy(rj_vm_);
+    rj_vm_ = nullptr;
+  }
+
   void start_local_vm() {
     assert(rj_vm_ != nullptr);
     std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
@@ -799,14 +812,16 @@ public:
               return nullptr;
             }
             execution_driver = rj_vm_->vm->driver();
+            rocjitsu::config::validate_dbt_simulator_device_limits(dbt_guest,
+                                                                   rj_vm_->loaded.device);
           }
 
           auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest), execution_driver);
           if (!guest_driver->prepare_for_discovery()) {
-            if (rj_vm_) {
-              rj_vm_destroy(rj_vm_);
-              rj_vm_ = nullptr;
-            }
+            // GuestKfd owns the simulator's bootstrap open, so destroy it while
+            // the VM and execution driver are still alive.
+            guest_driver.reset();
+            destroy_local_vm();
             in_construction = false;
             return nullptr;
           }
@@ -820,6 +835,7 @@ public:
         }
       } catch (const std::exception &e) {
         util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
+        destroy_local_vm();
         in_construction = false;
         return nullptr;
       }

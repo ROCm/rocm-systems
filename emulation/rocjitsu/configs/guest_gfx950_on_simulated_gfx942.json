@@ -24,7 +24,7 @@
       "wave_front_size": 64,
       "max_slots_scratch_cu": 32,
       "local_mem_size": 309237645312,
-      "lds_size_kb": 160,
+      "lds_size_kb": 64,
       "mem_width": 8192,
       "mem_clk_max": 1600,
       "l1_size_kb": 32,
