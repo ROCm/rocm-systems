@@ -3195,6 +3195,11 @@ class CodeGenerator:
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
 
+        # Sleep has no architectural register effect, but FUNCTIONAL execution
+        # must return to the event loop so peer CUs can make progress.
+        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+            return '  wf.cu().request_functional_yield();'
+
         if cls == 'true_nop':
             return '  (void)wf;'
 
@@ -8004,6 +8009,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
+        # In wave32, EXEC_HI remains addressable as scalar scratch even though
+        # it is not part of the active-lane mask. Wave64-only ISAs can keep the
+        # conventional EXEC accessors in their generated operand code.
+        exec_register = (
+            'exec_raw()' if self.isa_spec.profile.wave_size == 32 else 'exec()'
+        )
+        set_exec_register = (
+            'set_exec_raw' if self.isa_spec.profile.wave_size == 32 else 'set_exec'
+        )
 
         switch_cases = []
         ref_switch_cases = []
@@ -8575,7 +8589,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '  if (ev == 126)\n'
             '    return static_cast<uint32_t>(wf.exec());\n'
             '  if (ev == 127)\n'
-            '    return static_cast<uint32_t>(wf.exec() >> 32);\n'
+            f'    return static_cast<uint32_t>(wf.{exec_register} >> 32);\n'
             '  if (ev >= 128 && ev <= 192)\n'
             '    return static_cast<uint32_t>(ev - 128);\n'
             '  if (ev >= 193 && ev <= 208)\n'
@@ -8692,7 +8706,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
-            '    return wf.exec();\n'
+            f'    return wf.{exec_register};\n'
             '  if (ev >= 128 && ev <= 192)\n'
             '    return static_cast<uint64_t>(ev - 128);\n'
             '  if (ev >= 193 && ev <= 208)\n'
@@ -8773,7 +8787,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev == 127) {\n'
-            '    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
+            f'    wf.{set_exec_register}((wf.{exec_register} & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));\n'
@@ -8801,7 +8815,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 124)\n'
             '    return;\n'
             '  if (ev == 126) {\n'
-            '    wf.set_exec(val);\n'
+            f'    wf.{set_exec_register}(val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));\n'
