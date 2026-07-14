@@ -1401,20 +1401,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  // Get the raw code object data.
-  const void* code_data = reinterpret_cast<const void*>(code_object.handle);
-
-  // The memory-backed reader path passes code_object_size == 0; derive the ELF
-  // size from the image itself so AIE detection has a valid buffer length.
-  size_t code_data_size = code_object_size;
-  if (code_data_size == 0 && code_data) {
-    code_data_size = amd::elf::ElfSize(code_data);
-  }
-
   // Check if this is an AIE code object.
   // For AIE code objects, use a different loading path.
-  if (AMD::AieCode::IsAieCodeObject(code_data, code_data_size)) {
-    return LoadAieCodeObject(agent, code_data, code_data_size, uri, loaded_code_object);
+  if (AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
+                                    code_object_size)) {
+    return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
+                             code_object_size, uri, loaded_code_object);
   }
 
   LoaderOptions loaderOptions;
