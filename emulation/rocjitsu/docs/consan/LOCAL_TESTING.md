@@ -622,6 +622,16 @@ Retained current native logs are:
 - `$WORKSPACE_ROOT/7fab090280-rocjitsu-tests-full.log`
 - `$WORKSPACE_ROOT/7fab090280-rocjitsu-python-pytest.log`
 
+Source revisions used by this final workspace evidence are:
+
+| Project | Revision |
+| --- | --- |
+| `TheRock/rocm-systems` accepted implementation | `7fab090280a2cfe4035d30446f7b177d7054a46e` |
+| `TheRock` build superproject | `d1126aab8597c7ad7fd808e403aa0b9b6c71b1dd` |
+| `iree` | `c1c962b63cd248f1c7b6d9a9ac8288a57d711c46` |
+| `hip-moi` | `a2c1b13b8335781a209b0d8fa548b1ae2795d6cb` |
+| optional `rocjitsu-test-corpus` checkout | `68834ce073a941fc37fca0909344ff17ba8de064` |
+
 Final typed exclusions are part of the supported boundary, rather than hidden
 test skips:
 
