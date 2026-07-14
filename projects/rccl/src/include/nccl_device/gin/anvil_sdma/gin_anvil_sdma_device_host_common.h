@@ -23,6 +23,11 @@ struct ncclGinAnvilIpcBufEntry;
 /** Default off: fused OSS7 copy+signal needs remote GPU signal VA; opt-in via env on MI355. */
 #define NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL_DEFAULT 0u
 
+/** SDMA COPY_LINEAR chunk size (bytes) for Anvil queues. Env:
+ *  NCCL_GIN_ANVIL_SDMA_MAX_COPY_CHUNK or ANVIL_SDMA_MAX_COPY_CHUNK.
+ *  0 disables chunking. When unset on xGMI-capable GPUs, Anvil defaults to 4096. */
+#define NCCL_GIN_ANVIL_SDMA_MAX_COPY_CHUNK_DEFAULT_XGMI 4096u
+
 struct ncclGinAnvilSdmaGPUContext {
   uint32_t layoutMagic;  // NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC
   void** queueHandles;   // [local_pe * numChannels + ch] SdmaQueueDeviceHandle*

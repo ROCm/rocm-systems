@@ -27,7 +27,10 @@
 
 #include <fstream>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
+#include <cctype>
 
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
@@ -39,9 +42,33 @@ namespace anvil {
     LOG_ERROR_EXIT("%s", #call);                                              \
 } while (0)
 
-// HSA agents
+// HSA agents discovered via hsa_iterate_agents (unordered).
 std::vector<hsa_agent_t> cpuAgents_;
 std::vector<hsa_agent_t> gpuAgents_;
+
+static bool hsaAgentIsValid(const hsa_agent_t& agent) { return agent.handle != 0; }
+
+static std::string hsaAgentBusId(const hsa_agent_t& agent) {
+  uint32_t domain = 0;
+  uint32_t bdfid = 0;
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &domain) !=
+      HSA_STATUS_SUCCESS) {
+    return {};
+  }
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &bdfid) !=
+      HSA_STATUS_SUCCESS) {
+    return {};
+  }
+  const unsigned bus = (bdfid >> 8) & 0xff;
+  const unsigned dev = (bdfid >> 3) & 0x1f;
+  const unsigned fn = bdfid & 0x7;
+  char busId[32];
+  std::snprintf(busId, sizeof(busId), "%04x:%02x:%02x.%x", domain, bus, dev, fn);
+  for (char* p = busId; *p != '\0'; ++p) {
+    *p = static_cast<char>(std::tolower(static_cast<unsigned char>(*p)));
+  }
+  return std::string(busId);
+}
 
 hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent, hsa_device_type_t target_device_type,
                                      [[maybe_unused]] void* vector) {
@@ -90,8 +117,8 @@ static const std::string getBusId(int deviceId) {
   return std::string(busIdChar);
 }
 
-SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent,
-                     uint32_t engineId)
+SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
+                     const hsa_agent_t& localAgent, uint32_t engineId, uint32_t maxCopyChunkBytes)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
@@ -145,6 +172,7 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa
       .committedWptr = committedWptr_,
       .cachedHwReadIndex = (uint64_t)*(queue_.Queue_read_ptr_aql),
       .maxWritePtr = (uint64_t)*(queue_.Queue_write_ptr_aql),
+      .maxCopyChunkBytes = maxCopyChunkBytes,
   };
 
   ANVIL_CHECK_HIP_ERROR(
@@ -296,13 +324,73 @@ AnvilLib::~AnvilLib() {
   }
 }
 
-void AnvilLib::querySdmaEngineCounts() {
-  if (gpuAgents_.empty()) {
-    LOG_WARN("anvil: no GPU agents; SDMA engine count unknown");
-    return;
+void AnvilLib::buildGpuAgentMap() {
+  int hipCount = 0;
+  ANVIL_CHECK_HIP_ERROR(hipGetDeviceCount(&hipCount));
+  gpuAgentsByHipDev_.assign(static_cast<size_t>(hipCount), hsa_agent_t{});
+
+  for (const hsa_agent_t& agent : gpuAgents_) {
+    const std::string agentBusId = hsaAgentBusId(agent);
+    if (agentBusId.empty()) continue;
+
+    for (int hipDev = 0; hipDev < hipCount; ++hipDev) {
+      if (hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDev)])) continue;
+      if (getBusId(hipDev) != agentBusId) continue;
+      gpuAgentsByHipDev_[static_cast<size_t>(hipDev)] = agent;
+      LOG_TRACE("anvil: HIP device %d -> HSA agent (bus %s)", hipDev, agentBusId.c_str());
+      break;
+    }
   }
 
-  const hsa_agent_t agent = gpuAgents_[0];
+  for (int hipDev = 0; hipDev < hipCount; ++hipDev) {
+    if (!hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDev)])) {
+      LOG_WARN("anvil: no HSA GPU agent for HIP device %d (bus %s)", hipDev,
+               getBusId(hipDev).c_str());
+    }
+  }
+}
+
+hsa_agent_t AnvilLib::getHipGpuAgent(int hipDeviceId) const {
+  if (hipDeviceId < 0 || hipDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)])) {
+    throw std::runtime_error("anvil: no HSA agent mapped for HIP device " +
+                             std::to_string(hipDeviceId));
+  }
+  return gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)];
+}
+
+void AnvilLib::initSdmaMaxCopyChunkBytes() {
+  static constexpr uint32_t kDefaultXgmiChunkBytes = 4096;
+  const char* envNames[] = {"NCCL_GIN_ANVIL_SDMA_MAX_COPY_CHUNK", "ANVIL_SDMA_MAX_COPY_CHUNK"};
+  for (const char* name : envNames) {
+    const char* e = std::getenv(name);
+    if (!e || !e[0]) continue;
+    char* end = nullptr;
+    const unsigned long v = std::strtoul(e, &end, 10);
+    if (end == e) continue;
+    sdmaMaxCopyChunkBytes_ = static_cast<uint32_t>(v);
+    LOG_TRACE("anvil: SDMA max copy chunk %u bytes (from %s)", sdmaMaxCopyChunkBytes_, name);
+    return;
+  }
+  sdmaMaxCopyChunkBytes_ = numSdmaXgmiEngines_ > 0 ? kDefaultXgmiChunkBytes : 0;
+  if (sdmaMaxCopyChunkBytes_ > 0) {
+    LOG_TRACE("anvil: SDMA max copy chunk %u bytes (default for xGMI engines)",
+              sdmaMaxCopyChunkBytes_);
+  }
+}
+
+void AnvilLib::querySdmaEngineCounts() {
+  hsa_agent_t agent{};
+  for (const hsa_agent_t& hipAgent : gpuAgentsByHipDev_) {
+    if (hsaAgentIsValid(hipAgent)) {
+      agent = hipAgent;
+      break;
+    }
+  }
+  if (!hsaAgentIsValid(agent)) {
+    LOG_WARN("anvil: no mapped HIP GPU agents; SDMA engine count unknown");
+    return;
+  }
   hsa_status_t status = hsa_agent_get_info(
       agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG), &numSdmaEngines_);
   if (status != HSA_STATUS_SUCCESS) {
@@ -339,7 +427,9 @@ void AnvilLib::init() {
       LOG_TRACE("Failure to iterate HSA CPU agents: %#x", status);
     }
 
+    buildGpuAgentMap();
     querySdmaEngineCounts();
+    initSdmaMaxCopyChunkBytes();
 
     SetUpKFD();
     s_kfd_opened = true;
@@ -349,8 +439,9 @@ void AnvilLib::init() {
 SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                                      int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
-  vec.emplace_back(
-      std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));
+  vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId,
+                                               getHipGpuAgent(srcDeviceId), engineId,
+                                               sdmaMaxCopyChunkBytes_));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
@@ -424,20 +515,22 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
 
   if (numSdmaEnginesTotal_ > 0 &&
       static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_) {
-    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u, clamping", engineId,
-             numSdmaEnginesTotal_);
-    engineId = static_cast<int>(static_cast<uint32_t>(engineId) % numSdmaEnginesTotal_);
+    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u", engineId, numSdmaEnginesTotal_);
   }
   return engineId;
 }
 
 int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
   if (srcDeviceId >= 0 && dstDeviceId >= 0 &&
-      srcDeviceId < static_cast<int>(gpuAgents_.size()) &&
-      dstDeviceId < static_cast<int>(gpuAgents_.size())) {
+      srcDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
+      dstDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
+      hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)]) &&
+      hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)])) {
     uint32_t engineMask = 0;
+    const hsa_agent_t srcAgent = gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)];
+    const hsa_agent_t dstAgent = gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)];
     const hsa_status_t status = hsa_amd_memory_get_preferred_copy_engine(
-        gpuAgents_[dstDeviceId], gpuAgents_[srcDeviceId], &engineMask);
+        dstAgent, srcAgent, &engineMask);
     if (status == HSA_STATUS_SUCCESS && engineMask != 0) {
       const int engineId = __builtin_ctz(engineMask);
       if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||

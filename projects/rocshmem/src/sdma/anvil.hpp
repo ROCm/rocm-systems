@@ -45,7 +45,8 @@ namespace anvil {
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent, uint32_t engineId);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId,
+            uint32_t maxCopyChunkBytes = 0);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
@@ -110,13 +111,18 @@ class AnvilLib {
   uint32_t numSdmaEngines_{0};
   uint32_t numSdmaXgmiEngines_{0};
   uint32_t numSdmaEnginesTotal_{0};
+  uint32_t sdmaMaxCopyChunkBytes_{0};
 
+  void buildGpuAgentMap();
+  hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
   void querySdmaEngineCounts();
+  void initSdmaMaxCopyChunkBytes();
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
   int getSdmaEngineId(int srcDeviceId, int dstDeviceId);
 
   std::once_flag init_flag;
+  std::vector<hsa_agent_t> gpuAgentsByHipDev_;
   std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
 };
 
