@@ -4464,26 +4464,6 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
   return ret;
 }
 
-amdsmi_status_t amdsmi_gpu_driver_reload(void) {
-  std::ostringstream ss;
-  AMDSMI_CHECK_INIT();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-    LOG_INFO(ss);
-  }
-  rsmi_status_t ret = rsmi_dev_amdgpu_driver_reload();
-  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(ret);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__
-       << " | Returning: " << smi_amdgpu_get_status_string(amdsmi_status, false);
-    LOG_INFO(ss);
-  }
-  return amdsmi_status;
-}
-
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
   auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
