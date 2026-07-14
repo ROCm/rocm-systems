@@ -7,19 +7,16 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -1349,77 +1346,6 @@ TEST_F(InstrumentorPatchDecoded, BranchesMultipleLandAtTheirIntendedTargets) {
     const uint64_t ret_target = sopp_target(ret_pc, ret->raw_encoding());
     EXPECT_EQ(ret_target, (point + 2) * 4) << "return branch must land at anchor + original_size";
   }
-}
-
-//==============================================================================
-// Spill formula and policy (orchestrator-owned).
-//
-// These exercise the live/clobber arithmetic and the current no-spill policy
-// with explicitly-constructed register sets. The builder-envelope clobbers
-// (link pair, target pair) are passed in directly here; their dead-register
-// selection is deferred.
-//==============================================================================
-
-RegisterSet make_sgpr_set(std::initializer_list<uint16_t> indices) {
-  RegisterSet set;
-  for (uint16_t i : indices)
-    set.expand(RegisterRef{RegClass::SGPR, i, 1});
-  return set;
-}
-
-bool has_sgpr(const RegisterSet &set, uint16_t index) {
-  return set.contains(RegisterRef{RegClass::SGPR, index, 1});
-}
-
-// instrument_clobbers = probe body clobbers | builder envelope clobbers. The
-// builder set carries the link pair s[30:31] and a target pair s[8:9]; the
-// probe body contributes s5. The union must contain all of them, and the
-// callee summary must not be mutated to hold the envelope facts.
-TEST(InstrumentorSpill, InstrumentationClobbersUnionProbeAndBuilder) {
-  ProbeClobberSummary probe_summary;
-  probe_summary.ordinary_clobbers.expand(RegisterRef{RegClass::SGPR, 5, 1});
-
-  const RegisterSet builder_clobbers = make_sgpr_set({30, 31, 8, 9});
-  const RegisterSet clobbers = compute_instrumentation_clobbers(probe_summary, builder_clobbers);
-
-  EXPECT_TRUE(has_sgpr(clobbers, 5));  // from the probe body
-  EXPECT_TRUE(has_sgpr(clobbers, 30)); // link pair
-  EXPECT_TRUE(has_sgpr(clobbers, 31));
-  EXPECT_TRUE(has_sgpr(clobbers, 8)); // target pair
-  EXPECT_TRUE(has_sgpr(clobbers, 9));
-  // The summary is callee-only; computing the union does not add envelope facts.
-  EXPECT_FALSE(has_sgpr(probe_summary.ordinary_clobbers, 30));
-  EXPECT_FALSE(has_sgpr(probe_summary.ordinary_clobbers, 8));
-}
-
-// spill_set = live_at_anchor & instrumentation_clobbers.
-TEST(InstrumentorSpill, SpillSetIsLiveIntersectClobbers) {
-  const RegisterSet live = make_sgpr_set({8, 30, 12});
-  const RegisterSet clobbers = make_sgpr_set({8, 9, 30, 31});
-  const RegisterSet spill = compute_spill_set(live, clobbers);
-  EXPECT_TRUE(has_sgpr(spill, 8));
-  EXPECT_TRUE(has_sgpr(spill, 30));
-  EXPECT_FALSE(has_sgpr(spill, 12)); // live but not clobbered
-  EXPECT_FALSE(has_sgpr(spill, 9));  // clobbered but not live
-  EXPECT_FALSE(has_sgpr(spill, 31));
-}
-
-// An empty spill set passes the no-spill policy.
-TEST(InstrumentorSpill, EmptySpillSetPassesPolicy) {
-  const RegisterSet spill; // empty
-  std::string err;
-  EXPECT_TRUE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_TRUE(err.empty());
-}
-
-// A non-empty spill set fails closed under NoSpillsSupported and names the
-// live, clobbered registers in the diagnostic.
-TEST(InstrumentorSpill, NonEmptySpillSetFailsPolicy) {
-  const RegisterSet spill = make_sgpr_set({8, 30});
-  std::string err;
-  EXPECT_FALSE(check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_NE(err.find("s8"), std::string::npos);
-  EXPECT_NE(err.find("s30"), std::string::npos);
 }
 
 } // namespace

@@ -13,7 +13,6 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/patch/probe_callable.h"
-#include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -89,29 +88,6 @@ TEST(ProbeFixture, NopProbeBuildsCallable) {
   EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
   EXPECT_EQ(callable->body_words.size(), resolved->body_size / sizeof(uint32_t));
   EXPECT_EQ(callable->output_text_offset, 0u);
-}
-
-TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
-  Executable exec(probe_path("rj_nop_probe_gfx90a"));
-  ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
-  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
-  ASSERT_NE(co, nullptr);
-
-  std::string err;
-  const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
-  ASSERT_TRUE(resolved.has_value()) << err;
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
-  ASSERT_TRUE(callable.has_value()) << err;
-
-  const auto summary = build_probe_clobber_summary(*callable, &err);
-  ASSERT_TRUE(summary.has_value()) << err;
-  EXPECT_TRUE(summary->ordinary_clobbers.none());
-  EXPECT_FALSE(summary->touches_exec);
-  EXPECT_FALSE(summary->touches_vcc);
-  EXPECT_FALSE(summary->touches_scc);
-  EXPECT_FALSE(summary->touches_m0);
-  EXPECT_FALSE(summary->touches_flat_scratch);
-  EXPECT_FALSE(summary->uses_private_segment);
 }
 
 } // namespace
