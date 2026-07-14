@@ -4,6 +4,7 @@
 set (rocrtstUtilsTestSrcs utils_timer_gtest.cpp)
 set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} utils_timer_test.cpp)
 set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} utils_cpp11_gtest.cpp)
+set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} sdma_round_robin_test.cpp)
 
 #
 # Header files include path(s).
@@ -11,6 +12,8 @@ set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} utils_cpp11_gtest.cpp)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/utils)
 include_directories(${PROJECT_SOURCE_DIR}/gtest/include)
+# hsa-runtime core headers (core/util/flag.h) for internal flag parsing tests
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
 
 #
 # Build rule to build an executable object
