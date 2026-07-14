@@ -6,7 +6,7 @@
 // Currently consumed by tests/dbi/probe_fixture_test.cpp.
 //
 // This is a __device__ function, not a __global__ kernel. See
-// rj_add_probe_object in cmake/rj_add_device_kernel.cmake for how to build it.
+// cmake/rj_add_probe_object.cmake) for how to build it.
 //
 // The attributes keep the symbol alive and callable:
 //   extern "C"             - unmangled "rj_nop_probe" symbol name

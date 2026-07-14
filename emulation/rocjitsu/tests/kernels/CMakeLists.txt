@@ -102,7 +102,6 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/matmul_tiled.o
         ${KERNEL_OUTPUT_DIR}/vector_add.o
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
-        ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
         ${KERNEL_OUTPUT_DIR}/triton_cdna4_matmul_dynamic_32x32x64.hsaco
         ${KERNEL_OUTPUT_DIR}/triton_cdna4_matmul_buffer_async_1024.hsaco
@@ -134,16 +133,6 @@ set(HAS_PROBE_FIXTURES FALSE)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
     set(HAS_PROBE_FIXTURES TRUE)
-    # Install the probe object alongside the other kernel fixtures so installed
-    # runs of probe_fixture_test / hsa_dbi_nop_probe_test can find it via
-    # ROCJITSU_KERNEL_DIR. Gated here (not in the list above) because it exists
-    # only when the offload bundler is available.
-    if(RJ_INSTALL_TESTS)
-        install(
-            FILES ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
-        )
-    endif()
 else()
     message(
         STATUS

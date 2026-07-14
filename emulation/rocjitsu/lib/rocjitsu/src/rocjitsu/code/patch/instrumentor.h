@@ -190,9 +190,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
-///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
-///     call) or both empty (the inline nop). Setting only one is rejected.
-///   - @p pt.force_full_exec is false.
+///   - @p pt.probe_obj is null, @p pt.probe_symbol is empty, and
+///     @p pt.force_full_exec is false.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
@@ -268,22 +267,6 @@ enum class SpillPolicy {
 /// registers. An empty spill set always succeeds.
 [[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
                                       std::string *error_out = nullptr);
-
-/// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
-///        return-link pair s[link_base : link_base+1]?
-///
-/// The probe-call trampoline returns through a link pair fixed by the calling
-/// convention (s[30:31] today). A kernel only owns SGPRs [0, sgpr_count), so it
-/// is possible that it does not own the registers even if they look dead from
-/// liveness. This coarse gate fails such a kernel closed early.
-///
-/// NOTE: this exists only because the link pair is hardcoded and the kernel
-/// must be built padded up to it. Remove once the link pair is chosen from dead
-/// registers within the kernel's real allocation (SGPR auto-grow).
-[[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
-                                                            uint16_t link_base) {
-  return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
-}
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
 ///        anchor, plans + builds per-site trampolines, and drives the

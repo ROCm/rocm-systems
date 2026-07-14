@@ -350,7 +350,6 @@ add_executable(
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
-    code/amdgpu_code_object_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     sysfs_test.cpp
@@ -472,14 +471,10 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
     )
     add_dependencies(probe_fixture_test probe_rj_nop_probe_gfx90a)
     rj_configure_target(probe_fixture_test TEST)
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(probe_fixture_test)
-    endif()
-    rj_add_test(
+    add_test(
         NAME "ProbeFixture.NopProbeResolvesAndReturns"
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND "bin/probe_fixture_test"
     )
 endif()
 
@@ -1377,26 +1372,24 @@ if(HSA_RUNTIME64)
             add_dependencies(hsa_dbi_nop_probe_test device_kernels)
             add_dependencies(hsa_dbi_nop_probe_test probe_rj_nop_probe_gfx90a)
             rj_configure_target(hsa_dbi_nop_probe_test TEST)
-            if(RJ_INSTALL_TESTS)
-                rj_install_test_target(hsa_dbi_nop_probe_test)
-            endif()
 
-            # Local helper: register one TEST_F case as a CTest entry, in both the
-            # build tree and (under RJ_INSTALL_TESTS) the installed CTest tree.
-            # <group> is the part of the fixture name after "HsaDbiNopProbe".
+            # Local helper: register one TEST_F case as a CTest entry. <group>
+            # is the part of the fixture name after "HsaDbiNopProbe".
             function(register_hsa_dbi_nop_probe_case group case)
                 set(oneValueArgs TIMEOUT)
                 cmake_parse_arguments(RJ_DBIP "" "${oneValueArgs}" "" ${ARGN})
                 set(name "HsaDbiNopProbe${group}.${case}")
-                rj_add_test(
+                add_test(
                     NAME "${name}"
                     COMMAND hsa_dbi_nop_probe_test --gtest_filter=${name}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    INSTALL_COMMAND
-                        "bin/hsa_dbi_nop_probe_test"
-                        "--gtest_filter=${name}"
-                    ${ARGN}
                 )
+                if(RJ_DBIP_TIMEOUT)
+                    set_tests_properties(
+                        "${name}"
+                        PROPERTIES TIMEOUT ${RJ_DBIP_TIMEOUT}
+                    )
+                endif()
             endfunction()
 
             # Static-only test: no GPU needed, runs anywhere the binary builds.

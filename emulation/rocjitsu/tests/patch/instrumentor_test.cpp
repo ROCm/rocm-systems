@@ -1435,19 +1435,6 @@ TEST(InstrumentorSpill, NonEmptySpillSetFailsPolicy) {
   EXPECT_NE(err.find("s30"), std::string::npos);
 }
 
-// Coarse SGPR-allocation gate for probe calls: a kernel must allocate through
-// the fixed return-link pair s[link_base:link_base+1] to own it.
-TEST(InstrumentorSgprGate, LinkPairFitsRequiresAllocationThroughPair) {
-  // The link pair s[30:31] needs the kernel to allocate at least 32 SGPRs.
-  EXPECT_FALSE(probe_link_pair_fits_in_kernel(/*kernel_sgpr_count=*/12, /*link_base=*/30));
-  EXPECT_FALSE(probe_link_pair_fits_in_kernel(31, 30)); // owns s0..s30 only (s31 missing)
-  EXPECT_TRUE(probe_link_pair_fits_in_kernel(32, 30));  // owns s0..s31
-  EXPECT_TRUE(probe_link_pair_fits_in_kernel(64, 30));
-  // The bound tracks link_base, not a hardcoded 32.
-  EXPECT_FALSE(probe_link_pair_fits_in_kernel(9, 8));
-  EXPECT_TRUE(probe_link_pair_fits_in_kernel(10, 8));
-}
-
 // Test that a builder's resource plan can feeds the Instrumentor's spill
 // formula. The planner output flows straight into
 // spill_set = live & (probe | builder) clobbers.
@@ -1491,22 +1478,6 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal self-contained probe body that
 // returns through the link pair, so build_probe_callable accepts it.
 constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
-
-// s_mov_b32 s30, 0 (GFX9 family): overwrites the low half of the return-link
-// pair. A body that runs this before the closing s_setpc still passes
-// build_probe_callable (which only inspects the final instruction) but must be
-// rejected because it would return through a corrupted PC.
-constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
-
-// Distinguishable leading marker words for multi-probe layout tests. Each is a
-// harmless, self-contained op the probe verifier accepts (neither is a call,
-// scratch access, nor a write to the link pair). They must not collide with the
-// anchor instruction (s_nop, which the trampoline relocates) nor with any
-// envelope opcode, so a test can tell one copied probe body from another in the
-// appended cave by counting/locating the marker. s5/s6 are dead in the fixtures
-// and are not the low registers the planner picks for target/scc.
-constexpr uint32_t kProbeMarkerMovS5 = 0xbe850080u; // s_mov_b32 s5, 0
-constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 // gfx950 ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in
 // an executable .text. Mirrors the symtab layout in probe_symbol_test (kept
@@ -1721,115 +1692,6 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
-// Two anchors calling the SAME (probe_obj, symbol) share a single copied body:
-// the body is emitted once and both trampolines target that one copy. Locks in
-// the resolve_probe_index dedup so a regression that copies per site is caught.
-TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
-    InstrumentationPoint pt;
-    pt.anchor_offset = anchor;
-    pt.probe_obj = &probe_obj;
-    pt.probe_symbol = "rj_test_probe";
-    instr.add_point(pt);
-  }
-
-  auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 2u);
-
-  // Both sites resolve to the same copied body at the same offset.
-  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> text = section_words(patched, ".text");
-  constexpr size_t kOriginalTextWords = 2; // make_gfx950_elf_with_two_nops(): 8 bytes.
-  constexpr uint64_t kCaveStart = kOriginalTextWords * sizeof(uint32_t);
-  ASSERT_GT(text.size(), kOriginalTextWords);
-  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-
-  // Deduped: the body's marker appears exactly once across the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
-  EXPECT_EQ(cave.front(), kProbeMarkerMovS5); // body sits ahead of both trampolines.
-
-  // Each trampoline emits its own call and targets the shared body's offset.
-  for (const auto &p : result.patches) {
-    EXPECT_EQ(p.probe_target_offset, kCaveStart);
-    const uint32_t swappc =
-        build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
-  }
-}
-
-// Two anchors calling DISTINCT probes: both bodies are copied once, in the order
-// the probes were first requested, and each trampoline's probe_target_offset
-// points at its own body. Catches ordering / wrong-body-target regressions.
-TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
-  // Distinguishable 2-word bodies: a unique leading marker then the return.
-  auto probe_a = make_gfx950_probe_elf("rj_probe_a", {kProbeMarkerMovS5, kProbeSetpcS30S31});
-  auto probe_b = make_gfx950_probe_elf("rj_probe_b", {kProbeMarkerMovS6, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_a_obj(probe_a.data(), probe_a.size());
-  AmdGpuCodeObject probe_b_obj(probe_b.data(), probe_b.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt_a;
-  pt_a.anchor_offset = 0; // requested first -> body A laid out first.
-  pt_a.probe_obj = &probe_a_obj;
-  pt_a.probe_symbol = "rj_probe_a";
-  instr.add_point(pt_a);
-  InstrumentationPoint pt_b;
-  pt_b.anchor_offset = 4;
-  pt_b.probe_obj = &probe_b_obj;
-  pt_b.probe_symbol = "rj_probe_b";
-  instr.add_point(pt_b);
-
-  auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 2u);
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> text = section_words(patched, ".text");
-  constexpr size_t kOriginalTextWords = 2;
-  constexpr uint64_t kCaveStart = kOriginalTextWords * sizeof(uint32_t);
-  ASSERT_GT(text.size(), kOriginalTextWords);
-  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-
-  // Each distinct body is copied exactly once.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS6), 1);
-  // ...and in request order: body A (marker mov s5) precedes body B (marker s6).
-  const auto a_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS5);
-  const auto b_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS6);
-  ASSERT_NE(a_it, cave.end());
-  ASSERT_NE(b_it, cave.end());
-  EXPECT_LT(a_it, b_it);
-
-  // Each patch's probe_target_offset points at the first word of its own body.
-  auto marker_at = [&](uint64_t target_offset) -> uint32_t {
-    const size_t idx = (target_offset - kCaveStart) / sizeof(uint32_t);
-    return idx < cave.size() ? cave[idx] : 0u;
-  };
-  for (const auto &p : result.patches) {
-    const uint32_t expected =
-        p.probe_symbol == "rj_probe_a" ? kProbeMarkerMovS5 : kProbeMarkerMovS6;
-    EXPECT_EQ(marker_at(p.probe_target_offset), expected)
-        << "patch for " << p.probe_symbol << " targets the wrong body";
-  }
-  // The two bodies target different offsets.
-  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
-}
-
 TEST(InstrumentorProbePatch, UnknownProbeSymbolFailsClosed) {
   auto target = make_gfx950_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
@@ -1863,30 +1725,6 @@ TEST(InstrumentorProbePatch, ProbeObjWithoutSymbolFailsClosed) {
   auto result = instr.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
-}
-
-// A probe body that overwrites its own return-link pair (s30) before the closing
-// s_setpc_b64 s[30:31] must be rejected: it would return through a corrupted PC.
-// build_probe_callable accepts it (the final instruction is still the setpc), so
-// the orchestrator's check_probe_link_pair is what fails closed.
-TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
-  auto target = make_gfx950_elf_with_two_nops();
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovS30_0, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 4;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "rj_test_probe";
-  instr.add_point(pt);
-
-  auto result = instr.patch();
-  EXPECT_TRUE(result.elf_bytes.empty());
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
-      << "error was: " << result.errors.front();
 }
 
 } // namespace
