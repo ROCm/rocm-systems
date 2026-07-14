@@ -122,7 +122,11 @@ namespace hsa {
 namespace loader {
 
 std::string GetUriFromMemoryAddress(const void *memory, size_t size) {
+#if defined(_WIN32) || defined(_WIN64)
+  int pid = static_cast<int>(GetCurrentProcessId());
+#else
   int pid = getpid();
+#endif
   std::ostringstream uri_stream;
   uri_stream << "memory://" << pid
              << "#offset=0x" << std::hex << (uintptr_t)memory << std::dec
