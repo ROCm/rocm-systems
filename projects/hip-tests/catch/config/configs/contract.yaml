@@ -200,25 +200,25 @@ contract:
     tags: [peer_copy]
   Contract_Stream_CreateDestroy_Succeeds:
     <<: *level_0
-    tags: [stream]
+    tags: [stream_event]
   Contract_Stream_SynchronizeEmptyStream_Succeeds:
     <<: *level_0
-    tags: [stream]
+    tags: [stream_event]
   Contract_Stream_QueryEmptyStream_ReturnsSuccess:
     <<: *level_0
-    tags: [stream]
+    tags: [stream_event]
   Contract_Event_CreateDestroy_Succeeds:
     <<: *level_0
-    tags: [event]
+    tags: [stream_event]
   Contract_Event_RecordThenSynchronize_Succeeds:
     <<: *level_0
-    tags: [event]
+    tags: [stream_event]
   Contract_Event_QueryBeforeCompletion_ReturnsNotReadyOrSuccess:
     <<: *level_0
-    tags: [event]
+    tags: [stream_event]
   Contract_Stream_WaitEvent_OrdersDependentWork:
     <<: *level_0
-    tags: [stream, event]
+    tags: [stream_event]
   Contract_StreamProps_CreateWithDefaultFlags_ReportsDefaultFlags:
     <<: *level_0
     tags: [stream_props]

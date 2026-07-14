@@ -40,6 +40,29 @@ void SkipIfIntegratedDevice() {
   }
 }
 
+// Owns a device allocation and frees it on destruction, so a failing REQUIRE
+// (which throws and unwinds) does not leak the buffer into sibling tests.
+class ScopedDeviceInt {
+ public:
+  explicit ScopedDeviceInt(int initial_value) {
+    HIP_CHECK(hipMalloc(&ptr_, sizeof(int)));
+    HIP_CHECK(hipMemset(ptr_, initial_value, sizeof(int)));
+  }
+  ~ScopedDeviceInt() {
+    if (ptr_ != nullptr) {
+      (void)hipFree(ptr_);
+    }
+  }
+  ScopedDeviceInt(const ScopedDeviceInt&) = delete;
+  ScopedDeviceInt& operator=(const ScopedDeviceInt&) = delete;
+
+  int* get() { return ptr_; }
+  int** address() { return &ptr_; }
+
+ private:
+  int* ptr_ = nullptr;
+};
+
 __global__ void WriteValueKernel(int* out, int value) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     out[0] = value;
@@ -53,13 +76,11 @@ __global__ void WriteValueKernel(int* out, int value) {
 HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
   SkipIfIntegratedDevice();
 
-  int* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, sizeof(int)));
-  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(int)));
+  ScopedDeviceInt device_value(0);
 
   constexpr int kExpected = 0x5A5A;
   int value = kExpected;
-  void* args[] = {&device_ptr, &value};
+  void* args[] = {device_value.address(), &value};
 
   hipLaunchConfig_t config{};
   config.gridDim = dim3(1);
@@ -73,17 +94,14 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
       hipLaunchKernelExC(&config, reinterpret_cast<const void*>(WriteValueKernel), args);
   if (status == hipErrorNotSupported) {
     (void)hipGetLastError();
-    HIP_CHECK(hipFree(device_ptr));
     HIP_SKIP_TEST("hipLaunchKernelExC is not supported by this runtime path.");
   }
   HIP_CHECK(status);
   HIP_CHECK(hipDeviceSynchronize());
 
   int observed = -1;
-  HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost));
   REQUIRE(observed == kExpected);
-
-  HIP_CHECK(hipFree(device_ptr));
 }
 
 // hipDevSmResourceSplit partitions the device SM resource into caller-specified

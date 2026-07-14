@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,11 +37,19 @@ __global__ void MultiDeviceWriteValue(int* out, int value) {
 namespace {
 constexpr int kNumDevices = 2;
 
-int CurrentDevice() {
-  int device = -1;
-  HIP_CHECK(hipGetDevice(&device));
-  return device;
-}
+// Restores the process current device when it leaves scope, so a test that
+// switches devices (or throws mid-switch through a failing REQUIRE) cannot leave
+// a sibling test running on the wrong device.
+class ScopedDevice {
+ public:
+  ScopedDevice() { HIP_CHECK(hipGetDevice(&saved_device_)); }
+  ~ScopedDevice() { (void)hipSetDevice(saved_device_); }
+  ScopedDevice(const ScopedDevice&) = delete;
+  ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+ private:
+  int saved_device_ = 0;
+};
 
 bool IsDiscreteDevice(int device) {
   hipDeviceProp_t props{};
@@ -72,36 +81,79 @@ void RequireCooperativeMultiDeviceLaunch() {
 }
 
 // Per-device state for a multi-device launch: a device allocation to publish into,
-// its own stream, and the expected value the kernel should write.
-struct DeviceLaunchTarget {
-  int* device_ptr = nullptr;
-  hipStream_t stream = nullptr;
-  int expected_value = 0;
+// its own stream, and the expected value the kernel should write. The allocation
+// and stream are released in the destructor so a failing REQUIRE (which throws
+// and unwinds) cannot leak device memory or streams into sibling tests that share
+// the process. Each target remembers its owning device so teardown frees on the
+// correct context regardless of the currently-selected device.
+class DeviceLaunchTarget {
+ public:
+  DeviceLaunchTarget() = default;
+
+  // Allocates a one-int device buffer and a stream on `device`, zeroing the
+  // buffer so a later readback proves the launched kernel wrote the value.
+  void Allocate(int device) {
+    device_ = device;
+    expected_value_ = 100 + device;
+    HIP_CHECK(hipSetDevice(device_));
+    HIP_CHECK(hipMalloc(&device_ptr_, sizeof(int)));
+    HIP_CHECK(hipMemset(device_ptr_, 0, sizeof(int)));
+    HIP_CHECK(hipStreamCreate(&stream_));
+  }
+
+  ~DeviceLaunchTarget() {
+    if (device_ptr_ == nullptr && stream_ == nullptr) {
+      return;
+    }
+    (void)hipSetDevice(device_);
+    if (stream_ != nullptr) {
+      (void)hipStreamDestroy(stream_);
+    }
+    if (device_ptr_ != nullptr) {
+      (void)hipFree(device_ptr_);
+    }
+  }
+
+  DeviceLaunchTarget(const DeviceLaunchTarget&) = delete;
+  DeviceLaunchTarget& operator=(const DeviceLaunchTarget&) = delete;
+
+  int* device_ptr() { return device_ptr_; }
+  int** device_ptr_address() { return &device_ptr_; }
+  hipStream_t stream() const { return stream_; }
+  int device() const { return device_; }
+  int expected_value() const { return expected_value_; }
+  int* expected_value_address() { return &expected_value_; }
+
+ private:
+  int* device_ptr_ = nullptr;
+  hipStream_t stream_ = nullptr;
+  int device_ = 0;
+  int expected_value_ = 0;
 };
 
-void AllocateTargets(std::vector<DeviceLaunchTarget>& targets) {
-  targets.resize(kNumDevices);
+// Allocates per-device targets. Uses unique_ptr so the vector owns each target
+// by pointer: reallocation during growth cannot invoke a (deleted) move that
+// would double-free, and any target already constructed is destroyed (freeing
+// its resources) if a later device's allocation throws.
+void AllocateTargets(std::vector<std::unique_ptr<DeviceLaunchTarget>>& targets) {
   for (int device = 0; device < kNumDevices; ++device) {
-    HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipMalloc(&targets[device].device_ptr, sizeof(int)));
-    HIP_CHECK(hipMemset(targets[device].device_ptr, 0, sizeof(int)));
-    HIP_CHECK(hipStreamCreate(&targets[device].stream));
-    targets[device].expected_value = 100 + device;
+    targets.push_back(std::make_unique<DeviceLaunchTarget>());
+    targets.back()->Allocate(device);
   }
 }
 
-void VerifyAndRelease(std::vector<DeviceLaunchTarget>& targets) {
-  for (int device = 0; device < kNumDevices; ++device) {
-    HIP_CHECK(hipSetDevice(device));
+// Reads back each device's value and asserts it matches. Cleanup is left to the
+// targets' destructors, so a failing REQUIRE here still releases every device
+// allocation and stream as the vector unwinds.
+void VerifyTargets(std::vector<std::unique_ptr<DeviceLaunchTarget>>& targets) {
+  for (auto& target : targets) {
+    HIP_CHECK(hipSetDevice(target->device()));
     HIP_CHECK(hipDeviceSynchronize());
     int observed = -1;
-    HIP_CHECK(hipMemcpy(&observed, targets[device].device_ptr, sizeof(int),
+    HIP_CHECK(hipMemcpy(&observed, target->device_ptr(), sizeof(int),
                         hipMemcpyDeviceToHost));
-    REQUIRE(observed == targets[device].expected_value);
-    HIP_CHECK(hipStreamDestroy(targets[device].stream));
-    HIP_CHECK(hipFree(targets[device].device_ptr));
+    REQUIRE(observed == target->expected_value());
   }
-  targets.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +166,32 @@ constexpr char const kModuleSource[] =
     "    out[0] = value;\n"
     "  }\n"
     "}\n";
+
+// Owns a module loaded on a specific device and unloads it on destruction, so a
+// failing REQUIRE partway through the per-device load loop does not leak the
+// context-bound modules already loaded.
+class ScopedModule {
+ public:
+  ScopedModule(hipModule_t module, int device) : module_(module), device_(device) {}
+  ~ScopedModule() {
+    if (module_ != nullptr) {
+      (void)hipSetDevice(device_);
+      (void)hipModuleUnload(module_);
+    }
+  }
+  ScopedModule(ScopedModule&& other) noexcept
+      : module_(other.module_), device_(other.device_) {
+    other.module_ = nullptr;
+  }
+  ScopedModule& operator=(const ScopedModule&) = delete;
+  ScopedModule(const ScopedModule&) = delete;
+
+  hipModule_t get() const { return module_; }
+
+ private:
+  hipModule_t module_ = nullptr;
+  int device_ = 0;
+};
 
 bool CompileModuleSource(std::vector<char>& code) {
   hiprtcProgram program{};
@@ -161,30 +239,28 @@ bool CompileModuleSource(std::vector<char>& code) {
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
-  std::vector<DeviceLaunchTarget> targets;
+  ScopedDevice restore_device;
+  std::vector<std::unique_ptr<DeviceLaunchTarget>> targets;
   AllocateTargets(targets);
 
   std::vector<hipLaunchParams> launch_params(kNumDevices);
   std::memset(launch_params.data(), 0, launch_params.size() * sizeof(hipLaunchParams));
   std::vector<std::array<void*, 2>> kernel_args(kNumDevices);
   for (int device = 0; device < kNumDevices; ++device) {
-    kernel_args[device] = {&targets[device].device_ptr, &targets[device].expected_value};
+    kernel_args[device] = {targets[device]->device_ptr_address(),
+                           targets[device]->expected_value_address()};
     launch_params[device].func = reinterpret_cast<void*>(MultiDeviceWriteValue);
     launch_params[device].gridDim = dim3(1);
     launch_params[device].blockDim = dim3(1);
     launch_params[device].sharedMem = 0;
-    launch_params[device].stream = targets[device].stream;
+    launch_params[device].stream = targets[device]->stream();
     launch_params[device].args = kernel_args[device].data();
   }
 
-  const int original_device = CurrentDevice();
   HIP_CHECK(hipSetDevice(0));
-  const hipError_t status =
-      hipLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0);
-  HIP_CHECK(hipSetDevice(original_device));
-  HIP_CHECK(status);
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0));
 
-  VerifyAndRelease(targets);
+  VerifyTargets(targets);
 }
 
 // hipExtLaunchMultiKernelMultiDevice is the AMD extended multi-device launch entry
@@ -193,30 +269,28 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue)
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
-  std::vector<DeviceLaunchTarget> targets;
+  ScopedDevice restore_device;
+  std::vector<std::unique_ptr<DeviceLaunchTarget>> targets;
   AllocateTargets(targets);
 
   std::vector<hipLaunchParams> launch_params(kNumDevices);
   std::memset(launch_params.data(), 0, launch_params.size() * sizeof(hipLaunchParams));
   std::vector<std::array<void*, 2>> kernel_args(kNumDevices);
   for (int device = 0; device < kNumDevices; ++device) {
-    kernel_args[device] = {&targets[device].device_ptr, &targets[device].expected_value};
+    kernel_args[device] = {targets[device]->device_ptr_address(),
+                           targets[device]->expected_value_address()};
     launch_params[device].func = reinterpret_cast<void*>(MultiDeviceWriteValue);
     launch_params[device].gridDim = dim3(1);
     launch_params[device].blockDim = dim3(1);
     launch_params[device].sharedMem = 0;
-    launch_params[device].stream = targets[device].stream;
+    launch_params[device].stream = targets[device]->stream();
     launch_params[device].args = kernel_args[device].data();
   }
 
-  const int original_device = CurrentDevice();
   HIP_CHECK(hipSetDevice(0));
-  const hipError_t status =
-      hipExtLaunchMultiKernelMultiDevice(launch_params.data(), kNumDevices, 0);
-  HIP_CHECK(hipSetDevice(original_device));
-  HIP_CHECK(status);
+  HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launch_params.data(), kNumDevices, 0));
 
-  VerifyAndRelease(targets);
+  VerifyTargets(targets);
 }
 
 // hipModuleLaunchCooperativeKernelMultiDevice submits a module-resolved function per
@@ -230,22 +304,28 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDevice
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
 
-  std::vector<DeviceLaunchTarget> targets;
+  ScopedDevice restore_device;
+  std::vector<std::unique_ptr<DeviceLaunchTarget>> targets;
   AllocateTargets(targets);
 
-  std::vector<hipModule_t> modules(kNumDevices, nullptr);
+  // Each loaded module is owned by a ScopedModule so a failing REQUIRE mid-loop
+  // unloads the modules already loaded on earlier devices.
+  std::vector<ScopedModule> modules;
   std::vector<hipFunctionLaunchParams> launch_params(kNumDevices);
   std::memset(launch_params.data(), 0, launch_params.size() * sizeof(hipFunctionLaunchParams));
   std::vector<std::array<void*, 2>> kernel_args(kNumDevices);
   for (int device = 0; device < kNumDevices; ++device) {
     HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipModuleLoadData(&modules[device], code.data()));
-    REQUIRE(modules[device] != nullptr);
+    hipModule_t module = nullptr;
+    HIP_CHECK(hipModuleLoadData(&module, code.data()));
+    modules.emplace_back(module, device);
+    REQUIRE(module != nullptr);
     hipFunction_t function = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&function, modules[device], "write_value"));
+    HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
     REQUIRE(function != nullptr);
 
-    kernel_args[device] = {&targets[device].device_ptr, &targets[device].expected_value};
+    kernel_args[device] = {targets[device]->device_ptr_address(),
+                           targets[device]->expected_value_address()};
     launch_params[device].function = function;
     launch_params[device].gridDimX = 1;
     launch_params[device].gridDimY = 1;
@@ -254,22 +334,12 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDevice
     launch_params[device].blockDimY = 1;
     launch_params[device].blockDimZ = 1;
     launch_params[device].sharedMemBytes = 0;
-    launch_params[device].hStream = targets[device].stream;
+    launch_params[device].hStream = targets[device]->stream();
     launch_params[device].kernelParams = kernel_args[device].data();
   }
 
-  const int original_device = CurrentDevice();
   HIP_CHECK(hipSetDevice(0));
-  const hipError_t status =
-      hipModuleLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0);
-  HIP_CHECK(hipSetDevice(original_device));
-  HIP_CHECK(status);
+  HIP_CHECK(hipModuleLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0));
 
-  VerifyAndRelease(targets);
-
-  for (int device = 0; device < kNumDevices; ++device) {
-    HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipModuleUnload(modules[device]));
-  }
-  HIP_CHECK(hipSetDevice(original_device));
+  VerifyTargets(targets);
 }
