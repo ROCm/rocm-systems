@@ -2065,7 +2065,7 @@ write_rocpd(
                     get_insert_statement(db,
                                          "rocpd_sample{{uuid}}",
                                          {
-                                             insert_value("id", itr.correlation_id.internal),
+                                             insert_value("id", db.get_sample_id()),
                                              insert_value("track_id", track_id),
                                              insert_value("timestamp", itr.start_timestamp),
                                              insert_value("event_id", evt_id),
