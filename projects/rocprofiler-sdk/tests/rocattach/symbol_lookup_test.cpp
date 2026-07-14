@@ -36,6 +36,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -136,10 +137,11 @@ expect_ambiguous_basename_fails()
 }
 
 loaded_library
-create_and_load_sectionless_copy(const loaded_library& source)
+create_and_load_sectionless_copy(const loaded_library& source, std::string_view label)
 {
-    auto path = std::filesystem::temp_directory_path() /
-                "librocprofiler-register.so.rocattach-sectionless-XXXXXX";
+    auto path =
+        std::filesystem::temp_directory_path() /
+        ("librocprofiler-register.so.rocattach-sectionless-" + std::string{label} + "-XXXXXX");
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
     if(fd < 0)
@@ -250,8 +252,12 @@ main(int argc, char** argv)
     expect_resolves_to_dlsym(libraries.at(2));
     expect_resolves_to_dlsym(libraries.at(3));
     expect_different_symbol_offsets(libraries.at(0), libraries.at(3));
-    auto sectionless = create_and_load_sectionless_copy(libraries.at(0));
-    expect_resolves_to_dlsym(sectionless);
+    auto sectionless_normal = create_and_load_sectionless_copy(libraries.at(0), "normal");
+    auto sectionless_gnu    = create_and_load_sectionless_copy(libraries.at(1), "gnu");
+    auto sectionless_sysv   = create_and_load_sectionless_copy(libraries.at(2), "sysv");
+    expect_resolves_to_dlsym(sectionless_normal);
+    expect_resolves_to_dlsym(sectionless_gnu);
+    expect_resolves_to_dlsym(sectionless_sysv);
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
 

@@ -79,10 +79,13 @@ set(ROCATTACH_SYMBOL_LOOKUP_SOURCE
     "${CMAKE_CURRENT_LIST_DIR}/../../source/lib/rocprofiler-sdk-rocattach/symbol_lookup.cpp"
     )
 
+if(NOT EXISTS "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}")
+    set(ROCATTACH_SYMBOL_LOOKUP_SOURCE "${CMAKE_CURRENT_LIST_DIR}/symbol_lookup.cpp")
+endif()
+
 install(
     FILES "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}"
-    DESTINATION
-        "${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-sdk/source/lib/rocprofiler-sdk-rocattach"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-sdk/tests/rocattach"
     COMPONENT tests)
 
 add_executable(rocattach-symbol-lookup-test)
