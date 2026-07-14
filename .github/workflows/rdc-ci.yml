@@ -31,10 +31,29 @@ defaults:
     working-directory: projects/rdc
 
 jobs:
-  build:
-    runs-on:
-      - self-hosted
-      - lstt_ci_runners
+  # Resolve the current GPU runner label from ROCm/therock-ci-config instead of
+  # hard-coding one (labels get decommissioned). Reuses the shared resolver action.
+  ci_config:
+    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    name: Resolve GPU runner label
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+    steps:
+    - name: Checkout resolve-ci-config action
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+        set-safe-directory: true
+
+    - name: Resolve runner labels
+      id: runner
+      uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  rdc_build:
+    runs-on: lstt_ci_runners
     timeout-minutes: 90
     container: rocm/dev-ubuntu-22.04:7.2
     outputs:
@@ -98,7 +117,7 @@ jobs:
           zip \
           zstd
 
-    - name: Build and install gRPC
+    - name: Fetch gRPC source
       working-directory: .
       shell: bash
       run: |
@@ -112,6 +131,12 @@ jobs:
           third_party/protobuf \
           third_party/re2 \
           third_party/zlib
+
+    - name: Build and install gRPC
+      working-directory: .
+      shell: bash
+      run: |
+        set -euo pipefail
         cmake -S /tmp/grpc -B /tmp/grpc/build \
           -DgRPC_INSTALL=ON \
           -DgRPC_BUILD_TESTS=OFF \
@@ -169,11 +194,7 @@ jobs:
 
     - name: Install RDC
       run: |
-        echo "pre: "
-        ls -lah /opt
         make -C build -j $(nproc) install
-        echo "post: "
-        ls -lah /opt
 
     - name: Upload RDC packages
       uses: actions/upload-artifact@v4
@@ -188,11 +209,9 @@ jobs:
   # =================================================================
   #  Test job — non-GPU tests (installation, CLI, Python, parsers)
   # =================================================================
-  test:
-    needs: build
-    runs-on:
-      - self-hosted
-      - lstt_ci_runners
+  rdc_test:
+    needs: rdc_build
+    runs-on: lstt_ci_runners
     timeout-minutes: 30
     container: rocm/dev-ubuntu-22.04:7.2
 
@@ -268,6 +287,10 @@ jobs:
       env:
         RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
 
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
+
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
@@ -280,9 +303,9 @@ jobs:
   #  GPU test job — requires AMD GPU hardware
   #  Enable by setting repo variable: RDC_GPU_TESTS_ENABLED=true
   # =================================================================
-  test-gpu:
-    needs: build
-    runs-on: linux-gfx942-1gpu-core42-ossci-rocm
+  rdc_test_gpu:
+    needs: [rdc_build, ci_config]
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     timeout-minutes: 90
     if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' }}
     container:
@@ -334,6 +357,10 @@ jobs:
           --junitxml=build/test-results-gpu.xml
       env:
         RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
+
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload GPU test results
       if: always()
