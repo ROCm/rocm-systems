@@ -31,82 +31,47 @@
 namespace rocshmem {
 
 /**
- * @brief A single symmetrically-registered user buffer for the GDA backend.
+ * @brief One symmetric user-buffer registration, pre-specialized to a single
+ * QueuePair's fixed (dest_pe, nic_idx).
  *
- * Unlike the symmetric heap (whose per-PE bases and NIC keys are exchanged
- * once at init), each registered alias is a freshly reserved virtual address
- * that differs per PE, so the remote bases and remote keys must be exchanged
- * per registration. All pointer members reference device-resident arrays.
+ * Because every QP talks to exactly one peer over exactly one NIC, all the
+ * per-PE / per-NIC indexing can be resolved on the host at registration time,
+ * leaving the device with a self-contained 32-byte record: matching an address
+ * and producing the remote address + keys needs no pointer chasing. The host
+ * fills one entry per (pe, nic) per registration (see GDABackend's flat entry
+ * table), and each QP is handed the contiguous slice for its own (dest_pe,
+ * nic_idx), scanned by registration slot.
  */
-struct GDASymmRegion {
+struct QpSymmEntry {
   /**
-   * @brief This PE's registered alias base address.
+   * @brief This PE's registered alias base (identical across all slices).
    *
-   * Used to recognize whether a symmetric address falls in this region and to
-   * compute the intra-region offset.
+   * Used to recognize whether a symmetric address falls in this registration
+   * and to compute the intra-registration offset.
    */
   uintptr_t local_base;
 
   /**
+   * @brief The peer's alias base for this slice's dest_pe.
+   *
+   * Remote address for a transfer is remote_base + (sym_addr - local_base).
+   */
+  uintptr_t remote_base;
+
+  /**
    * @brief Registered length in bytes.
    */
-  size_t length;
+  uint64_t length;
 
   /**
-   * @brief Device array[num_pes] of each peer's alias base address.
-   *
-   * The remote address for a transfer to PE p is
-   * remote_bases[p] + (sym_addr - local_base).
+   * @brief Remote key for this slice's (dest_pe, nic_idx).
    */
-  uintptr_t *remote_bases;
+  uint32_t rkey;
 
   /**
-   * @brief Device array[num_pes * num_nics] of peer remote keys.
-   *
-   * Indexed as rkeys[pe * num_nics + nic_idx], mirroring the symmetric heap's
-   * heap_rkey layout, so a QP selects the remote key for its own NIC.
+   * @brief Local key for this slice's nic_idx (locally-sourced buffers).
    */
-  uint32_t *rkeys;
-
-  /**
-   * @brief Device array[num_nics] of this PE's local keys.
-   *
-   * Indexed by the issuing QP's NIC so a locally-sourced buffer supplies the
-   * matching lkey.
-   */
-  uint32_t *lkeys;
-};
-
-/**
- * @brief Device-visible table of symmetric user-buffer registrations.
- *
- * Allocated once in device memory; its contents are mutated by the
- * (collective) register/unregister calls. The pointer is shared by all
- * contexts so updates are observed without re-propagation. @c regions points
- * to a device-resident array of @c capacity entries (configured via
- * ROCSHMEM_MAX_SYMM_REGIONS, see envvar::max_symm_regions).
- */
-struct GDASymmTable {
-  int count;
-  int capacity;
-  int num_nics;
-  GDASymmRegion *regions;
-};
-
-/**
- * @brief Shared, device-visible view of the symmetric address space used to
- * resolve remote addresses and NIC keys.
- *
- * Bundles the process-global inputs a QueuePair needs to translate a symmetric
- * address for a peer: the per-PE symmetric heap bases and the registered-buffer
- * table. A single instance is owned by the backend and pointed to by every
- * QueuePair (see QueuePair::addr_space_). Because the members are pointers, the
- * QPs observe register/unregister updates without re-propagation. The per-QP
- * NIC selection (rkey/lkey/nic_idx) stays on the QueuePair itself.
- */
-struct SymmAddrSpace {
-  char *const *heap_bases{nullptr};   // device array[num_pes] of per-PE heap bases
-  GDASymmTable *symm_table{nullptr};  // registration table (null when unavailable)
+  uint32_t lkey;
 };
 
 }  // namespace rocshmem

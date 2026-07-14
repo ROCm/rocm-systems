@@ -90,24 +90,34 @@ class GDABackend : public Backend {
   uint32_t *heap_rkey = nullptr;
 
   /**
-   * @brief Device-visible table of symmetric user-buffer registrations.
+   * @brief Device-visible flat table of symmetric user-buffer registrations.
    *
-   * Allocated in setup_symm_registration() and shared (by pointer) with every
-   * context. Null when symmetric registration is unavailable (pre-ROCm-7.0).
+   * Sized num_pes * num_nics_ * symm_capacity_ QpSymmEntry records, allocated
+   * in setup_gpu_qps() so QPs capture stable slice pointers. Layout: the slice
+   * for (pe, nic) starts at (pe * num_nics_ + nic) * symm_capacity_ and holds
+   * one entry per registration slot, pre-specialized to that (pe, nic). Each QP
+   * points at the slice for its own (dest_pe, nic_idx). Null pre-ROCm-7.0.
    */
-  GDASymmTable *symm_table_{nullptr};
+  QpSymmEntry *symm_entries_{nullptr};
 
   /**
-   * @brief Device-resident descriptor of the symmetric address space.
+   * @brief Device-resident shared registration count (live slots per slice).
    *
-   * Allocated once in setup_gpu_qps() and pointed to by every QueuePair
-   * (QueuePair::addr_space_) so QPs can resolve remote addresses and NIC keys.
-   * Populated via hipMemcpy at init (heap_bases, then the symm_table pointer in
-   * setup_symm_registration()) and effectively read-only thereafter: buffer
-   * register/unregister mutate the table contents, not this descriptor. Plain
-   * device memory (not managed) since it sits on the RMA read hot path.
+   * A single int pointed to by every QueuePair (QueuePair::symm_count).
+   * register/unregister mutate the entry table contents and this count. Null
+   * when symmetric registration is unavailable.
    */
-  SymmAddrSpace *symm_addr_space_{nullptr};
+  int *symm_count_{nullptr};
+
+  /**
+   * @brief Host mirror of symm_entries_ and its capacity/count.
+   *
+   * The mirror is updated on the host at register/unregister and (re-)uploaded
+   * to symm_entries_; symm_count_host_ mirrors *symm_count_.
+   */
+  std::vector<QpSymmEntry> host_symm_entries_{};
+  int symm_capacity_{0};
+  int symm_count_host_{0};
 
   /**
    * @brief GDA-specific per-registration state kept on the host.
@@ -117,14 +127,11 @@ class GDABackend : public Backend {
    * down, keyed by the registered alias base address.
    */
   struct GdaSymmRecord {
-    int slot{-1};                       // index into the device symm_table
+    int slot{-1};                       // registration slot in each QP slice
     std::vector<struct ibv_mr*> mrs{};  // per-NIC MRs for the buffer
     std::vector<int> mr_fds{};          // per-NIC dmabuf fds (kept open for MR lifetime)
     hipMemGenericAllocationHandle_t gen_handle{};  // retained backing handle
     bool has_gen_handle{false};         // whether gen_handle must be released
-    uintptr_t* dev_remote_bases{nullptr};  // device array[num_pes]
-    uint32_t* dev_rkeys{nullptr};          // device array[num_pes*num_nics]
-    uint32_t* dev_lkeys{nullptr};          // device array[num_nics]
   };
 
   /**
@@ -306,14 +313,6 @@ class GDABackend : public Backend {
    * Collective.
    */
   int buffer_unregister_symmetric(void *addr) override;
-
-  /**
-   * @brief Accessor for the device-visible symmetric registration table.
-   *
-   * Contexts copy this pointer so register/unregister updates are observed
-   * without re-propagation. Null when symmetric registration is unavailable.
-   */
-  GDASymmTable *get_symm_table() { return symm_table_; }
 
   /**
    * @brief Abort the application.

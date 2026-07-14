@@ -660,35 +660,10 @@ void GDABackend::buffer_unregister_all() {
 void GDABackend::setup_symm_registration() {
 #if HIP_VERSION >= 70000000
   /*
-   * Allocate the device-visible symmetric-registration table. It is shared by
-   * pointer with every context (see GDAContext ctor) so registrations are
-   * observed without re-propagation.
-   */
-  int capacity = static_cast<int>(max_symm_regions_);
-  if (capacity <= 0) {
-    capacity = 1;
-  }
-
-  GDASymmTable *table{nullptr};
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&table), sizeof(GDASymmTable)));
-  assert(table);
-
-  GDASymmRegion *regions{nullptr};
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&regions),
-                      sizeof(GDASymmRegion) * capacity));
-  assert(regions);
-  CHECK_HIP(hipMemset(regions, 0, sizeof(GDASymmRegion) * capacity));
-
-  GDASymmTable host_table{};
-  host_table.count = 0;
-  host_table.capacity = capacity;
-  host_table.num_nics = num_nics_;
-  host_table.regions = regions;
-  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(GDASymmTable),
-                      hipMemcpyHostToDevice));
-  symm_table_ = table;
-
-  /*
+   * The GDA device-side registration state (the flat per-QP entry table and
+   * the shared count) is allocated in setup_gpu_qps() so every QP captures a
+   * stable slice pointer. Nothing to do for the NIC path here.
+   *
    * When IPC is enabled at runtime (node-local peers detected; controlled by
    * ROCSHMEM_DISABLE_MIXED_IPC / compile-time USE_IPC), also allocate the
    * device-visible IPC registration table so node-local peers can reach
@@ -699,29 +674,15 @@ void GDABackend::setup_symm_registration() {
   if (ipcImpl.pes_with_ipc_avail != nullptr) {
     alloc_ipc_symm_table();
   }
-#else
-  symm_table_ = nullptr;
 #endif
-  /*
-   * Publish the (possibly null) table pointer into the device-resident
-   * descriptor so every QP resolves registered buffers; when null, resolution
-   * falls back to heap arithmetic. Written once here via hipMemcpy; the pointer
-   * is stable afterwards (register/unregister mutate the table contents.
-   */
-  if (symm_addr_space_ != nullptr) {
-    SymmAddrSpace host_addr_space{};
-    host_addr_space.heap_bases = heap.get_heap_bases().data();
-    host_addr_space.symm_table = symm_table_;
-    CHECK_HIP(hipMemcpy(symm_addr_space_, &host_addr_space,
-                        sizeof(SymmAddrSpace), hipMemcpyHostToDevice));
-  }
 }
 
 void GDABackend::cleanup_symm_registration() {
 #if HIP_VERSION >= 70000000
   /*
    * Unregister anything the user left registered. buffer_unregister_symmetric
-   * mutates gda_symm_records_, so iterate over a snapshot of the keys.
+   * mutates gda_symm_records_, so iterate over a snapshot of the keys. The flat
+   * entry table itself is freed later in cleanup_gpu_qps().
    */
   std::vector<uintptr_t> addrs;
   addrs.reserve(gda_symm_records_.size());
@@ -730,17 +691,6 @@ void GDABackend::cleanup_symm_registration() {
   }
   for (auto a : addrs) {
     buffer_unregister_symmetric(reinterpret_cast<void *>(a));
-  }
-
-  if (symm_table_ != nullptr) {
-    GDASymmTable host_table{};
-    CHECK_HIP(hipMemcpy(&host_table, symm_table_, sizeof(GDASymmTable),
-                        hipMemcpyDeviceToHost));
-    if (host_table.regions != nullptr) {
-      CHECK_HIP(hipFree(host_table.regions));
-    }
-    CHECK_HIP(hipFree(symm_table_));
-    symm_table_ = nullptr;
   }
 
   /* Free the shared IPC registration table (no-op if never allocated). */
@@ -801,7 +751,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
                                           [[maybe_unused]] size_t length,
                                           [[maybe_unused]] void **registered_addr) {
 #if HIP_VERSION >= 70000000
-  if (registered_addr == nullptr || symm_table_ == nullptr) {
+  if (registered_addr == nullptr || symm_entries_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -900,35 +850,15 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
     lkeys[n] = mrs[n]->lkey;
   }
 
-  /* Publish the exchanged metadata into device-resident arrays. */
-  uintptr_t *dev_bases{nullptr};
-  uint32_t *dev_rkeys{nullptr};
-  uint32_t *dev_lkeys{nullptr};
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&dev_bases),
-                      num_pes * sizeof(uintptr_t)));
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&dev_rkeys),
-                      static_cast<size_t>(num_pes) * num_nics_ *
-                          sizeof(uint32_t)));
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&dev_lkeys),
-                      num_nics_ * sizeof(uint32_t)));
-  CHECK_HIP(hipMemcpy(dev_bases, bases.data(), num_pes * sizeof(uintptr_t),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMemcpy(dev_rkeys, rkeys.data(),
-                      static_cast<size_t>(num_pes) * num_nics_ *
-                          sizeof(uint32_t),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMemcpy(dev_lkeys, lkeys.data(), num_nics_ * sizeof(uint32_t),
-                      hipMemcpyHostToDevice));
-
   /*
-   * Publish the region into the device-visible table. The table lives in
-   * device memory, so read/update it through host staging copies.
+   * Publish the registration into the device-visible flat entry table. Each QP
+   * reads only the slice specialized to its (dest_pe, nic_idx), so fill one
+   * pre-resolved entry per (pe, nic) at this registration's slot. The entry
+   * carries the peer base and per-NIC keys directly, so the device lookup does
+   * no pointer chasing.
    */
-  GDASymmTable host_table{};
-  CHECK_HIP(hipMemcpy(&host_table, symm_table_, sizeof(GDASymmTable),
-                      hipMemcpyDeviceToHost));
-  int slot = host_table.count;
-  if (slot >= host_table.capacity) {
+  int slot = symm_count_host_;
+  if (slot >= symm_capacity_) {
     /* Bound guard; base class already enforces max_symm_regions_. */
     for (int n = 0; n < num_nics_; n++) {
       (void)ibv.dereg_mr(mrs[n]);
@@ -939,24 +869,33 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
     if (has_gen_handle) {
       (void)hipMemRelease(gen_handle);
     }
-    (void)hipFree(dev_bases);
-    (void)hipFree(dev_rkeys);
-    (void)hipFree(dev_lkeys);
     Backend::buffer_unregister_symmetric(alias);
     return ROCSHMEM_ERROR;
   }
 
-  GDASymmRegion host_region{};
-  host_region.local_base = key;
-  host_region.length = length;
-  host_region.remote_bases = dev_bases;
-  host_region.rkeys = dev_rkeys;
-  host_region.lkeys = dev_lkeys;
-  CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_region,
-                      sizeof(GDASymmRegion), hipMemcpyHostToDevice));
+  for (int pe = 0; pe < num_pes; pe++) {
+    for (int n = 0; n < num_nics_; n++) {
+      QpSymmEntry &e =
+          host_symm_entries_[(static_cast<size_t>(pe) * num_nics_ + n) *
+                                 symm_capacity_ + slot];
+      e.local_base = key;
+      e.remote_base = bases[pe];
+      e.length = length;
+      e.rkey = rkeys[static_cast<size_t>(pe) * num_nics_ + n];
+      e.lkey = lkeys[n];
+    }
+  }
 
-  host_table.count = slot + 1;
-  CHECK_HIP(hipMemcpy(symm_table_, &host_table, sizeof(GDASymmTable),
+  /*
+   * Registration is a rare collective, so re-upload the whole (small) mirror
+   * for simplicity, then publish by bumping the shared count last so a device
+   * reader never observes count > populated entries.
+   */
+  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
+                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = slot + 1;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
                       hipMemcpyHostToDevice));
 
   GdaSymmRecord rec;
@@ -965,9 +904,6 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
   rec.mr_fds = std::move(mr_fds);
   rec.gen_handle = gen_handle;
   rec.has_gen_handle = has_gen_handle;
-  rec.dev_remote_bases = dev_bases;
-  rec.dev_rkeys = dev_rkeys;
-  rec.dev_lkeys = dev_lkeys;
   gda_symm_records_[key] = std::move(rec);
 
   /*
@@ -1015,9 +951,46 @@ void GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
   int slot = it->second.slot;
 
   /*
-   * Deregister the per-NIC MRs for the buffer, then close their dmabuf fds. The
-   * fd must outlive the MR (the NIC references the dmabuf), so it is closed
-   * only after dereg_mr, mirroring the ibv_reg_mr wrapper's teardown order.
+   * Unpublish the region from the device-visible table BEFORE tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * (and rkeys) are about to be invalidated. This is the reverse of the publish
+   * order used at registration.
+   *
+   * Compact the flat entry table by moving the last registration's row into the
+   * freed slot for every (pe, nic) slice (in the host mirror). Upload the
+   * compacted entries first, then shrink the shared count: while count is still
+   * unshrunk the moved region is briefly duplicated (at both its old and new
+   * slot, which resolve identically), so every live region stays reachable
+   * throughout; the removed region disappears as soon as the entries land.
+   */
+  int last = symm_count_host_ - 1;
+  if (slot != last && last >= 0) {
+    for (int pe = 0; pe < num_pes; pe++) {
+      for (int n = 0; n < num_nics_; n++) {
+        size_t base =
+            (static_cast<size_t>(pe) * num_nics_ + n) * symm_capacity_;
+        host_symm_entries_[base + slot] = host_symm_entries_[base + last];
+      }
+    }
+    for (auto &kv : gda_symm_records_) {
+      if (kv.second.slot == last) {
+        kv.second.slot = slot;
+        break;
+      }
+    }
+  }
+  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
+                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = (last >= 0) ? last : 0;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                      hipMemcpyHostToDevice));
+
+  /*
+   * Now that the region is no longer advertised, deregister the per-NIC MRs,
+   * then close their dmabuf fds. The fd must outlive the MR (the NIC references
+   * the dmabuf), so it is closed only after dereg_mr, mirroring the ibv_reg_mr
+   * wrapper's teardown order.
    */
   for (size_t n = 0; n < it->second.mrs.size(); n++) {
     if (it->second.mrs[n]) {
@@ -1038,39 +1011,13 @@ void GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
     (void)hipMemRelease(it->second.gen_handle);
   }
 
-  /*
-   * Compact the device table by moving the last region into the freed slot,
-   * staging the header on the host and moving the region device-to-device.
-   */
-  GDASymmTable host_table{};
-  CHECK_HIP(hipMemcpy(&host_table, symm_table_, sizeof(GDASymmTable),
-                      hipMemcpyDeviceToHost));
-  int last = host_table.count - 1;
-  if (slot != last) {
-    CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_table.regions[last],
-                        sizeof(GDASymmRegion), hipMemcpyDeviceToDevice));
-    for (auto &kv : gda_symm_records_) {
-      if (kv.second.slot == last) {
-        kv.second.slot = slot;
-        break;
-      }
-    }
-  }
-  host_table.count = last;
-  CHECK_HIP(hipMemcpy(symm_table_, &host_table, sizeof(GDASymmTable),
-                      hipMemcpyHostToDevice));
-
-  /* Free the device-resident metadata arrays for this registration. */
-  (void)hipFree(it->second.dev_remote_bases);
-  (void)hipFree(it->second.dev_rkeys);
-  (void)hipFree(it->second.dev_lkeys);
   gda_symm_records_.erase(it);
 #endif
 }
 
 int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
 #if HIP_VERSION >= 70000000
-  if (addr == nullptr || symm_table_ == nullptr) {
+  if (addr == nullptr || symm_entries_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -1725,23 +1672,47 @@ void GDABackend::setup_gpu_qps() {
   host_qps = (QueuePair*) malloc(qp_objs_mem_size);
   CHECK_NNULL(host_qps, "malloc (host_qps)");
 
+#if HIP_VERSION >= 70000000
   /*
-   * Allocate the shared symmetric-address-space descriptor every QP points at.
-   * It is device-resident and effectively write-once: heap_bases is known now;
-   * the registration-table pointer is published in setup_symm_registration().
-   * Buffer register/unregister mutate the table's contents (symm_table_).
+   * Allocate the device-side symmetric-registration state shared by every QP:
+   * a flat entry table pre-sliced per (dest_pe, nic_idx) plus a shared count.
+   * Allocated here (before QPs are wired) so each QP captures a stable slice
+   * pointer; register/unregister only mutate the contents, never the pointers.
+   * Each QP reads only its own slice, so the RMA hot path needs no pointer
+   * chasing.
    */
-  CHECK_HIP(hipMalloc(&symm_addr_space_, sizeof(SymmAddrSpace)));
-  SymmAddrSpace host_addr_space{};
-  host_addr_space.heap_bases = heap.get_heap_bases().data();
-  host_addr_space.symm_table = nullptr;
-  CHECK_HIP(hipMemcpy(symm_addr_space_, &host_addr_space, sizeof(SymmAddrSpace),
-                      hipMemcpyHostToDevice));
+  int symm_capacity = static_cast<int>(max_symm_regions_);
+  if (symm_capacity <= 0) {
+    symm_capacity = 1;
+  }
+  symm_capacity_ = symm_capacity;
+  size_t num_entries =
+      static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_entries_),
+                      num_entries * sizeof(QpSymmEntry)));
+  CHECK_HIP(hipMemset(symm_entries_, 0, num_entries * sizeof(QpSymmEntry)));
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_count_), sizeof(int)));
+  CHECK_HIP(hipMemset(symm_count_, 0, sizeof(int)));
+  host_symm_entries_.assign(num_entries, QpSymmEntry{});
+  symm_count_host_ = 0;
+#endif
 
+  const auto &heap_bases = heap.get_heap_bases();
   for (size_t i = 0; i < qp_objs_count; i++) {
     new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
-    host_qps[i].addr_space_ = symm_addr_space_;
-    host_qps[i].dest_pe = static_cast<int>(i % num_pes);
+    int qp_dest_pe = static_cast<int>(i % num_pes);
+    host_qps[i].dest_pe = qp_dest_pe;
+    /* Cache the peer heap base so the heap translation is load-free. */
+    host_qps[i].remote_heap_base =
+        reinterpret_cast<uintptr_t>(heap_bases[qp_dest_pe]);
+#if HIP_VERSION >= 70000000
+    /* Point the QP at the registration slice for its (dest_pe, nic_idx). */
+    int qp_nic_idx = nic_idx_for_qp(static_cast<int>(i));
+    host_qps[i].symm_count = symm_count_;
+    host_qps[i].symm_entries =
+        symm_entries_ + (static_cast<size_t>(qp_dest_pe) * num_nics_ +
+                         qp_nic_idx) * symm_capacity_;
+#endif
     CHECK_HIP(hipMemcpy(&gpu_qps[i], &host_qps[i], sizeof(QueuePair), hipMemcpyDefault));
 
     initialize_gpu_qp(&gpu_qps[i], i);
@@ -1762,10 +1733,19 @@ void GDABackend::cleanup_gpu_qps() {
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
 
-  if (symm_addr_space_ != nullptr) {
-    CHECK_HIP(hipFree(symm_addr_space_));
-    symm_addr_space_ = nullptr;
+#if HIP_VERSION >= 70000000
+  if (symm_entries_ != nullptr) {
+    CHECK_HIP(hipFree(symm_entries_));
+    symm_entries_ = nullptr;
   }
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipFree(symm_count_));
+    symm_count_ = nullptr;
+  }
+  host_symm_entries_.clear();
+  symm_capacity_ = 0;
+  symm_count_host_ = 0;
+#endif
 }
 
 void GDABackend::open_ib_device() {

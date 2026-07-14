@@ -335,37 +335,39 @@ class QueuePair {
   size_t base_heap_size = 0;
 
   /**
-   * @brief Shared symmetric address space (per-PE heap bases + registration
-   * table). Set once at QP setup; used by the key/address resolvers below.
+   * @brief Cached remote heap base for this QP's connected peer (@ref dest_pe).
+   *
+   * Equals heap_bases[dest_pe], captured once at setup. Lets the (common) heap
+   * translation run as pure register arithmetic with no memory load.
    */
-  const SymmAddrSpace *addr_space_{nullptr};
+  uintptr_t remote_heap_base{0};
 
   /**
-   * @brief Find the registered symmetric region containing @p addr, if any.
+   * @brief Contiguous slice of registration entries for this QP's fixed
+   * (dest_pe, nic_idx), indexed by registration slot [0, *symm_count).
+   *
+   * Points into the backend's flat entry table; every entry is already
+   * specialized to this QP, so a match yields the remote address and keys with
+   * no further dereference. Null when symmetric registration is unavailable.
    */
-  __device__ __forceinline__ GDASymmRegion *find_symm_region(uintptr_t addr) {
-    GDASymmTable *table = addr_space_ ? addr_space_->symm_table : nullptr;
-    if (table == nullptr) {
-      return nullptr;
-    }
-    int n = table->count;
-    for (int i = 0; i < n; ++i) {
-      GDASymmRegion &r = table->regions[i];
-      if (addr >= r.local_base && addr < r.local_base + r.length) {
-        return &r;
-      }
-    }
-    return nullptr;
-  }
+  QpSymmEntry *symm_entries{nullptr};
+
+  /**
+   * @brief Shared registration count (number of live entries per slice).
+   *
+   * Single device int shared by all QPs; register/unregister publish updates
+   * here. One load per non-heap lookup (null when registration unavailable).
+   */
+  const int *symm_count{nullptr};
 
   /**
    * @brief Resolve the remote address and remote key for a symmetric target.
    *
    * The target PE is this QP's connected peer (@ref dest_pe). Common case is a
-   * symmetric-heap address, translated from this QP's local heap base and using
-   * its default heap key. Otherwise the address is matched against the
-   * registered-buffer table and this QP's per-NIC remote key (and the peer's
-   * registered base) are used.
+   * symmetric-heap address, translated from the cached remote heap base using
+   * this QP's default heap key. Otherwise the address is matched against this
+   * QP's registration slice, which supplies the peer base and per-NIC key
+   * directly.
    *
    * @param[in]  sym_addr  Symmetric address (valid in the local address space)
    * @param[out] rkey_out  Filled with the remote key to use
@@ -376,14 +378,15 @@ class QueuePair {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
     if ((addr - base_heap) < base_heap_size) {
       *rkey_out = rkey;
-      return reinterpret_cast<uintptr_t>(addr_space_->heap_bases[dest_pe]) +
-             (addr - base_heap);
+      return remote_heap_base + (addr - base_heap);
     }
-    GDASymmRegion *r = find_symm_region(addr);
-    if (r != nullptr) {
-      *rkey_out =
-          r->rkeys[dest_pe * addr_space_->symm_table->num_nics + nic_idx];
-      return r->remote_bases[dest_pe] + (addr - r->local_base);
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      QpSymmEntry e = symm_entries[i];
+      if (addr >= e.local_base && addr < e.local_base + e.length) {
+        *rkey_out = e.rkey;
+        return e.remote_base + (addr - e.local_base);
+      }
     }
     /*
      * Neither a heap address nor a registered buffer: the caller passed a
@@ -399,16 +402,20 @@ class QueuePair {
    * @brief Resolve the local key for a locally-sourced symmetric buffer.
    *
    * Heap buffers use this QP's default heap key; registered buffers use their
-   * per-NIC local key; anything else falls back to the user-buffer lookup.
+   * per-NIC local key (from this QP's slice); anything else falls back to the
+   * user-buffer lookup.
    */
   __device__ __forceinline__ uint32_t local_lkey(const void *local_addr) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(local_addr);
     if ((addr - base_heap) < base_heap_size) {
       return lkey;
     }
-    GDASymmRegion *r = find_symm_region(addr);
-    if (r != nullptr) {
-      return r->lkeys[nic_idx];
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      QpSymmEntry e = symm_entries[i];
+      if (addr >= e.local_base && addr < e.local_base + e.length) {
+        return e.lkey;
+      }
     }
     return get_lkey(addr);
   }
@@ -636,9 +643,8 @@ class QueuePair {
   /**
    * @brief Index of the NIC backing this QP.
    *
-   * Used to select the correct per-NIC remote/local key for symmetric
-   * user-buffer registrations (see GDASymmRegion), mirroring how the symmetric
-   * heap picks heap_rkey[pe * num_nics + nic_idx].
+   * Used at setup to select this QP's registration slice (see QpSymmEntry),
+   * mirroring how the symmetric heap picks heap_rkey[pe * num_nics + nic_idx].
    */
   int nic_idx{0};
 
