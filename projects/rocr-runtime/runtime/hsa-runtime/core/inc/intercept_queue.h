@@ -73,7 +73,9 @@ class QueueWrapper : public Queue {
   }
 
   ~QueueWrapper() {
+#ifndef ROCR_INTERCEPT_QUEUE_TESTING
     if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+#endif
   }
 
   hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
@@ -135,6 +137,15 @@ class QueueWrapper : public Queue {
   void SetProfiling(bool enabled) override { wrapped->SetProfiling(enabled); }
 
  protected:
+#ifdef ROCR_INTERCEPT_QUEUE_TESTING
+  // Test seam: the caller retains ownership of the supplied SharedQueue.
+  QueueWrapper(std::unique_ptr<Queue> queue, SharedQueue* shared_queue)
+      : Queue(shared_queue, 0, nullptr), wrapped(std::move(queue)) {
+    memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
+    wrapped->set_public_handle(wrapped.get(), public_handle_);
+  }
+#endif
+
   void do_set_public_handle(hsa_queue_t* handle) override {
     public_handle_ = handle;
     wrapped->set_public_handle(wrapped.get(), handle);
@@ -148,6 +159,14 @@ class QueueWrapper : public Queue {
 class QueueProxy : public QueueWrapper {
  public:
   explicit QueueProxy(std::unique_ptr<Queue> queue) : QueueWrapper(std::move(queue)) {}
+
+#ifdef ROCR_INTERCEPT_QUEUE_TESTING
+ protected:
+  QueueProxy(std::unique_ptr<Queue> queue, SharedQueue* shared_queue)
+      : QueueWrapper(std::move(queue), shared_queue) {}
+
+ public:
+#endif
 
   uint64_t LoadReadIndexAcquire() override {
     return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
@@ -221,8 +240,22 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Largest processed packet index.
   uint64_t next_packet_;
 
+  struct PacketWithMetadata {
+    AqlPacket aql;
+    AqlMetadataPrefetchPacket metadata;
+  };
+
+  struct OriginalPacketInfo {
+    AqlPacket aql;
+    AqlMetadataPrefetchPacket metadata;
+    bool matched;
+  };
+
   // Post interception packet overflow buffer
-  std::vector<AqlPacket> overflow_;
+  std::vector<PacketWithMetadata> overflow_;
+
+  // Originals used to associate rewritten packets with proxy metadata.
+  std::vector<OriginalPacketInfo> originals_;
 
   // Index at which async intercept processing was scheduled.
   uint64_t retry_index_;
@@ -244,6 +277,15 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Pre-allocated staging buffer for wrap-around cases
   std::vector<AqlPacket> staging_buffer_;
 
+  // Reusable overflow and metadata scratch buffers.
+  std::vector<AqlPacket> aql_scratch_;
+  std::vector<AqlMetadataPrefetchPacket> metadata_scratch_;
+
+  // Metadata rings are paired with the AQL rings of the wrapped and proxy queues.
+  // Producers must write a proxy metadata slot before publishing its AQL header.
+  void* metadata_ring_buf_ = nullptr;
+  std::vector<AqlMetadataPrefetchPacket> proxy_metadata_buf_;
+
   // Packet transform callbacks
   std::vector<std::pair<AMD::callback_t<hsa_amd_queue_intercept_handler>, void*>> interceptors;
 
@@ -254,7 +296,12 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
   // Submit packets to the wrapped queue and return number of packets that were
   // submitted.
-  uint64_t Submit(const AqlPacket* packets, uint64_t count);
+  uint64_t Submit(const AqlPacket* packets, uint64_t count,
+                  const AqlMetadataPrefetchPacket* metadata = nullptr);
+
+  void Initialize();
+  void NotifyWrappedDoorbell(uint64_t new_index);
+  hsa_signal_t GetRetryCompletionSignal();
 
   // Used as the final packet rewriter that submits the packets to the wrapped
   // queue.
@@ -286,6 +333,10 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
+
+#ifdef ROCR_INTERCEPT_QUEUE_TESTING
+  InterceptQueue(std::unique_ptr<Queue> queue, SharedQueue* shared_queue);
+#endif
 
  private:
   static __forceinline int& rtti_id() {
