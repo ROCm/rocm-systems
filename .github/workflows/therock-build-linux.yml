@@ -1,11 +1,15 @@
-name: TheRock CI Linux
+# TEMPORARY: Build-only workflow for MI455 (gfx125X)
+# This workflow is used to separate MI455 builds from the main therock-ci-linux
+# matrix, allowing MI455 tests to depend only on this build without waiting for
+# other GPU families' tests.
+# TODO: Remove this workflow once MI455 test infrastructure is stable and we have
+# sufficient MI455 machine capacity to run tests without blocking PRs.
+name: TheRock Build Linux
 
 on:
   workflow_call:
     inputs:
       cmake_options:
-        type: string
-      projects_to_test:
         type: string
       package_version:
         type: string
@@ -13,9 +17,6 @@ on:
       amdgpu_families:
         type: string
         default: "gfx94X-dcgpu"
-      test_runs_on:
-        type: string
-        default: "linux-gfx942-1gpu-core42-ossci-rocm"
       build_runs_on:
         type: string
         default: "azure-linux-scale-rocm"
@@ -129,16 +130,3 @@ jobs:
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
             --upload
-
-  therock-test-linux:
-    name: "Test"
-    needs: [therock-build-linux]
-    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
-    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
-    uses: ./.github/workflows/therock-test-packages.yml
-    with:
-      projects_to_test: ${{ inputs.projects_to_test }}
-      amdgpu_families: ${{ inputs.amdgpu_families }}
-      test_runs_on: ${{ inputs.test_runs_on }}
-      platform: "linux"
