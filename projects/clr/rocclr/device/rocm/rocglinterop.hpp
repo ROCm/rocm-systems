@@ -120,11 +120,10 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
             const DisplayHandle display, const ContextHandle context);
 #endif
 
-bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
+// validateOnly checks compatibility only, without starting an interop session.
+bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext,
+                 bool validateOnly);
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
-// Check GL interop compatibility without starting an interop session.
-bool glValidateInterop(Device* device, uint flags, void* GLplatformContext,
-                       void* GLdeviceContext);
 bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
             hsa_handle_t* resHandle, int* offset, void* image_srd, const unsigned image_srd_size);
 bool Detach(amd::Memory* mem, hsa_handle_t handle);

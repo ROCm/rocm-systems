@@ -1938,10 +1938,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle GL device binding (existing code)
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    const bool bound = validateOnly
-                           ? GlInterop::glValidateInterop(this, flags, gfxContext, glDevice)
-                           : GlInterop::glAssociate(this, flags, gfxContext, glDevice);
-    if (!bound) {
+    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice, validateOnly)) {
       if (!validateOnly) {
         LogError("Failed GlInterop::glAssociate()");
       }
@@ -1955,11 +1952,6 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
 // ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
-  // validateOnly never started a session; nothing to dissociate.
-  if (validateOnly) {
-    return true;
-  }
-
   bool success = true;
 
 #ifdef _WIN32
@@ -1977,7 +1969,8 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle GL device cleanup (existing code)
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (glDevice != nullptr) {
+    // validateOnly never started a session; nothing to dissociate.
+    if (glDevice != nullptr && !validateOnly) {
       if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
         LogWarning("Failed GlInterop::glDissociate()");
         success = false;

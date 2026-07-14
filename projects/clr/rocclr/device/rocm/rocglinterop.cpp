@@ -162,7 +162,9 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 }
 
 // ================================================================================================
-bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
+bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice,
+                 bool validateOnly) {
+  static_cast<void>(validateOnly); // no session begin/attach step to skip on Linux
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   MESA_INTEROP_KIND kind;
@@ -191,13 +193,6 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
          pcie.function == info.pci_function &&
          dev_info.vendorId_ == info.vendor_id &&
          dev_info.pcieDeviceId_ == info.device_id;
-}
-
-// ================================================================================================
-bool glValidateInterop(Device* device, uint flags, void* GLplatformContext,
-                       void* GLdeviceContext) {
-  // Linux glAssociate has no begin/attach side effect; it is already the check.
-  return glAssociate(device, flags, GLplatformContext, GLdeviceContext);
 }
 
 // ================================================================================================
