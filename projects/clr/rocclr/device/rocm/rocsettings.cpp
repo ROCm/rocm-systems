@@ -201,6 +201,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
     enableExtension(ClKhrD3d10Sharing);
     enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClAmdPlanarYuv);
   }
 #endif
 

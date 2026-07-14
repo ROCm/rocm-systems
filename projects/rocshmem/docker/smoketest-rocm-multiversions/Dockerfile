@@ -159,7 +159,6 @@ ENV ROCSHMEM_SRC=/app/rocshmem
 # Driver script (changes rarely, cached separately from source)
 ###############################################################################
 COPY docker/smoketest-rocm-multiversions/build_and_test.sh /app/build_and_test.sh
-RUN chmod +x /app/build_and_test.sh
 
 ###############################################################################
 # rocshmem source — LAST so that source changes don't rebuild expensive layers
