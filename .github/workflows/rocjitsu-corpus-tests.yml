@@ -259,7 +259,7 @@ jobs:
               "${common_pytest_args[@]}" \
               --timeout-failures-config "${timeout_failures_config}" \
               --non-timeout-failures-config "${non_timeout_failures_config}" \
-              --timeout "${SHORT_TIMEOUT}"; then
+              --timeout "${SOFT_TIMEOUT_SECONDS}"; then
               finish_target 0
               continue
             fi
@@ -279,25 +279,25 @@ jobs:
             fi
 
             timeout_failure_count="$(jq '[.[] | length] | add // 0' "${timeout_failures_config}")"
-            if [[ "${timeout_failure_count}" -gt "${MAX_TIMEOUT_FAILURES}" ]]; then
-              echo "::error title=Too many pytest-timeout failures::Recorded ${timeout_failure_count} pytest-timeout failures, which is more than the retry limit of ${MAX_TIMEOUT_FAILURES}; not retrying this target."
+            if [[ "${timeout_failure_count}" -gt "${MAX_SOFT_TIMEOUT_RETRIES}" ]]; then
+              echo "::error title=Too many pytest-timeout failures::Recorded ${timeout_failure_count} pytest-timeout failures, which is more than the retry limit of ${MAX_SOFT_TIMEOUT_RETRIES}; not retrying this target."
               finish_target 1
               continue
             fi
 
             target_status=1
-            echo "::warning::Retrying ${timeout_failure_count} pytest-timeout failure(s) with timeout=${LONG_TIMEOUT}s."
+            echo "::warning::Retrying ${timeout_failure_count} pytest-timeout failure(s) with timeout=${HARD_TIMEOUT_SECONDS}s."
             if rocjitsu \
               --config "${rocjitsu_config_path}" \
               -- pytest \
               tests/test_corpus.py -vv \
               "${common_pytest_args[@]}" \
               --run-tests-config "${timeout_failures_config}" \
-              --timeout "${LONG_TIMEOUT}"; then
+              --timeout "${HARD_TIMEOUT_SECONDS}"; then
               echo "::warning::Retried pytest-timeout failures passed."
               target_status=0
             else
-              echo "::error::Retried tests that previously timed out still failed with timeout=${LONG_TIMEOUT}s. Check the pytest log to see whether they timed out again or failed normally."
+              echo "::error::Retried tests that previously timed out still failed with timeout=${HARD_TIMEOUT_SECONDS}s. Check the pytest log to see whether they timed out again or failed normally."
             fi
             finish_target "${target_status}"
           done
