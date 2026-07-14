@@ -146,9 +146,6 @@ Mode
 get_mode();
 
 bool&
-is_attached();
-
-bool&
 is_binary_rewrite();
 
 bool

@@ -560,7 +560,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifndef RCCL_DEVICE_TABLE_OMIT
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
@@ -575,7 +574,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#endif
 #endif
     }
 
@@ -606,14 +604,15 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+// noinline iff RCCL_DEVICE_LINKER (each devfunc is a standalone shard).
+#ifdef RCCL_DEVICE_LINKER
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #else
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
+  __device__ void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #endif

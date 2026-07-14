@@ -31,6 +31,15 @@
 
 extern bool hsakmt_use_model;
 extern char *hsakmt_model_topology;
+
+/**
+ * Model-mode environment variables (developer/emulation use only):
+ *   HSA_MODEL_TOPOLOGY - Enables model mode when set. Ignored under AT_SECURE.
+ *   HSA_MODEL_LIB      - Path to the FFM model shared library. Must reside
+ *                        under the ROCm install lib directory configured at
+ *                        build time (HSAKMT_INSTALL_LIBDIR). Ignored under
+ *                        AT_SECURE.
+ */
 void model_init_env_vars(void);
 void model_init(void);
 int model_kfd_ioctl(unsigned long request, void *arg);
