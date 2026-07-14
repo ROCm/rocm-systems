@@ -70,7 +70,8 @@ def _spm_sq_waves_available(rocm_path: Optional[Path]) -> tuple[bool, str]:
 def _load_trace_processor(trace_path: Path) -> Any:
     """Load a Perfetto trace using the optional configured trace processor shell."""
     trace_processor = pytest.importorskip(
-        "perfetto.trace_processor", reason="Perfetto trace processor Python API not available"
+        "perfetto.trace_processor",
+        reason="Perfetto trace processor Python API not available",
     )
 
     trace_processor_shell = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
@@ -85,9 +86,7 @@ def _spm_counter_summary(trace_path: Path) -> dict[str, Any]:
     """Return aggregate SPM counter-track statistics from a Perfetto trace."""
     tp = _load_trace_processor(trace_path)
     try:
-        rows = list(
-            tp.query(
-                """
+        rows = list(tp.query("""
                 SELECT
                     COUNT(DISTINCT t.id) AS track_count,
                     COUNT(c.id) AS sample_count,
@@ -97,9 +96,7 @@ def _spm_counter_summary(trace_path: Path) -> dict[str, Any]:
                 FROM counter c
                 JOIN counter_track t ON c.track_id = t.id
                 WHERE t.name LIKE 'GPU SPM SQ_WAVES%'
-                """
-            )
-        )
+                """))
     finally:
         close = getattr(tp, "close", None)
         if close is not None:
@@ -128,17 +125,13 @@ def _spm_counter_track_names(trace_path: Path) -> list[str]:
     """Return SPM SQ_WAVES counter track names from a Perfetto trace."""
     tp = _load_trace_processor(trace_path)
     try:
-        rows = list(
-            tp.query(
-                """
+        rows = list(tp.query("""
                 SELECT DISTINCT t.name AS name
                 FROM counter c
                 JOIN counter_track t ON c.track_id = t.id
                 WHERE t.name LIKE 'GPU SPM SQ_WAVES%'
                 ORDER BY t.name
-                """
-            )
-        )
+                """))
     finally:
         close = getattr(tp, "close", None)
         if close is not None:
@@ -185,25 +178,23 @@ class TestSPMPerfetto(RocprofsysTest):
         assert perfetto_file is not None, "Perfetto trace file was not generated"
 
         summary = _spm_counter_summary(perfetto_file)
-        assert summary["track_count"] > 0, (
-            "No GPU SPM SQ_WAVES counter tracks were found in Perfetto trace"
-        )
-        assert summary["sample_count"] > 0, (
-            "GPU SPM SQ_WAVES tracks did not contain any samples"
-        )
-        assert summary["max_value"] is not None and summary["max_value"] > 0, (
-            f"GPU SPM SQ_WAVES samples did not contain positive values: {summary}"
-        )
-        assert summary["total_value"] is not None and summary["total_value"] > 0, (
-            f"GPU SPM SQ_WAVES sample total is not positive: {summary}"
-        )
+        assert (
+            summary["track_count"] > 0
+        ), "No GPU SPM SQ_WAVES counter tracks were found in Perfetto trace"
+        assert (
+            summary["sample_count"] > 0
+        ), "GPU SPM SQ_WAVES tracks did not contain any samples"
+        assert (
+            summary["max_value"] is not None and summary["max_value"] > 0
+        ), f"GPU SPM SQ_WAVES samples did not contain positive values: {summary}"
+        assert (
+            summary["total_value"] is not None and summary["total_value"] > 0
+        ), f"GPU SPM SQ_WAVES sample total is not positive: {summary}"
 
         track_names = _spm_counter_track_names(perfetto_file)
         assert track_names, "No GPU SPM SQ_WAVES counter track names were found"
         unexpected_tracks = [
-            name
-            for name in track_names
-            if not name.startswith("GPU SPM SQ_WAVES [0] ")
+            name for name in track_names if not name.startswith("GPU SPM SQ_WAVES [0] ")
         ]
         assert not unexpected_tracks, (
             "SPM device filter SQ_WAVES:device=0 produced tracks for other devices: "
