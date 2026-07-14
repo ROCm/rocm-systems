@@ -5,6 +5,8 @@
 #include <iostream>
 #include <vector>
 #include <numeric>
+#include <string>
+#include <algorithm>
 
 static constexpr auto globalfunc{
     R"(
@@ -46,19 +48,21 @@ std::vector<char> compile_prog(const char* src) {
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, src, nullptr, 0, nullptr, nullptr));
   
   std::vector<const char *> options;
-  options.push_back("-xhip");
+  options.push_back("-x");
+  options.push_back("hip");
   options.push_back("--offload-arch=amdgcnspirv");
-  
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, options.size(), options.data())};
 
-  REQUIRE(compileResult == HIPRTC_SUCCESS);
-  
+  hiprtcResult compileResult{
+      hiprtcCompileProgram(prog, static_cast<int>(options.size()), options.data())};
+
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
     std::string log(logSize, '\0');
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+    INFO(log);
   }
+  REQUIRE(compileResult == HIPRTC_SUCCESS);
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   
@@ -79,13 +83,15 @@ void* link_prog(hipLinkState_t* state,const std::vector<char>& global_obj, const
   HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, state));
 
   if (global_obj.size() > 0) {
-  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv, (void*)global_obj.data(),
+  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv,
+                           const_cast<void*>(static_cast<const void*>(global_obj.data())),
                            global_obj.size(), "globalfunc.spv", 0, nullptr,
                            nullptr));
   }
 
   if (device_obj.size() > 0) {
-  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv, (void*)device_obj.data(),
+  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv,
+                           const_cast<void*>(static_cast<const void*>(device_obj.data())),
                            device_obj.size(), "devicefunc.spv", 0, nullptr,
                            nullptr));
   }
