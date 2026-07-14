@@ -646,6 +646,14 @@ Full gfx950 support means:
   pre-gfx12 flat-scratch aliases; LLVM selects that pair for an outlined return
   only under the test's high spill pressure. Focused emulator regressions and
   generator-owned fixes are active before either broad gate resumes.
+- 2026-07-14: `X1H` is `DONE`. Commit `affcc903e3` makes the legacy
+  flat-scratch operand pair an explicit ISA-profile property. RDNA4 and
+  gfx1250 now retain ordinary `s102:s103` while their existing 230/231 scratch
+  selectors remain unchanged; older profiles preserve their aliases. A
+  focused getpc/carry/setpc regression keeps the physical SGPR pair and scratch
+  base distinct, and 155 generator/profile tests pass. The complete gfx1201
+  hip-moi baseline and documented SuperCollider/LDS-trap profile each pass all
+  46 CTest entries, comprising 180 nested GTests plus six tutorials.
 
 ## DAG Overview
 
@@ -892,7 +900,7 @@ flowchart LR
   X1SC["X1SC: SuperCollider And Trap Semantics"]:::done
   X1SA["X1SA: Sampled Immediate Semantics"]:::done
   X1F["X1F: Focused Emulator Gate"]:::done
-  X1H["X1H: hip-moi Emulator Tier"]:::active
+  X1H["X1H: hip-moi Emulator Tier"]:::done
   X1I0["X1I0: IREE Build And Emulator Launcher"]:::done
   X1IS["X1IS: Selected IREE Emulator Tier"]:::done
   X1BSC["X1BSC: SuperCollider Broad IREE"]:::active
@@ -2656,7 +2664,7 @@ Sub-DAG:
   both positive immediate controls pass under emulation.
 - `X1F` (DONE): run the corrected 37-test focused gfx1201 filter. The complete
   focused emulator gate passes 37/37.
-- `X1H` (ACTIVE): build and run every `LOCAL_TESTING.md` hip-moi gfx1201 control
+- `X1H` (DONE): build and run every `LOCAL_TESTING.md` hip-moi gfx1201 control
   through the emulator.
 - `X1I0` (DONE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
   launcher without changing the existing gfx950 build.
