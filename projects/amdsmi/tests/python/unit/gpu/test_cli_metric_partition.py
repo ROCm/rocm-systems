@@ -29,14 +29,12 @@ import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, find_cli_dir
 
-# The amd-smi CLI ships alongside the amdsmi package: ``common`` resolves
-# ``amdsmi_path`` to ``<rocm>/share/amd_smi`` and the CLI installs to the sibling
-# ``<rocm>/libexec/amdsmi_cli``. ``setUpClass`` skips the suite if it is absent
-# (e.g. an unusual layout where only the package, not the CLI, is present).
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
 class _FakeClkType:
@@ -269,8 +267,10 @@ class TestCliMetricPartitionClock(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI not found ({METRIC_PATH or _CLI_DIR}): metric.py not present"
+            )
         # Snapshot the real modules so tearDownClass can undo the fake install.
         # Otherwise the stub amdsmi leaks into later test modules (e.g. the real
         # amdsmi_helpers imported by test_cli_exit_codes) and breaks them.
