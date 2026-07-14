@@ -8,9 +8,10 @@
 
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
-#include <timemory/utility/join.hpp>
 
 #include "core/demangler.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <link.h>
@@ -627,9 +628,8 @@ rocprofsys_get_exe_realpath()
         auto _cmd_line = tim::read_command_line(tim::process::get_id());
         if(!_cmd_line.empty())
         {
-            using array_config_t = timemory::join::array_config;
-            ROCPROFSYS_ADD_DETAILED_LOG_ENTRY(array_config_t{ " ", "[ ", " ]" },
-                                              "cmdline:: ", _cmd_line);
+            ROCPROFSYS_ADD_LOG_ENTRY(
+                fmt::format("cmdline:: [ {} ]", fmt::join(_cmd_line, " ")));
             return _cmd_line.front();
             // return tim::filepath::realpath(_cmd_line.front(), nullptr, false);
         }
@@ -849,9 +849,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
-
-using ::timemory::join::join;
 
 //======================================================================================//
 //
@@ -1161,25 +1158,26 @@ to_string(error_level_t _level)
     {
         case BPatchFatal:
         {
-            return JOIN("", tim::log::color::fatal(), "FatalError");
+            return fmt::format("{}FatalError", tim::log::color::fatal());
         }
         case BPatchSerious:
         {
-            return JOIN("", tim::log::color::fatal(), "SeriousError");
+            return fmt::format("{}SeriousError", tim::log::color::fatal());
         }
         case BPatchWarning:
         {
-            return JOIN("", tim::log::color::warning(), "Warning");
+            return fmt::format("{}Warning", tim::log::color::warning());
         }
         case BPatchInfo:
         {
-            return JOIN("", tim::log::color::info(), "Info");
+            return fmt::format("{}Info", tim::log::color::info());
         }
-        default: break;
+        default:
+        {
+            return fmt::format("{}UnknownErrorLevel{}", tim::log::color::warning(),
+                               static_cast<int>(_level));
+        }
     }
-
-    return JOIN("", tim::log::color::warning(), "UnknownErrorLevel",
-                static_cast<int>(_level));
 }
 
 namespace
