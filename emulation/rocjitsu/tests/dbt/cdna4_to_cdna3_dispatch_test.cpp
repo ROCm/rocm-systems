@@ -16,6 +16,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/data_types.h"
 
 #include <gtest/gtest.h>
 
@@ -28,6 +29,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_HOST_AMDGPU
@@ -44,6 +46,18 @@ std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
     return {};
   return std::vector<uint8_t>(std::istreambuf_iterator<char>(file),
                               std::istreambuf_iterator<char>());
+}
+
+std::vector<uint8_t> load_gfx950_code_object(const char *name) {
+  Executable exec(kernel_hsaco_path(name));
+  if (!exec.is_valid() || exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) == 0)
+    return {};
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  if (!co)
+    return {};
+  std::vector<uint8_t> bytes(co->image_size());
+  std::memcpy(bytes.data(), co->image_data(), co->image_size());
+  return bytes;
 }
 
 struct TritonMatmulCase {
@@ -79,6 +93,27 @@ void fill_seeded_half_inputs(std::vector<uint16_t> &values, uint32_t seed) {
     const uint16_t sign = static_cast<uint16_t>(sign_dist(rng) << 15);
     value = static_cast<uint16_t>(sign | magnitude_dist(rng));
   }
+}
+
+std::vector<float> reference_triton_matmul(const TritonMatmulCase &test_case) {
+  std::vector<uint16_t> a(static_cast<size_t>(test_case.m) * test_case.k);
+  std::vector<uint16_t> b(static_cast<size_t>(test_case.k) * test_case.n);
+  fill_seeded_half_inputs(a, 0xA0D4'0001u ^ test_case.m ^ (test_case.k << 8));
+  fill_seeded_half_inputs(b, 0xB0D4'0001u ^ test_case.n ^ (test_case.k << 8));
+
+  std::vector<float> result(static_cast<size_t>(test_case.m) * test_case.n, 0.0f);
+  for (uint32_t m = 0; m < test_case.m; ++m) {
+    for (uint32_t n = 0; n < test_case.n; ++n) {
+      float sum = 0.0f;
+      for (uint32_t k = 0; k < test_case.k; ++k) {
+        const float lhs = util::f16_to_f32(a[static_cast<size_t>(m) * test_case.k + k]);
+        const float rhs = util::f16_to_f32(b[static_cast<size_t>(k) * test_case.n + n]);
+        sum = std::fma(lhs, rhs, sum);
+      }
+      result[static_cast<size_t>(m) * test_case.n + n] = sum;
+    }
+  }
+  return result;
 }
 
 hsa_agent_t find_cpu_agent() {
@@ -126,7 +161,7 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
   return ctx.pool;
 }
 
-struct Cdna3Target {
+struct DispatchTarget {
   hsa_agent_t agent{};
   uint32_t mach = 0;
   std::string isa_name;
@@ -143,11 +178,11 @@ uint32_t cdna3_mach_for_isa_name(const char *name) {
   return 0;
 }
 
-Cdna3Target find_cdna3_target() {
-  Cdna3Target target;
+DispatchTarget find_cdna3_target() {
+  DispatchTarget target;
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
-        auto *t = static_cast<Cdna3Target *>(data);
+        auto *t = static_cast<DispatchTarget *>(data);
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
         if (type != HSA_DEVICE_TYPE_GPU)
@@ -172,6 +207,36 @@ Cdna3Target find_cdna3_target() {
   return target;
 }
 
+DispatchTarget find_gpu_target_named(std::string_view expected_isa) {
+  struct Context {
+    std::string_view expected_isa;
+    DispatchTarget target;
+  } context{expected_isa, {}};
+
+  hsa_iterate_agents(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *ctx = static_cast<Context *>(data);
+        hsa_device_type_t type;
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+        if (type != HSA_DEVICE_TYPE_GPU)
+          return HSA_STATUS_SUCCESS;
+
+        hsa_isa_t isa{};
+        char isa_name[128]{};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
+        hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+        ctx->target.seen_gpu_isas.emplace_back(isa_name);
+        if (std::string_view(isa_name).find(ctx->expected_isa) == std::string_view::npos)
+          return HSA_STATUS_SUCCESS;
+
+        ctx->target.agent = agent;
+        ctx->target.isa_name = isa_name;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &context);
+  return context.target;
+}
+
 std::string join_seen_isas(const std::vector<std::string> &isas) {
   if (isas.empty())
     return "<none>";
@@ -185,7 +250,7 @@ struct HsaShutdownGuard {
   ~HsaShutdownGuard() { hsa_shut_down(); }
 };
 
-void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target) {
+void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
@@ -356,7 +421,7 @@ void translate_dynamic_triton_matmul(uint32_t mach, std::vector<uint8_t> &elf_by
   translate_triton_fixture("triton_cdna4_matmul_dynamic_32x32x64", mach, elf_bytes);
 }
 
-void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target,
+void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
                        const TritonMatmulCase &test_case, uint32_t shared_bytes,
                        std::vector<float> *observed = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
@@ -509,7 +574,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
 }
 
 void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
-                                    const Cdna3Target &target, uint32_t shared_bytes,
+                                    const DispatchTarget &target, uint32_t shared_bytes,
                                     std::vector<float> *observed = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
@@ -657,7 +722,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   hsa_code_object_reader_destroy(reader);
 }
 
-void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target,
+void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const DispatchTarget &target,
                                 const char *symbol_name, uint32_t shared_bytes,
                                 std::vector<float> *observed = nullptr) {
   hsa_agent_t cpu = find_cpu_agent();
@@ -862,7 +927,7 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -880,6 +945,119 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
                                << translated.diagnostics.front().message;
 
   ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(translated.elf_bytes, target));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, DynamicCopyLoopDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  Executable exec(kernel_path("dynamic_copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
+
+  // Deliberately load the original gfx950 ELF through the public guest agent.
+  // The DBT HSA hook owns translation and maps execution to simulated gfx942.
+  ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(guest_elf, guest));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonDynamicMatmulDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  Executable exec(kernel_hsaco_path("triton_cdna4_matmul_dynamic_32x32x64"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
+
+  constexpr TritonMatmulCase kCase{32, 32, 64};
+  std::vector<float> observed;
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul(guest_elf, guest, kCase, 8192, &observed));
+  expect_float_vectors_near(observed, reference_triton_matmul(kCase), 0.02f,
+                            "guest DBT dynamic Triton matmul");
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonBufferAsyncMatmulDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_matmul_buffer_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  ASSERT_NO_FATAL_FAILURE(run_buffer_async_triton_matmul(guest_elf, guest, 65536, &observed));
+  ASSERT_FALSE(observed.empty());
+  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
+                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_flash_attention_no_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
+      guest_elf, guest, "flash_attention_fwd_no_async_kernel.kd", 65536, &observed));
+  ASSERT_FALSE(observed.empty());
+  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
+                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  DispatchTarget guest = find_gpu_target_named("gfx950");
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  const std::vector<uint8_t> guest_elf =
+      load_gfx950_code_object("triton_cdna4_flash_attention_buffer_async_1024");
+  ASSERT_FALSE(guest_elf.empty());
+
+  std::vector<float> observed;
+  ASSERT_NO_FATAL_FAILURE(run_flash_attention_triton(
+      guest_elf, guest, "flash_attention_fwd_async_buffer_kernel.kd", 65536, &observed));
+  ASSERT_FALSE(observed.empty());
+  EXPECT_TRUE(std::all_of(observed.begin(), observed.end(),
+                          [](float value) { return std::isfinite(value) && value != -12345.0f; }));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {
@@ -903,7 +1081,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -933,7 +1111,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonBufferAsyncMatmulDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -960,7 +1138,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonBufferAsyncMatmulConservativeLivenessDispat
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -994,7 +1172,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonFlashAttentionNoAsyncDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);
@@ -1023,7 +1201,7 @@ TEST(Cdna4ToCdna3DispatchTest, TritonFlashAttentionBufferAsyncDispatchAndRun) {
                  << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
+  DispatchTarget target = find_cdna3_target();
   if (target.agent.handle == 0)
     GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
                  << join_seen_isas(target.seen_gpu_isas);

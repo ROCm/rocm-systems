@@ -356,6 +356,8 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
   EXPECT_EQ(dbt.guest_isa, "gfx950");
   EXPECT_EQ(dbt.host_isa, "gfx1201");
   EXPECT_EQ(dbt.host_gpu_id, 8716u);
+  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_TRUE(dbt.simulator_config.empty());
   EXPECT_EQ(dbt.log_level, 2);
   EXPECT_TRUE(dbt.signal_backtrace);
   ASSERT_TRUE(dbt.guest_device.present);
@@ -433,6 +435,7 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
   EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
   EXPECT_EQ(loaded.dbt_guest.host_isa, "gfx1201");
   EXPECT_EQ(loaded.dbt_guest.host_gpu_id, 8716u);
+  EXPECT_EQ(loaded.dbt_guest.execution_backend, config::DbtExecutionBackend::Hardware);
   EXPECT_EQ(loaded.dbt_guest.log_level, 2);
   EXPECT_TRUE(loaded.dbt_guest.signal_backtrace);
   ASSERT_TRUE(loaded.dbt_guest.guest_device.present);
@@ -452,6 +455,8 @@ TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
   EXPECT_TRUE(dbt.guest_isa.empty());
   EXPECT_TRUE(dbt.host_isa.empty());
   EXPECT_EQ(dbt.host_gpu_id, 0u);
+  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_TRUE(dbt.simulator_config.empty());
   EXPECT_EQ(dbt.log_level, 0);
   EXPECT_FALSE(dbt.signal_backtrace);
   EXPECT_FALSE(dbt.guest_device.present);
@@ -479,6 +484,131 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
 TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
   const std::filesystem::path path =
       write_temp_config("rocjitsu_malformed_dbt_guest_config_test.json", R"({ "dbt_guest": )");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_simulator_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_EQ(dbt.simulator_config, "gfx942_cdna3_kmd.json");
+  EXPECT_STREQ(config::dbt_execution_backend_name(dbt.execution_backend), "simulator");
+}
+
+TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_hardware_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_STREQ(config::dbt_execution_backend_name(dbt.execution_backend), "hardware");
+}
+
+TEST(ConfigLoaderTest, EmptyDbtExecutionBackendUsesHardware) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_empty_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": ""
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
+}
+
+TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
+  const std::filesystem::path simulator_path =
+      write_temp_config("rocjitsu_disabled_simulator_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "simulator"
+        }
+      })");
+  const std::filesystem::path hardware_path =
+      write_temp_config("rocjitsu_disabled_hardware_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware",
+          "simulator_config": "ignored.json"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_path.string()));
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_path.string()));
+  std::filesystem::remove(simulator_path);
+  std::filesystem::remove(hardware_path);
+}
+
+TEST(ConfigLoaderTest, ResolvesDbtSimulatorConfigPath) {
+  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "sim.json"),
+            "/a/b/sim.json");
+  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "/abs/sim.json"),
+            "/abs/sim.json");
+  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "../c/./sim.json"),
+            "/a/c/sim.json");
+}
+
+TEST(ConfigLoaderTest, RejectsSimulatorDbtBackendWithoutSimulatorConfig) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_missing_simulator_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_unknown_dbt_backend_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "magic"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_hardware_with_simulator_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "execution_backend": "hardware",
+          "simulator_config": "gfx942_cdna3_kmd.json"
+        }
+      })");
 
   EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
   std::filesystem::remove(path);

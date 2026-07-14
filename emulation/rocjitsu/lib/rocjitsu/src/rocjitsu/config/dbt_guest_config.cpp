@@ -11,6 +11,7 @@
 #include "simulation_config_generated.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -19,6 +20,17 @@
 namespace rocjitsu {
 namespace config {
 namespace {
+
+DbtExecutionBackend parse_execution_backend(const fb::DbtGuestConfig *guest) {
+  const std::string value =
+      guest->execution_backend() ? guest->execution_backend()->str() : std::string("hardware");
+  if (value.empty() || value == "hardware")
+    return DbtExecutionBackend::Hardware;
+  if (value == "simulator")
+    return DbtExecutionBackend::Simulator;
+  throw std::runtime_error("dbt_guest.execution_backend must be 'hardware' or 'simulator', got '" +
+                           value + "'");
+}
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
@@ -40,6 +52,24 @@ void validate_guest_device_geometry(const KfdDeviceConfig &device) {
 
 } // namespace
 
+const char *dbt_execution_backend_name(DbtExecutionBackend backend) {
+  switch (backend) {
+  case DbtExecutionBackend::Hardware:
+    return "hardware";
+  case DbtExecutionBackend::Simulator:
+    return "simulator";
+  }
+  return "unknown";
+}
+
+std::string resolve_dbt_simulator_config_path(const std::string &dbt_config_path,
+                                              const std::string &simulator_config) {
+  std::filesystem::path resolved(simulator_config);
+  if (resolved.is_relative())
+    resolved = std::filesystem::path(dbt_config_path).parent_path() / resolved;
+  return resolved.lexically_normal().string();
+}
+
 DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   DbtGuestConfig config;
   if (guest == nullptr)
@@ -51,10 +81,20 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   if (guest->host_isa())
     config.host_isa = guest->host_isa()->str();
   config.host_gpu_id = guest->host_gpu_id();
+  config.execution_backend = parse_execution_backend(guest);
+  if (guest->simulator_config())
+    config.simulator_config = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
   validate_guest_device_geometry(config.guest_device);
+  if (config.enabled && config.execution_backend == DbtExecutionBackend::Simulator &&
+      config.simulator_config.empty())
+    throw std::runtime_error(
+        "dbt_guest.simulator_config is required when execution_backend is 'simulator'");
+  if (config.enabled && config.execution_backend == DbtExecutionBackend::Hardware &&
+      !config.simulator_config.empty())
+    throw std::runtime_error("dbt_guest.simulator_config requires execution_backend 'simulator'");
   return config;
 }
 

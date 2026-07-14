@@ -271,6 +271,15 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   close(fd);
 }
 
+TEST(GuestKfdFailureTest, MissingSimulatorConfigFailsCleanly) {
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not
 // leave a stale KFD classification behind. In guest/DBT mode open("/dev/kfd")
 // returns an app-facing dup while the real fd stays internal; if some dup2/dup3
