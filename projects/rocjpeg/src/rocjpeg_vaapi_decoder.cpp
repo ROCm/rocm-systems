@@ -22,6 +22,10 @@ THE SOFTWARE.
 
 #include "rocjpeg_vaapi_decoder.h"
 
+#include <algorithm>
+#include <cctype>
+#include <stdlib.h>
+
 /**
  * @brief Default constructor for RocJpegVaapiMemoryPool class.
  *
@@ -386,22 +390,59 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
  *
  * @param device_name The name of the device.
  * @param device_id The ID of the device.
- * @param gpu_uuid The UUID of the GPU.
+ * @param gpu_uuid The GPU UUID (fallback match).
+ * @param gpu_pci_bdf The GPU PCI BDF (primary match).
  * @return The status of the initialization process.
  */
-RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid) {
+RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf) {
     device_id_ = device_id;
     std::vector<int> visible_devices;
     GetVisibleDevices(visible_devices);
     GetGpuUuids();
 
+    // Match by PCI BDF (consistent between HIP and sysfs), with unique_id as fallback.
+    std::string gpu_pci_bdf_lower = gpu_pci_bdf;
+    std::transform(gpu_pci_bdf_lower.begin(), gpu_pci_bdf_lower.end(), gpu_pci_bdf_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    // Drop the PCI function suffix so partition children match their base BDF (offset picks the child).
+    size_t gpu_pci_bdf_dot_pos = gpu_pci_bdf_lower.find_last_of('.');
+    if (gpu_pci_bdf_dot_pos != std::string::npos) {
+        gpu_pci_bdf_lower = gpu_pci_bdf_lower.substr(0, gpu_pci_bdf_dot_pos);
+    }
+
     int offset = 0;
-    ComputePartition current_compute_partition = (gpu_uuids_to_compute_partition_map_.find(gpu_uuid) != gpu_uuids_to_compute_partition_map_.end()) ? gpu_uuids_to_compute_partition_map_[gpu_uuid] : kSpx;
+    ComputePartition current_compute_partition = kSpx;
+    auto bdf_partition_it = gpu_pci_bdf_to_compute_partition_map_.find(gpu_pci_bdf_lower);
+    if (bdf_partition_it != gpu_pci_bdf_to_compute_partition_map_.end()) {
+        current_compute_partition = bdf_partition_it->second;
+    } else {
+        auto uuid_partition_it = gpu_uuids_to_compute_partition_map_.find(gpu_uuid);
+        if (uuid_partition_it != gpu_uuids_to_compute_partition_map_.end()) {
+            current_compute_partition = uuid_partition_it->second;
+        }
+    }
     GetDrmNodeOffset(device_name, device_id_, visible_devices, current_compute_partition, offset);
 
-    std::string drm_node = "/dev/dri/renderD";
-    int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
-    drm_node += std::to_string(render_node_id + offset);
+    int render_node_id = -1;
+    auto bdf_render_it = gpu_pci_bdf_to_render_nodes_map_.find(gpu_pci_bdf_lower);
+    if (bdf_render_it != gpu_pci_bdf_to_render_nodes_map_.end()) {
+        render_node_id = bdf_render_it->second;
+    } else {
+        auto uuid_render_it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
+        if (uuid_render_it != gpu_uuids_to_render_nodes_map_.end()) {
+            render_node_id = uuid_render_it->second;
+        }
+    }
+
+    std::string drm_node;
+    if (render_node_id >= 0) {
+        drm_node = "/dev/dri/renderD" + std::to_string(render_node_id + offset);
+    } else {
+        drm_node = GetFirstAvailableDrmNode();
+        if (drm_node.empty()) {
+            drm_node = "/dev/dri/renderD128";
+        }
+    }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
         std::ostringstream oss;
@@ -415,6 +456,8 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
         oss << '}';
         InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
         InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+        InfoLog(g_rocjpeg_logger, "Selected GPU BDF: " + gpu_pci_bdf_lower);
+        InfoLog(g_rocjpeg_logger, "Selected DRM node: " + drm_node);
     }
 
     CHECK_ROCJPEG(InitVAAPI(drm_node));
@@ -824,6 +867,8 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                     break;
             }
         }
+        jpeg_stream_key.width = jpeg_stream_key.width > default_surface_width_ ? jpeg_stream_key.width : default_surface_width_;
+        jpeg_stream_key.height = jpeg_stream_key.height > default_surface_height_ ? jpeg_stream_key.height : default_surface_height_;
         jpeg_stream_groups[jpeg_stream_key].push_back(i);
     }
 
@@ -1085,6 +1130,10 @@ void RocJpegVappiDecoder::GetGpuUuids() {
                 std::string sys_device_path = "/sys/class/drm/" + filename + "/device";
                 struct stat info;
                 if (stat(sys_device_path.c_str(), &info) == 0) {
+                    std::string bus_id = GetRenderNodeBusId(filename);
+                    if (!bus_id.empty()) {
+                        gpu_pci_bdf_to_render_nodes_map_[bus_id] = render_id;
+                    }
                     std::string unique_id_path = sys_device_path + "/unique_id";
                     std::ifstream unique_id_file(unique_id_path);
                     std::string unique_id;
@@ -1115,6 +1164,9 @@ void RocJpegVappiDecoder::GetGpuUuids() {
                                 }
                                 // Map the unique GPU UUID to the compute partition
                                 gpu_uuids_to_compute_partition_map_[unique_id] = current_compute_partition;
+                                if (!bus_id.empty()) {
+                                    gpu_pci_bdf_to_compute_partition_map_[bus_id] = current_compute_partition;
+                                }
                             }
                         }
                         partition_file.close();
@@ -1124,4 +1176,55 @@ void RocJpegVappiDecoder::GetGpuUuids() {
         }
         closedir(dir);
     }
+}
+
+// Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+std::string RocJpegVappiDecoder::GetRenderNodeBusId(const std::string& render_node_name) {
+    std::string device_link = "/sys/class/drm/" + render_node_name + "/device";
+    char* resolved = realpath(device_link.c_str(), nullptr);
+    if (resolved == nullptr) {
+        return "";
+    }
+    std::string path(resolved);
+    free(resolved);
+    size_t pos = path.find_last_of('/');
+    std::string bus_id = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    if (bus_id.find(':') == std::string::npos || bus_id.find('.') == std::string::npos) {
+        return "";
+    }
+    std::transform(bus_id.begin(), bus_id.end(), bus_id.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    size_t dot_pos = bus_id.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+        bus_id = bus_id.substr(0, dot_pos);
+    }
+    return bus_id;
+}
+
+// Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+std::string RocJpegVappiDecoder::GetFirstAvailableDrmNode() {
+    std::string dri_path = "/dev/dri";
+    DIR* dir = opendir(dri_path.c_str());
+    if (!dir) {
+        return "";
+    }
+    int min_render_id = -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string filename = entry->d_name;
+        if (filename.find("renderD") == 0 && filename.size() > 7) {
+            try {
+                int render_id = std::stoi(filename.substr(7));
+                if (min_render_id < 0 || render_id < min_render_id) {
+                    min_render_id = render_id;
+                }
+            } catch (...) {
+            }
+        }
+    }
+    closedir(dir);
+    if (min_render_id < 0) {
+        return "";
+    }
+    return "/dev/dri/renderD" + std::to_string(min_render_id);
 }

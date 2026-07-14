@@ -61,6 +61,9 @@ struct DispatchEntry {
   uint32_t cluster_size_x = 1;
   uint32_t cluster_size_y = 1;
   uint32_t cluster_size_z = 1;
+  /// RDNA COMPUTE_PGM_RSRC1.WGP_MODE. When set, the workgroup is placed on
+  /// one of a sibling CU pair and uses their shared WGP LDS backing.
+  bool wgp_mode = false;
   bool enable_wg_id_x = true;
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;

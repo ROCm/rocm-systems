@@ -44,7 +44,7 @@ if(NOT ROCTX_SDK_LIBRARY)
 endif()
 
 set(HPC_EXAMPLE_NAME "matrix-exponential-streams-sync-hip")
-add_executable(${HPC_EXAMPLE_NAME} mat_exp.cpp)
+add_executable(${HPC_EXAMPLE_NAME} mat-exp.cpp)
 
 # Derive the rocblas include directory from the library path so that the
 # compiler can find <rocblas/rocblas.h> regardless of which ROCm tree the

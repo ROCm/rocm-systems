@@ -26,11 +26,16 @@
 
 #include <hip/hip_runtime.h>
 
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
 #include "amdsmi_loader.hpp"
+#endif
 
 namespace rocshmem {
 
 PodIds detectLocalPodIds() {
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
   PodIds podIds = {};  // Zero-initialize the structure
 
   // Get the current HIP device
@@ -83,6 +88,11 @@ PodIds detectLocalPodIds() {
   amdsmi.shut_down();
 
   return podIds;
+#else
+  // Stub implementation when fabric support is not available
+  PodIds podIds = {};  // Zero-initialize the structure
+  return podIds;
+#endif
 }
 
 std::vector<int> matchIpcCapableRanks(int rank, const std::vector<PodIds>& allPodIds) {
