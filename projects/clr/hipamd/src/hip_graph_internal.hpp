@@ -959,10 +959,9 @@ class Graph {
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
-    // Approach B (same-queue any-order overlap): when true, this segment's head
-    // dispatch packet has its AQL barrier bit cleared so capable HW overlaps it
-    // with the first segment on the same oversubscribed queue. Decided once in
-    // BuildSyncPlan()'s dispatch-order walk; false unless overlap is enabled.
+    // Same-queue any-order overlap: when true, this head kernel's dispatch is
+    // captured with the AQL barrier bit cleared so capable HW overlaps it on the
+    // oversubscribed queue. Decided in RoundRobinStreamAssignment().
     bool clear_head_barrier = false;
   };
 
@@ -1176,10 +1175,12 @@ class GraphExecSegmented : public GraphExecBase {
   //! stream assignment. Called after the initial assignment and again if
   //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
   void ComputeCompletionSignalFlags();
-  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
-  //! onto a single stream because the cross-stream barriers multi-stream would
-  //! cost outweigh the work that could actually overlap. Returns true to collapse.
+  //! Barrier-ROI heuristic: returns true to collapse the graph onto one stream when
+  //! cross-stream sync would cost more than the overlap it unlocks. Memoized (see
+  //! collapse_decision_cache_); the raw scan lives in ComputeCollapseDecision().
   bool ShouldCollapseToSingleStream() const;
+  //! Uncached barrier-ROI computation backing ShouldCollapseToSingleStream().
+  bool ComputeCollapseDecision() const;
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1298,36 +1299,21 @@ class GraphExecSegmented : public GraphExecBase {
   //! the graph onto a single stream. Read by Init() to size stream creation.
   bool collapsed_to_single_stream_ = false;
 
+  //! Memoized ShouldCollapseToSingleStream(): -1 unknown, 0 no, 1 yes. Reset on a
+  //! new assignment; mutable so the const query can populate it on first use.
+  mutable int collapse_decision_cache_ = -1;
+
   void BuildSyncPlan();
 
-  // ---- Same-queue any-order overlap (Approach B: oversubscription) --------
-  // Multi-queue scheduling is preserved. When more parallel same-level segments
-  // exist than streams in a device's pool, round-robin assignment lands several
-  // segments on the same queue. BuildSyncPlan()'s dispatch-order walk both decides
-  // per segment whether its head may drop the AQL barrier bit
-  // (Segment::clear_head_barrier) and stamps it (PASS 3), so capable hardware
-  // overlaps the colliding segments on that queue instead of serializing. Set once
-  // in Init(); guards every mutation so it is a no-op otherwise. The optimization
-  // targets round-robin oversubscription only, so SelectStreamAssignment() forces
-  // round-robin when this is enabled.
+  // ---- Same-queue any-order overlap (oversubscribed queues) ---------------
+  // When round-robin oversubscribes a queue, it tags the later heads so capture
+  // clears their barrier bit. Targets RR only, so SelectStreamAssignment() forces
+  // round-robin when enabled.
   bool anyorder_enabled_ = false;
-  // True when the active stream assignment is round-robin (set by
-  // RoundRobinStreamAssignment, cleared by DFSStreamAssignment). Approach B's
-  // head-barrier clearing is only safe under round-robin, where same-queue
-  // collisions are independent same-level siblings; under DFS same-stream
-  // segments form dependency chains. BuildSyncPlan's decision consults this so a
-  // forced-DFS + any-order config (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2) never
-  // clears a chained head.
+  // True when the active assignment is round-robin. Head-barrier clearing runs
+  // only here (same-queue collisions are independent siblings); under DFS
+  // same-stream segments form dependency chains, so no head is tagged.
   bool assignment_is_round_robin_ = false;
-  // Stamp the precomputed head-barrier decision onto one segment's head dispatch
-  // packet (idempotent; re-applied per segment after a node update re-capture).
-  void SetSegmentHeadBarrier(const Segment& seg, SegmentBatch& sb);
-
- public:
-  // True for ISAs whose CP honors out-of-order same-queue dispatch when the
-  // barrier bit is clear (gfx1250 / gfx12.5+). Public so SelectStreamAssignment
-  // and the complexity heuristic can gate on capable HW.
-  static bool DeviceHonorsSameQueueAnyOrder(int dev_id);
 };
 
 
@@ -1450,6 +1436,14 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
+  //!< When set, this kernel head oversubscribes its queue with no cross-queue dep,
+  //!< so its dispatch clears the barrier via the AnyOrderLaunch path. Decided in
+  //!< RoundRobinStreamAssignment() per instantiate; recomputed on re-capture.
+  bool anyOrderOverlapHead_ = false;
+
+ public:
+  //!< Mark/unmark this kernel as an any-order overlap segment head.
+  void SetAnyOrderOverlapHead(bool v) { anyOrderOverlapHead_ = v; }
 
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -1771,6 +1765,12 @@ class GraphKernelNode : public GraphNode {
           flags = hipExtAnyOrderLaunch;
         }
       }
+    }
+    // Same-queue any-order overlap: this head oversubscribes its queue, so the
+    // AnyOrderLaunch path clears its barrier bit and capable HW overlaps it
+    // instead of serializing on the in-order queue.
+    if (anyOrderOverlapHead_) {
+      flags = hipExtAnyOrderLaunch;
     }
 
     const amd::Device* device = g_devices[dev_id_]->devices()[0];

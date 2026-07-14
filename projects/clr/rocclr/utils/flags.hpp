@@ -260,8 +260,8 @@ release(bool, DEBUG_HIP_GRAPH_CLASSIC_PATH, false,                            \
         "GPU_ENABLE_PAL, for testing on Linux")                                \
 release(bool, DEBUG_HIP_GRAPH_ANYORDER_OVERLAP, false,                        \
         "Keep multi-queue segment scheduling but clear the AQL barrier bit "  \
-        "when parallel segments oversubscribe a queue, so capable HW "        \
-        "(gfx1250 / gfx12.5+) overlaps the colliding kernels on that queue")  \
+        "when parallel segments oversubscribe a queue, letting the CP overlap "\
+        "the colliding kernels on that queue where the HW supports it")       \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
