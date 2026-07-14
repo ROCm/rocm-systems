@@ -194,6 +194,12 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
+    // WinDXG completion events can miss a GPU wake. Recheck the signal at a bounded interval
+    // instead of waiting for the thunk's six-second safety timeout.
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg()) {
+      wait_ms = std::min<uint32_t>(wait_ms, 1);
+    }
+
     HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
   }
 }

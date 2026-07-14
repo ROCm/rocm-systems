@@ -1868,7 +1868,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // KFD will move this thread into sleep, until any event from the list is complete or
   // if ROCR can wake it up with hsaKmtSetEvent()
   auto WaitForInterrupt = [&]() {
-    constexpr uint32_t wait_ms = 0xFFFFFFFEu;
+    const uint32_t wait_ms = runtime_singleton_->thunkLoader()->IsWinDxg() ? 1 : 0xFFFFFFFEu;
     HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
     unique_evts = uint32_t(end - &hsa_events[0]);
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
