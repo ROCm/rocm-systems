@@ -154,7 +154,7 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       std::remove(compile_options.begin(), compile_options.end(), std::string("")),
       compile_options.end());
   
-  bc_type_ = hip::helpers::kLLVM;
+  ir_kind_ = AMD_COMGR_DATA_KIND_BC;
 
   if (auto res = std::find_if(
           compile_options.begin(), compile_options.end(),
@@ -165,7 +165,7 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
     // check if spirv output is requested
     if (isaName == "amdgcnspirv") {
       isa_ = "spirv64-amd-amdhsa-unknown-" + isaName;
-      bc_type_ = hip::helpers::kSPIRV;
+      ir_kind_ = AMD_COMGR_DATA_KIND_SPIRV;
     }
     settings_.offloadArchProvided = true;
     return true;
@@ -193,15 +193,15 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     return false;
   }
   
-  if (bc_type_ == hip::helpers::kSPIRV && fgpu_rdc_) {
+  if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV && fgpu_rdc_) {
     LogError("Error in hiprtc: SPIRV output is not supported with fgpu-rdc");
     return false;
   }
 
-  if (bc_type_ == hip::helpers::kSPIRV || fgpu_rdc_) {
+  if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV || fgpu_rdc_) {
     // Generate SPIRV or Bitcode binary
-    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
-                                        LLVMBitcode_, bc_type_)) {
+    if (!hip::helpers::compileToIR(compile_input_, isa_, compileOpts, build_log_,
+                                   ir_, ir_kind_)) {
       LogError("Error in hiprtc: unable to compile source to SPIRV or Bitcode binary");
       return false;
     }
@@ -215,7 +215,12 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   if (!mangled_names_.empty()) {
-    auto& compile_step_output = fgpu_rdc_ ? LLVMBitcode_ : executable_;
+    if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV) {
+      // COMGR's name-expression map does not accept raw SPIRV.
+      LogError("Error in hiprtc: name expressions are not supported with SPIRV output");
+      return false;
+    }
+    auto& compile_step_output = fgpu_rdc_ ? ir_ : executable_;
     if (!hip::helpers::fillMangledNames(compile_step_output, mangled_names_, fgpu_rdc_)) {
       LogError("Error in hiprtc: unable to fill mangled names");
       return false;
@@ -273,20 +278,20 @@ bool RTCCompileProgram::getMangledName(const char* name_expression, const char**
 }
 
 bool RTCCompileProgram::GetBitcode(char* bitcode) {
-  if (LLVMBitcode_.size() <= 0 || bc_type_ == hip::helpers::kNone) {
+  if (ir_.size() <= 0 || ir_kind_ == AMD_COMGR_DATA_KIND_UNDEF) {
     return false;
   }
 
-  std::copy(LLVMBitcode_.begin(), LLVMBitcode_.end(), bitcode);
+  std::copy(ir_.begin(), ir_.end(), bitcode);
   return true;
 }
 
 bool RTCCompileProgram::GetBitcodeSize(size_t* bitcode_size) {
-  if (LLVMBitcode_.size() <= 0 || bc_type_ == hip::helpers::kNone) {
+  if (ir_.size() <= 0 || ir_kind_ == AMD_COMGR_DATA_KIND_UNDEF) {
     return false;
   }
 
-  *bitcode_size = LLVMBitcode_.size();
+  *bitcode_size = ir_.size();
   return true;
 }
 }  // namespace hiprtc

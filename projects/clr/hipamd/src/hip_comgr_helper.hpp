@@ -84,11 +84,6 @@ typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
 }  // namespace comgr_helper
 
 namespace helpers {
-enum DataKind {
-  kNone = 0x0,
-  kLLVM = 0x1,
-  kSPIRV = 0x2
-};
 bool UnbundleBitCode(std::string_view bundled_bit_code, const std::string& isa, size_t& co_offset,
                      size_t& co_size);
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
@@ -103,9 +98,9 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
                          const std::string& isa, const std::vector<std::string>& compileOptions,
                          const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& exe);
-bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, const std::vector<std::string>& compileOptions,
-                      std::string& buildLog, std::vector<char>& LLVMBitcode, DataKind kind);
+bool compileToIR(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                 const std::string& isa, const std::vector<std::string>& compileOptions,
+                 std::string& buildLog, std::vector<char>& ir, amd_comgr_data_kind_t kind);
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                      const std::string& isa, const std::vector<std::string>& linkOptions,
                      std::string& buildLog, std::vector<char>& LinkedLLVMBitcode);
@@ -199,7 +194,7 @@ class RTCProgram {
   std::string isa_;
   std::string build_log_;
   std::vector<char> executable_;
-  helpers::DataKind bc_type_{helpers::DataKind::kNone};
+  amd_comgr_data_kind_t ir_kind_{AMD_COMGR_DATA_KIND_UNDEF};
 
   hip::comgr_helper::ComgrDataSetUniqueHandle exec_input_;
 };

@@ -338,15 +338,15 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
   return true;
 }
 
-bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, const std::vector<std::string>& compileOptions,
-                      std::string& buildLog, std::vector<char>& LLVMBitcode, DataKind bc_type) {
+bool compileToIR(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                 const std::string& isa, const std::vector<std::string>& compileOptions,
+                 std::string& buildLog, std::vector<char>& ir, amd_comgr_data_kind_t ir_kind) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;
   amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC;
   amd_comgr_data_kind_t data_kind = AMD_COMGR_DATA_KIND_BC;
-  // if BC type is SPIRV, use the new action and data kind
-  if (bc_type == kSPIRV) {
+  // if IR kind is SPIRV, use the new action and data kind
+  if (ir_kind == AMD_COMGR_DATA_KIND_SPIRV) {
     action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_TO_SPIRV;
     data_kind = AMD_COMGR_DATA_KIND_SPIRV;
   }
@@ -370,7 +370,7 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
     return false;
   }
 
-  if (!extractByteCodeBinary(output, data_kind, LLVMBitcode)) {
+  if (!extractByteCodeBinary(output, data_kind, ir)) {
     return false;
   }
 
