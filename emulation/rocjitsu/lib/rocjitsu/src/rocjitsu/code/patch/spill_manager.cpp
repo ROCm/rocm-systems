@@ -466,24 +466,15 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
                                                            : build_s_wait_storecnt0(arch);
   const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                           : build_s_wait_loadcnt0(arch);
-  const auto wait_guest_load = build_s_wait_flat_load0(arch);
-  const auto wait_guest_lds = build_s_wait_lds0(arch);
-  if (!wait_store || !wait_load || !wait_guest_load || !wait_guest_lds)
+  if (!wait_store || !wait_load)
     return std::nullopt;
 
   VgprSpillSequence sequence;
   sequence.vgpr_base = vgpr_base;
   sequence.vgpr_count = vgpr_count;
   sequence.slot_offsets.reserve(vgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 3u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
-  // A live VGPR can still have an outstanding asynchronous guest producer.
-  // Saving it before that producer retires snapshots the old value; the probe
-  // then clobbers the completed value and restore silently resurrects stale
-  // data. Drain both vector/FLAT and LDS load paths before taking the snapshot.
-  sequence.save_words.push_back(*wait_guest_load);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    sequence.save_words.push_back(*wait_guest_lds);
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const auto offset = planned_manager.offset_for(RegisterRef{RegClass::VGPR, vgpr, 1});

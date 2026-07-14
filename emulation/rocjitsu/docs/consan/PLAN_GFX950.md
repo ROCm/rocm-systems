@@ -555,14 +555,18 @@ Full gfx950 support means:
   259/259. `T4IS` is now active; no other IREE CTest overlaps it.
 - 2026-07-14: the first `T4IS` sweep passed 257/259 and reduced both failures
   to live-VGPR spills in saturated CDNA4 MFMA kernels. Spill snapshots now
-  drain outstanding guest vector/FLAT and LDS producers before saving; this
-  fixed the large tensor-ukernel reproducer. Moving the medium reproducer's
+  have a target-specific containment boundary. Moving the medium reproducer's
   borrowed window from `v2:v8` to `v128:v134`, beyond every decoded MFMA
-  destination, still corrupted the result. Until injected scratch reads have
+  destination, still corrupted the result. A trial pre-save drain fixed the
+  large case but broke two non-MFMA coalesced-DMA kernels and was rejected.
+  Until injected scratch reads have
   explicit MFMA pipeline-hazard scheduling, CDNA4 MFMA owners that require a
-  live spill now receive typed `NoLegalWindow` containment. The synthetic
-  regression and both isolated IREE tests 1837/1838 pass; `T4IS` remains
-  active pending the clean broad rerun.
+  live spill now receive typed `NoLegalWindow` containment for the complete
+  code-object transaction. Candidate-local containment initially let the patch
+  budget substitute a sibling dynamic kernel and made IREE 1800/1801 return
+  zero matrices; object-level containment makes all four isolated rows green.
+  The synthetic regression also passes; `T4IS` remains active pending the
+  clean broad rerun.
 
 ## DAG Overview
 
@@ -2437,8 +2441,8 @@ Result: 259/259 pass with the workspace TheRock runtime.
 Goal: run the same inventory under standard inline shadow.
 
 Current result: the initial sweep passed 257/259. Both isolated failures are
-green after pre-save guest-load quiescence and typed containment of unscheduled
-live spills in CDNA4 MFMA owners. A clean 259-test rerun is pending.
+green after typed containment of unscheduled live spills in CDNA4 MFMA owners.
+A clean 259-test rerun is pending.
 
 For each T4 profile node:
 

@@ -503,6 +503,7 @@ struct ConSanCandidateResourcePlan {
   std::vector<uint64_t> owner_descriptor_file_offsets;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
   ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+  bool unsafe_cdna4_mfma_spill = false;
   std::optional<uint16_t> scratch_vgpr;
   uint16_t scratch_vgpr_count = 0;
   uint16_t current_vgpr_count = 0;

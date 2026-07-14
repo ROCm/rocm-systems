@@ -2403,6 +2403,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       register_plan.source == ConSanRegisterAllocationSource::SpillRequired) {
     plan.source = ConSanRegisterAllocationSource::Unsupported;
     plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+    plan.unsafe_cdna4_mfma_spill = true;
     return plan;
   }
   plan.source = register_plan.source;
@@ -2425,6 +2426,23 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
     result.resource_plans.push_back(plan_moi_resource_site(
         state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
         candidate.kernel_descriptor_file_offset, scratch_count));
+  }
+  const bool has_unscheduled_mfma_spill =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.unsafe_cdna4_mfma_spill;
+      });
+  if (has_unscheduled_mfma_spill) {
+    // max_patches selection must not skip a contained MFMA kernel and silently
+    // substitute a spill patch in a sibling kernel from the same object. The
+    // replacement object is one transaction, so preserve it whole until MFMA
+    // spill hazards can be scheduled explicitly.
+    for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      plan.source = ConSanRegisterAllocationSource::Unsupported;
+      plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+      plan.scratch_vgpr.reset();
+      plan.required_vgpr_count = plan.current_vgpr_count;
+    }
   }
 }
 

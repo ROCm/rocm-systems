@@ -156,15 +156,11 @@ CDNA4/gfx950. For each register they emit an address-free per-lane scratch
 store on save and the matching scratch load on restore. gfx1201 uses its
 one-word VSCRATCH forms and separate zero-threshold store/load waits. gfx950
 uses two-word FLAT_SCRATCH forms and `s_waitcnt vmcnt(0)` after both the store
-batch and load batch. Before taking the save snapshot, both backends also
-drain outstanding guest vector/FLAT and LDS loads. Otherwise an asynchronous
-producer can retire after the scratch store, and restore would silently
-resurrect the stale pre-load value.
+batch and load batch.
 
 Conceptually:
 
 ```text
-wait until guest vector and LDS producers complete
 scratch_store_b32 vN, private_offset_N
 ...
 wait until scratch stores complete
@@ -187,8 +183,10 @@ CDNA4 MFMA owners have an additional current boundary. Injected scratch reads
 do not yet participate in the guest MFMA pipeline's hazard scheduling. If a
 gfx950 MFMA kernel has no dead or growable scratch window and would require a
 live-VGPR spill, ConSan returns a typed `NoLegalWindow` resource outcome and
-leaves the object unmodified. Non-MFMA gfx950 kernels retain the hardware-
-qualified spill path, including forced-spill live tests.
+leaves the complete code object unmodified. This object-level transaction
+prevents a patch budget from skipping the contained MFMA kernel and selecting
+a spill in a sibling kernel instead. Objects without that hazard retain the
+hardware-qualified gfx950 spill path, including forced-spill live tests.
 
 These scratch waits are distinct from the other CDNA4 memory contracts. Native
 DS completion drains `LGKM_CNT`; general FLAT operations drain both `VM_CNT`

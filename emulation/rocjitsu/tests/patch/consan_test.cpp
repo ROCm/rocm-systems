@@ -7963,6 +7963,7 @@ TEST(ConSanMoi, Gfx950MfmaOwnerExcludesUnscheduledLiveVgprSpill) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::NoLegalWindow);
+  EXPECT_TRUE(result.resource_plans.front().unsafe_cdna4_mfma_spill);
   EXPECT_FALSE(result.resource_plans.front().scratch_vgpr);
 }
 
