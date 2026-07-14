@@ -160,7 +160,7 @@ run_pingpong(char* mem, size_t msg_size, long num_iters, int use_wait, int do_qu
 static void
 usage()
 {
-    printf("Usage:   shmem_pingpong [options]\n");
+    printf("Usage:   shmem-pingpong [options]\n");
     printf("\n");
     printf("Options are:\n");
     printf("  -n <iters>     Specify number of iterations to run (default: 10000).\n");

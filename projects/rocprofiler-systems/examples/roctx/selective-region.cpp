@@ -27,17 +27,17 @@
 //   CodeBlock_G                                 (outside any region)
 //
 // Run without filter (traces everything):
-//   rocprof-sys -- ./selective_region
-//   rocprof-sys -- ./selective_region --push-pop
+//   rocprof-sys -- ./selective-region
+//   rocprof-sys -- ./selective-region --push-pop
 //
 // Run with filter (only traces inside "Region1"):
-//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region
-//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region --push-pop
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective-region
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective-region --push-pop
 //
 // Expected with filter: profiling data recorded for {CodeBlock_B, CodeBlock_C,
 //                        CodeBlock_D, CodeBlock_F} on each thread
 
-#include "roctx_example_kernels.hpp"
+#include "roctx-example-kernels.hpp"
 
 DEFINE_KERNEL(CodeBlock_A, 10)
 DEFINE_KERNEL(CodeBlock_B, 20)
@@ -65,7 +65,7 @@ run(int tid, hipStream_t stream, float* d, bool use_push_pop)
 {
     {
         std::lock_guard<std::mutex> lk{ print_lock };
-        printf("[selective_region][thread %d] starting\n", tid);
+        printf("[selective-region][thread %d] starting\n", tid);
     }
 
     roctx_range_id_t region1_id  = 0;
