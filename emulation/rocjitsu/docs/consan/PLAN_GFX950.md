@@ -627,6 +627,14 @@ Full gfx950 support means:
   limit so CLR reports the HIP error instead of deliberately aborting first.
   The complete corrected gfx1201 emulator focused gate now passes 37/37; the
   shared WaveTrap plus ConSan unit selection passes 256/256.
+- 2026-07-14: `X1IS` is `DONE` and `X1BSC` is `ACTIVE`. The uninstrumented
+  selected IREE baseline passes 8/8. Each documented guarded profile passes
+  the five TileAndFuse tests 5/5 under gfx1201 emulation with required patches;
+  MOI profiles also require visible records. The separate unguarded
+  scan/softmax compatibility slice passes 3/3 under all four profiles. Commit
+  `f5c4bb4908` corrects the matrix to keep those unsupported-site compatibility
+  rows out of the guarded non-vacuity selection and validates exact 5/3/10
+  architecture-specific counts. Broad profiles now run serially.
 
 ## DAG Overview
 
@@ -875,8 +883,8 @@ flowchart LR
   X1F["X1F: Focused Emulator Gate"]:::done
   X1H["X1H: hip-moi Emulator Tier"]:::active
   X1I0["X1I0: IREE Build And Emulator Launcher"]:::done
-  X1IS["X1IS: Selected IREE Emulator Tier"]:::active
-  X1BSC["X1BSC: SuperCollider Broad IREE"]:::todo
+  X1IS["X1IS: Selected IREE Emulator Tier"]:::done
+  X1BSC["X1BSC: SuperCollider Broad IREE"]:::active
   X1BRR["X1BRR: Record/Replay Broad IREE"]:::todo
   X1BSA["X1BSA: Sampled Broad IREE"]:::todo
   X1BIS["X1BIS: Inline-Shadow Broad IREE"]:::todo
@@ -2641,8 +2649,8 @@ Sub-DAG:
   through the emulator.
 - `X1I0` (DONE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
   launcher without changing the existing gfx950 build.
-- `X1IS` (ACTIVE): run guarded selected IREE profiles with non-vacuity checks.
-- `X1BSC`, `X1BRR`, `X1BSA`, and `X1BIS` (TODO): run and independently reduce
+- `X1IS` (DONE): run guarded selected IREE profiles with non-vacuity checks.
+- `X1BSC` (ACTIVE), `X1BRR`, `X1BSA`, and `X1BIS` (TODO): run and independently reduce
   the four broad profiles; `X1BG` collects their accepted results.
 
 Done criteria:
