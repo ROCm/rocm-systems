@@ -84,20 +84,3 @@ jobs:
       - name: Build hip-tests
         run: cmake --build "${BUILD_DIR}/hip-tests" --parallel
 
-  nvidia-clr-build-ci-summary:
-    name: "HIP NVIDIA CI Summary"
-    if: always()
-    needs: [nvidia-clr-build]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check results
-        run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
-            | jq --raw-output \
-            'map_values(select(.result != "success" and .result != "skipped")) | keys | join(",")'
-          )"
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "The following jobs failed: ${FAILED_JOBS}"
-            exit 1
-          fi
