@@ -31,7 +31,6 @@ EXPECTED_XFAILS = {
     "pk_min3_max3_ops": "EXPAND not yet implemented for v_pk_min3_i16",
     "scalar_call_ops": "EXPAND not yet implemented for s_call_i64",
     "scalar_control_ops": "EXPAND not yet implemented for s_get_shader_cycles_u64",
-    "scalar_narrow_smem_loads": "mismatched outputs against external/kmd: out_u32",
 }
 
 

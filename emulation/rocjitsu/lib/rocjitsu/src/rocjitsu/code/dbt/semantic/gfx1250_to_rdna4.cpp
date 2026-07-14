@@ -1819,16 +1819,116 @@ ExpandResult expand_global_atomic_add_f64(const Instruction &inst, uint32_t, uin
   }
 }
 
-ExpandResult expand_scaled_smem(const Instruction &inst, uint32_t, uint64_t,
-                                std::span<const uint8_t>, const LivenessAnalysis &liveness,
-                                TranslationContext &context, const LaneLayout *,
-                                const LaneLayout *) {
+struct NarrowSmemSpec {
+  uint16_t rdna4_global_op;
+  uint8_t access_size;
+};
+
+[[nodiscard]] constexpr std::optional<NarrowSmemSpec> narrow_smem_spec(uint32_t opcode) {
+  switch (opcode) {
+  case 8:                         // s_load_i8
+  case 24:                        // s_buffer_load_i8
+    return NarrowSmemSpec{17, 1}; // global_load_i8
+  case 9:                         // s_load_u8
+  case 25:                        // s_buffer_load_u8
+    return NarrowSmemSpec{16, 1}; // global_load_u8
+  case 10:                        // s_load_i16
+  case 26:                        // s_buffer_load_i16
+    return NarrowSmemSpec{19, 2}; // global_load_i16
+  case 11:                        // s_load_u16
+  case 27:                        // s_buffer_load_u16
+    return NarrowSmemSpec{18, 2}; // global_load_u16
+  default:
+    return std::nullopt;
+  }
+}
+
+ExpandResult expand_narrow_smem(const Instruction &inst, const gfx1250::SmemMachineInst &src,
+                                const NarrowSmemSpec &spec, const LivenessAnalysis &liveness,
+                                TranslationContext &context) {
+  const int64_t signed_ioffset = static_cast<int32_t>(src.ioffset << 8u) >> 8u;
+  const int64_t byte_ioffset =
+      src.scale_offset != 0 ? signed_ioffset * spec.access_size : signed_ioffset;
+  constexpr int64_t kMinSigned24 = -(int64_t{1} << 23u);
+  constexpr int64_t kMaxSigned24 = (int64_t{1} << 23u) - 1;
+  if (byte_ioffset < kMinSigned24 || byte_ioffset > kMaxSigned24)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " byte offset does not fit an RDNA4 global load");
+
+  const auto scratch = liveness.find_free_run(&inst, 2);
+  if (!scratch || *scratch > 254)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot allocate address and result VGPRs");
+
+  std::vector<uint8_t> avoid_sgpr;
+  const uint16_t base = static_cast<uint16_t>(src.sbase) * 2u;
+  if (base <= 105) {
+    avoid_sgpr.push_back(static_cast<uint8_t>(base));
+    if (base + 1u <= 105)
+      avoid_sgpr.push_back(static_cast<uint8_t>(base + 1u));
+  }
+  if (src.sdata <= 105)
+    avoid_sgpr.push_back(static_cast<uint8_t>(src.sdata));
+  if (src.soffset <= 105)
+    avoid_sgpr.push_back(static_cast<uint8_t>(src.soffset));
+  const auto exec_save = find_free_sgpr_pair_avoiding(inst, liveness, avoid_sgpr);
+  if (!exec_save)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot allocate an SGPR pair to preserve EXEC");
+
+  const uint8_t address = static_cast<uint8_t>(*scratch);
+  const uint8_t result = static_cast<uint8_t>(*scratch + 1u);
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpReadfirstlaneB32 = 2;
+  constexpr uint8_t kOpLshlrevB32 = 24;
+  constexpr uint8_t kOpWaitLoadcnt = 64;
+  constexpr uint8_t kOpWaitAlu = 8;
+  constexpr uint8_t kSoffsetNull = 124;
+  constexpr uint16_t kInline0 = 128;
+
+  std::vector<uint32_t> words;
+  words.reserve(24);
+  append_save_exec(words, static_cast<uint8_t>(*exec_save));
+  append_set_exec_lo_mask(words, 1u);
+  append_vop1(words, kOpMovB32, address,
+              src.soffset == kSoffsetNull ? kInline0 : static_cast<uint16_t>(src.soffset));
+  if (src.scale_offset != 0 && spec.access_size == 2)
+    append_vop2(words, kOpLshlrevB32, address, scalar_positive_inline_u32(1), address);
+  append_wait_valu_vgpr(words);
+
+  VglobalFields load{};
+  load.saddr = base;
+  load.vaddr = address;
+  load.vdst = result;
+  load.ioffset = static_cast<uint32_t>(byte_ioffset) & 0x00FF'FFFFu;
+  load.nv = src.nv;
+  load.scope = src.scope;
+  load.th = src.th;
+  if (!append_rdna4_vglobal_load(words, load, spec.rdna4_global_op))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 global-load replacement");
+  words.push_back(pack_sopp(kOpWaitLoadcnt, 0));
+  append_vop1(words, kOpReadfirstlaneB32, static_cast<uint8_t>(src.sdata), vgpr_src(result));
+  words.push_back(pack_sopp(kOpWaitAlu, kWaitAluDepctrVaSdst0));
+  append_restore_exec(words, static_cast<uint8_t>(*exec_save));
+
+  context.require_vgprs(static_cast<uint32_t>(*scratch) + 2u);
+  context.require_sgprs(static_cast<uint32_t>(*exec_save) + 2u);
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_smem_semantics(const Instruction &inst, uint32_t, uint64_t,
+                                   std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                   TranslationContext &context, const LaneLayout *,
+                                   const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::SmemMachineInst))
     return ExpandResult::not_handled();
 
   gfx1250::SmemMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
+  if (const auto narrow = narrow_smem_spec(src.op))
+    return expand_narrow_smem(inst, src, *narrow, liveness, context);
   if (src.scale_offset == 0)
     return ExpandResult::not_handled();
 
@@ -12850,13 +12950,13 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vglobal,
      nullptr, nullptr},
-    {kEncSmem0, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_smem,
+    {kEncSmem0, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
      nullptr, nullptr},
-    {kEncSmem1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_smem,
+    {kEncSmem1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
      nullptr, nullptr},
-    {kEncSmem2, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_smem,
+    {kEncSmem2, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
      nullptr, nullptr},
-    {kEncSmem3, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_smem,
+    {kEncSmem3, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
      nullptr, nullptr},
 };
 
