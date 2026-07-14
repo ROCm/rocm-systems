@@ -1660,13 +1660,7 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  // The local-cave model grows .text in place. The appended region
-  // [probe body][trampoline] lives at the tail of .text, starting at the
-  // original text size (cave_start).
-  const std::vector<uint32_t> text = section_words(patched, ".text");
-  constexpr size_t kOriginalTextWords = 2; // make_gfx950_elf_with_two_nops(): 8 bytes.
-  ASSERT_GT(text.size(), kOriginalTextWords);
-  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  const std::vector<uint32_t> cave = section_words(patched, ".rj_trampolines");
   ASSERT_FALSE(cave.empty());
 
   // The probe body is copied exactly once, at the front of the appended region.

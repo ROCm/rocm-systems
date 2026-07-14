@@ -10,7 +10,7 @@
 #   2. unbundles the device code object into a raw device ELF that Executable /
 #      AmdGpuCodeObject can load directly.
 #
-# AMDCXX, ROCM_PATH, CLANG_OFFLOAD_BUNDLER, and KERNEL_OUTPUT_DIR must be set
+# AMDCLANG, ROCM_PATH, CLANG_OFFLOAD_BUNDLER, and KERNEL_OUTPUT_DIR must be set
 # before including this module.
 #
 # Usage: rj_add_probe_object(<name> <offload_arch> [OUTPUT_NAME <output_name>])
@@ -38,7 +38,7 @@ function(rj_add_probe_object name offload_arch)
     add_custom_command(
         OUTPUT ${bundle}
         COMMAND
-            ${AMDCXX} -x hip --offload-arch=${offload_arch}
+            ${AMDCLANG} -x hip --offload-arch=${offload_arch}
             --rocm-path=${ROCM_PATH} -fgpu-rdc --cuda-device-only -O2 -o
             ${bundle} ${src}
         DEPENDS ${src}

@@ -336,7 +336,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     return out.probes.size() - 1;
   };
 
-  // All-or-nothing: per-point errors accumulate
+  // All-or-nothing: per-point errors accumulate; sites are staged locally and
+  // only published if no point failed. Multi-site callers therefore can't tell
+  // *which* points succeeded when any fail — only the failures are itemized.
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   sites.reserve(points_.size());
@@ -509,9 +511,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
       record.target_pair_base = plan.target_pair_base;
-      // If this site does not call a probe
-      // Currently, this means that the plan is to put a nop which means we do
-      // not need to mess with spills
+    // If this site does not call a probe
+    // Currently, this means that the plan is to put a nop which means we do
+    // not need to mess with spills
     } else {
       TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
       // The only assembly we currently allow is an inlined nop
