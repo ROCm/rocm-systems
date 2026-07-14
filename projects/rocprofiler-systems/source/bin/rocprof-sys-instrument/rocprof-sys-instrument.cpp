@@ -71,6 +71,13 @@ get_default_min_address_range()
     // default to 4096
     return 4 * get_default_min_instructions();
 }
+auto
+get_default_max_library_functions()
+{
+    // default to 20000
+    return rocprofsys::get_env<size_t>(
+        rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
+}
 }  // namespace
 
 using InstrumentMode = ::rocprofsys::dl::InstrumentMode;
@@ -86,11 +93,11 @@ bool   instr_traps                  = false;
 bool   instr_loop_traps             = false;
 bool   exclude_internal_lib_paths   = false;
 bool   exe_only                     = false;
-size_t min_address_range            = get_default_min_address_range();  // 4096
-size_t min_loop_address_range       = get_default_min_address_range();  // 4096
-size_t min_instructions             = get_default_min_instructions();   // 1024
-size_t min_loop_instructions        = get_default_min_instructions();   // 1024
-size_t max_library_functions        = 20000;
+size_t min_address_range            = get_default_min_address_range();      // 4096
+size_t min_loop_address_range       = get_default_min_address_range();      // 4096
+size_t min_instructions             = get_default_min_instructions();       // 1024
+size_t min_loop_instructions        = get_default_min_instructions();       // 1024
+size_t max_library_functions        = get_default_max_library_functions();  // 20000
 bool   werror                       = false;
 bool   debug_print                  = false;
 bool   instr_print                  = false;
