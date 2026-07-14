@@ -86,8 +86,8 @@ jobs:
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
-  # GIN suite: build/link/infra failures show red (no continue-on-error); GIN
-  # benches stay non-gating (WIP) until GIN_GATE_TESTS=1. Jira: AICOMRCCL-1478.
+  # GIN suite: build/link/infra failures gate here (red); test failures surface via
+  # the non-gating gin-tests check below.
   gin:
     name: GIN
     needs: provision-tw
@@ -103,6 +103,20 @@ jobs:
       rocm_release: ${{ needs.provision-tw.outputs.rocm_release }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # Non-gating check for GIN test failures: red when benches fail, but not a
+  # required check so it doesn't block the PR. Make it a required check to gate.
+  # Jira AICOMRCCL-1478: Enable GIN test gating.
+  gin-tests:
+    name: GIN tests (non-gating)
+    needs: gin
+    if: ${{ needs.gin.outputs.tests_failed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report GIN test failure
+        run: |
+          echo "GIN benches failed (see the GIN job's test-*.log); non-gating." >&2
+          exit 1
 
   # --- Per-cluster cleanup: release this run's ROCm reference (always) and GC the
   # build if unreferenced. rocm-ref.sh only touches the local cache (no network).

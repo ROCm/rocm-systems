@@ -63,6 +63,10 @@ on:
         type: number
         required: false
         default: 240
+    outputs:
+      tests_failed:
+        description: 'true if the build succeeded but the suite tests failed (non-gating signal).'
+        value: ${{ jobs.suite.outputs.tests_failed }}
   workflow_dispatch:
     inputs:
       suite:
@@ -128,6 +132,8 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     continue-on-error: ${{ inputs.non_gating }}
+    outputs:
+      tests_failed: ${{ steps.test_result.outputs.tests_failed }}
     defaults:
       run:
         shell: bash
@@ -211,6 +217,19 @@ jobs:
           dump "scheduler"  "${logs_dir}"/rccl-${SUITE}-*.out "${logs_dir}"/rccl-${SUITE}-*.err
           # Verbose per-rank NCCL debug logs (RCCL_CI_DEBUG=1); noisy, kept last.
           dump "nccl-debug" "${logs_dir}"/nccl-debug/nccl-debug.*.log
+
+      # Surface test-only failures (sbatch sentinel) as a job output; build
+      # failures fail the submit step above and gate instead.
+      - name: Determine test result
+        id: test_result
+        if: always()
+        run: |
+          if [[ -f "${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/tests-failed" ]]; then
+            echo "tests_failed=true" >> "${GITHUB_OUTPUT}"
+            echo "::warning::${SUITE} tests failed (non-gating; see test-*.log)."
+          else
+            echo "tests_failed=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Clean up per-job workdir
         if: always()

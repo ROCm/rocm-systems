@@ -6,8 +6,8 @@
 # MPI_HOME, ROCSHMEM_INSTALL_DIR, RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR) or the
 # same values from the environment (gin.sbatch exports them).
 #
-# GIN benches are NON-GATING (WIP): each run is timed and summarized, but the
-# script still exits 0. Set GIN_GATE_TESTS=1 to gate. Jira: AICOMRCCL-1478.
+# Each run is timed and summarized; exits non-zero if any failed. gin.sbatch keeps
+# test failures non-gating (separate red check). Jira AICOMRCCL-1478: Enable GIN test gating.
 #
 # Environment overrides:
 #   NP             MPI ranks per run         (default: 8)
@@ -15,7 +15,6 @@
 #   BENCH_TIMEOUT  Per-test wall-clock cap   (default: 600s)
 #   BENCH_KILL_AFTER  SIGKILL grace          (default: 30s)
 #   CONFIG         Test-matrix JSON          (default: lib/gin-tests.json)
-#   GIN_GATE_TESTS Set to 1 to fail the job on any bench failure (default: off)
 #   RCCL_CI_DEBUG  Set to 1 to add the config's debug_env to every run
 #   RCCL_CI_DEBUG_DIR  Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
 #                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
@@ -52,9 +51,11 @@ ROCSHMEM_TESTS_BIN_DIR="${ROCSHMEM_TESTS_BIN_DIR:-${ROCSHMEM_INSTALL_DIR}/bin}"
 
 export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
 LD_LIBRARY_PATH="${ROCSHMEM_INSTALL_DIR}/lib:${RCCL_INSTALL_PREFIX}/lib:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
-# Some ROCm layouts ship bundled sysdeps here; include only if present.
-[[ -d "${ROCM_PATH}/core/lib/rocm_sysdeps/lib" ]] && \
-  LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ROCM_PATH}/core/lib/rocm_sysdeps/lib"
+# ROCm ships bundled sysdeps (librocm_sysdeps_numa.so.1, drm, ...) that rocSHMEM
+# links against; the dir moves between layouts, so add whichever exists.
+for _sysdeps in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
+  [[ -d "${_sysdeps}" ]] && LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${_sysdeps}"
+done
 export LD_LIBRARY_PATH
 export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 
@@ -140,14 +141,8 @@ done
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
   echo "=== FAILED / SKIPPED RUNS (${#FAILED_RUNS[@]} of ${#TEST_NAMES[@]}) ==="
   printf '  %s\n' "${FAILED_RUNS[@]}"
-  # GIN benches are WIP: report failures but stay green. Flip GIN_GATE_TESTS=1
-  # to gate the job on bench failures once GIN is validated. Jira AICOMRCCL-1478.
-  if [[ "${GIN_GATE_TESTS:-}" == "1" ]]; then
-    echo "GIN_GATE_TESTS=1: failing the job."
-    exit 1
-  fi
-  echo "GIN benches non-gating (WIP); not failing the job. Jira: AICOMRCCL-1478."
-  exit 0
+  # Exit non-zero on failure; gin.sbatch turns this into a non-gating red check.
+  exit 1
 fi
 
 echo "All GIN test runs succeeded."

@@ -151,6 +151,20 @@ fi
 echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
+
+# --whole-archive rocSHMEM into alltoall_perf so -rdynamic exports its host symbols
+# (e.g. rocshmem::envvar::log_flags) for librccl.so, which is built ENABLE_ROCSHMEM_GIN
+# and leaves them undefined. CI-time patch to avoid editing tracked rccl-tests files.
+tlib="${rccl_tests_src}/src/CMakeLists.txt"
+if grep -q 'target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
+  sed -i \
+    's|target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}|target_link_libraries(alltoall_perf PRIVATE -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive|' \
+    "${tlib}"
+  echo "    patched alltoall_perf link: --whole-archive rocSHMEM"
+else
+  echo "    (alltoall_perf whole-archive pattern not found; skipping)"
+fi
+
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
@@ -168,6 +182,16 @@ if [[ ! -x "${rccl_tests_build}/alltoall_perf" ]]; then
   exit 1
 fi
 
+# Diag: confirm alltoall_perf exports the rocSHMEM host symbol librccl.so resolves
+# at runtime (log_flags); a miss here => runtime 'undefined symbol'.
+sym='rocshmem.*envvar.*log_flags'
+rocshmem_a="${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
+librccl="$(ls "${rccl_prefix}"/lib/librccl.so* 2>/dev/null | head -n1)"
+echo "== log_flags symbol diag =="
+nm -C "${rocshmem_a}" 2>/dev/null | grep -E " [TDBRtdbr] .*${sym}" | head || echo "  not defined in librocshmem.a"
+nm -CD "${rccl_tests_build}/alltoall_perf" 2>/dev/null | grep -E "${sym}" || echo "  NOT exported by alltoall_perf"
+nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined in librccl.so"
+
 # Hand the install/build locations to the run stage.
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
@@ -176,8 +200,7 @@ fi
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
 
-# Abort before the test phase if the build failed -- running tests against a
-# broken/partial build is pointless and only muddies the logs.
+# Skip the test phase if the build failed (testing a broken build is pointless).
 if [[ "${build_rc}" -ne 0 ]]; then
   echo "ERROR: build phase failed (rc=${build_rc}); skipping GIN tests." >&2
   echo "----- last 60 lines of ${build_err} -----" >&2
@@ -185,10 +208,15 @@ if [[ "${build_rc}" -ne 0 ]]; then
   exit "${build_rc}"
 fi
 
-# --- test phase -> test-%j.{out,err} ---
+# --- test phase -> test-%j.{out,err}. Test failures are non-gating: don't fail
+# the job; drop a `tests-failed` sentinel for the workflow's separate red check. ---
+test_rc=0
 {
-# 6) GIN/rocSHMEM tests (non-gating).
 echo "==> [6/6] run GIN tests"
 "${ci_dir}/run-gin-ci.sh"
-} > "${test_out}" 2> "${test_err}"
+} > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
+if [[ "${test_rc}" -ne 0 ]]; then
+  echo "GIN tests failed (rc=${test_rc}); non-gating (sentinel written)." >&2
+  : > "${logs_dir}/tests-failed"
+fi
