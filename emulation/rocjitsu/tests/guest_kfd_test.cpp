@@ -271,4 +271,75 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   close(fd);
 }
 
+// Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not
+// leave a stale KFD classification behind. In guest/DBT mode open("/dev/kfd")
+// returns an app-facing dup while the real fd stays internal; if some dup2/dup3
+// target reuses that hidden number, the interposer must stop routing KFD ioctls
+// on it (GuestKfd::invalidate_primary_fd clears real_kfd_fd_ + ready_), and app
+// dups plus fresh opens must keep working via a lazily reopened real fd.
+//
+// The hidden fd number is not directly observable, so this brute-forces the
+// candidate space: it dup2's a pipe end over every low fd number (skipping the
+// ones the test itself owns). Whichever number was the hidden real fd gets
+// overwritten; the invariant under test is that KFD routing stays correct
+// regardless of which number that was.
+TEST(GuestKfdFdReuseTest, OverwritingHiddenRealFdKeepsRoutingCorrect) {
+  if (access(kKfdPath, R_OK | W_OK) != 0)
+    GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+
+  auto version_ok = [](int f) {
+    kfd_ioctl_get_version_args version{};
+    return ioctl(f, AMDKFD_IOC_GET_VERSION, &version) == 0;
+  };
+
+  int app_fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(app_fd, 0);
+  if (!guest_gpu_is_visible()) {
+    close(app_fd);
+    FAIL() << "guest GPU overlay is not visible";
+  }
+  ASSERT_TRUE(version_ok(app_fd));
+
+  // A second app-facing dup holds the guest process open across the overwrite.
+  int keeper = dup(app_fd);
+  ASSERT_GE(keeper, 0);
+  ASSERT_TRUE(version_ok(keeper));
+
+  int pipefd[2];
+  ASSERT_EQ(pipe(pipefd), 0);
+
+  // Overwrite every low fd number except the ones this test owns. Whichever
+  // number is the interposer's hidden real /dev/kfd fd gets clobbered here,
+  // driving invalidate_primary_fd() on that backend.
+  constexpr int kMaxProbeFd = 64;
+  for (int target = 3; target < kMaxProbeFd; ++target) {
+    if (target == app_fd || target == keeper || target == pipefd[0] || target == pipefd[1])
+      continue;
+    // dup2 onto an unopened number just creates a new dup of the pipe read end;
+    // onto an open number it atomically closes the old one first. Either way the
+    // target now names the pipe, not KFD.
+    if (dup2(pipefd[0], target) != target)
+      continue;
+    // The overwritten number must never route KFD ioctls.
+    EXPECT_FALSE(version_ok(target)) << "fd " << target << " still routed KFD after dup2 overwrite";
+    close(target);
+  }
+
+  // The surviving app dup must still route KFD, and a fresh open must succeed
+  // (the interposer lazily reopens the hidden real fd if it was the clobbered
+  // number), still seeing the guest overlay.
+  EXPECT_TRUE(version_ok(keeper)) << "keeper dup stopped routing after hidden-fd overwrite";
+
+  int reopened = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(reopened, 0) << "reopen after hidden-fd overwrite failed: " << std::strerror(errno);
+  EXPECT_TRUE(version_ok(reopened));
+  EXPECT_TRUE(guest_gpu_is_visible());
+
+  close(reopened);
+  close(keeper);
+  close(app_fd);
+  close(pipefd[0]);
+  close(pipefd[1]);
+}
+
 } // namespace

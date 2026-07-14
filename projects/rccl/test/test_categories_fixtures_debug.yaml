@@ -21,6 +21,7 @@ test_categories:
       - "TransportTest.*"
       - "ArgCheckTest.*"
       - "DdaIpcEligibilityTest.*"
+      - "DdaFabricEligibilityTest.*"
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
