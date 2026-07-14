@@ -45,6 +45,7 @@ subtrees:
       - file: how-to/hip_runtime_api/error_handling
       - file: how-to/hip_runtime_api/call_stack
       - file: how-to/hip_runtime_api/asynchronous
+      - file: how-to/hip_runtime_api/execution_context
       - file: how-to/hip_runtime_api/hipgraph
       - file: how-to/hip_runtime_api/cooperative_groups
       - file: how-to/hip_runtime_api/multi_device

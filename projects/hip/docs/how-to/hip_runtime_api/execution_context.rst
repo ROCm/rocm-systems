@@ -38,7 +38,7 @@ The resource returned is intersected with any global CU masks set through the
 ``HSA_CU_MASK`` and ``ROC_GLOBAL_CU_MASK`` environment variables, so it reflects
 the CUs your process can actually use.
 
-Workgroup Processor alignment
+Workgroup processor alignment
 -------------------------------------------------------------------------------
 
 On AMD GPUs, CUs are grouped into Workgroup Processors (WGPs), and the hardware
@@ -78,13 +78,13 @@ Splitting resources
 Two functions divide an SM resource into smaller groups:
 
 - :cpp:func:`hipDevSmResourceSplitByCount` divides a resource into as many
-  equally-sized groups as possible, each holding at least a requested minimum
+  equally sized groups as possible, each holding at least a requested minimum
   number of CUs. Call it with ``nbGroups`` set to 0, or ``result`` set to
-  ``NULL``, to run in query mode and learn how many groups are achievable before
+  ``nullptr``, to run in query mode and learn how many groups are achievable before
   allocating the output array.
 - :cpp:func:`hipDevSmResourceSplit` divides a resource into a fixed number of
   groups using a per-group parameter array, giving finer control over each
-  group's size and co-scheduling preferences.
+  group's size and coscheduling preferences.
 
 Both functions can write any leftover CUs to an optional ``remainder`` resource,
 which you can split further or leave unused.
