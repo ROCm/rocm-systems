@@ -160,6 +160,11 @@ set(RCCL_DEVICE_BC_PUBLIC_API
     ncclLsaBarrierSessionArrive
     ncclLsaBarrierSessionWait
     ncclLsaBarrierSessionSync
+    # [C] GIN + composite barrier session
+    ncclGinBarrierSessionInit
+    ncclGinBarrierSessionSync
+    ncclBarrierSessionInit
+    ncclBarrierSessionSync
 )
 string(REPLACE ";" "," RCCL_DEVICE_BC_PUBLIC_API_CSV "${RCCL_DEVICE_BC_PUBLIC_API}")
 
