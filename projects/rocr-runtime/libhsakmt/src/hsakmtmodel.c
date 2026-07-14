@@ -25,10 +25,10 @@
 
 #include "hsakmt/hsakmtmodel.h"
 #include "hsakmt/hsakmt_drm.h"
+#define _GNU_SOURCE
 #include "libhsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 #include "hsakmt/hsakmtmodeliface.h"
-#define _GNU_SOURCE
 #define __USE_GNU
 #include <assert.h>
 #include <errno.h>
