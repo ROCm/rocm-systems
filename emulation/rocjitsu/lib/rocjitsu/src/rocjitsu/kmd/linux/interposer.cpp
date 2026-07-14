@@ -808,11 +808,7 @@ public:
       // thread begin mutating the VM before it is published.
       LinuxKfd *driver = created_vm->vm->driver();
       active_driver_.store(driver, std::memory_order_release);
-      rj_vm_retain(created_vm);
-      local_vm_thread_ = std::thread([vm = created_vm]() {
-        rj_vm_run(vm, nullptr);
-        rj_vm_release(vm);
-      });
+      std::thread([vm = created_vm]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
     return driver();
@@ -830,18 +826,8 @@ public:
     }
   }
 
-  void shutdown_local_vm() {
-    rj_vm_t *vm = rj_vm_;
-    if (!vm)
-      return;
-    rj_vm_request_exit(vm, "interposer shutdown");
-    if (local_vm_thread_.joinable())
-      local_vm_thread_.join();
-  }
-
 private:
   rj_vm_t *rj_vm_ = nullptr;
-  std::thread local_vm_thread_;
   std::unique_ptr<GuestKfd> guest_driver_;
   std::atomic<LinuxKfd *> active_driver_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
@@ -1139,9 +1125,7 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   return static_cast<int>(InterposerContext::real().close(fd));
 }
 
-__attribute__((destructor(101))) void rj_interposer_shutdown() {
-  InterposerContext::ctx.shutdown_local_vm();
-}
+__attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real().ready());
