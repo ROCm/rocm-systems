@@ -498,8 +498,7 @@ TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  // preserve_scc default: [cselect, getpc, add (2 words), addc (2 words), swappc, cmp_lg, original,
-  // branch].
+  // preserve_scc default: [cselect, getpc, add (2 words), addc (2 words), swappc, cmp_lg, original, branch].
   EXPECT_EQ(w[1], build_s_getpc_b64(plan.target_pair_base, plan.arch));
   EXPECT_EQ(w[2], build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch));
   EXPECT_EQ(w[4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF,
