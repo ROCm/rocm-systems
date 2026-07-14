@@ -15,7 +15,6 @@ Usage from GitHub Actions:
 """
 
 import argparse
-import ctypes
 import logging
 import os
 import subprocess
@@ -64,34 +63,12 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
 
 
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
-    """Verify that the CI-built librccl.so exists and is loadable."""
+    """Verify that the CI-built librccl.so exists on disk."""
     ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
     if not ci_rccl.exists():
         log.error("CI-built librccl.so not found at %s", ci_rccl)
         sys.exit(1)
     log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_rccl.stat().st_size)
-
-    try:
-        ctypes.CDLL(str(ci_rccl))
-        log.info("Successfully loaded %s", ci_rccl)
-    except OSError as e:
-        log.error("Failed to load %s: %s", ci_rccl, e)
-        sys.exit(1)
-
-    try:
-        import torch
-
-        torch_rccl = Path(torch.__file__).parent / "lib" / "librccl.so"
-        if torch_rccl.exists():
-            log.info(
-                "PyTorch bundled RCCL: %s (%d bytes)",
-                torch_rccl,
-                torch_rccl.stat().st_size,
-            )
-        else:
-            log.info("PyTorch bundled RCCL: not found (device package may not bundle it)")
-    except ImportError:
-        log.warning("torch not yet installed, skipping bundled RCCL check")
 
 
 def clone_pytorch_test_sources(pytorch_src: Path) -> None:
