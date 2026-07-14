@@ -32,6 +32,7 @@
   ],
   "kernels": [
     "llama_mul_mat_vec_q::default",
-    "llama_rms_norm::default"
+    "llama_rms_norm::default",
+    "hip_matmul_matvec::m256_n1_k1024"
   ]
 }
