@@ -7,9 +7,10 @@ covers both top-level flavors:
   mode to try on a normal workload.
 - `moi`: structured memory-order instrumentation with three versioned
   `standard-v1` engine profiles. On gfx1201 these profiles are qualified over
-  the same broad compatibility tier as `supercollider`; gfx950 focused and
-  selected-workload qualification is complete, its broad SuperCollider
-  inventory is classified, and its broad MOI profiles remain in progress.
+  the same broad compatibility tier as `supercollider`; gfx950 focused,
+  selected-workload, and broad qualification is also complete. Its broad
+  SuperCollider inventory retains two typed mismatch findings, while all three
+  broad MOI profiles pass.
   Their precision and diagnostic shapes intentionally differ.
 
 ConSan runs through the HSA tools hook and patches final native RDNA4 /

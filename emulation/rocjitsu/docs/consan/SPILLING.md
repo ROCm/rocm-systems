@@ -286,12 +286,21 @@ mixed-wave rejection, persistent state and workgroup partitioning,
 barrier/atomic rollout, bounded summaries, and staged text-growth descriptor
 updates.
 
-On the final gfx950 qualification revision, this same broad focused filter is
-266/266. The narrower allocation/MOI/spill/emitter filter printed in
-`LOCAL_TESTING.md` is independently 256/256; the different totals reflect
-different test selections, not missing tests. The full `rocjitsu_tests` run is
-1542/1542, including the local gfx1201 synthetic encoding and target-object
-regressions.
+An earlier gfx950 qualification revision recorded this same broad focused
+filter at 266/266, the narrower allocation/MOI/spill/emitter filter printed in
+`LOCAL_TESTING.md` at 256/256, and the full `rocjitsu_tests` suite at
+1542/1542. A later complete suite passed 1548/1548. These are historical
+checkpoints, not the current registered totals.
+
+At `e75d265ad7`, after restoring the guarded gfx950 live-spill controls and
+adding their synthetic regression, the broad focused filter passes 268/268.
+At child revision `7fab090280`, the current complete suite passes 1549/1549.
+The different focused, narrow, and full totals reflect different selections
+rather than missing tests. The rebuilt gfx1201 emulator tier0 passed the same
+268/268 unit result followed by 37/37 focused live controls at both revisions;
+the child revision's aggregate is 305/305. The current native gfx950 tier0
+passes 268/268 unit/synthetic tests plus 58/58 live controls. See
+`LOCAL_TESTING.md` for the workspace-relative gfx1201 rebuild and tier logs.
 
 The live target-aware tier includes forced-spill tests whose victim VGPRs
 remain live across instrumentation:
@@ -311,6 +320,14 @@ all without register-number configuration. Historical gfx1201 results do not
 establish a gfx950 result. See
 [LOCAL_TESTING.md](LOCAL_TESTING.md) for workspace paths and the broader test
 ladder.
+
+The guarded gfx950 IREE tier deliberately uses eight safe VecDistMFMA rows
+plus configured scan and softmax. Those workloads retain a proven patchable
+site under every standard profile. TileAndFuse MFMA objects are not used as
+non-vacuity guards because saturated owners can require a live-VGPR spill and
+therefore hit the typed complete-object MFMA containment described above.
+They remain part of broad compatibility coverage; changing the selected
+workloads does not weaken or enlarge the spill support boundary.
 
 ## Source map
 

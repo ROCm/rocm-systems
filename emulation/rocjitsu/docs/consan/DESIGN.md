@@ -6,9 +6,10 @@ tools interface, inspecting final native machine code, and loading a patched
 replacement code object when instrumentation is possible.
 
 The current implementation has native paths for RDNA4 / `gfx1201` and CDNA4 /
-`gfx950`. The gfx1201 profile has completed its broad qualification; gfx950 has
-completed focused and selected-workload qualification. Its broad SuperCollider
-inventory is classified, while the three broad MOI profiles remain in progress.
+`gfx950`. Both profiles have completed focused, selected, and broad
+qualification. The gfx950 broad SuperCollider inventory retains two typed
+mismatch findings, while all three broad MOI profiles pass their agreed
+compatibility inventory.
 The intended native-instrumentation target set also includes
 `gfx942` and `gfx1250`. ConSan does not translate kernels between GPU ISAs; it
 patches the final code object for the architecture that will actually run.
@@ -23,7 +24,7 @@ register allocation, private-layout, ownership, and spill transaction.
 | Area | Current code | Intended direction |
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
-| Architecture | Native RDNA4 / `gfx1201` and CDNA4 / `gfx950` implementation. gfx950 focused and selected qualification is complete; broad SuperCollider is classified and broad MOI qualification is in progress. | Generalize the same native patching model to `gfx942` and `gfx1250`; do not translate between targets. |
+| Architecture | Native RDNA4 / `gfx1201` and CDNA4 / `gfx950` implementation. gfx950 focused, selected, and broad qualification is complete; broad SuperCollider retains two typed mismatch findings and all three broad MOI profiles pass. | Generalize the same native patching model to `gfx942` and `gfx1250`; do not translate between targets. |
 | Public flavor switch | `RJ_CONSAN_FLAVOR=supercollider|moi`. | Keep the two top-level flavors. |
 | SuperCollider | Usable redundant LDS/likely-group-flat check/trap mode. | Keep as a simple perturbation/value-check sanitizer mode. |
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |

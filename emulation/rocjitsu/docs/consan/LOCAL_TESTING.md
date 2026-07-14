@@ -111,17 +111,19 @@ Known gfx950 checkpoint result at commit `bd297cdbfc`:
   `SPILLING.md`: 263/263. The commit-qualified count makes later additions easy
   to distinguish from this accepted checkpoint.
 
-Final gfx950 qualification result on the current branch:
+Later qualification checkpoints:
 
-- Full `rocjitsu_tests`, including registered benchmark-style and hardware
-  tests: 1542/1542 in 56.75 seconds.
-- The broad focused filter printed in `SPILLING.md`: 266/266.
+- A complete 1542/1542 run and a later 1548/1548 run were recorded as tests
+  were added. At `7fab090280`, the current complete suite passes 1549/1549.
+- At `e75d265ad7`, the broad focused filter printed in `SPILLING.md` passes
+  268/268.
 - The allocation/MOI/spill/emitter subset printed immediately above: 256/256.
   These totals describe different filters and are intentionally reported
   separately.
 - The explicit local gfx1201 encoding and target-object subset
-  (`--gtest_filter=*Gfx1201*:*gfx1201*`): 3/3. Physical gfx1201 live tests
-  still require the gfx1201 workspace.
+  (`--gtest_filter=*Gfx1201*:*gfx1201*`): 3/3 at its recorded checkpoint.
+  Physical-device gfx1201 tests still require that workspace; the emulator
+  tier below supplies separate live guest evidence on this gfx950 host.
 
 gfx950 environment and spill baseline:
 
@@ -407,6 +409,14 @@ It requires `ROCJITSU_BUILD_DIR`, `IREE_BUILD_DIR`, `HIP_MOI_BUILD_DIR`, and
 `ROCM_DIST_DIR`; pass `tier0`, `tier1`, `tier2`, or `all`. See `USAGE.md` for
 the exact invocation and the meaning of each tier.
 
+On gfx950, the standard broad SuperCollider profile intentionally finds the
+two typed mismatches documented below. Consequently `tier2` and `all` stop
+after that profile with a nonzero status, preserving fail-fast behavior; run
+the three MOI broad commands from their sections above to collect the
+remaining compatibility evidence. A final `ConSan all matrix passed.` is
+expected for the gfx1201 emulator/physical workflow, whose broad
+SuperCollider profile has no expected failing diagnostic row.
+
 On a gfx950 host, qualify actual gfx1201 guest code through Rocjitsu by
 overriding the three build directories and asking the matrix to wrap each
 CTest process. Setting `CONSAN_GPU_ARCH` explicitly is required: the native
@@ -447,9 +457,9 @@ These commands exercise gfx1201 binaries on the gfx950 host; they are not a
 claim that `rocm_agent_enumerator` exposes a physical gfx1201. Keep their
 evidence separate from the physical-machine snapshot below.
 
-To close the cross-workspace gfx1201 regression gate after integrating the
-shared gfx950 changes, run the complete matrix from a clean gfx1201 checkout
-and retain revision-qualified evidence:
+For later physical-device corroboration after integrating shared changes, run
+the complete matrix from a clean gfx1201 checkout and retain
+revision-qualified evidence:
 
 ```sh
 test -z "$(git status --porcelain)" || {
@@ -468,24 +478,25 @@ set -o pipefail
 ```
 
 The final line must be `ConSan all matrix passed.` and the recorded agent list
-must contain `gfx1201`. Attach the log's revision and per-tier totals to the
-`X1B` result in `PLAN_GFX950.md`; do not reuse the older baseline as evidence
-for a revision containing newer shared policy or emitter changes.
+must contain `gfx1201`. This physical rerun is useful corroboration, not a
+prerequisite for the accepted emulator gate. Do not reuse an older physical
+baseline as evidence for a revision containing newer shared policy or emitter
+changes.
 
 Recorded architecture evidence across the development workspaces:
 
 | Target | Workspace hardware | Tier evidence | Status |
 | --- | --- | --- | --- |
 | gfx942 | no current workspace | no current native ConSan tier | deferred |
-| gfx950 | available in the gfx950 workspace | native spill/identity/compact-engine tiers and guarded selected profiles pass; all four broad profiles completed | accepted locally, subject to the cross-workspace gfx1201 live rerun tracked in `PLAN_GFX950.md` |
-| gfx1201 | available in the gfx1201 workspace | tier0 183 unit + 37 live; tier1/tier2 recorded below | accepted baseline |
+| gfx950 | available in this workspace | native spill/identity/compact-engine tiers pass; current guarded selection is eight safe VecDistMFMA rows plus scan/softmax; current broad evidence is recorded below | accepted locally: 1549-test full suite and all four current broad profiles complete |
+| gfx1201 | physical device available in the earlier gfx1201 workspace; emulated on this gfx950 host | historical physical evidence plus an accepted-revision emulator tier0/tier1 run and the separately revision-qualified broad profiles below | physical baseline retained; emulator focused, selected, and broad gates complete |
 | gfx1250 | no current workspace | decoder/encoder sources and synthetic dispatch coverage only | deferred |
 
 The harness uses 30-second focused-GPU, 60-second IREE, and 120-second hip-moi
 per-test limits. A failure or timeout terminates the current profile and all
 later tiers; it cannot be overwritten by a later green summary.
 
-Current gfx1201 snapshot (2026-07-10):
+Historical physical gfx1201 snapshot (2026-07-10):
 
 | Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
 | --- | ---: | ---: | ---: | ---: |
@@ -499,7 +510,68 @@ where appropriate and cover spill, overflow, ordering, and unsupported-site
 reporting. Tier1 and tier2 establish output compatibility and absence of
 resource-induced hangs; they do not imply every loaded object was patchable.
 
-Final gfx950 snapshot (2026-07-14):
+gfx950-hosted gfx1201 emulator snapshot (2026-07-14):
+
+| Evidence | Result | Revision |
+| --- | --- | --- |
+| Focused ConSan unit/synthetic filter | 268/268 | `7fab090280` |
+| Focused ConSan emulator live gate | 37/37; real hook patches, positive diagnostics, trap propagation, and forced-spill live-value preservation | `7fab090280` |
+| hip-moi guest baseline | 46/46 CTest entries: 180 nested GTests plus six tutorials | `7fab090280` |
+| hip-moi SuperCollider with `RJ_CONSAN_CHECK_TRAP_MODE=lds` | 46/46 CTest entries: 180 nested GTests plus six tutorials | `7fab090280` |
+| Selected IREE, each of SuperCollider, record/replay, sampled, and inline shadow | guarded TileAndFuse 5/5 plus unguarded scan/softmax compatibility 3/3 | `7fab090280` |
+| Broad IREE guest baseline, no hook | 209/209 in 174.07 seconds, or 181.78 seconds including the Rocjitsu wrapper | `bd1225dcd6` |
+| Broad IREE SuperCollider | 209/209 in 175.42 seconds, or 183.30 seconds wrapped | `547be88a52` |
+| Broad IREE record/replay, four-patch limit | 209/209 in 205.28 seconds, or 213.14 seconds wrapped | `12244d713f` |
+| Broad IREE sampled, four-patch limit | 209/209 in 179.96 seconds, or 187.37 seconds wrapped | `3b378881da` |
+| Broad IREE inline shadow, one patch and `hw_id` owner | 209/209 in 178.32 seconds, or 186.32 seconds wrapped | `0ca2953479` |
+
+The emulator was rebuilt from parent revision `e75d265ad7`, then tier0 and
+tier1 both passed at that revision with the same 268 unit, 37 live, 46+46
+hip-moi, four guarded 5-test, and four compatibility 3-test totals recorded
+above. Those exact logs are:
+
+- `$WORKSPACE_ROOT/e75d265ad7_rocjitsu-build-gfx1201-emu-rebuild.log`
+- `$WORKSPACE_ROOT/e75d265ad7_consan-gfx1201-emulator-tier0.log`
+- `$WORKSPACE_ROOT/e75d265ad7_consan-gfx1201-emulator-tier1.log`
+
+The final selector-only child revision was then rerun rather than inferred.
+Its accepted aggregate results and logs are:
+
+- tier0: 268 focused plus 37 live, 305/305 total, in
+  `$WORKSPACE_ROOT/7fab090280_consan-gfx1201-emulator-tier0.log`;
+- tier1: 46 baseline hip-moi plus 46 hooked hip-moi, 20 guarded IREE, and 12
+  compatibility IREE, 124/124 total, in
+  `$WORKSPACE_ROOT/7fab090280_consan-gfx1201-emulator-tier1.log`.
+
+The broad emulator profiles ran serially against the shared IREE build tree.
+They completed without a waiver, timeout, unexpected guest fault, or
+post-failure continuation. The no-hook run is an independent Rocjitsu guest
+baseline; it is not ConSan evidence. Likewise, the broad green profiles prove
+compatibility rather than non-vacuity. The focused gate and guarded selected
+profiles supply the required patch, record, spill, and positive-diagnostic
+evidence.
+
+The emulator, hip-moi guest, and IREE guest trees were rebuilt at
+`e75d265ad7`. Commit `7fab090280` changes only the gfx950 branch of the tier1
+CTest selector; it does not change the gfx1201 selection, ConSan
+implementation, Rocjitsu emulator, or guest binaries. Even so, tier0 and
+tier1 were rerun at that exact child revision as recorded above. The broad
+rows remain explicitly revision-qualified rather than being presented as if
+all four were rerun after a selector-only change that cannot affect them.
+
+The gfx950 guarded tier1 selector changed at `7fab090280`. Its ten rows are
+the eight safe VecDistMFMA cases (f16, f32, transposed-B f16, f8E4M3FN, i8,
+and the f16, bf16, and i8 block-batched cases) plus configured scan and
+softmax. These matrix workloads retain a proven patchable site for each
+profile. TileAndFuse MFMA objects are no longer the guarded non-vacuity set:
+some contain saturated owners that require a live-VGPR spill, and those
+objects correctly receive complete-object typed containment until injected
+scratch operations have an explicit MFMA pipeline-hazard schedule. This is a
+test-selection correction, not an expansion or removal of the documented
+MFMA spill support boundary.
+
+Earlier completed gfx950 snapshot (2026-07-14, before the current selector
+change):
 
 | Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
 | --- | ---: | ---: | ---: | ---: |
@@ -523,6 +595,32 @@ shared `test_tmpdir`; it passed 259/259 in 137.65 seconds. A separate
 parallel-8 stress run passed 258/259, with IREE 1833 failing numerically once
 and then passing 20/20 immediate serial repetitions. This stress observation
 is not folded into the clean serialized compatibility result.
+
+Current `7fab090280` gfx950 evidence:
+
+| Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
+| --- | ---: | ---: | ---: | ---: |
+| tier0 focused | 268/268 unit/synthetic plus 58/58 native live controls | same shared result | same shared result | same shared result |
+| tier1 selected IREE | 10/10 | 10/10 | 10/10 | 10/10 |
+| tier2 broad IREE (259 selected) | 257 ordinary passes plus typed `s_trap 0` mismatch outcomes in tests 1838 and 2861 | 259/259 | 259/259 | 259/259 serialized |
+
+The two SuperCollider outcomes are the same bounded sanitizer findings
+described for the earlier snapshot, not numerical corruption, a timeout, or a
+resource hang. Tier1 additionally runs the independent hip-moi suite 44/44
+without a hook and 44/44 under the documented SuperCollider profile. The
+guarded IREE rows use the ten-row safe selection described above and require
+patches for every profile and visible records for MOI.
+
+Retained current native logs are:
+
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier0.log`
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier1.log`
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier2-serial.log` (SuperCollider)
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier2-record-replay.log`
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier2-sampled.log`
+- `$WORKSPACE_ROOT/7fab090280-gfx950-tier2-inline-shadow-serial.log`
+- `$WORKSPACE_ROOT/7fab090280-rocjitsu-tests-full.log`
+- `$WORKSPACE_ROOT/7fab090280-rocjitsu-python-pytest.log`
 
 Final typed exclusions are part of the supported boundary, rather than hidden
 test skips:
@@ -551,7 +649,7 @@ Recorded gfx1201 workspace status:
 
 | Architecture | Live-GPU workspace coverage |
 | --- | --- |
-| `gfx1201` | Available. The recorded results above are the accepted baseline. |
-| `gfx950` | Available. Native focused and selected qualification is complete; broad SuperCollider is classified and broad MOI profiles are tracked in [PLAN_GFX950.md](PLAN_GFX950.md). |
+| `gfx1201` | The 2026-07-10 results above are the historical physical-device baseline. This gfx950 workspace additionally executes actual gfx1201 guest binaries through Rocjitsu, with separate revision-qualified emulator evidence above. |
+| `gfx950` | Available. Native focused and current safe selected tiers pass, and all four broad profiles reach their documented accepted outcomes at `7fab090280`; final cross-architecture acceptance is tracked in [PLAN_GFX950.md](PLAN_GFX950.md). |
 | `gfx942` | No current live-GPU workspace. |
 | `gfx1250` | No current live-GPU workspace. |

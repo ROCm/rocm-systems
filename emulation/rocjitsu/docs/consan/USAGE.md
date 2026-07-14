@@ -19,8 +19,10 @@ decoded native LDS load/store cell ranges and emit a compact inline diagnostic
 for a prior non-empty,
 different-owner conflict. ConSan emits native instrumentation for RDNA4
 `gfx1201` and CDNA4 `gfx950`; it does not translate code objects between
-architectures. gfx950 focused and selected-workload tiers are qualified, while
-its broad compatibility sweep is still in progress.
+architectures. gfx950 focused and selected-workload tiers are qualified. Its
+broad compatibility tier is also complete: all three MOI profiles pass the
+259-test inventory, while SuperCollider has 257 ordinary passes plus two typed
+mismatch terminations retained as sanitizer findings.
 
 ## Shortest Useful Snapshot Run
 
@@ -704,6 +706,11 @@ Tier0 proves focused implementation and live GPU behavior. Tier1 adds the
 independent semantic controls and selected LDS-heavy IREE workloads under all
 four profiles. Tier2 is broad compatibility/non-corruption evidence; it is not
 a claim that every loaded code object contained a supported patched site.
+On gfx950, the standard SuperCollider broad profile deliberately terminates
+two tests with typed mismatch findings, so the fail-fast `tier2`/`all` command
+stops there. Run the subsequent MOI profiles separately as documented in
+[LOCAL_TESTING.md](LOCAL_TESTING.md#repeatable-tier-matrix); the accepted
+results remain distinct from an all-green compatibility claim.
 
 The same matrix can qualify gfx1201 guest binaries on a gfx950 host. Set
 `CONSAN_GPU_ARCH=gfx1201`, `CONSAN_CTEST_EMULATOR` to the Rocjitsu executable,
