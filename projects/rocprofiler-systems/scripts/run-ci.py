@@ -334,9 +334,17 @@ def summarize_skipped_tests(binary_dir):
     import zlib
     import xml.etree.ElementTree as ET
 
-    xml_files = sorted(glob.glob(os.path.join(binary_dir, "Testing", "*", "Test.xml")))
-    if not xml_files:
+    # Only inspect the current run's Test.xml. CTest records the run's
+    # subdirectory in Testing/TAG (its first line)
+    testing_dir = os.path.join(binary_dir, "Testing")
+    try:
+        with open(os.path.join(testing_dir, "TAG"), encoding="utf-8") as tag_fh:
+            tag = tag_fh.readline().strip()
+    except OSError:
         return
+    if not tag:
+        return
+    xml_files = [os.path.join(testing_dir, tag, "Test.xml")]
 
     def decoded_value(value_el):
         """Return the text of a <Value>, decoding CTest's base64/gzip output.
@@ -389,7 +397,7 @@ def summarize_skipped_tests(binary_dir):
                     reason = (nm.findtext("Value") or "").strip()
                     break
             if not reason or reason.startswith("SKIP_RETURN_CODE"):
-                output = "".join(decoded_value(v) for v in test.iter("Value"))
+                output = "\n".join(decoded_value(v) for v in test.iter("Value"))
                 for skip_re in skip_res:
                     match = skip_re.search(output)
                     if match:
