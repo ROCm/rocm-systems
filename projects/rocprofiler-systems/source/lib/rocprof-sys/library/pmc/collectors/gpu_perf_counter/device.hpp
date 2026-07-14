@@ -62,6 +62,10 @@ concept backend_contract = requires(
         backend.configure_device_counting_service(context, buffer, agent, service_cb,
                                                   data)
     } -> std::same_as<typename Backend::status_t>;
+    // Status/flag constants read directly by device<Backend> during sampling.
+    { Backend::flag_none } -> std::convertible_to<typename Backend::counter_flag_t>;
+    { Backend::status_success } -> std::convertible_to<typename Backend::status_t>;
+    { Backend::status_hsa_not_loaded } -> std::convertible_to<typename Backend::status_t>;
 };
 
 template <backend_contract Backend>
@@ -70,12 +74,12 @@ class device
 public:
     device(std::shared_ptr<Backend> backend, typename Backend::context_id_t context,
            std::shared_ptr<rocprofsys::agent>    agent,
-           typename Backend::counter_config_id_t profile_config,
+           typename Backend::counter_config_id_t counter_config,
            std::vector<counter_metadata>         counter_meta)
     : m_backend_api{ std::move(backend) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
-    , m_profile_config{ profile_config }
+    , m_counter_config{ counter_config }
     , m_counter_meta{ std::move(counter_meta) }
     {
         // Each counter may produce multiple dimension instances (e.g. per-WGP);
@@ -200,7 +204,7 @@ private:
     std::shared_ptr<Backend>                        m_backend_api;
     typename Backend::context_id_t                  m_context;
     std::shared_ptr<rocprofsys::agent>              m_agent;
-    typename Backend::counter_config_id_t           m_profile_config;
+    typename Backend::counter_config_id_t           m_counter_config;
     std::vector<counter_metadata>                   m_counter_meta;
     std::vector<typename Backend::counter_record_t> m_record_buffer;
     metrics                                         m_result_cache;

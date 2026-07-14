@@ -60,6 +60,10 @@ namespace rocprofsys::rocprofiler_sdk
 /// Exposes SDK types as nested `using` aliases, SDK enum values as
 /// `static constexpr` constants, and SDK functions as `static` methods.
 /// No logic beyond direct forwarding lives here.
+///
+/// This is the `Wrapper` template argument consumed by
+/// rocprofsys::backends::rocprofiler_sdk::backend<Wrapper> (backend.hpp); it must
+/// expose the same nested types/constants/static methods that struct relies on.
 struct backend
 {
     // ─── Compile-time SDK version ────────────────────────────────────────────────
@@ -794,7 +798,9 @@ struct backend
     }
 
     // ─── Tracing name tables ──────────────────────────────────────────────────────
-    // Wrapped here so sdk_core<Backend> routes all SDK interactions through Backend.
+    // Name tables are exposed here so
+    // rocprofsys::backends::rocprofiler_sdk::backend<Wrapper> (backend.hpp) routes all
+    // SDK name-table access through this policy struct.
 
     using callback_name_info_t = rocprofiler::sdk::callback_name_info;
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info;

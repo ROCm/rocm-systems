@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -22,7 +23,9 @@ sdk_check(typename Wrapper::status_t status)
 {
     if(status != Wrapper::STATUS_SUCCESS)
     {
-        throw std::runtime_error{ Wrapper::get_status_string(status) };
+        const char* msg = Wrapper::get_status_string(status);
+        throw std::runtime_error{ std::string{ "rocprofiler-sdk error: " } +
+                                  (msg != nullptr ? msg : "<unknown status>") };
     }
 }
 
@@ -75,7 +78,6 @@ struct backend
     static constexpr status_t       status_error   = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
-    static constexpr status_t status_context_error = Wrapper::STATUS_ERROR_CONTEXT_ERROR;
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
@@ -171,9 +173,8 @@ struct backend
                 dims.reserve(dim_inst->dimensions_count);
                 for(std::uint64_t d = 0; d < dim_inst->dimensions_count; ++d)
                 {
-                    dims.push_back(
-                        { std::string{ dim_inst->dimensions[d]->dimension_name },
-                          dim_inst->dimensions[d]->index });
+                    const auto* dim = dim_inst->dimensions[d];
+                    dims.push_back({ safe_str(dim->dimension_name), dim->index });
                 }
                 result.push_back(counter_metadata{
                     dim_inst->instance_id, name_str, desc_str, blk_str, expr_str,
@@ -338,7 +339,8 @@ public:
     static timestamp_t get_timestamp() noexcept
     {
         timestamp_t ts{};
-        Wrapper::get_timestamp(&ts);
+        // Return code is always Wrapper::STATUS_SUCCESS.
+        (void) Wrapper::get_timestamp(&ts);
         return ts;
     }
 
