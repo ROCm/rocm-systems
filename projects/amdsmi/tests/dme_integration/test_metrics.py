@@ -100,8 +100,15 @@ class VerifyTest(unittest.TestCase):
         with mock.patch.object(metrics, "_fetch", return_value=(200, _VALID_BODY_WITH_REQUIRED)):
             self.assertIsNone(self._verify())
 
+    def _make_pid_file(self, pid: int = 1234) -> Path:
+        with tempfile.NamedTemporaryFile("w", suffix=".pid", delete=False) as f:
+            f.write(str(pid))
+            pid_file = Path(f.name)
+        self.addCleanup(pid_file.unlink, missing_ok=True)
+        return pid_file
+
     def test_missing_metrics_gpu_agent_alive_exits(self):
-        pid_file = Path(tempfile.gettempdir()) / "dme-test-pid"
+        pid_file = self._make_pid_file()
         with (
             mock.patch.object(metrics, "_fetch", return_value=(200, _VALID_BODY_MISSING_REQUIRED)),
             mock.patch.object(metrics, "_read_pid_file", return_value=1234),
@@ -110,15 +117,26 @@ class VerifyTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self._verify(gpu_agent_pid_file=pid_file)
 
-    def test_missing_metrics_gpu_agent_dead_soft_passes(self):
-        # A dead GPU Agent with missing metrics soft-passes (upstream ABI skew,
-        # not a PR regression); this branch self-disables once the agent stays up.
-        pid_file = Path(tempfile.gettempdir()) / "dme-test-pid"
+    def test_missing_metrics_gpu_agent_started_then_died_soft_passes(self):
+        # Agent started (PID file present) then died: soft-pass (upstream ABI
+        # skew, not a PR regression); self-disables once the agent stays up.
+        pid_file = self._make_pid_file()
         with (
             mock.patch.object(metrics, "_fetch", return_value=(200, _VALID_BODY_MISSING_REQUIRED)),
-            mock.patch.object(metrics, "_read_pid_file", return_value=None),
+            mock.patch.object(metrics, "_read_pid_file", return_value=1234),
+            mock.patch.object(metrics, "_process_alive", return_value=False),
         ):
             self.assertIsNone(self._verify(gpu_agent_pid_file=pid_file))
+
+    def test_missing_metrics_no_pid_file_hard_fails(self):
+        # No PID file means the agent never started -- a real failure, not
+        # upstream skew -- so missing metrics must hard-fail, not soft-pass.
+        missing = Path(tempfile.gettempdir()) / "dme-nonexistent-agent.pid"
+        if missing.exists():
+            missing.unlink()
+        with mock.patch.object(metrics, "_fetch", return_value=(200, _VALID_BODY_MISSING_REQUIRED)):
+            with self.assertRaises(SystemExit):
+                self._verify(gpu_agent_pid_file=missing)
 
     def test_empty_body_exits_not_assertion_error(self):
         # F-4: HTTP 200 with an empty body on every retry must raise SystemExit,

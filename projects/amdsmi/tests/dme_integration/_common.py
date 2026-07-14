@@ -3,6 +3,7 @@
 """Shared utilities for DME integration CI helpers."""
 
 import logging
+import os
 import shlex
 import subprocess
 import sys
@@ -37,18 +38,19 @@ def run(
     )
 
 
-def gh_group(title: str) -> None:
-    """Emit a GitHub Actions log group marker."""
-    print(f"::group::{title}", flush=True)
-
-
-def gh_endgroup() -> None:
-    print("::endgroup::", flush=True)
-
-
 def gh_error(message: str) -> None:
     print(f"::error::{message}", flush=True)
 
 
 def gh_warning(message: str) -> None:
     print(f"::warning::{message}", flush=True)
+
+
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True

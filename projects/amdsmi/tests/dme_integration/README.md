@@ -153,10 +153,10 @@ python3 -m dme_integration check-alive \
 ```bash
 python3 -m dme_integration prepare-submodules \
     --dme-repo https://github.com/ROCm/device-metrics-exporter.git \
-    --dme-branch main \
+    --dme-branch v1.4.2 \
     --dme-dir /tmp/dme \
     --gpu-agent-repo https://github.com/ROCm/gpu-agent.git \
-    --gpu-agent-branch main
+    --gpu-agent-branch v1.4.2
 ```
 
 ### `prepare-build-env` - lay out gpu-agent build tree
@@ -264,7 +264,7 @@ export AMDSMI_TESTS_DIR=$PWD/projects/amdsmi/tests
 export DME_DIR=/tmp/dme
 export DME_REPO=https://github.com/ROCm/device-metrics-exporter.git
 export GPU_AGENT_REPO=https://github.com/ROCm/gpu-agent.git
-export DME_BRANCH=main GPU_AGENT_BRANCH=main
+export DME_BRANCH=v1.4.2 GPU_AGENT_BRANCH=v1.4.2
 cd "$AMDSMI_TESTS_DIR"
 
 python3 -m dme_integration prepare-submodules \

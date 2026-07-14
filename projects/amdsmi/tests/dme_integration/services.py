@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-from ._common import configure_logging, gh_error
+from ._common import _process_alive, configure_logging, gh_error
 
 logger = logging.getLogger("dme.services")
 
@@ -40,16 +40,6 @@ def _wait_for_port(host: str, port: int, timeout: float) -> bool:
         except (OSError, ConnectionRefusedError):
             time.sleep(_READY_POLL_INTERVAL_S)
     return False
-
-
-def _process_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
 
 
 def _pid_cmdline(pid: int) -> str:

@@ -20,7 +20,6 @@ gates for real.
 
 import argparse
 import logging
-import os
 import re
 import sys
 import time
@@ -28,7 +27,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ._common import configure_logging, gh_error, gh_warning
+from ._common import _process_alive, configure_logging, gh_error, gh_warning
 
 logger = logging.getLogger("dme.metrics")
 
@@ -81,16 +80,6 @@ def _exposed_metric_names(body: str) -> set[str]:
     return {m.group("name") for m in _SAMPLE_RE.finditer(body)}
 
 
-def _process_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
 def _read_pid_file(pid_file: Path) -> int | None:
     if not pid_file.is_file():
         return None
@@ -119,17 +108,20 @@ def _gpu_agent_crashed(log_file: Path) -> bool:
 
 
 def _gpu_agent_dead(pid_file: Path | None, log_file: Path | None) -> bool:
-    """Best-effort check that the GPU Agent has died (dead/missing PID, or a
-    zombie whose log shows a crash). Drives the soft-pass in verify() when
-    required metrics are missing.
+    """True only if the GPU Agent started and then died (PID gone, or a zombie
+    whose log shows a crash). A missing/unreadable PID file means it never
+    started -- a real failure, not upstream skew -- so return False and let the
+    missing metrics hard-fail instead of soft-passing.
     """
-    if pid_file is None:
+    if pid_file is None or not pid_file.is_file():
         return False
     pid = _read_pid_file(pid_file)
-    if pid is None or not _process_alive(pid):
+    if pid is None:
+        return False
+    if not _process_alive(pid):
         return True
-    # A crashed process can linger as a zombie, so os.kill(pid, 0) still
-    # succeeds; fall back to scanning the log for crash indicators.
+    # A crashed process can linger as a zombie (os.kill(pid, 0) succeeds), so
+    # fall back to scanning the log for crash indicators.
     return log_file is not None and _gpu_agent_crashed(log_file)
 
 
