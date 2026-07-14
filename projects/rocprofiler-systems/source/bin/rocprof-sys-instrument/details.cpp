@@ -3,6 +3,7 @@
 
 #include "function_signature.hpp"
 #include "fwd.hpp"
+#include "internal_libs.hpp"
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
@@ -853,8 +854,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
                              ":: ID# =", num, "::", line)
         .force(level < BPatchInfo);
 }
-
-#include "internal_libs.hpp"
 
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/utility/filepath.hpp>
