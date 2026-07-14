@@ -575,8 +575,21 @@ Full gfx950 support means:
 - 2026-07-14: `D2B` and `X1A` are `DONE`. The broad focused filter passes
   266/266, its narrower allocation/MOI/spill/emitter subset passes 256/256,
   the explicit gfx1201 synthetic subset passes 3/3, and the full Rocjitsu suite
-  passes 1542/1542. `M0` is blocked only on `X1B`, the physical gfx1201 live
-  regression that cannot be produced on this gfx950 host.
+  passes 1542/1542. `M0` next depends on gfx1201 emulator qualification in
+  `X1B`; a physical gfx1201 rerun remains desirable corroboration but is no
+  longer the only way to produce live evidence on this host.
+- 2026-07-14: `X1E` and `X1SA` are `DONE`; `X1SC` is `ACTIVE`. Commit
+  `14c0253e70` added the gfx1201 Rocjitsu launcher and corrected the focused
+  selector. The emulator executes actual gfx1201 code objects after the same
+  HSA-tools ConSan hook, including a forced live-VGPR spill round trip. The
+  first focused pass was 31/37. Reduction found a compiler-emitted gfx12
+  `global_inv`, an obsolete forced `v3` test resource, one ConSan sampled
+  checker load-order bug, and an unimplemented Rocjitsu `s_trap`. The cache
+  admission, automatic-resource harness, and sampled emission fixes are in
+  `eb626a0902`; both sampled immediate controls, both SuperCollider marker
+  controls, and both clean SuperCollider controls pass. The sole focused
+  failure now reaches the injected trap and is isolated to Rocjitsu trap
+  propagation rather than being hidden or waived.
 
 ## DAG Overview
 
@@ -819,8 +832,20 @@ flowchart LR
   D2A["D2A: Capability And Runbook Content"]:::done
   D2B["D2B: Final Result Tables"]:::done
   X1A["X1A: Local gfx1201 Synthetic Regression"]:::done
-  X1B["X1B: gfx1201 Live Regression Evidence"]:::blocked
-  M0{"M0: gfx950 Fully Supported"}:::blocked
+  X1E["X1E: gfx1201 Emulator Harness"]:::done
+  X1SC["X1SC: SuperCollider And Trap Semantics"]:::active
+  X1SA["X1SA: Sampled Immediate Semantics"]:::done
+  X1F["X1F: Focused Emulator Gate"]:::active
+  X1H["X1H: hip-moi Emulator Tier"]:::todo
+  X1I0["X1I0: IREE Build And Emulator Launcher"]:::todo
+  X1IS["X1IS: Selected IREE Emulator Tier"]:::todo
+  X1BSC["X1BSC: SuperCollider Broad IREE"]:::todo
+  X1BRR["X1BRR: Record/Replay Broad IREE"]:::todo
+  X1BSA["X1BSA: Sampled Broad IREE"]:::todo
+  X1BIS["X1BIS: Inline-Shadow Broad IREE"]:::todo
+  X1BG{"X1BG: Broad Emulator Gate"}:::target
+  X1B{"X1B: gfx1201 Emulator Regression Evidence"}:::target
+  M0{"M0: gfx950 Fully Supported"}:::target
 
   T1A --> T1B
   SP --> T2R
@@ -876,7 +901,26 @@ flowchart LR
   T3G --> X1A
   T4G --> D2B
   D2A --> D2B --> M0
-  X1A --> X1B --> M0
+  X1A --> X1E
+  X1E --> X1SC
+  X1E --> X1SA
+  X1E --> X1H
+  X1E --> X1I0
+  X1SC --> X1F
+  X1SA --> X1F
+  X1I0 --> X1IS
+  X1IS --> X1BSC
+  X1IS --> X1BRR
+  X1IS --> X1BSA
+  X1IS --> X1BIS
+  X1BSC --> X1BG
+  X1BRR --> X1BG
+  X1BSA --> X1BG
+  X1BIS --> X1BG
+  X1F --> X1B
+  X1H --> X1B
+  X1BG --> X1B
+  X1B --> M0
 
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
@@ -2537,25 +2581,44 @@ tier commands remain in `LOCAL_TESTING.md` and
 `tests/dbi/consan_test_matrix.sh`. No physical gfx1201 result is inferred from
 this gfx950 host.
 
-### X1B: gfx1201 Live Regression Evidence - BLOCKED
+### X1B: gfx1201 Emulator Regression Evidence - ACTIVE
 
-Goal: retain the accepted gfx1201 hardware baseline while changing shared
-ConSan policy and emitters.
+Goal: retain the accepted gfx1201 behavior while changing shared ConSan policy
+and emitters. Rocjitsu runs actual gfx1201 binaries through the same HSA-tools
+ConSan hook used on hardware; emulator and ConSan failures are reduced
+independently, and neither implementation is treated as an oracle.
 
-External completion requirement:
+Sub-DAG:
 
-- Run the focused and agreed broad gfx1201 hardware tiers on the gfx1201
-  machine after the shared changes are integrated.
-- Use the revision-qualified, clean-checkout evidence command in
-  `LOCAL_TESTING.md`; retain the detected `gfx1201` agent, per-tier totals, and
-  final fail-fast success line in the result.
+- `X1E` (DONE): build gfx1201 HIP controls and launch them through the
+  `gfx1201_r9700.json` Rocjitsu model. Require real hook patch records and a
+  forced-spill live-value round trip.
+- `X1SC` (ACTIVE): admit the compiler's non-LDS-ordering `global_inv`, use
+  automatic scratch selection, and implement correct emulator `s_trap`
+  dispatch-failure propagation.
+- `X1SA` (DONE): correct the sampled immediate checker's low-word load order;
+  both positive immediate controls pass under emulation.
+- `X1F` (ACTIVE): run the corrected 37-test focused gfx1201 filter. The current
+  result is 36/37; the only residual reaches Rocjitsu's unimplemented trap.
+- `X1H` (TODO): build and run every `LOCAL_TESTING.md` hip-moi gfx1201 control
+  through the emulator.
+- `X1I0` (TODO): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
+  launcher without changing the existing gfx950 build.
+- `X1IS` (TODO): run guarded selected IREE profiles with non-vacuity checks.
+- `X1BSC`, `X1BRR`, `X1BSA`, and `X1BIS` (TODO): run and independently reduce
+  the four broad profiles; `X1BG` collects their accepted results.
 
 Done criteria:
 
-- Local synthetic regression is green and the other workspace records green
-  focused and broad hardware results at the accepted revision.
+- Corrected focused emulator filter passes 37/37.
+- All workspace-relative hip-moi controls pass under the emulator.
+- Selected and agreed broad IREE emulator tiers pass for all four profiles.
+- Patch, record, and positive-diagnostic guards prove non-vacuity, and no
+  unexpected emulator or guest fault remains.
+- A later physical gfx1201 rerun is retained as corroboration, not as an
+  external prerequisite for local progress.
 
-## Final Acceptance Checklist - BLOCKED ON X1B
+## Final Acceptance Checklist - ACTIVE: X1B EMULATOR QUALIFICATION
 
 `M0: gfx950 Fully Supported` is reached only when:
 
@@ -2566,6 +2629,5 @@ Done criteria:
 - All four standard profiles complete the agreed broad compatibility tier.
 - No standard command requires register numbers or report-buffer sizing.
 - `X1A` records green local synthetic regressions and `X1B` records green
-  gfx1201 focused and broad hardware tiers from the
-  gfx1201 workspace.
+  gfx1201 focused and broad emulator tiers at the accepted revision.
 - The architecture capability and spilling documentation matches the code.
