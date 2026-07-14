@@ -1406,12 +1406,10 @@ void
 perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
 {
 #if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
-    auto track_it = m_pmc_track_map.find(
-        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
-    if(track_it == m_pmc_track_map.end()) return;
+    using counter_collection_track =
+        core::perfetto::counter_track<category::rocm_counter_collection>;
 
-    const auto&   track_info = track_it->second;
-    std::uint32_t device_id  = 0;
+    std::uint32_t device_id = 0;
     try
     {
         device_id = static_cast<std::uint32_t>(
@@ -1448,12 +1446,11 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
         const auto track_key = std::hash<std::string>{}(
             track_name + std::to_string(sample.counter_instance_id));
 
-        if(!track_info.exists_fn(track_key))
-        {
-            track_info.emplace_fn(track_key, track_name, track_info.default_units);
-        }
-
-        track_info.trace_fn(track_key, 0, sample.timestamp, sample.value);
+        if(!counter_collection_track::exists(track_key))
+            counter_collection_track::emplace(track_key, track_name, ROCM_COUNTER_UNIT);
+        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                      counter_collection_track::at(track_key, 0), sample.timestamp,
+                      sample.value);
     }
 #else
     (void) _spm;
