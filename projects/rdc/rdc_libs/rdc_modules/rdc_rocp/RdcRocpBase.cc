@@ -193,6 +193,17 @@ rdc_status_t RdcRocpBase::map_entity_to_profiler() {
         RDC_LOG(RDC_DEBUG, "Flat[" << flat_idx << "] <-> Profiler[" << prof_index << "] = KFD_ID["
                                    << prof_id << "]");
         entity_to_prof_map.insert({flat_idx, prof_index});
+
+        // Downstream telemetry may key lookups by the encoded partition-instance entity
+        // index (gS.P) rather than the bare flat index. Register that key too so CPX
+        // partition entities resolve. In SPX the two coincide and the duplicate insert is
+        // a no-op.
+        rdc_entity_info_t part_info{};
+        part_info.device_index = flat_table[flat_idx].socket_index;
+        part_info.instance_index = flat_table[flat_idx].proc_index;
+        part_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+        uint32_t encoded_idx = rdc_get_entity_index_from_info(part_info);
+        entity_to_prof_map.insert({encoded_idx, prof_index});
         break;
       }
     }

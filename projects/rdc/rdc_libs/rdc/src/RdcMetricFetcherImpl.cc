@@ -786,8 +786,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_GPU_COUNT: {
       const auto& table = get_flat_gpu_table();
       value->type = INTEGER;
-      value->status = AMDSMI_STATUS_SUCCESS;
-      value->value.l_int = static_cast<int64_t>(table.size());
+      // An empty table means SMI init / socket enumeration failed; surface that as an
+      // error instead of silently reporting a count of 0.
+      if (table.empty()) {
+        value->status = AMDSMI_STATUS_NOT_INIT;
+      } else {
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->value.l_int = static_cast<int64_t>(table.size());
+      }
     } break;
     case RDC_FI_GPU_PARTITION_COUNT: {
       uint32_t partition_count = 0;
@@ -1337,7 +1343,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
                                                               rdc_field_value* value) {
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
   uint16_t num_partitions = 0;
-  amdsmi_status_t st = get_num_partition(info.device_index, &num_partitions);
+  // Pass the full entity index so get_num_partition resolves the correct socket for CPX
+  // partition instances (info.device_index alone is only the socket index).
+  amdsmi_status_t st = get_num_partition(gpu_index, &num_partitions);
   if (st != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Failed to get partition info for device " << info.device_index);
     return RDC_ST_UNKNOWN_ERROR;

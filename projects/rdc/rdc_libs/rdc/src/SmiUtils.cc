@@ -86,6 +86,10 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
 // flat index where a socket index is expected.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
+  if (processor_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   const auto& table = get_flat_gpu_table();
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
 
@@ -239,14 +243,26 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Use flat table to find the physical GPU (first processor in the socket)
+  // Decode the entity index so both bare flat indices and partition-instance entity
+  // indices resolve to the right socket (they diverge in CPX). See the dual-index note
+  // on get_processor_handle_from_id().
   const auto& table = get_flat_gpu_table();
-  if (index >= table.size()) {
-    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(index);
+
+  uint32_t target_socket = 0;
+  if (info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && info.instance_index == 0) {
+    // Physical/instance-0: device_index is a flat index into the GPU table.
+    uint32_t flat_idx = info.device_index;
+    if (flat_idx >= table.size()) {
+      return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+    target_socket = table[flat_idx].socket_index;
+  } else {
+    // Partition-instance: device_index is the socket index.
+    target_socket = info.device_index;
   }
 
   // Find the first processor in the same socket to query the physical GPU profile.
-  uint32_t target_socket = table[index].socket_index;
   amdsmi_processor_handle phys_handle = nullptr;
   for (const auto& entry : table) {
     if (entry.socket_index == target_socket) {
@@ -277,6 +293,21 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
 
   if (partition_id != 0) {
     return AMDSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  // Some driver/amdsmi versions return the current profile with num_partitions set to an
+  // invalid sentinel (e.g. UINT32_MAX) even though the call succeeds. Fall back to the flat
+  // table, which enumerates exactly one entry per partition in a socket, so the count stays
+  // consistent with the rest of RDC's GPU view.
+  if (profile.num_partitions == 0 || profile.num_partitions > RDC_MAX_NUM_PARTITIONS) {
+    uint16_t socket_entries = 0;
+    for (const auto& entry : table) {
+      if (entry.socket_index == target_socket) {
+        socket_entries++;
+      }
+    }
+    *num_partition = socket_entries;
+    return AMDSMI_STATUS_SUCCESS;
   }
 
   *num_partition = profile.num_partitions;

@@ -81,13 +81,15 @@ class RdcRocpBase {
  private:
   typedef std::pair<uint32_t, rdc_field_t> rdc_field_pair_t;
   /**
-   * @brief Tweak this to change for how long each metric is collected
+   * @brief Tweak this to change for how long each metric is collected.
+   * Widened from 10ms to 100ms: eval fields are counter rates divided by this fixed
+   * window, and the wider window averages out per-XCC dispatch jitter for a stable reading.
    */
   static const uint32_t collection_duration_us_k = 100000;
 
   /**
    * @brief SIMD_UTILIZATION is a derived metric (SQ_BUSY_CU_CYCLES/GRBM_COUNT/CU_NUM).
-   * The 10ms default window is too short for workloads with multi-second compute/idle
+   * Even the 100ms default window is too short for workloads with multi-second compute/idle
    * cycles and produces oscillating 0/0.2/0.4 readings. 500ms averages across those
    * cycles and matches the stable value reported by direct rocprofiler kernel tracing.
    */
