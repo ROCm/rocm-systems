@@ -225,9 +225,9 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
                                                           &metadata_size, (const void**)&metadata
 #endif
   );
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
-          size);
-  deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "fd %zu, Map Interop memory %p, size 0x%zx, status = 0x%xh",
+          size_t(fd), interop_deviceMemory_, size, status);
+  deviceMemory_ = static_cast<char*>(interop_deviceMemory_);
   if (status != HSA_STATUS_SUCCESS) return status;
   // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
   // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
@@ -253,21 +253,25 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   static_assert(alignof(hsa_amd_image_descriptor_t) == alignof(uint32_t),
                 "Unexpected alignment for hsa_amd_image_descriptor_t");
-  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
-      new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+  const bool isImage = (owner()->asImage() != nullptr);
 
-  if (amdImageDesc_ == nullptr) {
-    return false;
+  if (isImage) {
+    amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
+        new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+
+    if (amdImageDesc_ == nullptr) {
+      return false;
+    }
+
+    hsa_agent_t agent = dev().getBackendDevice();
+    uint32_t id;
+    Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+
+    static constexpr uint32_t DeviceIdVendorShift = 16u;
+
+    amdImageDesc_->version = 1;
+    amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
   }
-
-  hsa_agent_t agent = dev().getBackendDevice();
-  uint32_t id;
-  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
-
-  static constexpr uint32_t DeviceIdVendorShift = 16u;
-
-  amdImageDesc_->version = 1;
-  amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
 
 #if IS_WINDOWS
   hsa_handle_t handle = 0, resHandle = 0;
@@ -276,30 +280,30 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   // Check if this is D3D interop (vs GL interop)
   amd::InteropObject* interopObj = owner()->getInteropObj();
-  UINT srdSize = MaxMetadataSizeDwords * sizeof(uint32_t);
+  // SRD and size are only needed for images; pass nullptr for plain buffers.
+  void* srdPtr = isImage ? amdImageDesc_->data : nullptr;
+  UINT srdSize = isImage ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
   size_t sizeHint = 0;
   if (interopObj->asD3D11Object()) {
     // D3D11 interop
     D3D11Object* d3d11Obj = interopObj->asD3D11Object();
-    if (!D3D11Interop::Export(this, d3d11Obj->getD3D11Resource(),
-                              d3d11Obj->getSubresource(), &handle, &offset,
-                              amdImageDesc_->data, &srdSize, &mapFlags, &sizeHint)) {
+    if (!D3D11Interop::Export(this, d3d11Obj, &handle, &offset,
+                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
       LogError("D3D11Interop::Export failed for buffer");
       return false;
     }
   } else if (interopObj->asD3D10Object()) {
     // D3D10 interop
     D3D10Object* d3d10Obj = interopObj->asD3D10Object();
-    if (!D3D10Interop::Export(this, d3d10Obj->getD3D10Resource(),
-                              d3d10Obj->getSubresource(), &handle, &offset,
-                              amdImageDesc_->data, &srdSize, &mapFlags)) {
+    if (!D3D10Interop::Export(this, d3d10Obj, &handle, &offset,
+                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
       LogError("D3D10Interop::Export failed for buffer");
       return false;
     }
   } else if (interopObj->asGLObject()) {
     // GL interop
     if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset,
-                           amdImageDesc_->data, MaxMetadataSizeDwords * sizeof(uint32_t))) {
+                           srdPtr, srdSize)) {
       return false;
     }
   } else {
@@ -336,8 +340,8 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   in.target = targetType;
   in.obj = owner()->getInteropObj()->asGLObject()->getGLName();
   in.miplevel = miplevel;
-  in.out_driver_data_size = MaxMetadataSizeBytes;
-  in.out_driver_data = &amdImageDesc_->data[0];
+  in.out_driver_data_size = isImage ? MaxMetadataSizeBytes : 0;
+  in.out_driver_data = isImage ? &amdImageDesc_->data[0] : nullptr;
 
   const auto& glenv = owner()->getContext().glenv();
   if (glenv->isEGL()) {
@@ -362,7 +366,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 void Memory::destroyInteropBuffer() {
   assert(kind_ == MEMORY_KIND_INTEROP && "Memory must be interop type.");
   Hsa::interop_unmap_buffer(interop_deviceMemory_);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap GL memory %p", deviceMemory_);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap interop memory %p", deviceMemory_);
   deviceMemory_ = nullptr;
 }
 
@@ -860,6 +864,16 @@ bool Buffer::create(bool alloc_local) {
                        owner()->getSvmPtr());
         return false;
       }
+    } else if (memFlags & ROCCLR_MEM_HOST_NUMA) {
+      // Host-resident NUMA VMM: decode the packed node selector. Stored value is
+      // (node + 1); 0 means "resolve current node" (HostNumaCurrent) -> pass -1.
+      const uint64_t stored =
+          (memFlags & ROCCLR_MEM_HOST_NUMA_NODE_MASK) >> ROCCLR_MEM_HOST_NUMA_NODE_SHIFT;
+      const int numaNode = (stored == 0) ? -1 : static_cast<int>(stored - 1);
+      owner()->getUserData().hsa_handle = dev().hostVmemAlloc(owner()->getSize(),
+                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
+                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,
+                                          numaNode);
     } else {
       owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
                                           memFlags & ROCCLR_MEM_HSA_UNCACHED

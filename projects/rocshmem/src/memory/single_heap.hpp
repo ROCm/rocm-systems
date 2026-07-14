@@ -131,6 +131,27 @@ class SingleHeap {
    */
   size_t get_avail();
 
+  /**
+   * @brief Accessor for the allocator type backing the heap
+   *
+   * @return AllocatorType used to allocate the heap memory
+   */
+  AllocatorType get_type();
+
+  /**
+   * @brief Accessor for the allocation granularity of the heap allocator
+   *
+   * @return Allocation granularity in bytes
+   */
+  size_t get_granularity();
+
+  /**
+   * @brief Accessor for the allocator used to back the heap memory
+   *
+   * @return Pointer to the HIPAllocator that allocated the heap
+   */
+  HIPAllocator *get_allocator();
+
  private:
   /**
    * @brief Heap memory object
@@ -140,6 +161,10 @@ class SingleHeap {
    * @brief Allocation strategy object
    */
   ShmemAllocatorStrategy *strat_{nullptr};
+  /**
+   * @brief Allocator used to back the heap memory
+   */
+  HIPAllocator *allocator_{nullptr};
 };
 
 }  // namespace rocshmem

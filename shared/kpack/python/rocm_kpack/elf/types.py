@@ -16,8 +16,11 @@ from typing import ClassVar
 # Constants
 # =============================================================================
 
-PAGE_SIZE = 0x1000  # 4KB pages
+PAGE_SIZE = 0x1000  # 4KB pages (x86_64 default)
 ELF_MAGIC = b"\x7fELF"
+
+# ELF machine types (e_machine)
+EM_X86_64 = 62
 
 # ELF header offsets (for direct byte access)
 E_IDENT_OFFSET = 0
@@ -483,32 +486,35 @@ class RelaEntry:
         """Create r_info value from symbol index and type."""
         return (sym << 32) | (type_ & 0xFFFFFFFF)
 
-    def get_target_address(self) -> int | None:
+    def get_target_address(self, r_relative: int = R_X86_64_RELATIVE) -> int | None:
         """Get the target address this relocation points to.
+
+        Args:
+            r_relative: The RELATIVE relocation type for this binary's architecture.
 
         Returns:
             Target address for known relocation types, None for unknown types.
-
-        Currently supports:
-            - R_X86_64_RELATIVE: target is r_addend
         """
-        if self.r_type == R_X86_64_RELATIVE:
+        if self.r_type == r_relative:
             return self.r_addend
         return None
 
-    def targets_range(self, range_start: int, range_size: int) -> bool | None:
+    def targets_range(
+        self, range_start: int, range_size: int, r_relative: int = R_X86_64_RELATIVE
+    ) -> bool | None:
         """Check if this relocation targets an address within a range.
 
         Args:
             range_start: Start address of the range
             range_size: Size of the range in bytes
+            r_relative: The RELATIVE relocation type for this binary's architecture.
 
         Returns:
             True: relocation target is within range
             False: relocation target is known to be outside range
             None: relocation type not understood (caller decides how to handle)
         """
-        target = self.get_target_address()
+        target = self.get_target_address(r_relative)
         if target is None:
             return None
         range_end = range_start + range_size
@@ -561,34 +567,61 @@ class RelEntry:
 # =============================================================================
 
 
-def round_up_to_page(addr: int) -> int:
+@dataclass
+class ArchConfig:
+    """Architecture-specific ELF constants."""
+
+    page_size: int  # OS page size in bytes
+    r_relative: int  # Relocation type for RELATIVE (PIE pointer fixups)
+
+
+_ARCH_CONFIGS: dict[int, ArchConfig] = {
+    EM_X86_64: ArchConfig(page_size=0x1000, r_relative=R_X86_64_RELATIVE),
+}
+
+def get_arch_config(e_machine: int) -> ArchConfig:
+    """Return architecture-specific constants for the given ELF machine type.
+
+    Raises:
+        ValueError: If the machine type is not supported.
+    """
+    config = _ARCH_CONFIGS.get(e_machine)
+    if config is None:
+        raise ValueError(
+            f"Unsupported ELF machine type: {e_machine} (0x{e_machine:x}). "
+            f"Supported types: {list(_ARCH_CONFIGS.keys())}"
+        )
+    return config
+
+
+def round_up_to_page(addr: int, page_size: int = PAGE_SIZE) -> int:
     """Round address up to next page boundary."""
-    return (addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
+    return (addr + page_size - 1) & ~(page_size - 1)
 
 
-def round_down_to_page(addr: int) -> int:
+def round_down_to_page(addr: int, page_size: int = PAGE_SIZE) -> int:
     """Round address down to previous page boundary."""
-    return addr & ~(PAGE_SIZE - 1)
+    return addr & ~(page_size - 1)
 
 
-def page_align_offset(offset: int, vaddr: int) -> int:
+def page_align_offset(offset: int, vaddr: int, page_size: int = PAGE_SIZE) -> int:
     """Calculate file offset that maintains mmap alignment with vaddr.
 
     For mmap to work correctly:
-        (p_offset % PAGE_SIZE) == (p_vaddr % PAGE_SIZE)
+        (p_offset % page_size) == (p_vaddr % page_size)
 
     This function finds the smallest offset >= the given offset that
     satisfies this constraint for the given vaddr.
     """
-    vaddr_page_offset = vaddr & (PAGE_SIZE - 1)
-    offset_page_offset = offset & (PAGE_SIZE - 1)
+    vaddr_page_offset = vaddr & (page_size - 1)
+    offset_page_offset = offset & (page_size - 1)
 
     if offset_page_offset == vaddr_page_offset:
         return offset
     elif offset_page_offset < vaddr_page_offset:
-        return (offset & ~(PAGE_SIZE - 1)) + vaddr_page_offset
+        return (offset & ~(page_size - 1)) + vaddr_page_offset
     else:
-        return round_up_to_page(offset) + vaddr_page_offset
+        return round_up_to_page(offset, page_size) + vaddr_page_offset
 
 
 def get_section_name(

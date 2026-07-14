@@ -11,6 +11,10 @@ using namespace rocjitsu;
 
 namespace {
 
+/*
+ * \NPI new GPU: add its target -> Decoder mapping in create_decoder_for_target() \
+ * and its target -> arch mapping in arch_for_target() below.
+ */
 Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> cdna2_decoder;
   static thread_local std::unique_ptr<Decoder> cdna3_decoder;
