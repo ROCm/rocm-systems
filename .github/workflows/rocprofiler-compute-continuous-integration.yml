@@ -55,7 +55,6 @@ concurrency:
 env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
 
 jobs:
   prepare_matrix:
@@ -94,7 +93,7 @@ jobs:
     permissions:
       packages: read
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-${{ matrix.system.arch }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-multiarch
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
@@ -108,6 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
@@ -115,17 +115,14 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
             MODE=Nightly
-            EXCLUDED_TESTS=""
             ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
-            EXCLUDED_TESTS="test_profile_live_attach_detach"
             ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
-          echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
           echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
           if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
@@ -135,31 +132,31 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Install amdgpu and dependencies
+      - name: Install dependencies
         shell: bash
         run: |
-          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
-          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
-          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get update
-          apt install -y amd-smi-lib libdw-dev hip-dev
-          echo "✅ amdgpu and ROCm dependencies Installed!"
+          apt install -y libdw-dev pkg-config
+          echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
         run: |
           set -e
+          mkdir ${{ env.ROCM_PATH }}
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
+          rm ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock Manifest
+        run: |
+          cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
 
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |
+          pip --version
           for i in 1 2 3; do
             pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
             echo "⚠️ pip install attempt $i failed, retrying..."
@@ -197,19 +194,18 @@ jobs:
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
-            -E "${{ steps.setup_env.outputs.excluded_tests }}"
+            -L full \
+            -LE full_rocprofiler_compute_ci_exclude
 
-      - name: Output Logs
+      - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
-        working-directory: projects/rocprofiler-compute
-        run: |
-          echo "❌ Run Failed: Outputting available log files..."
-          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
-            if [ -f "$log" ]; then
-              echo "=== $log ==="
-              cat "$log"
-            fi
-          done
+        uses: actions/upload-artifact@v7
+        with:
+          name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
+          path: |
+            projects/rocprofiler-compute/build/ctest-results.xml
+            projects/rocprofiler-compute/build/Testing/Temporary/**
+          retention-days: 2
 
       - name: Check Test Results
         if: always()

@@ -210,8 +210,11 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
     strncpy(lineCopy, line, sizeof(lineCopy));
     lineCopy[sizeof(lineCopy) - 1] = '\0';
 
-    // Tokenize by comma
-    token = strtok(lineCopy, ",");
+    // Tokenize by comma. Use strtok_r (reentrant): strtok keeps parser state in
+    // a shared static, so concurrent multi-comm init would corrupt each other's
+    // parse and load a partial config set, causing per-rank algo split-brain.
+    char* saveptr = NULL;
+    token = strtok_r(lineCopy, ",", &saveptr);
     while (token != NULL && tokenCount < CONFIG_FIELDS_MAX) {
       // Trim whitespace
       while (*token == ' ' || *token == '\t') token++;
@@ -221,7 +224,7 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
         end--;
       }
       tokens[tokenCount++] = token;
-      token = strtok(NULL, ",");
+      token = strtok_r(NULL, ",", &saveptr);
     }
 
     // Validate field count: support required fields (8), with pipeOps (9), or with regBuff (10)
@@ -353,6 +356,7 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
                               int regBuff, int* nChannels) {
   TunerContext* ctx = (TunerContext*)context;
   if (!ctx) return ncclInternalError;
+  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
   // Set default channels to 0 to ensure RCCL uses its default channel selection logic in case no match is found or wildcard is used in config.
   *nChannels = 0;
@@ -459,6 +463,33 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   return ncclSuccess;
 }
 
+__hidden ncclResult_t pluginGetChunkSize(void* context, ncclFunc_t collType, size_t nBytes,
+                                         int algo, int proto, int nChannels, size_t* chunkSize) {
+  TunerContext* ctx = (TunerContext*)context;
+  if (!ctx) return ncclInternalError;
+
+  size_t originalChunkSize = *chunkSize;
+  size_t minChunkSize = 0;
+
+  if (algo == NCCL_ALGO_NVLS_TREE && proto == NCCL_PROTO_SIMPLE) {
+    minChunkSize = 32768;
+  }
+
+  if (minChunkSize > 0 && *chunkSize < minChunkSize) {
+    *chunkSize = minChunkSize;
+  }
+
+  if (ctx->logFunction && *chunkSize != originalChunkSize) {
+    ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
+                     "TUNER/ExamplePlugin: getChunkSize - collType=%s, nBytes=%zu, algo=%s, proto=%s, nChannels=%d: "
+                     "chunk size %zu -> %zu",
+                     collTypeToString(collType), nBytes, algorithmToString(algo), protocolToString(proto),
+                     nChannels, originalChunkSize, *chunkSize);
+  }
+
+  return ncclSuccess;
+}
+
 __hidden ncclResult_t pluginFinalize(void* context) {
   if (context) {
     TunerContext* ctx = (TunerContext*)context;
@@ -473,6 +504,16 @@ __hidden ncclResult_t pluginFinalize(void* context) {
 
 #define PLUGIN_NAME "Example"
 
+// Export V6 plugin with getChunkSize support
+const ncclTuner_v6_t ncclTunerPlugin_v6 = {
+  .name = PLUGIN_NAME,
+  .init = pluginInit,
+  .getCollInfo = pluginGetCollInfo,
+  .getChunkSize = pluginGetChunkSize,
+  .finalize = pluginFinalize
+};
+
+// Also export V5 plugin for backward compatibility
 const ncclTuner_v5_t ncclTunerPlugin_v5 = {
   .name = PLUGIN_NAME,
   .init = pluginInit,

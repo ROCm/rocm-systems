@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
@@ -15,7 +17,9 @@
 #include <dlfcn.h>
 #include <string>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 
 //======================================================================================//
 
@@ -34,7 +38,8 @@ to_lower(string_t s)
 //
 //======================================================================================//
 //
-template <typename Tp, std::enable_if_t<!std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t
 get_snippet(Tp arg)
 {
@@ -43,7 +48,8 @@ get_snippet(Tp arg)
 //
 //======================================================================================//
 //
-template <typename Tp, std::enable_if_t<std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires std::is_same_v<Tp, std::string>
 snippet_pointer_t
 get_snippet(const Tp& arg)
 {
@@ -154,7 +160,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
 static inline address_space_t*
 rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
                              const std::vector<std::string>& _cmdenv, bool _rewrite,
-                             int _pid = -1, const std::string& _name = {})
+                             const std::string& _name = {})
 {
     address_space_t* mutatee = nullptr;
 
@@ -180,9 +186,7 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     }
     else
     {
-        bool _attach = (_pid >= 0);
-
-        // override the current environment create/attach to process, revert environment
+        // override the current environment to start the process, revert environment
         using strpair_t    = std::pair<std::string, std::string>;
         auto _imported     = std::vector<strpair_t>{};
         auto _exported     = std::vector<strpair_t>{};
@@ -211,50 +215,34 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_attach)
+        if(_cmdc < 1) errprintf(-127, "No command provided");
+
+        if(is_text_file(_cmdv[0]))
         {
-            verbprintf(1, "Attaching to process %i... ", _pid);
-            fflush(stderr);
-            char* _cmdv0 = (_cmdc > 0) ? _cmdv[0] : nullptr;
-            mutatee      = _bpatch->processAttach(_cmdv0, _pid);
-            if(!mutatee)
-            {
-                verbprintf(-1, "Failed to connect to process %i\n", (int) _pid);
-                throw std::runtime_error("Failed to attach to process");
-            }
-            verbprintf_bare(1, "Done\n");
+            errprintf(-1,
+                      "'%s' is a text file. rocprof-sys only supports instrumenting "
+                      "binary files",
+                      _cmdv[0]);
         }
-        else
+
+        std::stringstream ss;
+        for(int i = 0; i < _cmdc; ++i)
         {
-            if(_cmdc < 1) errprintf(-127, "No command provided");
-
-            if(is_text_file(_cmdv[0]))
-            {
-                errprintf(-1,
-                          "'%s' is a text file. rocprof-sys only supports instrumenting "
-                          "binary files",
-                          _cmdv[0]);
-            }
-
-            std::stringstream ss;
-            for(int i = 0; i < _cmdc; ++i)
-            {
-                if(!_cmdv || !_cmdv[i]) continue;
-                ss << " " << _cmdv[i];
-            }
-            auto _cmd_msg = ss.str();
-            if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
-
-            verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
-            fflush(stderr);
-            mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
-            if(!mutatee)
-            {
-                verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());
-                throw std::runtime_error("Failed to create process");
-            }
-            verbprintf_bare(1, "Done\n");
+            if(!_cmdv || !_cmdv[i]) continue;
+            ss << " " << _cmdv[i];
         }
+        auto _cmd_msg = ss.str();
+        if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
+
+        verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
+        fflush(stderr);
+        mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
+        if(!mutatee)
+        {
+            verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());
+            throw std::runtime_error("Failed to create process");
+        }
+        verbprintf_bare(1, "Done\n");
     }
 
     return mutatee;

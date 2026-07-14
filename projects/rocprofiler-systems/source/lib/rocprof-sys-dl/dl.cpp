@@ -83,16 +83,16 @@ namespace
 inline int
 get_rocprofsys_env()
 {
-    auto&& _debug = get_env("ROCPROFSYS_DEBUG", false);
-    return get_env("ROCPROFSYS_VERBOSE", (_debug) ? 100 : 0);
+    auto&& _debug = get_env(env_vars::DEBUG_MODE, false);
+    return get_env(env_vars::VERBOSE, (_debug) ? 100 : 0);
 }
 
 inline int
 get_rocprofsys_dl_env()
 {
-    return get_env("ROCPROFSYS_DL_DEBUG", false)
+    return get_env(env_vars::DL_DEBUG, false)
                ? 100
-               : get_env("ROCPROFSYS_DL_VERBOSE", get_rocprofsys_env());
+               : get_env(env_vars::DL_VERBOSE, get_rocprofsys_env());
 }
 
 inline bool&
@@ -109,7 +109,7 @@ inline bool
 get_rocprofsys_preload()
 {
     static bool _v = []() {
-        auto&& _preload      = get_env("ROCPROFSYS_PRELOAD", true);
+        auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
                 _preload_libs.find("librocprof-sys-dl.so") != std::string::npos);
@@ -132,8 +132,8 @@ inline pid_t
 get_rocprofsys_root_pid()
 {
     auto _pid = getpid();
-    setenv("ROCPROFSYS_ROOT_PROCESS", std::to_string(_pid).c_str(), 0);
-    return get_env("ROCPROFSYS_ROOT_PROCESS", _pid);
+    setenv(env_vars::ROOT_PROCESS, std::to_string(_pid).c_str(), 0);
+    return get_env(env_vars::ROOT_PROCESS, _pid);
 }
 
 void
@@ -274,6 +274,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_set_env_f, m_omnihandle, "rocprofsys_set_env");
         ROCPROFSYS_DLSYM(rocprofsys_set_mpi_f, m_omnihandle, "rocprofsys_set_mpi");
         ROCPROFSYS_DLSYM(rocprofsys_push_trace_f, m_omnihandle, "rocprofsys_push_trace");
+        ROCPROFSYS_DLSYM(rocprofsys_push_trace_with_args_f, m_omnihandle,
+                         "rocprofsys_push_trace_with_args");
         ROCPROFSYS_DLSYM(rocprofsys_pop_trace_f, m_omnihandle, "rocprofsys_pop_trace");
         ROCPROFSYS_DLSYM(rocprofsys_push_region_f, m_omnihandle,
                          "rocprofsys_push_region");
@@ -382,11 +384,12 @@ public:
     void (*rocprofsys_init_f)(const char*, bool, const char*)                  = nullptr;
     void (*rocprofsys_finalize_f)(void)                                        = nullptr;
     void (*rocprofsys_set_env_f)(const char*, const char*)                     = nullptr;
-    void (*rocprofsys_set_mpi_f)(bool, bool)                                   = nullptr;
+    void (*rocprofsys_set_mpi_f)(bool)                                         = nullptr;
     void (*rocprofsys_register_source_f)(const char*, const char*, size_t, size_t,
                                          const char*)                          = nullptr;
     void (*rocprofsys_register_coverage_f)(const char*, const char*, size_t)   = nullptr;
     void (*rocprofsys_push_trace_f)(const char*)                               = nullptr;
+    void (*rocprofsys_push_trace_with_args_f)(const char*, const char*)        = nullptr;
     void (*rocprofsys_pop_trace_f)(const char*)                                = nullptr;
     int (*rocprofsys_push_region_f)(const char*)                               = nullptr;
     int (*rocprofsys_pop_region_f)(const char*)                                = nullptr;
@@ -471,9 +474,9 @@ get_indirect()
 {
     rocprofsys_preinit_library();
 
-    static auto  _libomni = get_env("ROCPROFSYS_LIBRARY", "librocprof-sys.so");
-    static auto  _libuser = get_env("ROCPROFSYS_USER_LIBRARY", "librocprof-sys-user.so");
-    static auto  _libdlib = get_env("ROCPROFSYS_DL_LIBRARY", "librocprof-sys-dl.so");
+    static auto  _libomni = get_env(env_vars::LIBRARY, "librocprof-sys.so");
+    static auto  _libuser = get_env(env_vars::USER_LIBRARY, "librocprof-sys-user.so");
+    static auto  _libdlib = get_env(env_vars::DL_LIBRARY, "librocprof-sys-dl.so");
     static auto* _v       = new indirect{ _libomni, _libuser, _libdlib };
     return *_v;
 }
@@ -509,7 +512,7 @@ get_user_api_active()
 auto&
 get_enabled()
 {
-    static auto* _v = new std::atomic<bool>{ get_env("ROCPROFSYS_INIT_ENABLED", true) };
+    static auto* _v = new std::atomic<bool>{ get_env(env_vars::INIT_ENABLED, true) };
     return *_v;
 }
 
@@ -537,7 +540,7 @@ get_thread_status()
 InstrumentMode&
 get_instrumented()
 {
-    static auto _v = get_env("ROCPROFSYS_INSTRUMENT_MODE", InstrumentMode::None);
+    static auto _v = get_env(env_vars::INSTRUMENT_MODE, InstrumentMode::None);
     return _v;
 }
 
@@ -584,7 +587,8 @@ extern "C"
 {
     void rocprofsys_preinit_library(void)
     {
-        if(rocprofsys::common::get_env("ROCPROFSYS_MONOCHROME", tim::log::monochrome()))
+        if(rocprofsys::common::get_env(rocprofsys::env_vars::MONOCHROME,
+                                       tim::log::monochrome()))
             tim::log::monochrome() = true;
     }
 
@@ -670,6 +674,27 @@ extern "C"
         if(dl::get_thread_enabled())
         {
             ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+    }
+
+    void rocprofsys_push_trace_with_args(const char* name, const char* serialized_args)
+    {
+        if(!dl::get_active()) return;
+        if(dl::get_thread_enabled())
+        {
+            if(get_indirect().rocprofsys_push_trace_with_args_f)
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_with_args_f,
+                                     name, serialized_args);
+            }
+            else
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+            }
         }
         else
         {
@@ -764,14 +789,14 @@ extern "C"
         // ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_env_f, a, b);
     }
 
-    void rocprofsys_set_mpi(bool a, bool b)
+    void rocprofsys_set_mpi(bool a)
     {
         if(dl::get_inited() && dl::get_active())
         {
-            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a, b);
+            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a);
             return;
         }
-        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a, b);
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a);
     }
 
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
@@ -1159,7 +1184,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes)
 const char*
 get_default_mode()
 {
-    if(get_env("ROCPROFSYS_USE_CAUSAL", false)) return "causal";
+    if(get_env(env_vars::USE_CAUSAL, false)) return "causal";
 
     auto _link_map = get_link_map(nullptr);
     for(const auto& itr : _link_map)
@@ -1180,12 +1205,11 @@ rocprofsys_preinit()
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
-            auto _use_mpip = get_env("ROCPROFSYS_USE_MPIP", false);
-            auto _use_mpi  = get_env("ROCPROFSYS_USE_MPI", _use_mpip);
-            auto _causal   = get_env("ROCPROFSYS_USE_CAUSAL", false);
-            auto _mode     = get_env("ROCPROFSYS_MODE", get_default_mode());
+            auto _use_mpip = get_env(env_vars::USE_MPIP, false);
+            auto _use_mpi  = get_env(env_vars::USE_MPI, _use_mpip);
+            auto _causal   = get_env(env_vars::USE_CAUSAL, false);
+            auto _mode     = get_env(env_vars::MODE, get_default_mode());
 
             if(_use_mpi && !(_causal && _mode == "causal"))
             {
@@ -1195,8 +1219,7 @@ rocprofsys_preinit()
                 // If _use_mpi defaults to true above, calling this
                 // will override can current env or config value for
                 // ROCPROFSYS_USE_PID.
-                rocprofsys_set_mpi(_use_mpi, dl::get_instrumented() ==
-                                                 dl::InstrumentMode::ProcessAttach);
+                rocprofsys_set_mpi(_use_mpi);
             }
             break;
         }
@@ -1215,7 +1238,6 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
             if(_exe.empty())
                 _exe = tim::filepath::readlink(join('/', "/proc", getpid(), "exe"));
@@ -1240,11 +1262,11 @@ bool
 rocprofsys_preload()
 {
     auto _preload = get_rocprofsys_is_preloaded() && get_rocprofsys_preload() &&
-                    get_env("ROCPROFSYS_ENABLED", true);
+                    get_env(env_vars::ENABLED, true);
 
     auto _link_map = get_link_map(nullptr);
     auto _instr_mode =
-        get_env("ROCPROFSYS_INSTRUMENT_MODE", dl::InstrumentMode::BinaryRewrite);
+        get_env(env_vars::INSTRUMENT_MODE, dl::InstrumentMode::BinaryRewrite);
     for(const auto& itr : _link_map)
     {
         if(itr.find("librocprof-sys-rt.so") != std::string::npos ||
@@ -1284,7 +1306,6 @@ verify_instrumented_preloaded()
     switch(dl::get_instrumented())
     {
         case dl::InstrumentMode::None:
-        case dl::InstrumentMode::ProcessAttach:
         case dl::InstrumentMode::ProcessCreate:
         case dl::InstrumentMode::PythonProfile:
         {
@@ -1528,7 +1549,7 @@ extern "C"
             }
         }
 
-        auto _mode = get_env("ROCPROFSYS_MODE", get_default_mode());
+        auto _mode = get_env(rocprofsys::env_vars::MODE, get_default_mode());
         rocprofsys_init(_mode.c_str(),
                         dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
                         argv[0]);

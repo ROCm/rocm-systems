@@ -261,11 +261,16 @@ TEST(Vop3UnarySimdCorrectness, MovB32_PreservesBits) {
   struct Sub {
     uint32_t abs, neg, omod, clamp, in, expect;
   };
+  // v_mov_b32 is an integer bit-move (D.u = S0.u): its generated scalar body is
+  // a raw copy that ignores the VOP3 float modifiers (abs/neg are float input
+  // modifiers, omod/clamp float output modifiers — none apply to a .u move). So
+  // every modifier combination must preserve the source bits exactly; the SIMD
+  // fast path (plain VOP1 unary copy) must match.
   const std::array<Sub, 4> subs = {{
       {0, 0, 0, 0, 0x3F000000u, 0x3F000000u}, // 0.5 -> 0.5 (bits preserved)
       {0, 0, 0, 0, 0x12345678u, 0x12345678u}, // arbitrary bits preserved
-      {0, 1, 0, 0, 0x3F000000u, 0xBF000000u}, // neg: flip sign -> -0.5
-      {1, 0, 0, 0, 0xBF000000u, 0x3F000000u}, // abs: clear sign -> 0.5
+      {0, 1, 0, 0, 0x3F000000u, 0x3F000000u}, // neg modifier ignored -> bits preserved
+      {1, 0, 0, 0, 0xBF000000u, 0xBF000000u}, // abs modifier ignored -> bits preserved
   }};
   for (const auto &s : subs) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};

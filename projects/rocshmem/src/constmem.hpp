@@ -25,13 +25,20 @@
 #ifndef LIBRARY_SRC_CONSTMEM_HPP_
 #define LIBRARY_SRC_CONSTMEM_HPP_
 
+#include <array>
+
 #include "gda/gda_enums.hpp"
+#include "rocshmem/rocshmem_common.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
 
 struct constmem_t {
+  BackendType backend_type;
+  GDAProvider gda_provider;
   uint64_t alltoall_wg_algo;
+  int my_pe;
+  int num_pes;
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;

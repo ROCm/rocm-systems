@@ -20,10 +20,6 @@
 
 typedef ncclNet_t* getNcclNet_t(void* netPluginLib);
 typedef ncclCollNet_t* getNcclCollNet_t(void* netPluginLib);
-// [RCCL] Local typedef so the v11 GIN getter can still be wired up here. The
-// upstream NCCL 2.29.7 patch moved this whole table into plugin/gin.cc, but
-// AMD still constructs the GIN/RMA fields of netPluginLib_t inline below.
-typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
 extern getNcclNet_t getNcclNet_v6;
 extern getNcclNet_t getNcclNet_v7;
@@ -31,6 +27,7 @@ extern getNcclNet_t getNcclNet_v8;
 extern getNcclNet_t getNcclNet_v9;
 extern getNcclNet_t getNcclNet_v10;
 extern getNcclNet_t getNcclNet_v11;
+extern getNcclNet_t getNcclNet_v12;
 extern getNcclCollNet_t getNcclCollNet_v6;
 extern getNcclCollNet_t getNcclCollNet_v7;
 extern getNcclCollNet_t getNcclCollNet_v8;
@@ -38,15 +35,14 @@ extern getNcclCollNet_t getNcclCollNet_v9;
 extern getNcclCollNet_t getNcclCollNet_v10;
 extern getNcclCollNet_t getNcclCollNet_v11;
 extern int64_t rcclParamAinicRoce();
-// [RCCL] NCCL 2.29.7 moved getNcclGin[] / getNcclGin_v* externs into
-// plugin/gin.cc -- declare it here as extern so this TU can still reference
-// getNcclGin[i] from setupPlugin() without redefining the array.
-extern getNcclGin_t* getNcclGin[];
+// [RCCL] getNcclCollNet_v12 is defined in plugin/net/net_v12.cc; declare it here
+// so the getNcclCollNet[] table below can reference it in this TU.
+extern getNcclCollNet_t getNcclCollNet_v12;
 NCCL_PARAM(NetPluginRefCount, "NET_PLUGIN_REF_COUNT", 0);
-#define NCCL_NET_VERSION_COUNT 6
-int ncclNetVersion[NCCL_NET_VERSION_COUNT] = {11, 10, 9, 8, 7, 6};
-getNcclNet_t* getNcclNet[NCCL_NET_VERSION_COUNT] = {getNcclNet_v11, getNcclNet_v10, getNcclNet_v9, getNcclNet_v8, getNcclNet_v7, getNcclNet_v6};
-getNcclCollNet_t* getNcclCollNet[NCCL_NET_VERSION_COUNT] = {getNcclCollNet_v11, getNcclCollNet_v10, getNcclCollNet_v9, getNcclCollNet_v8, getNcclCollNet_v7, getNcclCollNet_v6};
+#define NCCL_NET_VERSION_COUNT 7
+int ncclNetVersion[NCCL_NET_VERSION_COUNT] = {12, 11, 10, 9, 8, 7, 6};
+getNcclNet_t* getNcclNet[NCCL_NET_VERSION_COUNT] = {getNcclNet_v12, getNcclNet_v11, getNcclNet_v10, getNcclNet_v9, getNcclNet_v8, getNcclNet_v7, getNcclNet_v6};
+getNcclCollNet_t* getNcclCollNet[NCCL_NET_VERSION_COUNT] = {getNcclCollNet_v12, getNcclCollNet_v11, getNcclCollNet_v10, getNcclCollNet_v9, getNcclCollNet_v8, getNcclCollNet_v7, getNcclCollNet_v6};
 
 #define NCCL_NET_NUM_INTERNAL_PLUGINS 2
 
@@ -72,13 +68,6 @@ typedef struct netPluginLib {
   int netVirtDevs;                              // ncclNet - number of virtual devices
   int collNetPhysDevs;                          // ncclCollNet -  number of physical devices
   int collNetVirtDevs;                          // ncclCollNet -  number of virtual devices
-  // [RCCL] AMD wires GIN/RMA into the same plugin lib record so the IB
-  // plugin can advertise both transports. Upstream NCCL 2.29.7 split this
-  // out into plugin/gin.cc; AMD has not yet adopted that split.
-  ncclGin_t* ncclGin;
-  ncclGin_t* ncclRma;
-  ncclNetPluginState_t ncclGinPluginState;
-  ncclNetPluginState_t ncclRmaPluginState;
 } netPluginLib_t;
 
 int pluginCount = 0;
@@ -89,11 +78,17 @@ static std::once_flag initPluginLibsOnceFlag;
 
 static ncclResult_t ncclNetPluginUnload(netPluginLib_t* pluginLib) {
   if ((pluginLib->dlHandle) && ((pluginLib->ncclNetPluginRefCount) == 0)) {
-    INFO(NCCL_INIT|NCCL_NET, "Unloading plugin %s", pluginLib->name);
+    INFO(NCCL_DESTROY|NCCL_NET, "Unloading plugin %s", pluginLib->name);
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeNet));
-    // memset will reset the status to ncllNetPluginStateLoadReady
-    memset(pluginLib, 0, sizeof(netPluginLib_t));
-    // reset the count of devices to UNDEF_DEV_COUNT
+
+    // Reset fields but preserve name, to be reused when reloading
+    pluginLib->dlHandle = NULL;
+    pluginLib->ncclNet = NULL;
+    pluginLib->ncclNetVer = 0;
+    pluginLib->ncclCollNet = NULL;
+    pluginLib->ncclNetPluginState = ncclNetPluginStateLoadReady;
+    pluginLib->ncclCollNetPluginState = ncclNetPluginStateLoadReady;
+    pluginLib->ncclNetPluginRefCount = 0;
     pluginLib->netPhysDevs = pluginLib->netVirtDevs = NCCL_UNDEF_DEV_COUNT;
     pluginLib->collNetPhysDevs = pluginLib->collNetVirtDevs = NCCL_UNDEF_DEV_COUNT;
   }
@@ -202,42 +197,6 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
     }
   }
 
-  if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
-    if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
-#if !defined(__HIP_PLATFORM_AMD__)
-      void* throwAwayContext = nullptr;
-      if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
-        if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
-          pluginLib->ncclGin = &ncclGinIbGdaki;
-        } else {
-          pluginLib->ncclGin = &ncclGinIbProxy;
-        }
-        ncclGinIbGdaki.finalize(throwAwayContext);
-      }
-      else {
-        pluginLib->ncclGin = &ncclGinIbProxy;
-      }
-#else
-      pluginLib->ncclGin = &ncclGinIbProxy;
-#endif
-    }
-    if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
-    else if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
-    else {
-      pluginLib->ncclGinPluginState = ncclNetPluginStateEnabled;
-    }
-  }
-
-  // Initialize RMA plugin
-  if (pluginLib->ncclRmaPluginState == ncclNetPluginStateInitReady && pluginLib->ncclRma) {
-    if (pluginLib->ncclRma->init(&comm->netContext, comm->commHash, ncclDebugLog) != ncclSuccess)
-      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
-    else if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0)
-      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
-    else {
-      pluginLib->ncclRmaPluginState = ncclNetPluginStateEnabled;
-    }
-  }
 exit:
   return ncclSuccess;
 fail:
@@ -333,24 +292,16 @@ static void initPluginLibsOnceFunc() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   {
     const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
+    if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
+       envNet = "IB-CAST";
+    }
+    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) ||
+        (!envNet && rcclUseAinic() && !(envNetPlugin))) {
       netPluginLibs[pluginCounter].ncclNet = &netIbCast;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
       netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
     } else {
 #endif
       netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      netPluginLibs[pluginCounter].ncclGin = NULL;
-      if (ncclParamGinType() == -1)
-        netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
-      else if (ncclParamGinType() == NCCL_GIN_TYPE_PROXY)
-        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
-#if !defined(__HIP_PLATFORM_AMD__)
-      else if (ncclParamGinType() == NCCL_GIN_TYPE_GDAKI)
-        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
-#endif
       netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
       ++pluginCounter;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

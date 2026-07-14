@@ -86,7 +86,7 @@ using namespace RCCLTestHelpers;
 
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
-// External NET IB-CAST plugin (WRR scheduler, multi-QP)
+// External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
 extern ncclNet_t netIbCast;
 
 // Select plugin by NCCL_NET env var name; falls back to ncclNetIb.

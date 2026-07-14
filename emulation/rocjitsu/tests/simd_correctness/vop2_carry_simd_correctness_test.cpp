@@ -14,8 +14,8 @@
 /// asserted with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
 /// in-process). Inputs deliberately seed the
 /// 32-bit carry/borrow boundary (0xFFFFFFFF+1, a<b, a==b+cin, ...) on the low
-/// lanes — random-only inputs hide these corners. In-process the test still
-/// checks inactive-lane dst/VCC preservation under full and partial EXEC masks.
+/// lanes — random-only inputs hide these corners. Inactive-lane carry-out VCC
+/// bits are zeroed under full and partial EXEC masks.
 
 #include "util/simd_test_hooks.h"
 
@@ -138,7 +138,7 @@ const CarryCase kCases[] = {
 };
 
 // Carry-in VCC patterns to seed before execution. addc/subb/subbrev read these;
-// the non-carry-in forms ignore them but must still leave inactive bits intact.
+// the non-carry-in forms ignore them. Inactive carry-out bits are zeroed.
 const uint64_t kVccPatterns[] = {
     0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xAAAAAAAAAAAAAAAAULL,
     0x5555555555555555ULL, 0x0123456789ABCDEFULL,
@@ -195,12 +195,12 @@ void check_case(const CarryCase &c, uint64_t exec) {
             << c.label << ": clobbered inactive dst lane " << lane;
       }
     }
-    // Inactive EXEC lanes must keep their incoming VCC bit.
+    // Inactive EXEC lanes must be zeroed in the carry-out.
     const uint64_t inactive = ~exec;
-    EXPECT_EQ(simd_out.vcc & inactive, vcc_in & inactive)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
-    EXPECT_EQ(scalar_out.vcc & inactive, vcc_in & inactive)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
+    EXPECT_EQ(simd_out.vcc & inactive, 0ULL)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": inactive-lane VCC bit not zeroed";
+    EXPECT_EQ(scalar_out.vcc & inactive, 0ULL)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": inactive-lane VCC bit not zeroed";
   }
 }
 
@@ -220,7 +220,7 @@ TEST(Vop2CarrySimdCorrectness, PartialExecMask) {
   }
   // Sparse/alternating pattern crossing SIMD chunk boundaries: exercises the
   // masked result store and per-chunk VCC merge (active bits updated, inactive
-  // preserved) on both halves of a wave64.
+  // zeroed) on both halves of a wave64.
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }

@@ -2,7 +2,7 @@
 
 This package provides:
     - Canonical GFX target hierarchy (family/sub-family/target)
-    - Pure-Python GPU detection via Linux sysfs
+    - GPU detection via Linux sysfs (KFD topology) or ``clinfo`` (Windows)
     - Python dist-safe and module-safe naming APIs
     - WheelNext variant plugin for AMD GPU detection
 """

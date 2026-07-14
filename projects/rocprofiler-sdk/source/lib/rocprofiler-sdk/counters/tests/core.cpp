@@ -146,7 +146,7 @@ buffered_callback(rocprofiler_context_id_t,
     // /**
     //  * Specific counters default to a size of 128 even if they have less data (primarily
     //  * TCP). This is a known quirk on AQL profile's end where it will allocate for 128 entries
-    //  * but return less (and the data may be duplicated across entries). Skip these entires for
+    //  * but return less (and the data may be duplicated across entries). Skip these entries for
     //  * testing purposes since we cannot determine what mock data will be in the return (and its
     //  * arch dependent).
     //  */
@@ -800,6 +800,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -856,6 +857,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           block: GRBM
           event: 2
     - name: TEST_YAML_LOAD
@@ -885,6 +887,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

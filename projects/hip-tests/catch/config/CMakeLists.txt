@@ -41,6 +41,13 @@ set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.h
 file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
 file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 
+# When building with Address Sanitizer, pass --asan so the parser skips test
+# cases that list 'asan' in their 'disabled' field.
+set(CONFIG_ASAN_FLAG)
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    set(CONFIG_ASAN_FLAG "--asan")
+endif()
+
 if(ENABLE_YAML_TAGS)
     add_custom_target(check_hip_tests_config ALL
         COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}"
@@ -65,6 +72,7 @@ add_custom_command(
             "${CONFIG_ARCH}"
             "${HIP_TEST_CONFIG_HEADER}"
             "${HIP_TEST_PARAMETERS_HEADER}"
+            ${CONFIG_ASAN_FLAG}
     DEPENDS ${CONFIG_COMMON_MODULE} ${CONFIG_PARSER_SCRIPT} ${HIP_TESTS_UNIT_CONFIGS} ${HIP_TESTS_GROUP_CONFIGS}
     COMMENT "Generating hip_test_config.hh and hip_test_parameters.hh"
 )

@@ -92,7 +92,7 @@ Example usage:
     Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node5/db5.db and make new folder
     $ rocpd package -i my_MPI_run_1.rpdb node5/db5.db -d my_MPI_run_1_append_5 --consolidate --copy
 
-    Use my_MPI_run_1.rpdb folder and move/consolidate node7/db7.db and re-use same .rpdb folder
+    Use my_MPI_run_1.rpdb folder and move/consolidate node7/db7.db and reuse same .rpdb folder
     $ rocpd package -i my_MPI_run_1.rpdb node7/db7.db -d my_MPI_run_1 --consolidate
 """
 
@@ -117,7 +117,7 @@ Example usage:
     Aggregate 3 databases and output all summary files and include summary by rank/process ID, to csv file output
     $ rocpd summary -i db{1..3}.db --summary-by-rank --format csv
 
-    Output all summaries to console and exlude all regions to save processing time
+    Output all summaries to console and exclude all regions to save processing time
     $ rocpd summary -i db0.db --region-categories NONE
 
     Aggregate 2 databases and output all summary files to HTML, only include HIP and MARKER regions, include domain summary

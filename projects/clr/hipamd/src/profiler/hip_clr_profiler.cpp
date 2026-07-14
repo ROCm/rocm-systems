@@ -298,6 +298,10 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
     default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
   }
 }
@@ -1036,6 +1040,16 @@ static void DrainAllDevices() {
   for (auto* dev : hip::g_devices) {
     constexpr bool kWaitForCpu = true;
     dev->SyncAllStreams(kWaitForCpu);
+    // SyncAllStreams only guarantees the GPU work is done and the host has
+    // observed the completion signals. The HSA async-handler thread may still
+    // be executing the completion callback (ReportActivity -> profiler record
+    // write). Wait for those handlers to drain too, so no callback runs after
+    // we flush/free the profiler's record storage below.
+    for (auto* adev : dev->devices()) {
+      if (adev != nullptr) {
+        adev->WaitForHsaAsyncHandlersIdle();
+      }
+    }
   }
 }
 

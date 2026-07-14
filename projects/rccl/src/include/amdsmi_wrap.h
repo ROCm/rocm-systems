@@ -7,6 +7,7 @@
 #include <ctime>
 
 #include "nccl.h"
+#include "device.h"
 
 /*************************************************************************
  * UALoE Fabric Support
@@ -500,7 +501,8 @@ struct amdsmiFabricDeviceInfo {
     uint32_t vpodSize;                              //!< Virtual POD size
 };
 
-constexpr int amdsmiFabricMaxDevices = 32;
+// Sized to match NCCL_MAX_LOCAL_RANKS so every local GPU can cache fabric info.
+constexpr int amdsmiFabricMaxDevices = NCCL_MAX_LOCAL_RANKS;
 extern int amdsmiFabricDeviceCount;
 extern struct amdsmiFabricDeviceInfo amdsmiFabricDevices[amdsmiFabricMaxDevices];
 

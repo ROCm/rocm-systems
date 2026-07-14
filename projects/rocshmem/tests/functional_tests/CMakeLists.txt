@@ -30,6 +30,9 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
 
+# ASAN option (if not already defined by parent project)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
 ###############################################################################
 # SOURCES
 ###############################################################################
@@ -71,6 +74,10 @@ target_sources(
     library_info_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
+    host_team_sync_barrier_tester.cpp
+    host_rma_tester.cpp
+    tile_broadcast_tester.cpp
+    tile_allgather_tester.cpp
 )
 
 ###############################################################################
@@ -78,10 +85,10 @@ target_sources(
 ###############################################################################
 if (BUILD_TESTS_ONLY)
   #TODO these find_packages should be performed as-needed in rocshmem-config.cmake
-  find_package(hip REQUIRED PATHS /opt/rocm)
+  find_package(hip REQUIRED)
   find_package(MPI)
   find_package(Threads REQUIRED)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
+  find_package(rocshmem REQUIRED)
 
   target_include_directories(
     ${PROJECT_NAME}
@@ -112,6 +119,21 @@ target_link_libraries(
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
+)
+
+###############################################################################
+# ASAN SETTINGS
+###############################################################################
+target_compile_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
 )
 
 ###############################################################################

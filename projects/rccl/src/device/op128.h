@@ -50,6 +50,16 @@ inline __device__ void storeShmem128(uint64_t* shmemAsmPtr, uint64_t v0, uint64_
   *(shmemAsmPtr+1) = v1;
 }
 
+// Warp-collective async copy helpers used by the LL128 always-shmem staging mode.
+// All lanes of the warp must call together; the copy of `bytes` bytes is
+// distributed across the lanes internally. `asyncWait` blocks until all async
+// copies previously issued by the calling warp have completed and their results
+// are safe to consume.
+// NOTE: bodies are provided separately.
+inline __device__ void asyncLoadGlobalToShmem(uint64_t* shmemDst, const uint64_t* globalSrc, int bytes);
+inline __device__ void asyncStoreShmemToGlobal(uint64_t* globalDst, const uint64_t* shmemSrc, int bytes);
+inline __device__ void asyncWait();
+
 template<typename T>
 inline __device__ void loadShmemMisaligned128(T *ptr, uint64_t &v0, uint64_t &v1) {
   union {
@@ -500,21 +510,23 @@ __device__ __forceinline__ Pack loadPack(T* ptr, int ix, int end) {
   if (alignof(T) == Size && sizeof(T) == Size) {
     return *(Pack*)ptr;
   } else if ((Size+3)/4 + 1 < Size/sizeof(T)) {
-    union { Pack ans; uint32_t part[Size/4]; };
+    union { Pack ans; uint32_t part[Size/4+1]; };
     int misalign = reinterpret_cast<uintptr_t>(ptr) % 4;
     uint32_t* down = reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(ptr) & -uintptr_t(4));
+    // ndiv holds the number of aligned 4-byte loads needed to cover the entire input
+    int ndiv = (n*sizeof(T)+misalign+3)/4;
+    int imax = min(Size/4 + (misalign > 0), ndiv);
     int i;
     #pragma unroll
-    for (i=0; i < Size/4; i++) {
-      if (i*4/sizeof(T) < 1 || i*4/sizeof(T) < n) part[i] = down[i];
+    for (i=0; i < Size/4 + 1; i++) {
+      if (i < imax) part[i] = down[i];
     }
-    uint32_t extra = 0;
-    if (misalign) extra = down[i];
-    #pragma unroll
-    for (i=0; i < Size/4 - 1; i++) {
-      part[i] = __funnelshift_r(part[i], part[i+1], 8*misalign);
+    if (misalign > 0) {
+      #pragma unroll
+      for (i=0; i < Size/4; i++) {
+        part[i] = __funnelshift_r(part[i], part[i+1], 8*misalign);
+      }
     }
-    part[Size/4-1] = __funnelshift_r(part[Size/4-1], extra, 8*misalign);
     return ans;
   } else {
     union { Pack ans; BytePack<sizeof(T)> part[Size/sizeof(T)]; };

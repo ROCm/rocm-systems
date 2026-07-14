@@ -89,8 +89,10 @@ public:
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
+  /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
-                                           uint32_t /*vgpr_count*/, uint32_t /*sgpr_count*/,
+                                           uint32_t /*physical_vgpr_count*/,
+                                           uint32_t /*sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has halted.

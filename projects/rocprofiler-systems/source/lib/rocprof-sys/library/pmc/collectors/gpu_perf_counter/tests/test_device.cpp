@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
-#include "library/pmc/device_providers/rocprofiler_sdk/drivers/tests/mock_driver.hpp"
+#include "mock_backend.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>
@@ -15,8 +15,8 @@ using ::testing::_;
 using ::testing::Return;
 using ::testing::StrictMock;
 
-using MockDriver = ::testing::StrictMock<
-    rocprofsys::pmc::drivers::rocprofiler_sdk::testing::mock_driver>;
+using MockBackend =
+    ::testing::StrictMock<rocprofsys::backends::rocprofiler_sdk::testing::mock_backend>;
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
@@ -24,14 +24,14 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 class SdkPmcDeviceTest : public ::testing::Test
 {
 protected:
-    std::shared_ptr<MockDriver>        mock_driver;
+    std::shared_ptr<MockBackend>       mock_backend;
     std::shared_ptr<rocprofsys::agent> test_agent;
-    MockDriver::context_id_t           test_context{};
-    MockDriver::counter_config_id_t    test_profile_config{};
+    MockBackend::context_id_t          test_context{};
+    MockBackend::counter_config_id_t   test_profile_config{};
 
     void SetUp() override
     {
-        mock_driver                = std::make_shared<MockDriver>();
+        mock_backend               = std::make_shared<MockBackend>();
         test_context.handle        = 1;
         test_profile_config.handle = 100;
 
@@ -52,8 +52,8 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
         counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            std::move(meta));
 
     EXPECT_EQ(dev.get_index(), 0U);
     EXPECT_EQ(dev.get_name(), "GPU 0");
@@ -63,8 +63,8 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 
 TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 {
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           {});
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            {});
 
     EXPECT_FALSE(dev.is_supported());
 }
@@ -77,7 +77,7 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
     agent3->product_name      = "GPU 3";
     agent3->vendor_name       = "AMD";
 
-    device<MockDriver> dev(mock_driver, test_context, agent3, test_profile_config, {});
+    device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config, {});
 
     EXPECT_EQ(dev.get_index(), 3U);
     EXPECT_EQ(dev.get_name(), "GPU 3");
@@ -91,37 +91,39 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
         counter_metadata{ 20, "SQ_INSTS_VALU", "", "", "", false, false, {} },
     };
 
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            std::move(meta));
 
-    MockDriver::counter_record_t records[2];
+    MockBackend::counter_record_t records[2];
     records[0].id            = 10;
     records[0].counter_value = 42.0;
     records[1].id            = 20;
     records[1].counter_value = 100.0;
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
-                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
+                      MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
             out[0] = records[0];
             out[1] = records[1];
             *count = 2;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
-        .WillOnce([](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
-            out->handle = 10;
-            return MockDriver::status_success;
-        })
-        .WillOnce([](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
-            out->handle = 20;
-            return MockDriver::status_success;
-        });
+    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+        .WillOnce(
+            [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
+                out->handle = 10;
+                return MockBackend::status_success;
+            })
+        .WillOnce(
+            [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
+                out->handle = 20;
+                return MockBackend::status_success;
+            });
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
@@ -170,35 +172,35 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                           { { "WGP", 3 }, { "SA", 0 }, { "SE", 0 } } },
     };
 
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            std::move(meta));
 
-    MockDriver::counter_record_t records[4];
+    MockBackend::counter_record_t records[4];
     for(int i = 0; i < 4; ++i)
     {
         records[i].id            = static_cast<std::uint64_t>(100 + i);
         records[i].counter_value = static_cast<double>(10 * (i + 1));
     }
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
-                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
+                      MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
             for(int i = 0; i < 4; ++i)
                 out[i] = records[i];
             *count = 4;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
         .Times(4)
         .WillRepeatedly(
-            [](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
+            [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
                 out->handle = record.id;
-                return MockDriver::status_success;
+                return MockBackend::status_success;
             });
 
     enabled_metrics enabled{ {} };
@@ -227,29 +229,29 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             plain_counter_handle, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            std::move(meta));
 
-    MockDriver::counter_record_t record{};
+    MockBackend::counter_record_t record{};
     record.id            = sdk_instance_id;
     record.counter_value = 99.0;
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
-                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
+                      MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
             out[0] = record;
             *count = 1;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
-        .WillOnce([](MockDriver::counter_record_t, MockDriver::counter_id_t* out) {
+    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+        .WillOnce([](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
             out->handle = plain_counter_handle;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
     enabled_metrics enabled{ {} };
@@ -268,33 +270,34 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
         counter_metadata{ 5, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            std::move(meta));
 
-    MockDriver::counter_record_t record{};
+    MockBackend::counter_record_t record{};
     record.id            = 5;
     record.counter_value = 1.0;
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
     // Two successive sample calls; each must return correct data.
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .Times(2)
-        .WillRepeatedly([&](MockDriver::context_id_t, MockDriver::user_data_t,
-                            MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
-                            size_t* count) {
+        .WillRepeatedly([&](MockBackend::context_id_t, MockBackend::user_data_t,
+                            MockBackend::counter_flag_t,
+                            MockBackend::counter_record_t* out, size_t* count) {
             out[0] = record;
             *count = 1;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
         .Times(2)
-        .WillRepeatedly([](MockDriver::counter_record_t, MockDriver::counter_id_t* out) {
-            out->handle = 5;
-            return MockDriver::status_success;
-        });
+        .WillRepeatedly(
+            [](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
+                out->handle = 5;
+                return MockBackend::status_success;
+            });
 
     enabled_metrics enabled{ {} };
 
@@ -309,14 +312,14 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 
 TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 {
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           {});
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            {});
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce(Return(MockDriver::status_error));
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce(Return(MockBackend::status_error));
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
@@ -326,18 +329,18 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 
 TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
 {
-    device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
-                           {});
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            {});
 
-    EXPECT_CALL(*mock_driver, start_context(_))
-        .WillOnce(Return(MockDriver::status_success));
+    EXPECT_CALL(*mock_backend, start_context(_))
+        .WillOnce(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([](MockDriver::context_id_t, MockDriver::user_data_t,
-                     MockDriver::counter_flag_t, MockDriver::counter_record_t*,
+    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,
+                     MockBackend::counter_flag_t, MockBackend::counter_record_t*,
                      size_t* count) {
             *count = 0;
-            return MockDriver::status_success;
+            return MockBackend::status_success;
         });
 
     enabled_metrics enabled{ {} };

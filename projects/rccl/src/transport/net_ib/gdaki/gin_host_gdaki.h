@@ -25,8 +25,8 @@
 #include "nccl.h"
 #include "gin/gin_host.h"
 
-ncclResult_t ncclGinGdakiCreateContext(void *collComm, int nSignals, int nCounters, int nContexts,
-                                       void **outGinCtx, ncclNetDeviceHandle_t **outDevHandle);
+ncclResult_t ncclGinGdakiCreateContext(void *collComm, int nSignals, int nCounters, int nContexts, int queueDepth,
+                                       int trafficClass, void **outGinCtx, ncclNetDeviceHandle_t **outDevHandle);
 ncclResult_t ncclGinGdakiDestroyContext(void *ginCtx);
 ncclResult_t ncclGinGdakiRegMrSym(void *collComm, void *data, size_t size, int type, uint64_t mr_flags, void **mhandle,
                                   void **ginHandle);

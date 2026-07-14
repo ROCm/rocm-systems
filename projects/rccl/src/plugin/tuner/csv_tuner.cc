@@ -260,8 +260,10 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
     strncpy(lineCopy, line, sizeof(lineCopy));
     lineCopy[sizeof(lineCopy) - 1] = '\0';
 
-    // Tokenize by comma
-    token = strtok(lineCopy, ",");
+    // Use strtok_r (not strtok): concurrent per-communicator loads during
+    // single-process init race strtok's static state and parse partial configs.
+    char* saveptr = nullptr;
+    token = strtok_r(lineCopy, ",", &saveptr);
     while (token != NULL && tokenCount < CONFIG_FIELDS_MAX) {
       // Trim leading whitespace
       while (*token == ' ' || *token == '\t') token++;
@@ -285,7 +287,7 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
         break;
       }
       tokens[tokenCount++] = token;
-      token = strtok(NULL, ",");
+      token = strtok_r(NULL, ",", &saveptr);
     }
 
     if (!lineValid) continue;

@@ -12,7 +12,7 @@
 /// -- once forcing the scalar body, once the SIMD fast path, with identical
 /// inputs/EXEC/VCC-in -- and the 64-bit compare results are asserted equal with
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
-/// In-process inactive SGPR-pair bits must be preserved.
+/// In-process inactive SGPR-pair bits must be zeroed.
 
 #include "util/simd_test_hooks.h"
 
@@ -174,12 +174,12 @@ void check_case(const Case &c, uint64_t exec) {
               << std::hex << vcc_in << ": SIMD result diverged from scalar body";
 
           const uint64_t inactive = ~exec;
-          EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+          EXPECT_EQ(simd_vcc & inactive, 0ULL)
               << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
-              << ": altered inactive-lane dst bit";
-          EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
+              << ": inactive-lane dst bit not zeroed";
+          EXPECT_EQ(scalar_vcc & inactive, 0ULL)
               << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
-              << ": altered inactive-lane dst bit";
+              << ": inactive-lane dst bit not zeroed";
         }
       }
     }

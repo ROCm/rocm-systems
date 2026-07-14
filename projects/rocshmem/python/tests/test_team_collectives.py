@@ -67,6 +67,10 @@ def test_team_collective_symbols_are_exported():
     for name in (
         "rocshmem_alltoallmem_on_stream",
         "rocshmem_broadcastmem_on_stream",
+        "rocshmem_barrier",
+        "rocshmem_team_sync",
+        "rocshmem_barrier_on_stream",
+        "rocshmem_team_sync_on_stream",
         "rocshmem_global_exit",
         "rocshmem_dump_stats",
         "rocshmem_reset_stats",

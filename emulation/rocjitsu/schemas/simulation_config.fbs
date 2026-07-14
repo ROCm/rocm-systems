@@ -51,6 +51,8 @@ table GpuMemoryConfig {
 ///   - GFX target versions: projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
 ///   - Real hardware values: `cat /sys/class/kfd/kfd/topology/nodes/*/properties` on a system
 ///     with the target GPU installed.
+///
+/// \NPI new GPU: add a configs/<gpu>.json that fills in these identity fields for the new device.
 table KfdDeviceInfo {
   gpu_id: uint32;                  // KFD GPU ID (e.g., 0x9500 for gfx950).
   gfx_target_version: uint32;     // Packed GFX version (e.g., 90500 for gfx950).
@@ -60,11 +62,13 @@ table KfdDeviceInfo {
   unique_id: uint64;              // Globally unique GPU identifier (PSP-generated on real HW).
   marketing_name: string;         // Human-readable name (e.g., "AMD Instinct MI350X").
   drm_render_minor: uint32 = 128; // DRM render device minor number.
+  revision_id: uint32 = 0;        // amdgpu adev->rev_id; KFD capability ASIC revision bits.
+  pci_revision_id: uint32 = 0;    // PCI config-space revision from DRM sysfs device/revision.
 
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
   max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;
+  num_shader_engines: uint32;    // KFD array_count: total shader arrays, not libdrm SE count.
   num_shader_arrays_per_engine: uint32 = 1;
   num_cu_per_sh: uint32;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
@@ -95,6 +99,13 @@ table KfdDeviceInfo {
   location_id: uint32 = 768;  // PCI BDF: 0x0300 = bus 3, dev 0, func 0.
   hive_id: uint64 = 0;        // XGMI hive ID (shared by GPUs in same node).
   domain: uint32 = 0;         // PCI domain.
+  vram_type: uint32 = 6;      // AMDGPU_VRAM_TYPE_* (6 = HBM, 9 = GDDR6).
+
+  // KFD debugger API (from kfd_sysfs.h HSA_CAP_*/HSA_DBG_* bits). 0 = auto-compute
+  // from gfx_target_version (see rocjitsu::default_capability_for/debug_prop_for).
+  capability: uint32 = 0;
+  capability2: uint32 = 0;
+  debug_prop: uint64 = 0;
 }
 
 /// Top-level AMDGPU configuration.
@@ -105,6 +116,23 @@ table AmdgpuConfig {
   memory: GpuMemoryConfig;
   device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
+}
+
+/// DBT guest-GPU discovery mode.
+///
+/// When enabled, the KFD interposer does not start the simulated VM. Instead it
+/// forwards real host-GPU KFD ioctls to /dev/kfd and appends one synthetic guest
+/// GPU to the topology seen by ROCR. HSA hooks then map execution-facing calls
+/// from the guest agent to the host agent and translate guest code objects to
+/// host code objects before loading them.
+table DbtGuestConfig {
+  enabled: bool = false;          // Enables GuestKfd discovery mode.
+  guest_isa: string;              // Guest ISA advertised by the synthetic agent, e.g. "gfx950".
+  host_isa: string;               // Host ISA used for execution and DBT output, e.g. "gfx942".
+  host_gpu_id: uint32 = 0;        // Preferred host KFD topology gpu_id, not HIP ordinal/node id; 0 matches topology to host_isa.
+  log_level: int32 = 0;           // DBT hook logging: 0 off, 1 info, 2 verbose, 3 debug.
+  signal_backtrace: bool = false; // Install a best-effort crash backtrace handler in the HSA hook.
+  guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
 }
 
 /// A dispatch packet describing a kernel launch.
@@ -189,8 +217,9 @@ table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
   num_threads: uint32;           // Number of simulation threads (partitions).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
-  vm: VirtualMachineConfig;      // Virtual machine hardware model.
-  topology: TopologyDef;         // Declarative topology.
+  vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
+  topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
+  dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
 }
 
 root_type SimulationConfig;

@@ -27,7 +27,9 @@ use std::path::{Path, PathBuf};
 
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
-use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, SupportStatus};
+use mirage_core::emulator::{
+    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, SupportStatus,
+};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
@@ -45,8 +47,8 @@ pub const ROCR_LIB: &str = "libhsa-runtime64.so";
 /// The COMGR transpiler, expected alongside [`LIB_NAME`].
 pub const COMGR_LIB: &str = "libamd_comgr.so";
 
-/// Subdirectory under the mirage cache / `./emulator/` where a
-/// HotSwap install may be dropped.
+/// Subdirectory name used to namespace a HotSwap install (e.g. under an
+/// `./emulator/` tree).
 pub const ASSET_SUBDIR: &str = "hotswap";
 
 /// In-container mount point for the HotSwap runtime tree (lib,
@@ -55,11 +57,6 @@ pub const ASSET_SUBDIR: &str = "hotswap";
 /// the injected `LD_PRELOAD`/`HOTSWAP_HOME`/`PYTHONPATH` paths resolve
 /// inside each node's container.
 pub const CONTAINER_HOTSWAP_DIR: &str = "/mnt/mirage/emulator/hotswap";
-
-/// In-container mount point for HotSwap's read-write cache tree
-/// (translation + per-framework caches), bind-mounted from the host
-/// cache dir so artifacts persist across runs.
-pub const CONTAINER_HOTSWAP_CACHE: &str = "/mnt/mirage/cache/hotswap";
 
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
@@ -85,30 +82,30 @@ pub const ADAPTER_POLICIES: &[&str] = &["none", "env", "native_build", "triton",
 /// GPUs physically present there is nothing for HotSwap to run on.
 pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950")];
 
-/// HotSwap [`Emulator`] implementation. HotSwap is wired into a
+/// HotSwap [`EmulatorBackend`] implementation. HotSwap is wired into a
 /// workload via the env contract: the patched ROCR + COMGR shadow the
 /// system copies (`LD_LIBRARY_PATH`), the HIP intercept is `LD_PRELOAD`ed,
 /// and the `HSA_HOTSWAP_*` variables select the source target and policy.
-pub struct Hotswap {
-    profile: ProfileDef,
-}
+/// Stateless; a single shared instance is registered in the emulator
+/// registry.
+pub struct Hotswap;
 
-impl Emulator for Hotswap {
-    fn description() -> EmulatorDescription {
+impl EmulatorBackend for Hotswap {
+    fn description(&self) -> EmulatorDescription {
         describe()
     }
 
-    fn new(def: ProfileDef) -> Self {
-        Self { profile: def }
+    fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+        Ok(())
     }
 
-    fn options() -> Vec<OptionDef> {
+    fn options(&self) -> Vec<OptionDef> {
         Vec::new()
     }
 
-    fn shutdown(self) {}
+    fn shutdown(&self, _session: &SessionId) {}
 
-    fn validate_profile(_def: &ProfileDef) -> std::result::Result<(), String> {
+    fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
         // HotSwap is not bundled or built by mirage; it must be
         // installed separately. Surface actionable guidance now, at
         // profile-creation time, rather than only when a session is
@@ -120,19 +117,19 @@ impl Emulator for Hotswap {
         }
     }
 
-    fn def(&self) -> &EmulatorDef {
-        &self.profile.emulator
-    }
-
-    fn installed() -> bool {
+    fn installed(&self) -> bool {
         is_installed()
     }
 
-    fn discover_plugins() -> Vec<PluginsDef> {
+    fn supported(&self) -> SupportStatus {
+        support_status()
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
         Vec::new()
     }
 
-    fn health(&self) -> SessionHealth {
+    fn health(&self, _session: &SessionId) -> SessionHealth {
         let support = support_status();
         let installed = is_installed();
         let healthy = installed && support.supported;
@@ -151,7 +148,10 @@ impl Emulator for Hotswap {
         }
     }
 
-    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
+    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
+        // The trait hands us only the session id, so recover the profile
+        // it was started with to learn whether it is containerised.
+        let profile = mirage_core::session::resolve_profile(session)?;
         // Refuse to run unemulated: without the HotSwap tree the
         // workload would silently run on real hardware, so fail loudly
         // with guidance instead.
@@ -162,28 +162,22 @@ impl Emulator for Hotswap {
             ))
         })?;
 
-        let (ld_preload, env, mounts) =
-            build_hotswap_env(&dir, self.profile.containerize.is_some());
+        let containerized = profile.containerize.is_some();
+        let (ld_preload, env, mounts) = build_hotswap_env(&dir, containerized);
 
         // HotSwap retargets device code onto a *physical* GPU, so the
-        // host's AMD GPU device nodes must be exposed to each node's
-        // container (with the matching `video`/`render` groups so the
-        // workload can open them). Only meaningful for containerised
-        // sessions; non-containerised runs already see the host devices.
-        let (devices, groups) = if self.profile.containerize.is_some() {
-            (gpu_devices(), gpu_groups())
-        } else {
-            (Vec::new(), Vec::new())
-        };
-
+        // workload always needs host GPU access. The container engine
+        // turns this into the host GPU device nodes plus the
+        // provider-specific group passthrough; it is a no-op for a
+        // non-containerised session (which already sees the host GPUs).
         Ok(InjectionDef {
             wrapper: None,
             ld_preload: Some(ld_preload),
             files: Default::default(),
             env,
             mounts,
-            devices,
-            groups,
+            libraries: Default::default(),
+            host_gpus: true,
         })
     }
 }
@@ -223,50 +217,12 @@ fn physical_target_gfx() -> String {
         .unwrap_or_default()
 }
 
-/// Scratch root for HotSwap's translation/framework caches, under the
-/// mirage cache dir. Mirrors env_contract.py's `branch_root`.
-fn hotswap_branch_root() -> PathBuf {
-    mirage_core::paths::mirage_cache_dir().join("hotswap")
-}
-
-/// Host AMD GPU device nodes to pass through to a node's container
-/// (`--device`). HotSwap runs the retargeted code on the real GPU, so
-/// the workload needs the KFD compute device (`/dev/kfd`) and the DRM
-/// render nodes (`/dev/dri`). Only paths that actually exist on the
-/// host are returned, so a host without one simply omits it.
-fn gpu_devices() -> Vec<String> {
-    ["/dev/kfd", "/dev/dri"]
-        .iter()
-        .filter(|p| Path::new(p).exists())
-        .map(|p| (*p).to_string())
-        .collect()
-}
-
-/// Supplementary groups a workload needs inside the container to open
-/// the passed-through GPU device nodes (`--group-add`). `video` and
-/// `render` are the conventional owners of `/dev/kfd` and the
-/// `/dev/dri/render*` nodes on ROCm hosts.
-fn gpu_groups() -> Vec<String> {
-    vec!["video".to_string(), "render".to_string()]
-}
-
-/// Cache subdirectories created under [`hotswap_branch_root`].
-const HOTSWAP_CACHE_SUBDIRS: &[&str] = &[
-    "hotswap_translation_cache",
-    "triton_cache",
-    "torchinductor_cache",
-    "torch_extensions",
-    "pytorch_kernel_cache",
-    "miopen_user_db",
-    "miopen_cache",
-];
-
 /// Build the HotSwap env contract for a workload, mirroring
 /// env_contract.py's `build_hotswap_env`: the `HSA_HOTSWAP_*` variables,
-/// the per-framework cache redirects, the python `sitecustomize` on
-/// `PYTHONPATH`, and the source-arch overrides selected by the adapter
-/// policy. Returns the `LD_PRELOAD` value (patched ROCR + intercept)
-/// separately so the host can merge it with any user-supplied preload.
+/// the python `sitecustomize` on `PYTHONPATH`, and the source-arch
+/// overrides selected by the adapter policy. Returns the `LD_PRELOAD`
+/// value (patched ROCR + intercept) separately so the host can merge it
+/// with any user-supplied preload.
 fn build_hotswap_env(
     dir: &Path,
     containerized: bool,
@@ -288,36 +244,20 @@ fn build_hotswap_env(
     let source_arch = source_arch_of(&source_target).to_string();
     let target_gfx = physical_target_gfx();
 
-    let root = hotswap_branch_root();
-    let _ = ensure_cache_dirs(&root);
-    let host_cache_root = std::fs::canonicalize(&root).unwrap_or(root);
-
     // Establish host→workload path mappings. For a containerised session
     // every host tree HotSwap relies on is bind-mounted under
     // `/mnt/mirage` and the workload must reference the in-container path;
     // otherwise it sees the host paths directly. The install root is
-    // mounted read-only (immutable runtime libs/tools), the cache root
-    // read-write so framework caches persist.
+    // mounted read-only (immutable runtime libs/tools).
     let mut mounts: Vec<FileMount> = Vec::new();
     let mut mappings: Vec<(PathBuf, PathBuf)> = Vec::new();
-    if containerized {
-        if let Some(home) = host_dir.parent() {
-            mounts.push(FileMount {
-                host_path: home.display().to_string(),
-                container_path: CONTAINER_HOTSWAP_DIR.to_string(),
-                read_only: true,
-            });
-            mappings.push((home.to_path_buf(), PathBuf::from(CONTAINER_HOTSWAP_DIR)));
-        }
+    if containerized && let Some(home) = host_dir.parent() {
         mounts.push(FileMount {
-            host_path: host_cache_root.display().to_string(),
-            container_path: CONTAINER_HOTSWAP_CACHE.to_string(),
-            read_only: false,
+            host_path: home.display().to_string(),
+            container_path: CONTAINER_HOTSWAP_DIR.to_string(),
+            read_only: true,
         });
-        mappings.push((
-            host_cache_root.clone(),
-            PathBuf::from(CONTAINER_HOTSWAP_CACHE),
-        ));
+        mappings.push((home.to_path_buf(), PathBuf::from(CONTAINER_HOTSWAP_DIR)));
     }
     // Rewrite a host path to the path the workload sees: any path under a
     // mounted host root maps to its container target; everything else is
@@ -339,13 +279,7 @@ fn build_hotswap_env(
     let intercept = dir.join(LIB_NAME);
     let ld_preload = format!("{}:{}", libhsa.display(), intercept.display());
 
-    let cache = |name: &str| remap(&host_cache_root.join(name)).display().to_string();
-
     let mut env: BTreeMap<String, String> = BTreeMap::new();
-    env.insert(
-        "HSA_HOTSWAP_CACHE_DIR".into(),
-        cache("hotswap_translation_cache"),
-    );
     env.insert("HSA_HOTSWAP_CACHE_DEBUG".into(), "1".into());
     env.insert("HSA_HOTSWAP_ISA_OVERRIDE".into(), target_gfx);
     env.insert("HSA_HOTSWAP_IR_RAISER".into(), "1".into());
@@ -357,18 +291,6 @@ fn build_hotswap_env(
     // Force-compile framework caches so a swapped target never reuses a
     // host-targeted artifact.
     env.insert("TRITON_ALWAYS_COMPILE".into(), "1".into());
-    env.insert("TRITON_CACHE_DIR".into(), cache("triton_cache"));
-    env.insert(
-        "TORCHINDUCTOR_CACHE_DIR".into(),
-        cache("torchinductor_cache"),
-    );
-    env.insert("TORCH_EXTENSIONS_DIR".into(), cache("torch_extensions"));
-    env.insert(
-        "PYTORCH_KERNEL_CACHE_PATH".into(),
-        cache("pytorch_kernel_cache"),
-    );
-    env.insert("MIOPEN_USER_DB_PATH".into(), cache("miopen_user_db"));
-    env.insert("MIOPEN_CUSTOM_CACHE_DIR".into(), cache("miopen_cache"));
 
     // The patched ROCR + COMGR shadow the system copies via the loader
     // search path. The host launcher inherits a minimal env (no
@@ -417,28 +339,22 @@ fn build_hotswap_env(
     (ld_preload, env, mounts)
 }
 
-/// Best-effort creation of the HotSwap cache subdirectories.
-fn ensure_cache_dirs(root: &Path) -> std::io::Result<()> {
-    for name in HOTSWAP_CACHE_SUBDIRS {
-        std::fs::create_dir_all(root.join(name))?;
-    }
-    Ok(())
-}
-
 /// Describe the hotswap emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all hotswap-specific
-/// policy lives alongside the hotswap discovery integration. Reports
-/// whether hotswap is installed, the resolved path to its runtime
-/// library when available, and whether this host has a physical GPU
-/// HotSwap can actually run on.
+/// policy lives alongside the hotswap discovery integration.
 pub fn describe() -> EmulatorDescription {
     EmulatorDescription {
         name: "hotswap".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)".to_string(),
-        installed: is_installed(),
-        path: lib_path(),
-        support: support_status(),
+        options_schema: Vec::new(),
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "hotswap",
+        backend: &Hotswap,
     }
 }
 

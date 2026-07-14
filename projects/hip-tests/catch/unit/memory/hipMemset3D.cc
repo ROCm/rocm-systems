@@ -89,6 +89,7 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);

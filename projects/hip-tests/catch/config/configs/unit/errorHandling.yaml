@@ -65,7 +65,10 @@ errorHandling:
   Unit_hipGetLastError_KernelFailure_TwoDevices:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipGetLastError_KernelFailure_TwoStreams: *level_2
+  Unit_hipGetLastError_KernelFailure_TwoStreams:
+    <<: *level_2
+    # Test causes error state in the runtime and prevents resource cleanup.
+    disabled: [asan]
   Unit_hipExtGetLastError_Positive_Basic: *level_2
   Unit_hipExtGetLastError_Positive_Threaded: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:

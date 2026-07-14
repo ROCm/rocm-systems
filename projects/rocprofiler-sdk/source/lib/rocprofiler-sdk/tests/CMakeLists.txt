@@ -19,6 +19,7 @@ set(rocprofiler_lib_sources
     hsa.cpp
     late_start.cpp
     naming.cpp
+    queue_interposition.cpp
     timestamp.cpp
     version.cpp
     hsa_barrier.cpp)
@@ -46,7 +47,7 @@ rocprofiler_add_unit_test(
     DATA "data/topology/nodes" # copy over and install
     CONFIGURE_FILES "${_NODE_PROPERTIES}" # ensure cmake re-runs when files are updated
     ENVIRONMENT
-        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # -------------------------------------------------------------------------------------- #
@@ -73,7 +74,7 @@ set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 
 set(rocprofiler-sdk-lib-tests-env
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
 
 rocprofiler_add_unit_test(

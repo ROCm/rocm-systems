@@ -15,12 +15,22 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <bit>
+#include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <type_traits>
+
+namespace rocjitsu::gfx1250 {
+struct Isa;
+} // namespace rocjitsu::gfx1250
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -35,6 +45,255 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {
+  assert(bits >= 1 && bits <= 32 && "sign_extend_u32 requires a 1..32 bit width");
+  const uint32_t sign = uint32_t{1} << (bits - 1);
+  const uint32_t mask = bits == 32 ? ~uint32_t{0} : ((uint32_t{1} << bits) - uint32_t{1});
+  return ((value & mask) ^ sign) - sign;
+}
+
+inline uint32_t lshl_masked(uint32_t value, uint32_t count) { return value << (count & 31u); }
+
+inline uint64_t lshl_masked(uint64_t value, uint64_t count) { return value << (count & 63u); }
+
+inline uint32_t bfm_b32(uint32_t width, uint32_t offset) {
+  const uint32_t w = width & 31u;
+  const uint32_t off = offset & 31u;
+  return w == 0 ? uint32_t{0} : ((uint32_t{1} << w) - uint32_t{1}) << off;
+}
+
+inline uint32_t mul_i24_u32(uint32_t lhs, uint32_t rhs) {
+  return sign_extend_u32(lhs, 24) * sign_extend_u32(rhs, 24);
+}
+
+inline uint32_t mad_i24_u32(uint32_t lhs, uint32_t rhs, uint32_t addend) {
+  return mul_i24_u32(lhs, rhs) + addend;
+}
+
+inline uint32_t mad_lo_u16(uint32_t lhs, uint32_t rhs, uint32_t addend) {
+  const uint32_t a = lhs & 0xffffu;
+  const uint32_t b = rhs & 0xffffu;
+  const uint32_t c = addend & 0xffffu;
+  return (a * b + c) & 0xffffu;
+}
+
+/// Return whether signed integer add/sub overflows. The unsigned parameter type
+/// is deduced, so the same helper serves 32- and 64-bit scalar add/sub.
+template <typename U> inline bool signed_add_overflows(U a, U b) {
+  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
+  const U sum = static_cast<U>(a + b);
+  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
+  // Overflow iff the operands share a sign that differs from the result's.
+  return ((a ^ sum) & (b ^ sum) & sign_bit) != 0;
+}
+
+template <typename U> inline bool signed_sub_overflows(U a, U b) {
+  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
+  const U diff = static_cast<U>(a - b);
+  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
+  // Overflow iff the operands differ in sign and a's sign differs from the
+  // result's.
+  return ((a ^ b) & (a ^ diff) & sign_bit) != 0;
+}
+
+/// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
+/// dword only; writing a pair would clobber the next SGPR, which codegen may
+/// legally use for unrelated scalar state.
+template <typename Operand>
+inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t mask) {
+  if (wf.wf_size() <= 32)
+    dst.write_scalar(wf, static_cast<uint32_t>(mask));
+  else
+    dst.write_scalar64(wf, mask);
+}
+
+inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, unsigned bits) {
+  assert(bits >= 1 && bits <= 32 && "simd_sign_extend_u32 requires a 1..32 bit width");
+  const uint32_t sign = uint32_t{1} << (bits - 1);
+  const uint32_t mask = bits == 32 ? ~uint32_t{0} : ((uint32_t{1} << bits) - uint32_t{1});
+  return ((v & mask) ^ sign) - sign;
+}
+
+inline util::native<uint32_t> simd_mul_i24_u32(util::native<uint32_t> lhs,
+                                               util::native<uint32_t> rhs) {
+  return simd_sign_extend_u32(lhs, 24) * simd_sign_extend_u32(rhs, 24);
+}
+
+inline util::native<uint32_t> simd_mad_i24_u32(util::native<uint32_t> lhs,
+                                               util::native<uint32_t> rhs,
+                                               util::native<uint32_t> addend) {
+  return simd_mul_i24_u32(lhs, rhs) + addend;
+}
+
+inline util::native<uint32_t> simd_lshl_u32(util::native<uint32_t> v, util::native<uint32_t> sh) {
+  return util::map_native_scalar<uint32_t>(
+      v, sh, [](uint32_t value, uint32_t count) { return value << (count & 31u); });
+}
+
+inline util::native<uint32_t> simd_lshr_u32(util::native<uint32_t> v, util::native<uint32_t> sh) {
+  return util::map_native_scalar<uint32_t>(
+      v, sh, [](uint32_t value, uint32_t count) { return value >> (count & 31u); });
+}
+
+inline util::native<uint64_t> simd_lshl_u64(util::native<uint64_t> v, util::native<uint64_t> sh) {
+  return util::map_native64_scalar<uint64_t>(
+      v, sh, [](uint64_t value, uint64_t count) { return value << (count & 63u); });
+}
+
+inline util::native<uint64_t> simd_lshr_u64(util::native<uint64_t> v, util::native<uint64_t> sh) {
+  return util::map_native64_scalar<uint64_t>(
+      v, sh, [](uint64_t value, uint64_t count) { return value >> (count & 63u); });
+}
+
+inline util::native<uint64_t> simd_ashr_i64(util::native<uint64_t> v, util::native<uint64_t> sh) {
+  return util::map_native64_scalar<uint64_t>(v, sh, [](uint64_t value, uint64_t count) {
+    return static_cast<uint64_t>(static_cast<int64_t>(value) >> (count & 63u));
+  });
+}
+
+inline util::native<uint32_t> simd_bfe_u32(util::native<uint32_t> src,
+                                           util::native<uint32_t> offset,
+                                           util::native<uint32_t> width) {
+  return util::map_native_scalar<uint32_t>(
+      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
+        const uint32_t off = offset_value & 31u;
+        const uint32_t w = width_value & 31u;
+        if (w == 0)
+          return uint32_t{0};
+        const uint32_t mask = (uint32_t{1} << w) - 1u;
+        return (value >> off) & mask;
+      });
+}
+
+inline util::native<uint32_t> simd_bfe_i32(util::native<uint32_t> src,
+                                           util::native<uint32_t> offset,
+                                           util::native<uint32_t> width) {
+  return util::map_native_scalar<uint32_t>(
+      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
+        const uint32_t off = offset_value & 31u;
+        const uint32_t w = width_value & 31u;
+        if (w == 0)
+          return uint32_t{0};
+        const uint32_t mask = (uint32_t{1} << w) - 1u;
+        const uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(value) >> off) & mask;
+        const uint32_t signbit = uint32_t{1} << (w - 1u);
+        return (extracted ^ signbit) - signbit;
+      });
+}
+
+inline util::native<uint32_t> simd_bfm_b32(util::native<uint32_t> width,
+                                           util::native<uint32_t> offset) {
+  return util::map_native_scalar<uint32_t>(width, offset,
+                                           [](uint32_t width_value, uint32_t offset_value) {
+                                             return bfm_b32(width_value, offset_value);
+                                           });
+}
+
+inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
+  return util::map_native_convert_scalar<int32_t>(s, [](float32_t value) {
+    if (std::isnan(value))
+      return int32_t{0};
+    if (value >= 2147483648.0f)
+      return std::numeric_limits<int32_t>::max();
+    if (value < -2147483648.0f)
+      return std::numeric_limits<int32_t>::min();
+    return static_cast<int32_t>(value);
+  });
+}
+
+inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
+  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
+    if (std::isnan(value) || value < 0.0f)
+      return uint32_t{0};
+    if (value >= 4294967296.0f)
+      return std::numeric_limits<uint32_t>::max();
+    return static_cast<uint32_t>(value);
+  });
+}
+
+inline util::native<uint32_t> simd_cvt_i16_f32_to_u32(util::native<float32_t> s) {
+  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
+    if (std::isnan(value))
+      return uint32_t{0};
+    if (value >= 32768.0f)
+      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
+    if (value < -32768.0f)
+      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
+    return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(value)));
+  });
+}
+
+inline util::native<uint32_t> simd_cvt_u16_f32_to_u32(util::native<float32_t> s) {
+  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
+    if (std::isnan(value) || value < 0.0f)
+      return uint32_t{0};
+    if (value >= 65536.0f)
+      return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
+    return static_cast<uint32_t>(static_cast<uint16_t>(value));
+  });
+}
+
+template <typename Op>
+inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
+  write_explicit_lane_mask(op, wf, mask);
+}
+
+template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {
+  if constexpr (requires { inst.opsel; })
+    return inst.opsel;
+  else if constexpr (requires { inst.op_sel; })
+    return inst.op_sel;
+  else
+    return 0;
+}
+
+template <typename T>
+inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t src_idx) {
+  if (abs & (1u << src_idx))
+    value &= T(0x7fffffffu);
+  if (neg & (1u << src_idx))
+    value ^= T(0x80000000u);
+  return value;
+}
+
+template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
+  if constexpr (requires { typename Inst::IsaType; }) {
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+                  requires { inst.inst_.clamp; })
+      return inst.inst_.clamp;
+  }
+  return false;
+}
+
+template <typename Operand>
+inline uint32_t read_vop3_true16_src(const Operand &src, Wavefront &wf, uint32_t lane,
+                                     uint32_t opsel, uint32_t src_idx) {
+  uint32_t value = src.read_lane(wf, lane);
+  if (opsel & (1u << src_idx))
+    value >>= 16;
+  return value & 0xffffu;
+}
+
+template <typename Operand>
+inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t lane, uint32_t opsel,
+                                  uint32_t value) {
+  uint32_t src_half = value & 0xffffu;
+  auto reg = dst.to_register_ref();
+  if (reg && reg->cls == RegClass::VGPR) {
+    // VOP3 true16 selects the destination half with op_sel[3], independent of
+    // any packed operand encoding convention.
+    uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
+    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
+    uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                                     : ((old_dst & 0xffff0000u) | src_half);
+    wf.cu().write_vgpr(idx, lane, merged);
+    return;
+  }
+  dst.write_lane(wf, lane, (opsel & 0x8u) ? (src_half << 16) : src_half);
+}
+
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
 /// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`
 /// (`-x`). `abs`/`neg` are the raw VOP3 modifier fields; the bit for source
@@ -42,8 +301,7 @@ inline bool simd_force_scalar() { return util::force_scalar(); }
 /// sign bit and unary minus flips it (both NaN-payload preserving), so the
 /// vector form is a pure sign-bit AND/XOR — bit-identical on every input.
 template <unsigned SrcIdx>
-inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs,
-                                                  uint32_t neg) {
+util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs, uint32_t neg) {
   using U = util::native<uint32_t>;
   U b = std::bit_cast<U>(v);
   if (abs & (1u << SrcIdx))
@@ -59,8 +317,7 @@ inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_
 /// the vector form is a pure AND/XOR — bit-identical incl. NaN payload,
 /// matching the scalar lambda the f64 VOP3 bodies emit.
 template <unsigned SrcIdx>
-inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs,
-                                                   uint32_t neg) {
+util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs, uint32_t neg) {
   using U = util::native<uint64_t>;
   U b = std::bit_cast<U>(v);
   if (abs & (1u << SrcIdx))
@@ -77,7 +334,7 @@ inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint3
 /// matching `std::clamp(v, T(0), T(1))`. Instantiated for float and double; the
 /// `_f32`/`_f64` wrappers below name the two lane types the VOP3 paths use.
 template <typename T>
-inline util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp) {
+util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp) {
   if (omod == 1)
     v = v * T(2);
   else if (omod == 2)
@@ -85,8 +342,21 @@ inline util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint
   else if (omod == 3)
     v = v * T(0.5);
   if (clamp) {
-    util::stdx::where(v < T(0), v) = T(0);
-    util::stdx::where(v > T(1), v) = T(1);
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+    if constexpr (std::is_same_v<T, double>) {
+      return util::map_native64_scalar<double>(v, [](double x) {
+        if (x < 0.0)
+          return 0.0;
+        if (x > 1.0)
+          return 1.0;
+        return x;
+      });
+    } else
+#endif
+    {
+      util::stdx::where(v < T(0), v) = T(0);
+      util::stdx::where(v > T(1), v) = T(1);
+    }
   }
   return v;
 }
@@ -108,7 +378,7 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 /// per-chunk loop then issues a value-semantic `r->simd_load<T>(base)` directly
 /// off the resolved (loop-invariant) object with no further dispatch and no raw
 /// pointer in the kernel body — the storage pointer never escapes `VgprStorage`.
-template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
+template <typename Op> const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
   const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
   if (r)
     SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
@@ -117,7 +387,7 @@ template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, cons
 
 /// Mutable counterpart of `simd_src_reg` for the dst write path (single
 /// `simd_vgpr_storage_mut` dispatch).
-template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
+template <typename Op> VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage_mut(op, wf);
 }
 
@@ -126,8 +396,7 @@ template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront 
 /// hi = reg N+1), or `{nullptr, nullptr}` for a non-VGPR operand. The glue's
 /// 64-bit kernels structured-bind this and issue value-semantic
 /// `lo->simd_load64<T>(*hi, base)` — no raw pointer in the kernel body.
-template <typename Op>
-inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
+template <typename Op> ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
   ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
   if (p.lo)
     SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
@@ -136,7 +405,7 @@ inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) 
 
 /// Mutable counterpart of `simd_src_reg64` for the 64-bit dst write path
 /// (single `simd_vgpr_storage64_mut` dispatch).
-template <typename Op> inline VgprStoragePair64 simd_dst_reg64(const Op &op, Wavefront &wf) {
+template <typename Op> VgprStoragePair64 simd_dst_reg64(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage64_mut(op, wf);
 }
 
@@ -146,15 +415,15 @@ template <typename Op> inline VgprStoragePair64 simd_dst_reg64(const Op &op, Wav
 /// invariant (hoisted before the chunk loop), so this is a plain null test +
 /// inlined load — no raw pointer escapes the kernel body.
 template <typename T>
-inline util::native<T> simd_load_or(const VgprStorage *r, uint32_t base, util::native<T> bcast) {
+util::native<T> simd_load_or(const VgprStorage *r, uint32_t base, util::native<T> bcast) {
   return r ? r->template simd_load<T>(base) : bcast;
 }
 
 /// Narrow (native_width64-wide) counterpart of `simd_load_or` for the
 /// mixed-width f64<->32-bit glue.
 template <typename T>
-inline util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base,
-                                             util::narrow32<T> bcast) {
+util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base,
+                                      util::narrow32<T> bcast) {
   return r ? r->template simd_load_narrow<T>(base) : bcast;
 }
 
@@ -163,16 +432,15 @@ inline util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base
 /// storage, otherwise the pre-broadcast scalar `bcast`. The resolved pair is
 /// loop-invariant — no raw pointer escapes the kernel body.
 template <typename T>
-inline util::native<T> simd_load64_or(const ConstVgprStoragePair64 &p, uint32_t base,
-                                      util::native<T> bcast) {
+util::native<T> simd_load64_or(const ConstVgprStoragePair64 &p, uint32_t base,
+                               util::native<T> bcast) {
   return p.lo ? p.lo->template simd_load64<T>(*p.hi, base) : bcast;
 }
 
 /// Mutable-pair overload of `simd_load64_or`, for the dst-accumulate (fmac) f64
 /// paths whose vdst pair is both the accumulator source and the destination.
 template <typename T>
-inline util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base,
-                                      util::native<T> bcast) {
+util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base, util::native<T> bcast) {
   return p.lo ? p.lo->template simd_load64<T>(*p.hi, base) : bcast;
 }
 
@@ -267,6 +535,36 @@ inline util::native<T> read_simd64(const Op &op, const Wavefront &wf, uint32_t l
   if (p.lo)
     return p.lo->template simd_load64<T>(*p.hi, lane_base);
   return util::broadcast64<T>(op.read_scalar64(wf));
+}
+
+/// Per-half f32 reader for the packed-f32 VOP3P family (v_pk_add/mul/fma_f32).
+/// In a VGPR pair {N, N+1}, register N holds the LO f32 of every lane and N+1
+/// the HI f32, so each half is a native-width native<float> read of one
+/// register (no 64-bit-lane / narrow32 detour). For a non-VGPR source the
+/// pk_f32 scalar bodies splat the single 32-bit operand into BOTH halves, so
+/// lo == hi == broadcast(read_scalar). The `p.lo != nullptr` gate is bit-exact
+/// to the scalar's `encoding_value_ in [256,511]` VGPR-range test.
+struct PkF32Halves {
+  util::native<float> lo;
+  util::native<float> hi;
+};
+template <typename Op>
+  requires(util::has_stdx_simd)
+inline PkF32Halves read_pkf32_halves(const Op &op, const Wavefront &wf, uint32_t lane_base) {
+  ConstVgprStoragePair64 p = simd_src_reg64(op, wf);
+  if (p.lo)
+    return {p.lo->template simd_load<float>(lane_base), p.hi->template simd_load<float>(lane_base)};
+  const util::native<float> b = util::broadcast<float>(op.read_scalar(wf));
+  return {b, b};
+}
+
+/// In-vector f32 sign flip (neg modifier): XOR the sign bit. Bit-exact to the
+/// scalar `x = -x` for all values incl. ±0 / ±Inf / NaN (payload preserved).
+inline util::native<float> pkf32_neg(util::native<float> v, bool do_neg) {
+  if (!do_neg)
+    return v;
+  return std::bit_cast<util::native<float>>(std::bit_cast<util::native<uint32_t>>(v) ^
+                                            util::native<uint32_t>(0x80000000u));
 }
 
 /// 64-bit-lane masked store of `v` into an operand at `lane_base`, writing only
@@ -372,7 +670,7 @@ template <typename T, typename Inst, typename BinOp>
 /// Trivially inlined to `return false;` so the generated probe at the
 /// call site costs nothing on toolchains without `<experimental/simd>`.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -386,6 +684,51 @@ template <typename To, typename Mask>
   requires(util::has_stdx_simd)
 inline auto simd_mask_as(const Mask &m) {
   return util::stdx::__proposed::static_simd_cast<util::native<To>>(m);
+}
+
+template <typename T, typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) T abuf[W];
+  alignas(64) T bbuf[W];
+  a.copy_to(abuf, util::stdx::element_aligned);
+  b.copy_to(bbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    if constexpr (std::is_floating_point_v<T>) {
+      using One = util::stdx::fixed_size_simd<T, 1>;
+      const One av(&abuf[i], util::stdx::element_aligned);
+      const One bv(&bbuf[i], util::stdx::element_aligned);
+      if (cmp_op(av, bv)[0])
+        bits |= (1ULL << i);
+    } else {
+      if (cmp_op(abuf[i], bbuf[i]))
+        bits |= (1ULL << i);
+    }
+  }
+  return bits;
+}
+
+template <typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
+                                   CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) uint64_t sbuf[W];
+  alignas(64) uint32_t mbuf[W];
+  s.copy_to(sbuf, util::stdx::element_aligned);
+  mask.copy_to(mbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    using One64 = util::stdx::fixed_size_simd<uint64_t, 1>;
+    using One32 = util::stdx::fixed_size_simd<uint32_t, 1>;
+    const One64 sv(&sbuf[i], util::stdx::element_aligned);
+    const One32 mv(&mbuf[i], util::stdx::element_aligned);
+    if (cmp_op(sv, mv)[0])
+      bits |= (1ULL << i);
+  }
+  return bits;
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
@@ -419,7 +762,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the unary path; see the binary-path note above.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop1_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop1_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -436,7 +779,7 @@ template <typename Value, typename Mask> struct SimdCarry {
 /// Deduce-and-wrap helper for the carry functors. Keeps each functor a single
 /// expression while leaving the mask type implicit.
 template <typename Value, typename Mask>
-inline SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
+SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
   return {value, carry};
 }
 
@@ -447,7 +790,7 @@ inline SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
 /// where `cin` carries the incoming VCC bit (0/1 per lane); ops without a
 /// carry-in ignore it. The result is masked-stored to vdst and the carry mask
 /// is merged into VCC at the chunk's bit offset for active EXEC lanes only —
-/// inactive-lane VCC bits are preserved, matching the scalar bodies.
+/// inactive-lane VCC bits are zeroed, matching the scalar bodies.
 template <typename Inst, typename CarryOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
@@ -459,11 +802,10 @@ template <typename Inst, typename CarryOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Carry-in reads the incoming VCC; the result accumulates into a copy. Each
-  // lane touches only its own VCC bit, so the snapshot/copy split mirrors the
-  // scalar body, which reads wf.vcc() for carry-in and writes set_vcc() once.
+  // Carry-in reads the incoming VCC; the result accumulates from zero so that
+  // inactive lanes are zeroed (matching hardware and the scalar bodies).
   const uint64_t vcc_in = wf.vcc();
-  uint64_t vcc_out = vcc_in;
+  uint64_t vcc_out = 0;
   // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.vsrc1, wf);
@@ -498,7 +840,7 @@ template <typename Inst, typename CarryOp>
 
 /// Unconstrained fallback for the carry path; see the binary-path note above.
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
@@ -551,8 +893,7 @@ template <typename T, typename Inst, typename FmaOp>
 
 /// Unconstrained fallback for the ternary path; see the binary-path note above.
 template <typename T, typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop2_simd(Inst &, Wavefront &, util::native<T>,
-                                                        FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop2_simd(Inst &, Wavefront &, util::native<T>, FmaOp) {
   return false;
 }
 
@@ -601,7 +942,48 @@ template <typename T, typename Inst, typename FmaOp>
 
 /// Unconstrained fallback for the f64 ternary path; see the binary-path note.
 template <typename T, typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop2_f64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop2_f64_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
+/// 64-bit-lane VOP2 binary SIMD fast path (v_add_f64 / v_mul_f64 /
+/// v_max_num_f64 / v_min_num_f64). VOP2 has no abs/neg/omod/clamp fields and
+/// reads its second source as `vsrc1` (not `src1`); otherwise identical to the
+/// f64 FMA vop2 path minus the dst-accumulate operand. add/mul are bit-exact;
+/// fmax/fmin carry the accepted NaN-payload / signed-zero-tie carve-out (same as
+/// the f64 vop3 binary path and every other min/max).
+template <typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &inst, Wavefront &wf,
+                                                           BinOp bin_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
+  const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.vsrc1, wf);
+  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  const auto a_bcast =
+      rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
+  const auto b_bcast =
+      rs1.lo ? util::native<T>{} : util::broadcast64<T>(inst.vsrc1.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = simd_load64_or<T>(rs0, base, a_bcast);
+    const auto b = simd_load64_or<T>(rs1, base, b_bcast);
+    write_simd64_at<T>(rd64, inst.vdst, wf, base, bin_op(a, b), chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the f64 vop2 binary path.
+template <typename Inst, typename BinOp>
+[[nodiscard]] bool try_execute_binary_vop2_f64_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -644,7 +1026,7 @@ template <typename T, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the f64 unary path; see the binary-path note.
 template <typename T, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop1_f64_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop1_f64_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -703,7 +1085,7 @@ template <typename Tout, typename Inst, typename CvtOp>
 
 /// Unconstrained fallback for the f64->b32 cvt path; see the binary-path note.
 template <typename Tout, typename Inst, typename CvtOp>
-[[nodiscard]] inline bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
+[[nodiscard]] bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -740,7 +1122,65 @@ template <typename Tin, typename Inst, typename CvtOp>
 
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
-[[nodiscard]] inline bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+[[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+  return false;
+}
+
+/// VOP3 mixed-width f64-source -> 32-bit-fp-dst fast path: the 64-bit-in /
+/// 32-bit-out counterpart of the f64 unary FP glue, for v_frexp_exp_i32_f64
+/// (the lone f64 VOP3 cvt whose body keeps the modifiers around an
+/// f64 -> float(exp) -> bit_cast tail). Reads src0 as native<double>
+/// (native_width64 lanes), applies src0 abs/neg in the f64 domain, runs cvt_op
+/// (native<double> -> narrow32<float> = the exponent as float), then applies the
+/// result omod/clamp INLINE at narrow32 width (apply_vop3_dst_mod_f32 is
+/// native<float>-wide — a different width than narrow32<float>), and stores the
+/// 32-bit results. All steps bit-exact: frexp_exp_f64_simd is the proven VOP1
+/// helper (op 48), apply_vop3_src_mod_f64 is the same helper the tested f64
+/// unary ops use, and the (float)(uint32) cast + power-of-two omod + ordered
+/// clamp mirror the scalar tail (the exp is always finite, so NaN handling is
+/// moot).
+template <typename Inst, typename CvtOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &inst, Wavefront &wf,
+                                                                  CvtOp cvt_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  const auto s_bcast =
+      rs0.lo ? util::native<double>{} : util::broadcast64<double>(inst.src0.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto s = apply_vop3_src_mod_f64<0>(simd_load64_or<double>(rs0, base, s_bcast), abs, neg);
+    util::narrow32<float> v = cvt_op(s);
+    // Inline omod/clamp at narrow32<float> width (mirrors apply_vop3_dst_mod):
+    // IEEE-exact power-of-two scale, ordered-compare saturation to [0,1].
+    if (omod == 1)
+      v = v * 2.0f;
+    else if (omod == 2)
+      v = v * 4.0f;
+    else if (omod == 3)
+      v = v * 0.5f;
+    if (clamp) {
+      util::stdx::where(v < 0.0f, v) = 0.0f;
+      util::stdx::where(v > 1.0f, v) = 1.0f;
+    }
+    write_simd_narrow_at<float>(rd, inst.vdst, wf, base, v, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename CvtOp>
+[[nodiscard]] bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -784,19 +1224,16 @@ template <typename Inst>
 }
 
 /// Unconstrained fallback for the cndmask path; see the binary-path note above.
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_vop2_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop2_simd(Inst &, Wavefront &) {
   return false;
 }
 
 /// v_cndmask_b32 VOP3 form: dst[lane] = (sel[lane]) ? src1 : src0, where `sel`
 /// is the 64-bit value read from the SGPR-pair `src2` (instead of the fixed VCC
-/// used by the VOP2 form). The scalar body applies no modifiers (the result is
-/// a bit-exact integer select on whichever operand the selector picks), so the
-/// VOP3 modifier fields are intentionally not consulted here — bit-identical to
-/// the scalar body regardless of abs/neg/omod/clamp encoding. `src2` is an
-/// SGPR/inline operand, not a VGPR, so it does not participate in the
-/// simd_capable gate; src0/src1/vdst do.
+/// used by the VOP2 form). VOP3 source modifiers are bitwise sign modifiers for
+/// this B32 select: abs clears bit 31 and neg flips bit 31 before selection.
+/// `src2` is an SGPR/inline operand, not a VGPR, so it does not participate in
+/// the simd_capable gate; src0/src1/vdst do.
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &inst, Wavefront &wf) {
@@ -818,8 +1255,10 @@ template <typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = apply_vop3_b32_src_mod(simd_load_or<T>(r0, base, a_bcast), inst.inst_.abs,
+                                          inst.inst_.neg, 0);
+    const auto b = apply_vop3_b32_src_mod(simd_load_or<T>(r1, base, b_bcast), inst.inst_.abs,
+                                          inst.inst_.neg, 1);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     alignas(util::native<T>) uint32_t selbuf[W];
     for (std::size_t i = 0; i < W; ++i)
@@ -832,8 +1271,7 @@ template <typename Inst>
 }
 
 /// Unconstrained fallback for the VOP3 cndmask path; see the binary-path note.
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop3_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -877,8 +1315,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_b16_vop3_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_b16_vop3_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -904,7 +1341,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -930,14 +1367,14 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOPC path; see the binary-path note above.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
 /// 64-bit-lane VOPC compare SIMD fast path (f64/i64/u64 relations). Identical to
 /// try_execute_vopc_simd but reads each operand as `native<T>` (T = double /
 /// int64_t / uint64_t) through the split lo/hi VGPR-pair path (read_simd64), so
-/// it processes `native_width64` lanes per chunk. Same VCC merge / preservation.
+/// it processes `native_width64` lanes per chunk. Same VCC merge.
 template <typename T, typename Inst, typename CmpOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc64_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op) {
@@ -946,7 +1383,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -961,11 +1398,7 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -974,7 +1407,7 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the 64-bit VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -995,7 +1428,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1010,11 +1443,7 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto s = simd_load64_or<uint64_t>(rs0, base, s_bcast);
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -1023,7 +1452,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the f64 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_class_f64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_class_f64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1051,7 +1480,7 @@ template <typename Inst, typename CmpOp>
   const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast<T>(signmask);
-  uint64_t vcc = inst.vdst.read_scalar64(wf);
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1075,13 +1504,13 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 b32 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vop3_class_b32_simd(Inst &, Wavefront &, uint32_t, CmpOp) {
+[[nodiscard]] bool try_execute_vop3_class_b32_simd(Inst &, Wavefront &, uint32_t, CmpOp) {
   return false;
 }
 
@@ -1103,7 +1532,7 @@ template <typename Inst, typename CmpOp>
   const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast64<uint64_t>(signmask);
-  uint64_t vcc = inst.vdst.read_scalar64(wf);
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1122,20 +1551,16 @@ template <typename Inst, typename CmpOp>
     if (do_neg)
       s = s ^ sm;
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 f64 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vop3_class_f64_simd(Inst &, Wavefront &, uint64_t, CmpOp) {
+[[nodiscard]] bool try_execute_vop3_class_f64_simd(Inst &, Wavefront &, uint64_t, CmpOp) {
   return false;
 }
 
@@ -1176,8 +1601,23 @@ template <typename T, typename Inst, typename BinOp>
 /// Unconstrained fallback for the VOP3 integer binary path; see the VOP2
 /// binary-path note above.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_simd(Inst &, Wavefront &, BinOp) {
   return false;
+}
+
+/// VOP3 f16 binary fast path. The packed-f16 binary functors widen f16->f32
+/// inside `bin_op` and narrow back, but do NOT apply the VOP3 abs/neg/omod/clamp
+/// modifiers (there is no fp16 binary modifier glue, unlike the f32 path). The
+/// generated scalar body DOES apply them around the f16<->f32 round trip, so bail
+/// to scalar whenever any modifier field is set. VOP3 true16 op_sel needs packed
+/// source/destination-half merging, so it also stays on the scalar path. The
+/// common unmodified low-half case still takes the integer fast path.
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
+  if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
+      inst.inst_.clamp != 0u || vop3_opsel(inst.inst_) != 0u)
+    return false;
+  return try_execute_binary_vop3_simd<T>(inst, wf, bin_op);
 }
 
 /// VOP3 f32 binary SIMD fast path. Reads `src0`/`src1`, applies the per-source
@@ -1218,7 +1658,7 @@ template <typename T, typename Inst, typename BinOp>
 
 /// Unconstrained fallback for the VOP3 f32 binary path.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_fp_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_fp_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -1239,7 +1679,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1259,13 +1699,13 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 integer VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1283,7 +1723,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1298,20 +1738,16 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
 /// Unconstrained fallback for the 64-bit VOP3 integer VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1334,7 +1770,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1354,20 +1790,21 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 f32 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_fp32_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_fp32_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
-/// VOP3 f16 VOPC compare SIMD fast path. The scalar body widens each f16 src
-/// to f32 (`util::f16_to_f32`) and only then applies abs/neg (std::fabs / unary
-/// minus on the f32). The vector path matches that order exactly: read
-/// src0/src1 as raw uint32 lanes (low 16 = f16 bits), widen via
+/// VOP3 f16 VOPC compare SIMD fast path. The scalar body selects the source
+/// half with VOP3 true16 op_sel, widens each f16 src to f32
+/// (`util::f16_to_f32`), and only then applies abs/neg (std::fabs / unary minus
+/// on the f32). The vector path matches that order exactly: read src0/src1 as
+/// raw uint32 lanes, select the requested half, widen via
 /// `util::f16_to_f32_simd`, then apply the f32 modifier helper, then call the
 /// compare functor on f32 operands. The compare functor is the same as the f32
 /// VOP3 VOPC one (it takes already-widened, already-modified `native<float>`).
@@ -1380,10 +1817,11 @@ template <typename Inst, typename CmpOp>
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
+  const uint32_t opsel = vop3_opsel(inst.inst_);
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1394,10 +1832,14 @@ template <typename Inst, typename CmpOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f32<0>(
-        util::f16_to_f32_simd(simd_load_or<T>(r0, base, a_bcast)), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(
-        util::f16_to_f32_simd(simd_load_or<T>(r1, base, b_bcast)), abs, neg);
+    auto a_raw = simd_load_or<T>(r0, base, a_bcast);
+    auto b_raw = simd_load_or<T>(r1, base, b_bcast);
+    if (opsel & 0x1u)
+      a_raw = a_raw >> 16;
+    if (opsel & 0x2u)
+      b_raw = b_raw >> 16;
+    const auto a = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(a_raw), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
     const auto m = cmp_op(a, b);
     uint64_t cmp_bits = 0;
     for (std::size_t i = 0; i < W; ++i)
@@ -1405,13 +1847,13 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 f16 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_fp16_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_fp16_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1435,7 +1877,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1450,20 +1892,16 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto a = apply_vop3_src_mod_f64<0>(simd_load64_or<T>(rs0, base, a_bcast), abs, neg);
     const auto b = apply_vop3_src_mod_f64<1>(simd_load64_or<T>(rs1, base, b_bcast), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
 /// Unconstrained fallback for the VOP3 f64 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_vop3_fp64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_vop3_fp64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1511,7 +1949,7 @@ template <typename Inst, typename BinOp>
 
 /// Unconstrained fallback for the VOP3 f64 binary path; see the binary-path note.
 template <typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_fp64_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_fp64_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -1550,7 +1988,7 @@ template <typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f64 unary path; see the binary-path note.
 template <typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp64_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp64_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -1566,6 +2004,8 @@ template <typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (vop3_opsel(inst.inst_) != 0u)
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -1594,7 +2034,7 @@ template <typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f16 unary path; see the binary-path note.
 template <typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -1637,7 +2077,7 @@ template <typename T, typename Inst, typename TernOp>
 
 /// Unconstrained fallback for the VOP3 integer ternary path; see binary-path note.
 template <typename T, typename Inst, typename TernOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
   return false;
 }
 
@@ -1683,7 +2123,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1696,6 +2136,8 @@ template <typename Inst, typename FmaOp>
                                                              FmaOp tern_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (vop3_opsel(inst.inst_) != 0u)
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -1731,7 +2173,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1778,7 +2220,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1826,7 +2268,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1838,6 +2280,8 @@ template <typename Inst, typename FmaOp>
                                                           FmaOp tern_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.vdst.simd_capable())
+    return false;
+  if (vop3_opsel(inst.inst_) != 0u)
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -1872,7 +2316,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1917,7 +2361,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1960,7 +2404,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2003,7 +2447,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2042,7 +2486,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f32 unary path.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -2088,6 +2532,41 @@ inline util::native<float> div_fixup_f32_simd(util::native<float> p, util::nativ
 inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::native<double> b,
                                                util::native<double> c) {
   using D = util::native<double>;
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  constexpr std::size_t W = D::size();
+  alignas(D) double pbuf[W];
+  alignas(D) double bbuf[W];
+  alignas(D) double cbuf[W];
+  alignas(D) double out[W];
+  p.copy_to(pbuf, util::stdx::vector_aligned);
+  b.copy_to(bbuf, util::stdx::vector_aligned);
+  c.copy_to(cbuf, util::stdx::vector_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    const double bi = bbuf[i];
+    const double ci = cbuf[i];
+    const double bxc =
+        std::bit_cast<double>(std::bit_cast<uint64_t>(bi) ^ std::bit_cast<uint64_t>(ci));
+    const double inf_val = std::copysign(std::numeric_limits<double>::infinity(), bxc);
+    const double zero_val = std::copysign(0.0, bxc);
+    double r = pbuf[i];
+    if (std::isinf(bi))
+      r = zero_val;
+    if (std::isinf(ci))
+      r = inf_val;
+    if (ci == 0.0)
+      r = zero_val;
+    if (bi == 0.0)
+      r = inf_val;
+    if ((std::isinf(bi) && std::isinf(ci)) || (bi == 0.0 && ci == 0.0))
+      r = std::numeric_limits<double>::quiet_NaN();
+    if (std::isnan(bi))
+      r = bi;
+    if (std::isnan(ci))
+      r = ci;
+    out[i] = r;
+  }
+  return D(out, util::stdx::vector_aligned);
+#else
   using U = util::native<uint64_t>;
   const auto bxc = std::bit_cast<D>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
   const auto inf_val = util::stdx::copysign(D(std::numeric_limits<double>::infinity()), bxc);
@@ -2109,6 +2588,7 @@ inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::nat
   util::stdx::where(b_nan, r) = b;
   util::stdx::where(c_nan, r) = c;
   return r;
+#endif
 }
 
 /// VOP3 div_fmas SIMD fast path (f32). The scalar body is `fma(s0, s1, s2)`
@@ -2163,8 +2643,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_div_fmas_f32_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_div_fmas_f32_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2206,22 +2685,15 @@ template <typename Inst>
     const auto c = apply_vop3_src_mod_f64<2>(simd_load64_or<T>(rs2, base, c_bcast), abs, neg);
     auto r = util::stdx::fma(a, b, c);
     const auto scaled = util::stdx::ldexp(r, shift_64);
-    // VCC mask built directly in the f64 abi via a generator; avoids a
-    // cross-abi mask cast (the f32 path can ride load+simd_mask_as because
-    // native<uint32_t> shares abi with native<float>, but native<uint64_t>
-    // does not match native<double>::abi on AVX-512).
     const uint64_t vcc_chunk = vcc >> base;
-    const auto vcc_mask = util::native<double>([&](std::size_t i) {
-                            return ((vcc_chunk >> i) & 1ULL) ? 1.0 : 0.0;
-                          }) != 0.0;
-    util::stdx::where(vcc_mask, r) = scaled;
+    r = util::replace_f64_lanes(r, scaled,
+                                [&](std::size_t i) { return ((vcc_chunk >> i) & 1ULL) != 0; });
     write_simd64_at<T>(rd64, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_div_fmas_f64_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_div_fmas_f64_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2262,7 +2734,7 @@ template <typename Inst, typename ShiftOp>
   return true;
 }
 template <typename Inst, typename ShiftOp>
-[[nodiscard]] inline bool try_execute_shift64_vop3_simd(Inst &, Wavefront &, ShiftOp) {
+[[nodiscard]] bool try_execute_shift64_vop3_simd(Inst &, Wavefront &, ShiftOp) {
   return false;
 }
 
@@ -2298,20 +2770,19 @@ template <typename Inst>
     const auto s = simd_load_narrow_or<uint32_t>(rs, base, s_bcast);
     const auto c = simd_load64_or<uint64_t>(rs2, base, c_bcast);
     const auto sh = util::stdx::static_simd_cast<util::native<uint64_t>>(s) & 63ull;
-    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, (v << sh) + c, chunk);
+    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, simd_lshl_u64(v, sh) + c, chunk);
   }
   return true;
 }
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_lshl_add_u64_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_lshl_add_u64_simd(Inst &, Wavefront &) {
   return false;
 }
 
 /// VOP3 wide 32x32->64 multiply-add fast path (v_mad_u64_u32 / v_mad_i64_i32).
 /// src0/src1 are 32-bit multiplicands (read as narrow lanes), src2 is the 64-bit
-/// addend, dst is 64-bit. `mad_op(s0, s1, c)` receives the two narrow operands
-/// and the 64-bit addend and does the (signedness-aware) widen, 64-bit multiply
-/// (low 64), and add — matching the scalar `(wide)s0 * (wide)s1 + s2`.
+/// addend, dst is 64-bit, and sdst is the per-lane overflow/carryout mask.
+/// `mad_op(s0, s1, c)` receives the two narrow operands and the 64-bit addend
+/// and returns both the low 64-bit result and carry/overflow mask.
 template <typename Inst, typename MadOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &inst, Wavefront &wf,
@@ -2322,6 +2793,7 @@ template <typename Inst, typename MadOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const ConstVgprStoragePair64 rs2 = simd_src_reg64(inst.src2, wf);
@@ -2339,19 +2811,27 @@ template <typename Inst, typename MadOp>
     const auto a = simd_load_narrow_or<uint32_t>(r0, base, a_bcast);
     const auto b = simd_load_narrow_or<uint32_t>(r1, base, b_bcast);
     const auto c = simd_load64_or<uint64_t>(rs2, base, c_bcast);
-    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, mad_op(a, b, c), chunk);
+    const auto r = mad_op(a, b, c);
+    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename MadOp>
-[[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &, Wavefront &, MadOp) {
+[[nodiscard]] bool try_execute_mad_wide64_vop3_simd(Inst &, Wavefront &, MadOp) {
   return false;
 }
 
 /// VOP3 carry-OUT binary fast path (v_add_co/sub_co/subrev_co_u32). No carry-in
 /// (the SimdCarry functor's third arg is a zero vector); the per-lane carry-out
-/// is merged into a copy of the current VCC and written to the SGPR-pair `sdst`
-/// (not the fixed VCC) — exactly the scalar body's `inst.sdst.write_scalar64`.
+/// is written to the SGPR-pair `sdst` (not the fixed VCC). In wave32, explicit
+/// scalar mask destinations write only the low SGPR and preserve the high SGPR;
+/// wave64 writes the full pair.
 /// `sdst` is an SGPR operand, so it does not participate in the simd_capable
 /// gate; src0/src1/vdst do. (These VOP3 forms carry no `src2` member, so the
 /// carry-in path lives in the separate _cin glue below.)
@@ -2366,7 +2846,7 @@ template <typename Inst, typename CarryOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t carry_out = wf.vcc();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
@@ -2386,18 +2866,19 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  inst.sdst.write_scalar64(wf, carry_out);
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_co_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop3_co_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
 /// VOP3 carry-IN binary fast path (v_addc_co/subb_co/subbrev_co_u32). Same as
 /// the _co glue but the per-lane carry-in is read from the SGPR-pair `src2`
 /// (these forms have a src2 member) and expanded to a 0/1-per-lane vector;
-/// carry-out goes to `sdst`. src2/sdst are SGPR operands (not gated).
+/// carry-out goes to `sdst` with the same wave32/wave64 width rule as _co.
+/// src2/sdst are SGPR operands (not gated).
 template <typename Inst, typename CarryOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &inst, Wavefront &wf,
@@ -2410,7 +2891,7 @@ template <typename Inst, typename CarryOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   const uint64_t cin_all = inst.src2.read_scalar64(wf);
-  uint64_t carry_out = wf.vcc();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
@@ -2434,11 +2915,11 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  inst.sdst.write_scalar64(wf, carry_out);
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop3_cin_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
@@ -2448,17 +2929,30 @@ template <typename Inst, typename CarryOp>
 /// high half (low half preserved). Selected by the per-mnemonic glue probe.
 enum class FmaMixDst { F32, F16_LO, F16_HI };
 
-/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because
-/// the scalar reference computes `a * b + c` (plain `*+`, not std::fma) for
-/// all six and differs only in (a) the f16-vs-f32 widening shape per source
-/// and (b) the f16-lo/f16-hi/f32 narrowing shape on the destination.
+inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<float> b,
+                                           util::native<float> c) {
+  return a * b + c;
+}
+
+inline bool fma_mix_src_is_float_inline(uint32_t src_selector) {
+  // Standard AMDGPU floating inline constants in the shared OPR_SRC encoding.
+  return src_selector >= 240u && src_selector <= 248u;
+}
+
+/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
+/// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
+/// f16-lo/f16-hi/f32 narrowing shape on the destination. The generated scalar
+/// bodies use `a * b + c`, so this keeps the SIMD path in the same expression
+/// shape instead of forcing a fused stdx::fma and shifting finite results by an
+/// ulp on some hosts.
 ///
 /// Per-source data fetch is gated by `op_sel_hi` (src0/src1) and
 /// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
 /// 1 the source is read as a 32-bit word and the low or high f16 half
 /// (selected by the matching `op_sel` bit) is widened via f16_to_f32_simd.
-/// Per-source sign-flip is gated by `neg` (xor of bit 31). VOP3P does not
-/// carry abs or omod. Result-clamp saturates to [0, 1] via stdx::where.
+/// Per-source abs is gated by the field named `neg_hi` in the shared VOP3P
+/// layout for this mix-family encoding, and per-source sign-flip is gated by
+/// `neg` (xor of bit 31). Result-clamp saturates to [0, 1] via stdx::where.
 ///
 /// All modifier fields are uniform across the wave so the per-source mode
 /// branches live outside the chunk loop and feed into the same `a*b+c`
@@ -2470,10 +2964,21 @@ template <FmaMixDst DstMode, typename Inst>
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
+#if defined(__clang__) && defined(__FMA__)
+  if constexpr (DstMode == FmaMixDst::F32) {
+    // Clang contracts native SIMD a*b+c on FMA hosts for this shape while the
+    // generated scalar bodies remain bit-exact with separate multiply/add. The
+    // f16 destination modes round after the mixed-precision add, and the other
+    // FMA-family SIMD helpers intentionally model fused instructions with
+    // stdx::fma, so this guard is only needed for the F32 fma_mix/mad_mix path.
+    return false;
+  }
+#endif
   using T = float32_t;
   const uint32_t op_sel = inst.inst_.op_sel;
   const uint32_t op_sel_hi = inst.inst_.op_sel_hi;
   const uint32_t op_sel_hi_2 = inst.inst_.op_sel_hi_2;
+  const uint32_t abs = inst.inst_.neg_hi;
   const uint32_t neg = inst.inst_.neg;
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -2484,27 +2989,35 @@ template <FmaMixDst DstMode, typename Inst>
   const F kZero(0.0f);
   const F kOne(1.0f);
   const U kSignBit(0x80000000u);
+  const U kAbsMask(~0x80000000u);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    auto load_src = [&](auto &op, uint32_t sel_hi_bit, uint32_t sel_bit, uint32_t neg_bit) -> F {
+    auto load_src = [&](auto &op, uint32_t src_selector, uint32_t sel_hi_bit, uint32_t sel_bit,
+                        uint32_t abs_bit, uint32_t neg_bit) -> F {
       F v;
       if (sel_hi_bit) {
         U raw = read_simd<uint32_t>(op, wf, base);
-        U halves = sel_bit ? (raw >> 16) : (raw & 0xFFFFu);
+        U halves = fma_mix_src_is_float_inline(src_selector)
+                       ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
+                       : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
         v = util::f16_to_f32_simd(halves);
       } else {
         v = read_simd<float>(op, wf, base);
       }
+      if (abs_bit)
+        v = std::bit_cast<F>(std::bit_cast<U>(v) & kAbsMask);
       if (neg_bit)
         v = std::bit_cast<F>(std::bit_cast<U>(v) ^ kSignBit);
       return v;
     };
-    F a = load_src(inst.src0, op_sel_hi & 1u, op_sel & 1u, neg & 1u);
-    F b = load_src(inst.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u, (neg >> 1) & 1u);
-    F c = load_src(inst.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (neg >> 2) & 1u);
-    F r = a * b + c;
+    F a = load_src(inst.src0, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
+    F b = load_src(inst.src1, inst.inst_.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u,
+                   (abs >> 1) & 1u, (neg >> 1) & 1u);
+    F c = load_src(inst.src2, inst.inst_.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (abs >> 2) & 1u,
+                   (neg >> 2) & 1u);
+    F r = fma_mix_mul_add(a, b, c);
     if (clamp) {
       util::stdx::where(r < kZero, r) = kZero;
       util::stdx::where(r > kOne, r) = kOne;
@@ -2527,7 +3040,7 @@ template <FmaMixDst DstMode, typename Inst>
 }
 
 template <FmaMixDst DstMode, typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2572,7 +3085,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2610,7 +3123,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2669,7 +3182,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_fp16_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_binary_fp16_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2736,7 +3249,96 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
+/// VOP3P packed-f32 binary fast path (v_pk_add_f32 / v_pk_mul_f32). In a VGPR
+/// pair {N, N+1} register N is the LO f32 of every lane, N+1 the HI f32, so each
+/// half is a native-width native<float> read of one register (read_pkf32_halves)
+/// and the per-half arithmetic runs at full native width. Default-packing gate
+/// (op_sel == 0, op_sel_hi == 3) bails to scalar otherwise — under default
+/// packing the lo result comes from the lo halves and hi from the hi halves.
+/// neg/neg_hi bits 0/1 sign-flip the respective half. No clamp on any pk_f32
+/// scalar body. Non-VGPR sources splat the 32-bit operand into both halves.
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+    return false;
+  constexpr std::size_t W = util::native_width_v<float>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const bool neg0_lo = inst.inst_.neg & 1u;
+  const bool neg1_lo = inst.inst_.neg & 2u;
+  const bool neg0_hi = inst.inst_.neg_hi & 1u;
+  const bool neg1_hi = inst.inst_.neg_hi & 2u;
+  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const PkF32Halves a = read_pkf32_halves(inst.src0, wf, base);
+    const PkF32Halves b = read_pkf32_halves(inst.src1, wf, base);
+    const util::native<float> r_lo = op(pkf32_neg(a.lo, neg0_lo), pkf32_neg(b.lo, neg1_lo));
+    const util::native<float> r_hi = op(pkf32_neg(a.hi, neg0_hi), pkf32_neg(b.hi, neg1_hi));
+    rd64.lo->template simd_store<float>(base, r_lo, chunk);
+    rd64.hi->template simd_store<float>(base, r_hi, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] bool try_execute_vop3p_pk_binary_f32_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
+/// VOP3P packed-f32 ternary fast path (v_pk_fma_f32). 3-source FMA per half;
+/// same per-register native<float> read/write as the binary form. Default-
+/// packing gate adds op_sel_hi_2 == 1 (the src2-hi select). neg/neg_hi bits
+/// 0/1/2 sign-flip the respective half. No clamp. NaN-input payload divergence
+/// between stdx::fma and std::fma accepted (same carve-out as the f16 pk ternary
+/// / fma_mix slices).
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+    return false;
+  constexpr std::size_t W = util::native_width_v<float>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const bool neg0_lo = inst.inst_.neg & 1u;
+  const bool neg1_lo = inst.inst_.neg & 2u;
+  const bool neg2_lo = inst.inst_.neg & 4u;
+  const bool neg0_hi = inst.inst_.neg_hi & 1u;
+  const bool neg1_hi = inst.inst_.neg_hi & 2u;
+  const bool neg2_hi = inst.inst_.neg_hi & 4u;
+  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const PkF32Halves a = read_pkf32_halves(inst.src0, wf, base);
+    const PkF32Halves b = read_pkf32_halves(inst.src1, wf, base);
+    const PkF32Halves c = read_pkf32_halves(inst.src2, wf, base);
+    const util::native<float> r_lo =
+        op(pkf32_neg(a.lo, neg0_lo), pkf32_neg(b.lo, neg1_lo), pkf32_neg(c.lo, neg2_lo));
+    const util::native<float> r_hi =
+        op(pkf32_neg(a.hi, neg0_hi), pkf32_neg(b.hi, neg1_hi), pkf32_neg(c.hi, neg2_hi));
+    rd64.lo->template simd_store<float>(base, r_lo, chunk);
+    rd64.hi->template simd_store<float>(base, r_hi, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_f32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2774,8 +3376,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2789,9 +3390,10 @@ template <typename Inst>
 /// signed forms when inst.clamp is set, a lower clamp to 0 — the scalar
 /// std::clamp(sum, 0, INT_MAX) on an int32 sum is just max(sum, 0). The
 /// unsigned scalar bodies have NO clamp branch, so the unsigned fast path
-/// ignores the clamp bit entirely. Signed accumulation runs in the int32
-/// domain (matching the scalar body and the pk_mad_i16 precedent); unsigned
-/// in uint32. For the 16-bit forms op_sel / op_sel_hi pick the source halves,
+/// ignores the clamp bit entirely. Signed products fit in int32, but the
+/// accumulator is kept as uint32_t bits so overflow wraps like the scalar tail
+/// without tripping signed-overflow sanitizers. For the 16-bit forms op_sel /
+/// op_sel_hi pick the source halves,
 /// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
 /// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
 /// needed there.
@@ -2808,7 +3410,6 @@ template <int ElemBits, bool Signed, typename Inst>
   }
   constexpr int N = 32 / ElemBits;
   constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
-  constexpr int kShift = 32 - ElemBits;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2825,17 +3426,20 @@ template <int ElemBits, bool Signed, typename Inst>
     const U raw1 = read_simd<uint32_t>(inst.src1, wf, base);
     const U acc = read_simd<uint32_t>(inst.src2, wf, base);
     if constexpr (Signed) {
-      I sum = std::bit_cast<I>(acc);
+      U sum = acc;
       for (int i = 0; i < N; ++i) {
         const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
         const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = (util::stdx::static_simd_cast<I>(ea) << kShift) >> kShift;
-        const I b = (util::stdx::static_simd_cast<I>(eb) << kShift) >> kShift;
-        sum += a * b;
+        const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
+        const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
+        sum += std::bit_cast<U>(a * b);
       }
-      if (clamp)
-        util::stdx::where(sum < kZeroI, sum) = kZeroI;
-      write_simd<uint32_t>(inst.vdst, wf, base, std::bit_cast<U>(sum), chunk);
+      if (clamp) {
+        I signed_sum = std::bit_cast<I>(sum);
+        util::stdx::where(signed_sum < kZeroI, signed_sum) = kZeroI;
+        sum = std::bit_cast<U>(signed_sum);
+      }
+      write_simd<uint32_t>(inst.vdst, wf, base, sum, chunk);
     } else {
       U sum = acc;
       for (int i = 0; i < N; ++i) {
@@ -2850,7 +3454,7 @@ template <int ElemBits, bool Signed, typename Inst>
 }
 
 template <int ElemBits, bool Signed, typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2916,8 +3520,173 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// VOP3P mixed-sign integer dot product (v_dot4_i32_iu8 / v_dot8_i32_iu4).
+/// Same structure as try_execute_vop3p_dot_int_simd but the per-operand
+/// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
+/// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
+/// accumulator seed; clamp (when set) is the lower clamp to 0. Accumulation is
+/// in uint32_t bits so signed overflow wraps without sanitizer traps. The 8/4-bit
+/// scalar bodies read no op_sel/neg_hi, so no gate.
+template <int ElemBits, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
+  static_assert(ElemBits == 8 || ElemBits == 4, "iu dot ElemBits must be 8/4");
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  constexpr int N = 32 / ElemBits;
+  constexpr uint32_t kElemMask = (ElemBits == 8) ? 0xFFu : 0xFu;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const bool clamp = inst.inst_.clamp;
+  const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
+  const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
+  using U = util::native<uint32_t>;
+  using I = util::native<int32_t>;
+  const I kZeroI(0);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U raw0 = read_simd<uint32_t>(inst.src0, wf, base);
+    const U raw1 = read_simd<uint32_t>(inst.src1, wf, base);
+    const U acc = read_simd<uint32_t>(inst.src2, wf, base);
+    U sum = acc;
+    for (int i = 0; i < N; ++i) {
+      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+      // Sign-extend the low ElemBits when the operand is signed (same shift
+      // trick as the signed dot path); plain zero-extended reinterpret when
+      // unsigned. Sign choice is per operand, resolved at runtime.
+      const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
+                              : util::stdx::static_simd_cast<I>(ea);
+      const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
+                              : util::stdx::static_simd_cast<I>(eb);
+      sum += std::bit_cast<U>(a * b);
+    }
+    if (clamp) {
+      I signed_sum = std::bit_cast<I>(sum);
+      util::stdx::where(signed_sum < kZeroI, signed_sum) = kZeroI;
+      sum = std::bit_cast<U>(signed_sum);
+    }
+    write_simd<uint32_t>(inst.vdst, wf, base, sum, chunk);
+  }
+  return true;
+}
+
+template <int ElemBits, typename Inst>
+[[nodiscard]] bool try_execute_vop3p_dot_int_mixed_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// VOP2/VOP3 dst-accumulate integer dot product (the "c" forms:
+/// v_dot2c_i32_i16, v_dot4c_i32_i8, v_dot8c_i32_i4). The accumulator is the
+/// DESTINATION register (inst.vdst), read as the accumulate source and written
+/// as the result. VOP2 reads its 2nd source as inst.vsrc1, VOP3 as inst.src1
+/// (selected by the Vop3 flag via if constexpr). All *c int forms are signed;
+/// products fit in int32, while accumulation wraps in uint32_t bits. The scalar
+/// bodies carry no op_sel/neg/clamp.
+template <int ElemBits, bool Vop3, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_dotc_int_simd(Inst &inst, Wavefront &wf) {
+  static_assert(ElemBits == 16 || ElemBits == 8 || ElemBits == 4, "dotc ElemBits must be 16/8/4");
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if constexpr (Vop3) {
+    if (!inst.src1.simd_capable())
+      return false;
+  } else {
+    if (!inst.vsrc1.simd_capable())
+      return false;
+  }
+  constexpr int N = 32 / ElemBits;
+  constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  using U = util::native<uint32_t>;
+  using I = util::native<int32_t>;
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U raw0 = read_simd<uint32_t>(inst.src0, wf, base);
+    U raw1;
+    if constexpr (Vop3)
+      raw1 = read_simd<uint32_t>(inst.src1, wf, base);
+    else
+      raw1 = read_simd<uint32_t>(inst.vsrc1, wf, base);
+    U sum = read_simd<uint32_t>(inst.vdst, wf, base); // accumulator from dst
+    for (int i = 0; i < N; ++i) {
+      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+      const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
+      const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
+      sum += std::bit_cast<U>(a * b);
+    }
+    write_simd<uint32_t>(inst.vdst, wf, base, sum, chunk);
+  }
+  return true;
+}
+
+template <int ElemBits, bool Vop3, typename Inst>
+[[nodiscard]] bool try_execute_dotc_int_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// VOP2/VOP3 dst-accumulate f16 dot product (v_dot2c_f32_f16). Two f16 products
+/// of src0 and src1/vsrc1 (widened via f16_to_f32_simd) plus the f32
+/// accumulator read from the DESTINATION register. Bracketing matches the
+/// scalar `facc += a0*b0 + a1*b1` exactly: acc + ((a0*b0)+(a1*b1)). No
+/// op_sel/neg/clamp. NaN-payload divergence accepted (shared f16 carve-out).
+template <bool Vop3, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_dotc_f16_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if constexpr (Vop3) {
+    if (!inst.src1.simd_capable())
+      return false;
+  } else {
+    if (!inst.vsrc1.simd_capable())
+      return false;
+  }
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U raw0 = read_simd<uint32_t>(inst.src0, wf, base);
+    U raw1;
+    if constexpr (Vop3)
+      raw1 = read_simd<uint32_t>(inst.src1, wf, base);
+    else
+      raw1 = read_simd<uint32_t>(inst.vsrc1, wf, base);
+    const F acc = std::bit_cast<F>(read_simd<uint32_t>(inst.vdst, wf, base));
+    const F a0 = util::f16_to_f32_simd(raw0 & 0xFFFFu);
+    const F a1 = util::f16_to_f32_simd(raw0 >> 16);
+    const F b0 = util::f16_to_f32_simd(raw1 & 0xFFFFu);
+    const F b1 = util::f16_to_f32_simd(raw1 >> 16);
+    const F r = acc + (a0 * b0 + a1 * b1);
+    write_simd<uint32_t>(inst.vdst, wf, base, std::bit_cast<U>(r), chunk);
+  }
+  return true;
+}
+
+template <bool Vop3, typename Inst>
+[[nodiscard]] bool try_execute_dotc_f16_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2976,29 +3745,66 @@ template <typename Inst>
 /// 64-bit-lane VOP2 FMA counterpart (v_fmac_f64). Lane type is fixed to double,
 /// so this takes only the dst-accumulate functor. Variadic so the functor's
 /// commas pass through as one token sequence.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP2_FMA_F64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP2_FMA_F64(...)                                                        \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop2_f64_simd<double>(inst, wf, __VA_ARGS__))        \
   return
+#endif
+
+/// 64-bit-lane VOP2 binary counterpart (v_add/mul/max_num/min_num_f64). Lane
+/// type fixed to double, read/written through the split lo/hi VGPR-pair path
+/// (vsrc1 as the second source). Variadic in the functor.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64(...)
+#else
+#define ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64(...)                                                    \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_f64_simd(inst, wf, __VA_ARGS__))                 \
+  return
+#endif
 
 /// 64-bit-lane VOP1 unary counterpart. `T` is the 64-bit lane type (`double`
 /// for the f64 math ops, `uint64_t` for v_mov_b64). Variadic in the functor so
 /// its commas pass through as one token sequence.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...)                                                   \
   if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<T>(inst, wf, __VA_ARGS__))               \
   return
+#endif
 
 /// Mixed-width cvt counterpart, f64 source -> 32-bit dst. `Tout` is the 32-bit
 /// result lane type; the functor (`native<double> -> narrow32<Tout>`) is variadic
 /// so its commas pass through as one token sequence.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)
+#else
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
   if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))            \
   return
+#endif
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
 /// source lane type; the functor (`narrow32<Tin> -> native<double>`) is variadic.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)
+#else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
   return
+#endif
+
+/// VOP3 f64-source -> 32-bit-fp-dst cvt counterpart (src0 abs/neg + result
+/// omod/clamp; for v_frexp_exp_i32_f64). Functor: native<double> -> narrow32<float>.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP(...)
+#else
+#define ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP(...)                                              \
+  if (::rocjitsu::amdgpu::try_execute_cvt_vop3_f64_to_b32_fp_simd(inst, wf, __VA_ARGS__))          \
+  return
+#endif
 
 /// VOPC compare counterpart. `T` is the 32-bit lane read type; the comparison
 /// functor (which may convert/narrow inside) is variadic so its commas pass
@@ -3009,16 +3815,24 @@ template <typename Inst>
 
 /// 64-bit-lane VOPC compare counterpart (f64/i64/u64). `T` is the 64-bit lane
 /// read type; the comparison functor is variadic so its commas pass through.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOPC64(T, ...)
+#else
 #define ROCJITSU_TRY_SIMD_VOPC64(T, ...)                                                           \
   if (::rocjitsu::amdgpu::try_execute_vopc64_simd<T>(inst, wf, __VA_ARGS__))                       \
   return
+#endif
 
 /// Mixed-width v_cmp_class_f64 counterpart (64-bit value, 32-bit mask). No type
 /// argument; the class functor `(native<uint64_t> bits, narrow32<uint32_t> mask)
 /// -> mask` is variadic so its commas pass through as one token sequence.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...)                                                      \
   if (::rocjitsu::amdgpu::try_execute_vopc_class_f64_simd(inst, wf, __VA_ARGS__))                  \
   return
+#endif
 
 /// VOP3 v_cmp_class_f16/f32 counterpart (32-bit value, abs/neg modifiers, src1
 /// mask, SGPR-pair dst). `SM` is the per-op sign-bit mask (0x8000 / 0x80000000);
@@ -3029,14 +3843,25 @@ template <typename Inst>
 
 /// VOP3 v_cmp_class_f64 counterpart (64-bit value). `SM` is the f64 sign-bit mask
 /// (0x8000000000000000); the class functor is variadic.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(inst, wf, SM, __VA_ARGS__))              \
   return
+#endif
 
 /// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
 /// `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
+/// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
+/// set. `T` is the 32-bit packed lane type; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(T, ...)                                                  \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<T>(inst, wf, __VA_ARGS__))              \
   return
 
 /// VOP3 f32 binary counterpart (reads src0/src1, applies abs/neg/omod/clamp).
@@ -3061,9 +3886,13 @@ template <typename Inst>
 /// 64-bit-lane VOP3 integer/bitwise VOPC compare counterpart (i64/u64, no
 /// modifiers, SGPR-pair dst). `T` is the 64-bit integer lane read type;
 /// variadic in the functor.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...)
+#else
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_int_simd<T>(inst, wf, __VA_ARGS__))              \
   return
+#endif
 
 /// VOP3 f32 VOPC compare counterpart (per-source abs/neg modifiers, SGPR-pair
 /// dst). Lane type is fixed to float32_t; the functor takes already-modified
@@ -3084,9 +3913,13 @@ template <typename Inst>
 /// lane via split lo/hi VGPR-pair, SGPR-pair dst). Lane type is fixed to
 /// `double`; the functor takes already-modified `native<double>` arguments
 /// and is variadic so its commas pass through.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(...)                                                    \
   if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
   return
+#endif
 
 /// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
@@ -3108,9 +3941,13 @@ template <typename Inst>
 
 /// VOP3 f64 ternary counterpart (read_simd64, per-source abs/neg, omod/clamp).
 /// Variadic.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)                                                   \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp64_simd(inst, wf, __VA_ARGS__))               \
   return
+#endif
 
 /// VOP3 dst-accumulate FMA counterpart (f32). Per-isa class has no src2;
 /// vdst is the accumulator. abs/neg apply to src0/src1 only.
@@ -3125,9 +3962,13 @@ template <typename Inst>
   return
 
 /// VOP3 dst-accumulate FMA counterpart (f64).
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
   return
+#endif
 
 /// VOP3 ldexp counterpart (f32 src0 + int32 src1 exp). Variadic functor.
 #define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32(...)                                                     \
@@ -3135,9 +3976,13 @@ template <typename Inst>
   return
 
 /// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
+#endif
 
 /// VOP3 div_fmas counterpart (fma(s0,s1,s2) followed by VCC-gated ldexp; no
 /// omod/clamp). No functor — the op is fixed (operand order, ldexp shift) and
@@ -3146,22 +3991,34 @@ template <typename Inst>
   if (::rocjitsu::amdgpu::try_execute_div_fmas_f32_simd(inst, wf))                                 \
   return
 
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64()
+#else
 #define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64()                                                     \
   if (::rocjitsu::amdgpu::try_execute_div_fmas_f64_simd(inst, wf))                                 \
   return
+#endif
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
 /// the result). Variadic in the functor so its commas pass through as one
 /// token sequence.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...)                                                    \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
   return
+#endif
 
 /// VOP3 f64 unary counterpart (read_simd64, src0 abs/neg, omod/clamp on
 /// the result). Variadic in the functor.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...)
+#else
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
+#endif
 
 /// VOP3 f16 unary counterpart (raw uint32 lanes; widen f16->f32, src0 abs/neg,
 /// op, omod/clamp, narrow f32->f16). The functor takes already-widened-and-
@@ -3184,7 +4041,8 @@ template <typename Inst>
 
 /// VOP3 wide 32x32->64 multiply-add counterpart (v_mad_u64_u32 / v_mad_i64_i32).
 /// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
-/// native<uint64_t> c)`; variadic so its commas pass through.
+/// native<uint64_t> c)` and returns `SimdCarry<native<uint64_t>, mask>`;
+/// variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                 \
   return
@@ -3245,6 +4103,18 @@ template <typename Inst>
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_fp16_simd(inst, wf, __VA_ARGS__))           \
   return
 
+/// VOP3P packed-f32 binary probe (v_pk_add_f32 / v_pk_mul_f32). Functor takes
+/// (a, b) as narrow32<float> (neg-applied) and returns narrow32<float>.
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_f32_simd(inst, wf, __VA_ARGS__))             \
+  return
+
+/// VOP3P packed-f32 ternary probe (v_pk_fma_f32). Functor takes (a, b, c) as
+/// narrow32<float>; default-packing gate adds op_sel_hi_2 == 1.
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(...)                                                \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_f32_simd(inst, wf, __VA_ARGS__))            \
+  return
+
 /// VOP3P v_pk_mov_b32 probe. Functorless / fixed-op.
 #define ROCJITSU_TRY_SIMD_VOP3P_MOV_B32()                                                          \
   if (::rocjitsu::amdgpu::try_execute_vop3p_mov_b32_simd(inst, wf))                                \
@@ -3259,6 +4129,23 @@ template <typename Inst>
 /// VOP3P v_dot2_f32_f16 probe. Functorless / fixed-op.
 #define ROCJITSU_TRY_SIMD_VOP3P_DOT_F16()                                                          \
   if (::rocjitsu::amdgpu::try_execute_vop3p_dot_f16_simd(inst, wf))                                \
+  return
+
+/// VOP3P mixed-sign integer dot probe (v_dot4_i32_iu8 / v_dot8_i32_iu4). Arg:
+/// ElemBits (8 or 4). Per-operand sign read at runtime from inst.neg.
+#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED(ElemBits)                                            \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_mixed_simd<ElemBits>(inst, wf))                \
+  return
+
+/// VOP2/VOP3 dst-accumulate integer dot probe (the "c" forms). Args:
+/// (ElemBits, Vop3) — e.g. (8, true) for v_dot4c_i32_i8_vop3.
+#define ROCJITSU_TRY_SIMD_DOTC_INT(...)                                                            \
+  if (::rocjitsu::amdgpu::try_execute_dotc_int_simd<__VA_ARGS__>(inst, wf))                        \
+  return
+
+/// VOP2/VOP3 dst-accumulate f16 dot probe (v_dot2c_f32_f16). Arg: Vop3 bool.
+#define ROCJITSU_TRY_SIMD_DOTC_F16(...)                                                            \
+  if (::rocjitsu::amdgpu::try_execute_dotc_f16_simd<__VA_ARGS__>(inst, wf))                        \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
