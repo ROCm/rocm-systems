@@ -247,7 +247,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Build GPU Agent Binary
-        timeout-minutes: 30
+        timeout-minutes: 45
         working-directory: ${{ env.GPU_AGENT_WORKDIR }}/sw/nic/gpuagent
         run: |
           set -euo pipefail
@@ -265,22 +265,17 @@ jobs:
           # fixes its LDFLAGS.
           GPP_WRAP=$(cd "${AMDSMI_TESTS_DIR}" && python3 -m dme_integration write-gpp-wrapper --output /tmp/g++-wrap)
 
-          # gpu-agent's Makefile lists gen-protos/gogo-protos as ordinary
-          # prerequisites of the gpuagent target, and neither writes a file
-          # make can stat, so they are always "out of date". Under -j make
-          # reruns protoc concurrently with the object compiles that
-          # #include the generated headers, racing with a
-          # "gen/proto/gpuagent/types.pb.h: No such file" failure. Generate
-          # the protobuf sources serially first...
-          echo "::group::generate protobuf sources"
-          make gen-protos gogo-protos
-          echo "::endgroup::"
-
-          # ...then build the objects in parallel, marking the proto targets
-          # old (-o) so this phase never reruns protoc mid-compile.
+          # Build serially (no -j). The Makefile seeds $(SRC) from a
+          # parse-time `find` that is meant to skip the generated gen/proto dir.
+          # If the *.pb.cc already exist when this make is parsed -- e.g. a
+          # separate `make gen-protos` first, or a -j run that regenerates them
+          # mid-build -- that find picks them up again on top of the explicit
+          # proto list, so every proto object lands on the link line twice and
+          # the link fails with "multiple definition". A plain serial
+          # `make gpuagent` generates the protos as a prerequisite after the
+          # find has run, so each proto object is compiled and linked once.
           echo "::group::make gpuagent"
-          make gpuagent -j "$(nproc)" CC="${GPP_WRAP}" \
-            -o gen-protos -o gogo-protos
+          make gpuagent CC="${GPP_WRAP}"
           echo "::endgroup::"
 
           BLD_BIN="${GPU_AGENT_WORKDIR}/sw/nic/build/x86_64/sim/bin"
