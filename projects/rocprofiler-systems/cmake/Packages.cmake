@@ -263,8 +263,18 @@ endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-# Detect AMD SMI library version from header
-set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+# Detect AMD SMI library version from header.
+# amd_smi is already found above; pull its include dirs directly from the
+# imported target rather than running a separate find_path that may search
+# different paths.
+get_target_property(_AMDSMI_INCLUDE_DIRS amd_smi INTERFACE_INCLUDE_DIRECTORIES)
+set(_AMDSMI_HEADER "")
+foreach(_dir IN LISTS _AMDSMI_INCLUDE_DIRS)
+    if(EXISTS "${_dir}/amd_smi/amdsmi.h")
+        set(_AMDSMI_HEADER "${_dir}/amd_smi/amdsmi.h")
+        break()
+    endif()
+endforeach()
 if(EXISTS "${_AMDSMI_HEADER}")
     file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
 
