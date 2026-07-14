@@ -577,47 +577,50 @@ amdcuid_status_t CuidFile::save() {
 
       // Write hardware fingerprint (privileged file only)
       if (is_privileged_) {
-        file << "hardware_fingerprint=" << std::hex << std::setw(16)
+        file << "hardware_fingerprint=0x" << std::hex << std::setw(16)
              << std::setfill('0') << entry.hardware_fingerprint << "\n";
       }
 
       // Write device-specific fields
       if (entry.vendor_id != 0) {
-        file << "vendor_id=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "vendor_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.vendor_id << "\n";
       }
       if (entry.device_id != 0) {
-        file << "device_id=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "device_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.device_id << "\n";
       }
       if (entry.revision_id != 0) {
-        file << "revision_id=" << std::hex << std::setw(2) << std::setfill('0')
-             << static_cast<uint16_t>(entry.revision_id) << "\n";
+        file << "revision_id=0x" << std::hex << std::setw(2)
+             << std::setfill('0') << static_cast<uint16_t>(entry.revision_id)
+             << "\n";
       }
       if (entry.family != 0) {
-        file << "family=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "family=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.family << "\n";
       }
       if (entry.model != 0) {
-        file << "model=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "model=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.model << "\n";
       }
       if (entry.pci_class != 0) {
-        file << "pci_class=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "pci_class=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.pci_class << "\n";
       }
-      if (entry.unit_id != 0) {
-        file << "unit_id=" << std::hex << std::setw(4) << std::setfill('0')
+      if (entry.unit_id != std::numeric_limits<uint16_t>::max()) {
+        file << "unit_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.unit_id << "\n";
       }
       if (!entry.device_node.empty()) {
         file << "device_node=" << entry.device_node << "\n";
       }
       if (entry.package_id != std::numeric_limits<uint16_t>::max()) {
-        file << "package_id=" << entry.package_id << "\n";
+        file << "package_id=0x" << std::hex << std::setw(4) << std::setfill('0')
+             << entry.package_id << "\n";
       }
       if (entry.core_id != std::numeric_limits<uint16_t>::max()) {
-        file << "core_id=" << entry.core_id << "\n";
+        file << "core_id=0x" << std::hex << std::setw(4) << std::setfill('0')
+             << entry.core_id << "\n";
       }
       if (!entry.bdf.empty()) {
         file << "bdf=" << entry.bdf << "\n";

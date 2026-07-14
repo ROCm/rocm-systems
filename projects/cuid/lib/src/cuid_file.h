@@ -145,10 +145,10 @@ struct CuidFileEntry {
   uint8_t revision_id = 0;
 
   // Device-specific information
-  uint16_t family = 0;     // For CPU
-  uint16_t model = 0;      // For CPU
-  uint16_t pci_class = 0;  // For PCIe devices (GPU, NIC)
-  uint16_t unit_id = 0;    // For CPU and GPU
+  uint16_t family = 0;    // For CPU
+  uint16_t model = 0;     // For CPU
+  uint16_t pci_class = 0; // For PCIe devices (GPU, NIC)
+  uint16_t unit_id = std::numeric_limits<uint16_t>::max(); // For CPU and GPU
   std::string device_node; // For GPU: /sys/class/drm/renderD128, NIC:
                            // /sys/class/net/eth0
   uint16_t package_id =

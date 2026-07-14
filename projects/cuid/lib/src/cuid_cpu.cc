@@ -242,8 +242,8 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
     // representative used by firmware to identify the socket.
     info.header.fields.cpu.unit_id = static_cast<uint16_t>(rep->apic_id);
     info.header.fields.cpu.physical_id = static_cast<uint16_t>(kv.first);
-    // core is not meaningful at socket granularity
-    info.header.fields.cpu.core = 0;
+    info.header.fields.cpu.core =
+        static_cast<uint16_t>(rep->processor); // logical CPU number
 
     // device_node points to the representative logical CPU's sysfs path.
     info.device_node =
@@ -382,7 +382,7 @@ CuidCpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
   // PPIN is an eFuse-burned per-socket serial number — the spec's primary
   // identifier. The core argument only selects which MSR fd to open.
   uint64_t ppin = 0;
-  if (try_read_ppin(ppin, m_info.header.fields.cpu.unit_id)) {
+  if (try_read_ppin(ppin, m_info.header.fields.cpu.core)) {
     fingerprint = ppin;
     return AMDCUID_STATUS_SUCCESS;
   }
