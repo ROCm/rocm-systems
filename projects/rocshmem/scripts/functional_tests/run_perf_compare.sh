@@ -27,6 +27,12 @@
 #   --baseline-dir PATH   Use PATH as pre-built baseline (skips baseline build).
 #                         Use with --skip-baseline to also skip baseline test runs.
 #   --branch-dir PATH     Use PATH as pre-built branch build (skips branch build).
+#   --variant-dir SPEC    Additional named variant: NAME:ENV1=V1,...:PATH
+#                         NAME       - label used in plots and directory name
+#                         ENV1=V1,…  - comma-separated env vars set at runtime
+#                         PATH       - PATH to use as pre-build variant build (skips variant build)
+#                         May be repeated for multiple variants.
+#                         Example: --variant-path "sdma-on:ROCSHMEM_SDMA_ENABLED=1:build/sdma"
 #   --skip-build          Skip all build steps (reuse existing builds)
 #   --skip-baseline       Skip baseline build and test runs (reuse existing logs)
 #   --skip-develop        Alias for --skip-baseline
@@ -56,6 +62,7 @@ CMAKE_ARGS=""
 BRANCH_ARGS=""
 VARIANT_SPECS=()   # array of "name:env1=v1,...:cmake-args"
 PR_NUM=""
+VARIANT_DIR_SPECS=() # array of "name:env1=v1,...:build-dir"
 SKIP_BUILD=0
 SKIP_BASELINE=0
 SKIP_BRANCH=0
@@ -76,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --base-branch)   BASE_BRANCH="$2";                     shift 2 ;;
     --baseline-dir)  BASELINE_DIR="$2";                    shift 2 ;;
     --branch-dir)    BRANCH_DIR="$2";                      shift 2 ;;
+    --variant-dir)   VARIANT_DIR_SPECS+=("$2");            shift 2 ;;
     --skip-build)    SKIP_BUILD=1;                         shift ;;
     --skip-baseline) SKIP_BASELINE=1;                      shift ;;
     --skip-develop)  SKIP_BASELINE=1;                      shift ;;
@@ -290,6 +298,12 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     (cd "$vdir" && "$BUILD_CONFIG_SCRIPT" $CMAKE_ARGS $vcmake)
   done
 
+  # Additional pre-built variants
+  for dir_spec in "${VARIANT_DIR_SPECS[@]}"; do
+    IFS=':' read -r vname venv vdir <<< "$dir_spec"
+    echo "--- Using pre-built variant dir:  $vdir ---"
+  done
+
   echo ">>> Builds complete"
 else
   echo ""
@@ -345,6 +359,16 @@ for spec in "${VARIANT_SPECS[@]}"; do
   run_iterations "$vdir" "logs-${SUITE}" "$vname" "$env_prefix"
 done
 
+for dir_spec in "${VARIANT_DIR_SPECS[@]}"; do
+  IFS=':' read -r vname venv vdir <<< "$dir_spec"
+  env_prefix=""
+  IFS=',' read -ra pairs <<< "$venv"
+  for pair in "${pairs[@]}"; do
+    [[ -n "$pair" ]] && env_prefix+="export $pair; "
+  done
+  run_iterations "$vdir" "logs-${SUITE}" "$vname" "$env_prefix"
+done
+
 echo ">>> All test runs complete"
 
 # ---------------------------------------------------------------------------
@@ -358,6 +382,10 @@ VARIANT_ARGS=("${BRANCH_LABEL}:$BUILD_BRANCH/logs-${SUITE}-*")
 for spec in "${VARIANT_SPECS[@]}"; do
   IFS=':' read -r vname venv vcmake <<< "$spec"
   vdir="$PROJECTS_DIR/build-${BRANCH_SAFE}-${vname}"
+  VARIANT_ARGS+=("${vname}:${vdir}/logs-${SUITE}-*")
+done
+for dir_spec in "${VARIANT_DIR_SPECS[@]}"; do
+  IFS=':' read -r vname venv vdir <<< "$dir_spec"
   VARIANT_ARGS+=("${vname}:${vdir}/logs-${SUITE}-*")
 done
 
