@@ -59,7 +59,11 @@
 // and ncclLoadParam.
 #undef ncclCudaCallocAsync
 #undef ncclCudaMemcpyAsync
-#define ncclCudaCallocAsync(ptr, nelem, stream) \
+// Variadic: production's ncclCudaCallocAsync now takes trailing
+// manager/memType args (e.g. comm->memManager). We ignore them here --
+// the fake is type-erased to (void**, nbytes, stream) -- but the macro
+// must still swallow the extra arguments so the call site expands.
+#define ncclCudaCallocAsync(ptr, nelem, stream, ...) \
     g_fakeCudaCallocAsync(reinterpret_cast<void**>(ptr), \
                           (nelem) * sizeof(**(ptr)), (stream))
 #define ncclCudaMemcpyAsync(dst, src, nelem, stream) \
@@ -191,8 +195,13 @@ struct RegRecordCleaner {
     ncclReg& reg;
     explicit RegRecordCleaner(ncclReg& r) : reg(r) {}
     ~RegRecordCleaner() {
-        for (auto*& info : reg.ipcInfos) {
-            if (info) { std::free(info); info = nullptr; }
+        // ipcInfos is a dynamically-sized pointer (ncclIpcRegInfo**) sized to
+        // reg.ipcInfosSize; iterate by index rather than range-for. Tests that
+        // install stack-owned ncclIpcRegInfo into a slot null it out before
+        // this cleaner runs, so only heap-allocated (production newInfo) slots
+        // survive to be freed here.
+        for (int i = 0; i < reg.ipcInfosSize; ++i) {
+            if (reg.ipcInfos[i]) { std::free(reg.ipcInfos[i]); reg.ipcInfos[i] = nullptr; }
         }
         if (reg.regIpcAddrs.hostPeerRmtAddrs) {
             std::free(reg.regIpcAddrs.hostPeerRmtAddrs);
@@ -201,6 +210,27 @@ struct RegRecordCleaner {
     }
     RegRecordCleaner(const RegRecordCleaner&)            = delete;
     RegRecordCleaner& operator=(const RegRecordCleaner&) = delete;
+};
+
+// IpcInfosBacking -- provides stack storage for ncclReg::ipcInfos, which
+// production now treats as a dynamically-(re)allocated ncclIpcRegInfo**
+// sized to ipcInfosSize (it used to be a fixed inline array). By
+// pre-attaching a NCCL_MAX_LOCAL_RANKS-sized zeroed array and setting
+// ipcInfosSize to match, production's
+//     if (ipcInfos == NULL || ipcInfosSize < ipcIndexSize) ncclRealloc(...)
+// guard never fires (ipcIndexSize == localRanks <= NCCL_MAX_LOCAL_RANKS),
+// so the array stays stack-owned -- no malloc to free, no per-test leak --
+// while individual slots behave exactly like the real pointer array. Drop
+// one of these next to every ncclReg a test drives ipcRegisterBuffer with;
+// it must outlive the call.
+struct IpcInfosBacking {
+    std::array<ncclIpcRegInfo*, NCCL_MAX_LOCAL_RANKS> storage{};
+    explicit IpcInfosBacking(ncclReg& reg) {
+        reg.ipcInfos     = storage.data();
+        reg.ipcInfosSize = NCCL_MAX_LOCAL_RANKS;
+    }
+    IpcInfosBacking(const IpcInfosBacking&)            = delete;
+    IpcInfosBacking& operator=(const IpcInfosBacking&) = delete;
 };
 
 // CommBuilder -- fluent builder that owns the backing storage for the
@@ -414,6 +444,7 @@ protected:
 
     CommBuilder cb;
     ncclReg     regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     // std::optional rather than raw members so RegRecordCleaner (which
     // captures &regRecord) and the ScopedHook (which mutates a global
     // std::function slot) are constructed in SetUp() *after* regRecord
@@ -516,6 +547,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ true);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     existing.InstallInto(regRecord);
@@ -559,6 +591,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x2000;
     existing.InstallInto(regRecord);
@@ -615,6 +648,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x4000;
     existing.InstallInto(regRecord);
@@ -701,6 +735,7 @@ protected:
     // non-copyable members.
     std::unique_ptr<CommBuilder>       cb;
     std::unique_ptr<ncclReg>           regRecord;
+    std::unique_ptr<IpcInfosBacking>   ipcInfosBacking;
     std::unique_ptr<RegRecordCleaner>  regCleanup;
     std::unique_ptr<ScopedHook<int64_t(const char*, int64_t)>> loadParam;
     std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
@@ -724,6 +759,7 @@ protected:
         *regRecord = ncclReg{};
         regRecord->begAddr = kBegAddr;
         regRecord->endAddr = kBegAddr + 0x1000;
+        ipcInfosBacking = std::make_unique<IpcInfosBacking>(*regRecord);
         // ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
         regCleanup = std::make_unique<RegRecordCleaner>(*regRecord);
 
@@ -811,6 +847,7 @@ protected:
         memGet.reset();
         loadParam.reset();
         regCleanup.reset();
+        ipcInfosBacking.reset();
         regRecord.reset();
         cb.reset();
         P2pMicrotest::TearDown();
@@ -1118,6 +1155,7 @@ TEST_F(P2pMicrotest, DISABLED_IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenC
     ReusableIpcInfo prior(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                           /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     prior.InstallInto(regRecord);
@@ -1185,6 +1223,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ true);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     existing.InstallInto(regRecord);
@@ -1406,6 +1445,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerReuseLoopIteratesCorrectly)
     devPeerRmtAddrs[kPeer1LocalRank] = kRmt1;
 
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x2000;
     regRecord.ipcInfos[kPeer0LocalRank]   = &info0;
@@ -1459,6 +1499,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
       .WithMaxLocalRanks();
 
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
@@ -1605,6 +1646,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     devTable[kPeer1LocalRank] = 0xDEADu;
 
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     regRecord.ipcInfos[kPeer0LocalRank]    = &info0;
@@ -1719,6 +1761,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseAllocatesDevTableWithoutMe
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x2000;
     existing.InstallInto(regRecord);
@@ -1804,6 +1847,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerFreshRegistrationReusesBaseAddrA
     cb.comm().gproxyConn[kPeer1Rank].initialized = true;
 
     ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     // Both ipcInfos[] slots NULL -> both peers take the fresh-reg arm.

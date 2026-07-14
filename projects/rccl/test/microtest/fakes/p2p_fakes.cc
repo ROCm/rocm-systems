@@ -38,6 +38,7 @@
 #include "shm.h"          // ncclShm*
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
+#include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
 
 #include "p2p_fakes.h"     // controllable seam hooks
 
@@ -494,3 +495,67 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
     if (isXGMI) *isXGMI = false;
     return ncclSuccess;
 }
+
+// ---------------------------------------------------------------------------
+// Bucket E: memory-manager tracking stubs.
+//
+// The rebased p2p.cc reaches ncclCuMem{Alloc,Free} and the shareable-buffer
+// import/export paths in alloc.h, which now route allocations through the
+// ncclMemManager tracking layer. None of the microtests exercise real HIP
+// allocation (the ncclCudaCallocAsync macro is shimmed away), so these are
+// pure no-ops that satisfy the linker and report success.
+// ---------------------------------------------------------------------------
+
+ncclResult_t ncclMemTrack(struct ncclMemManager* /*manager*/,
+                          void*                            /*ptr*/,
+                          size_t                           /*size*/,
+                          hipMemGenericAllocationHandle_t  /*handle*/,
+                          hipMemAllocationHandleType       /*handleType*/,
+                          ncclMemType_t                    /*memType*/)
+{
+    return ncclSuccess;
+}
+
+ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* /*manager*/,
+                                        void*                           /*ptr*/,
+                                        size_t                          /*size*/,
+                                        hipMemGenericAllocationHandle_t /*handle*/,
+                                        hipMemAllocationHandleType      /*handleType*/,
+                                        ncclMemType_t                   /*memType*/,
+                                        int                             /*ownerRank*/,
+                                        int                             /*ownerDev*/,
+                                        void*                           /*ownerPtr*/)
+{
+    return ncclSuccess;
+}
+
+ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
+                            void*                  /*ptr*/,
+                            size_t                 /*size*/)
+{
+    return ncclSuccess;
+}
+
+ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* /*manager*/,
+                                        void*                  /*ptr*/,
+                                        int                    /*peerRank*/)
+{
+    return ncclSuccess;
+}
+
+// Batch fd-query variant added upstream for multi-segment registration.
+// Returns failure by default -- no microtest drives the multi-segment
+// path (ncclParamMultiSegmentRegister is stubbed to 0 below).
+ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*comm*/,
+                                                 struct ncclProxyConnector* /*proxyConn*/,
+                                                 int*                       /*localFds*/,
+                                                 int*                       /*rmtFds*/,
+                                                 int                        /*numSegments*/)
+{
+    return ncclSystemError;
+}
+
+// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
+// `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
+// keeps the single-segment path the microtests exercise.
+int64_t ncclParamMultiSegmentRegister() { return 0; }

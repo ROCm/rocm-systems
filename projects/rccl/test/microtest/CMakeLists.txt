@@ -29,7 +29,7 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_LINK_LIBS})
 # pass the absolute path through as a string literal so the #include in
 # the test TU stays independent of the build directory layout.
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p.cc"
+  P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
 )
 
 # Make sure the hipify step has produced the file before we try to compile
