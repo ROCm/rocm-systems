@@ -551,6 +551,8 @@ Full gfx950 support means:
   regression passes, and test 1833 passes under the record/replay hook with
   `/tmp/xx/TheRock/build/dist/rocm`. The clean broad rerun then passes 259/259,
   completing `T4RRC` and aggregate `T4RR`; `T4SA` is now active.
+- 2026-07-14: `T4SA` is `DONE`: the standard sampled broad IREE profile passes
+  259/259. `T4IS` is now active; no other IREE CTest overlaps it.
 
 ## DAG Overview
 
@@ -787,8 +789,8 @@ flowchart LR
   T4RRB["T4RRB: Persistent Identity Containment"]:::done
   T4RRC["T4RRC: Clean Record/Replay Rerun"]:::done
   T4RR{"T4RR: Record/Replay Broad IREE"}:::done
-  T4SA["T4SA: Sampled Broad IREE"]:::active
-  T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
+  T4SA["T4SA: Sampled Broad IREE"]:::done
+  T4IS["T4IS: Inline-Shadow Broad IREE"]:::active
   T4G{"T4G: Broad Compatibility Accepted"}:::target
   D2A["D2A: Capability And Runbook Content"]:::done
   D2B["D2B: Final Result Tables"]:::todo
@@ -2414,11 +2416,13 @@ This aggregate now has three bounded subnodes:
   restored test 1833, and the clean workspace-runtime sweep passes 259/259,
   including all prior scalar-containment and numerical-mismatch rows.
 
-### T4SA: Sampled Broad IREE - ACTIVE
+### T4SA: Sampled Broad IREE - DONE
 
 Goal: run the same inventory under standard sampled MOI.
 
-### T4IS: Inline-Shadow Broad IREE - TODO
+Result: 259/259 pass with the workspace TheRock runtime.
+
+### T4IS: Inline-Shadow Broad IREE - ACTIVE
 
 Goal: run the same inventory under standard inline shadow.
 
