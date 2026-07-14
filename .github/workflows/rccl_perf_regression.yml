@@ -10,9 +10,14 @@
 #
 # Flow per PR:
 #   1. Check out PR head with full history (merge-base resolution needs it).
-#   2. build_rccl.sh: build librccl.so for reference (merge-base) and candidate
-#      (PR head) from projects/rccl, then template their lib dirs into ci_detect.json.
-#   3. submit_and_poll.sh: run the A/B detector sbatch on the pinned nodes.
+#   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
+#      and candidate (PR head) on a single build node, then template their lib
+#      dirs into a per-run copy of ci_detect.json. This is a single-node CPU
+#      compile with no RDMA/MPI involved, so it runs under its own concurrency
+#      lock instead of the pinned 4-node lock below -- it no longer holds all
+#      4 nodes idle for its ~15-20min duration.
+#   3. [detect job] rccl_ab.sbatch: run the A/B detector on the pinned 4-node
+#      set, using the config the build job produced.
 #   4. format_report.py: render verdict to the job summary + PR comment.
 #   5. Job exit code (from the detector) is the merge gate.
 name: RCCL Perf Regression Gate
@@ -37,13 +42,6 @@ on:
         required: false
         default: '0'
 
-# Serialise: the pinned calibration nodes can host only one A/B job at a time,
-# and thresholds are only valid there. Do NOT cancel in-progress (a running
-# allocation must finish cleanly to release the nodes).
-concurrency:
-  group: rccl-perf-gate-pinned-nodes
-  cancel-in-progress: false
-
 env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   SLURM_RESERVATION: rccl_ci
@@ -55,9 +53,19 @@ permissions:
   actions: write
 
 jobs:
-  perf-gate:
+  build:
+    # Separate lock from the detect job below: build never touches the pinned
+    # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
+    # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
+    # -- see "Runner capacity" in the PR's known gaps. With one runner, this
+    # still shortens how long the 4-node reservation is held per PR.)
+    concurrency:
+      group: rccl-perf-gate-build
+      cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
-    timeout-minutes: 600
+    timeout-minutes: 60
+    outputs:
+      config_json: ${{ steps.resolve.outputs.config_json }}
     steps:
       - name: Checkout PR (full history)
         uses: actions/checkout@v4
@@ -73,17 +81,50 @@ jobs:
             && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
             || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
 
-      - name: Build + run A/B detector (one sbatch allocation on pinned nodes)
-        id: detect
-        # Build of reference+candidate librccl and the detector run happen inside
-        # the SAME allocation (build_node=same_alloc). Don't fail here; we still
-        # want to post the report below — the final "Gate" step enforces it.
-        continue-on-error: true
+      - name: Build reference + candidate librccl (single build node)
+        id: resolve
         env:
           BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
           BASE_REF: origin/${{ github.base_ref || 'develop' }}
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
+        run: |
+          if [[ "${BUILD_RCCL}" == "1" ]]; then
+            # This job's concurrency lock no longer matches the detect job's
+            # lock, so another PR's build can now run while this PR is still
+            # waiting for/running its detect step. Templating the shared prod
+            # config file in place (the old behavior) would let one PR's build
+            # clobber another PR's in-flight detect config -- give every run
+            # its own copy instead.
+            RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
+            cp "${_CONFIG}" "${RUN_CONFIG}"
+            sbatch --wait \
+              --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
+              --reservation="${SLURM_RESERVATION}" \
+              "${RCCL_CI_ROOT}/sbatch/rccl_build.sbatch"
+            echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
+          fi
+
+  detect:
+    needs: build
+    # Serialise: the pinned calibration nodes can host only one A/B job at a
+    # time, and thresholds are only valid there. Do NOT cancel in-progress (a
+    # running allocation must finish cleanly to release the nodes).
+    concurrency:
+      group: rccl-perf-gate-pinned-nodes
+      cancel-in-progress: false
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 540
+    steps:
+      - name: Run A/B detector (pinned 4-node allocation)
+        id: detect
+        # Don't fail here; we still want to post the report below -- the final
+        # "Gate" step enforces it.
+        continue-on-error: true
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
         run: |
           bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" "${_CONFIG}"
 
@@ -114,6 +155,15 @@ jobs:
             /it-share/rccl-ci/ab_artifacts/ab_derived_thresholds.json
             /it-share/rccl-ci/ab_artifacts/rccl_runs.log
 
+      - name: Clean up per-run config copy
+        if: always()
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
+        run: |
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
+
       - name: Gate on detector verdict
         if: always()
         run: |
@@ -128,5 +178,3 @@ jobs:
           python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --output /dev/null
-
-
