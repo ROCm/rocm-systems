@@ -20,10 +20,12 @@ namespace amdgpu {
 
 /// @brief Memory-side cache component sitting between L2 and HBM on each IOD.
 ///
-/// @details Write-back, write-allocate cache, and no mtype awareness. All traffic from
+/// @details Write-through, write-allocate cache, and no mtype awareness. All traffic from
 /// L2 is already filtered (UC bypasses L2, so it never reaches the MSC).
 /// On miss, fetches from the backing store via the requester port (typically HbmController).
-/// On eviction, dirty lines are written back to the backing store.
+/// Stores are pushed straight to the backing store and the line is left clean
+/// (EXCLUSIVE), so the daemon's process_vm_readv bridge sees writes immediately;
+/// the for_each_dirty writeback in flush_all() is retained as a safety net.
 ///
 /// Provides structural ports for the topology graph. The backing store is reached
 /// through the requester port (req), which is connected to the HBM controller via a link.
@@ -51,8 +53,8 @@ public:
                                                     simdojo::PortProtocol::MEMORY));
   }
 
-  void read(uint64_t addr, uint8_t *dst, uint32_t size);
-  void write(uint64_t addr, const uint8_t *src, uint32_t size);
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0);
+  void write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0);
 
   /// @brief Flush all dirty lines to the backing store and invalidate.
   void flush_all();
@@ -64,9 +66,9 @@ public:
           auto &hdr = msg->header();
           auto *data = reinterpret_cast<uint8_t *>(msg->payload());
           if (hdr.op == simdojo::MessageOp::READ)
-            read(hdr.addr, data, hdr.size_bytes);
+            read(hdr.addr, data, hdr.size_bytes, hdr.vmid);
           else if (hdr.op == simdojo::MessageOp::WRITE)
-            write(hdr.addr, data, hdr.size_bytes);
+            write(hdr.addr, data, hdr.size_bytes, hdr.vmid);
           hdr.op = simdojo::MessageOp::RESPONSE;
         });
       }
@@ -85,9 +87,9 @@ public:
       auto &hdr = msg->header();
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       if (hdr.op == simdojo::MessageOp::READ)
-        read(hdr.addr, data, hdr.size_bytes);
+        read(hdr.addr, data, hdr.size_bytes, hdr.vmid);
       else if (hdr.op == simdojo::MessageOp::WRITE)
-        write(hdr.addr, data, hdr.size_bytes);
+        write(hdr.addr, data, hdr.size_bytes, hdr.vmid);
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
     cpl_ports_.push_back(raw);
@@ -95,10 +97,11 @@ public:
   }
 
 private:
-  void ensure_line(uint64_t addr);
+  void ensure_line(uint64_t addr, uint32_t vmid);
 
   /// @brief Send a read or write request to the backing store via the req port.
-  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op);
+  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
+                    uint32_t vmid);
 
   /// @brief Return the stripe index for a given address.
   uint32_t stripe_index(uint64_t addr) const {
