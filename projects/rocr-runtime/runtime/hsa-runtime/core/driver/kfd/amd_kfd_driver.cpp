@@ -285,8 +285,12 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  // WinDXG system allocations carry a high per-allocation WDDM cost. The region allocator already
+  // handles fragment-aware free and access updates, so use it for ordinary system memory there too.
+  const bool fragmentable_memory =
+      m_region.IsLocalMemory() ||
+      (m_region.IsSystem() && core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg());
+  if (fragmentable_memory && !kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
