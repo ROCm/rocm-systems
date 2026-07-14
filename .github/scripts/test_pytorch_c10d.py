@@ -142,7 +142,7 @@ def clone_pytorch_test_sources(pytorch_src: Path) -> None:
         )
 
     subprocess.run(
-        ["git", "sparse-checkout", "set", "test/", "torch/testing/"],
+        ["git", "sparse-checkout", "set", "test/"],
         cwd=pytorch_src,
         check=True,
     )
