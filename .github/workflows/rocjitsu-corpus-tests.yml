@@ -229,7 +229,7 @@ jobs:
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               --durations=0 \
-              tests/test_corpus.py \
+              tests/test_corpus.py -vv \
               -n auto \
               --target "${name}" \
               --suite iree,kernels,cts \
