@@ -143,8 +143,9 @@ public:
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
-    static auto instance = std::make_shared<ExecutionPluginGroup>();
-    return instance;
+    static const auto *instance =
+        new std::shared_ptr<ExecutionPluginGroup>(std::make_shared<ExecutionPluginGroup>());
+    return *instance;
   }
 
 protected:
