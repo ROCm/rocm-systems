@@ -40,6 +40,22 @@ namespace rocjitsu {
 
 namespace {
 
+// Prefix of libhsakmt's public HsaUserContextSaveAreaHeader ABI. Rocjitsu's
+// standalone headers do not carry hsakmttypes.h, so retain just the fields KFD
+// needs to deliver queue exceptions and lock their published offsets here.
+struct HsaUserContextSaveAreaHeaderPrefix {
+  uint32_t control_stack_offset;
+  uint32_t control_stack_size;
+  uint32_t wave_state_offset;
+  uint32_t wave_state_size;
+  uint32_t debug_offset;
+  uint32_t debug_size;
+  uint64_t error_reason_va;
+  uint32_t error_event_id;
+};
+static_assert(offsetof(HsaUserContextSaveAreaHeaderPrefix, error_reason_va) == 24);
+static_assert(offsetof(HsaUserContextSaveAreaHeaderPrefix, error_event_id) == 32);
+
 bool vm_trace_enabled() {
   static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
   return enabled;
@@ -193,7 +209,7 @@ bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
 int SimulatedKfd::open() {
   static std::once_flag raise_nofile_flag;
   std::call_once(raise_nofile_flag, [] {
-    struct rlimit rl {};
+    struct rlimit rl{};
     if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < 8192) {
       rl.rlim_cur = std::min<rlim_t>(rl.rlim_max, 65536);
       setrlimit(RLIMIT_NOFILE, &rl);
@@ -639,7 +655,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     if (doorbell_fd >= 0) {
       off_t cur_size = 0;
       {
-        struct stat st {};
+        struct stat st{};
         if (fstat(doorbell_fd, &st) == 0)
           cur_size = st.st_size;
       }
@@ -1257,6 +1273,21 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // amd_queue_t base: write_pointer_address points to write_dispatch_id.
   if (!hw.is_sdma)
     hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+  // libhsakmt places the queue exception signal payload and event ID in the
+  // context-save-area header. Preserve them so an emulated wave exception can
+  // follow the same KFD -> ROCR notification path as hardware.
+  if (!hw.is_sdma && args->ctx_save_restore_address != 0) {
+    if (auto *mem = gpu->soc->memory()) {
+      hw.error_reason_va =
+          mem->read64(args->ctx_save_restore_address +
+                          offsetof(HsaUserContextSaveAreaHeaderPrefix, error_reason_va),
+                      proc.process_id());
+      hw.error_event_id =
+          mem->read32(args->ctx_save_restore_address +
+                          offsetof(HsaUserContextSaveAreaHeaderPrefix, error_event_id),
+                      proc.process_id());
+    }
+  }
   if (hw.is_sdma && !daemon_mode_) {
     auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
     auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
@@ -1335,7 +1366,7 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   if (!find_gpu(args->gpu_id))
     return -EINVAL;
 
-  struct stat st {};
+  struct stat st{};
   if (fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
   uint64_t size = static_cast<uint64_t>(st.st_size);
@@ -1619,7 +1650,7 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   }
 
   if (!found) {
-    struct stat st {};
+    struct stat st{};
     if (fstat(args->dmabuf_fd, &st) != 0)
       return -errno;
     size = static_cast<uint64_t>(st.st_size);
@@ -1721,7 +1752,7 @@ bool SimulatedKfd::owns_fd(int fd) const {
 }
 
 void SimulatedKfd::init_reserved_fd_range() {
-  struct rlimit rl {};
+  struct rlimit rl{};
   getrlimit(RLIMIT_NOFILE, &rl);
   reserved_fd_base_ = static_cast<int>(rl.rlim_cur) - kReservedFdCount;
   next_reserved_fd_ = reserved_fd_base_;

@@ -180,6 +180,9 @@ public:
   /// and the CP is notified via notify_wg_complete.
   void release_wf(uint32_t dispatch_id, uint32_t wg_id);
 
+  /// @brief Halt every resident wave belonging to a faulted dispatch.
+  void abort_dispatch(uint32_t dispatch_id);
+
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();

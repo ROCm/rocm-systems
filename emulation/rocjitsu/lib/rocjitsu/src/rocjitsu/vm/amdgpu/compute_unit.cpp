@@ -212,6 +212,13 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   }
 }
 
+void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
+  for (auto &wf : wfs_) {
+    if (!wf->is_halted() && wf->dispatch_id() == dispatch_id)
+      wf->halt();
+  }
+}
+
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;

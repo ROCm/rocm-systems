@@ -2938,11 +2938,9 @@ class CodeGenerator:
 
         if cls == 'trap':
             # S_TRAP is an exceptional control-flow terminator for CFG and DBT
-            # purposes, but rocjitsu does not currently model trap-handler
-            # execution in the wavefront simulator. Make dynamic execution fail
-            # explicitly while the generated PROGRAM_TERMINATOR flag carries the
-            # static-control-flow meaning for CFG construction.
-            return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
+            # purposes. The simulator models an unhandled trap as a dispatch
+            # fault; executing a guest trap handler remains out of scope.
+            return '  wf.trap();'
 
         if cls == 'waitcnt':
             L.append(

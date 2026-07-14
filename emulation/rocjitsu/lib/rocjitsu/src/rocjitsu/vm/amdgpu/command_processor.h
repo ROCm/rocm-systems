@@ -70,6 +70,8 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   uint64_t queue_desc_va = 0;
+  uint64_t error_reason_va = 0;
+  uint32_t error_event_id = 0;
 };
 
 enum class SdmaPacketDialect {
@@ -158,6 +160,7 @@ public:
 
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
+  void notify_wave_trap(uint32_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 

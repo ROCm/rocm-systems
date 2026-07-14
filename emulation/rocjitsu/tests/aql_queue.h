@@ -40,7 +40,8 @@ public:
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
-           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR)
+           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, uint64_t error_reason_addr = 0,
+           uint32_t error_event_id = 0)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -56,6 +57,8 @@ public:
     hw.read_ptr_va = read_ptr_addr_;
     hw.write_ptr_va = write_ptr_addr_;
     hw.doorbell_va = doorbell_addr_;
+    hw.error_reason_va = error_reason_addr;
+    hw.error_event_id = error_event_id;
     cp_->register_queue(std::move(hw));
   }
 

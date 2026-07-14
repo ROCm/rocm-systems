@@ -9,11 +9,24 @@
 #include <cstdio>
 #include <cstdlib>
 #include <hip/hip_runtime.h>
+#include <sys/resource.h>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 int main(int argc, char **argv) {
+  if (const char *expect_trap = std::getenv("RJ_CONSAN_EXPECT_TRAP");
+      expect_trap != nullptr && expect_trap[0] != '\0' && expect_trap[0] != '0') {
+    // CLR deliberately aborts on queue exceptions when RLIMIT_CORE is nonzero,
+    // before publishing the GPU error observed by hipDeviceSynchronize(). This
+    // test intentionally triggers a queue exception and needs the recoverable
+    // HIP error path instead of a host core dump.
+    const rlimit no_core = {0, 0};
+    if (setrlimit(RLIMIT_CORE, &no_core) != 0) {
+      std::perror("setrlimit(RLIMIT_CORE)");
+      return 1;
+    }
+  }
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
   (void)hipDeviceReset();

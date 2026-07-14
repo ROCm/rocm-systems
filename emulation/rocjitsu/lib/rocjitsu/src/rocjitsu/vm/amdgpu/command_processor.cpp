@@ -805,6 +805,80 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
     completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
 }
 
+void CommandProcessor::notify_wave_trap(uint32_t dispatch_id) {
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+
+  DispatchEntry *faulted_entry = nullptr;
+  HwQueue *faulted_queue = nullptr;
+  HwQueueState *faulted_queue_state = nullptr;
+  size_t faulted_entry_index = 0;
+  for (size_t queue_idx = 0; queue_idx < new_queue_states_.size(); ++queue_idx) {
+    for (size_t entry_idx = 0; entry_idx < new_queue_states_[queue_idx].entries.size();
+         ++entry_idx) {
+      auto &entry = new_queue_states_[queue_idx].entries[entry_idx];
+      if (entry.dispatch_id == dispatch_id) {
+        faulted_entry = &entry;
+        faulted_queue = &hw_queues_[queue_idx];
+        faulted_queue_state = &new_queue_states_[queue_idx];
+        faulted_entry_index = entry_idx;
+        break;
+      }
+    }
+    if (faulted_entry)
+      break;
+  }
+
+  if (!faulted_entry || faulted_entry->faulted)
+    return;
+
+  faulted_entry->faulted = true;
+  faulted_queue_state->status = HwQueueState::Status::BLOCKED;
+  // A wave trap is a fatal queue exception in ROCR. Packets already fetched
+  // after the faulting dispatch (notably a synchronize marker) must not report
+  // normal completion before the queue error callback cancels them.
+  for (size_t idx = faulted_entry_index + 1; idx < faulted_queue_state->entries.size(); ++idx) {
+    auto &entry = faulted_queue_state->entries[idx];
+    entry.faulted = true;
+    entry.dispatched_wgs = entry.total_wgs;
+    entry.completed_wgs = entry.total_wgs;
+  }
+  // Workgroups which were never made resident must not keep a faulted
+  // dispatch alive. Resident workgroups complete as abort_dispatch() halts
+  // their waves and follows the normal per-WG refcount path.
+  faulted_entry->completed_wgs += faulted_entry->total_wgs - faulted_entry->dispatched_wgs;
+  faulted_entry->dispatched_wgs = faulted_entry->total_wgs;
+
+  util::Logger::cp([&](auto &os) {
+    os << std::format("WAVE_TRAP d={} q={} pid={}", dispatch_id, faulted_entry->queue_id,
+                      faulted_entry->process_id);
+  });
+
+  if (faulted_queue && faulted_queue->error_reason_va != 0) {
+    // KFD exception bit 2 is EC_QUEUE_WAVE_TRAP. ROCR's queue exception
+    // handler translates it to HSA_STATUS_ERROR_EXCEPTION and ultimately a
+    // HIP launch failure.
+    constexpr uint64_t kQueueWaveTrapMask = uint64_t{1} << (2 - 1);
+    if (auto *page = memory_->resolve_host_ptr(faulted_queue->error_reason_va,
+                                               faulted_queue->process_id)) {
+      auto *reason = reinterpret_cast<uint64_t *>(
+          page + (faulted_queue->error_reason_va & 0xFFF));
+      std::atomic_ref<uint64_t>(*reason).fetch_or(kQueueWaveTrapMask,
+                                                  std::memory_order_release);
+    } else {
+      uint64_t reason = memory_->read64(faulted_queue->error_reason_va,
+                                        faulted_queue->process_id);
+      memory_->write64(faulted_queue->error_reason_va, reason | kQueueWaveTrapMask,
+                       faulted_queue->process_id);
+    }
+    if (interrupt_cb_ && faulted_queue->error_event_id != 0) {
+      interrupt_cb_(faulted_queue->process_id, faulted_queue->error_event_id);
+    }
+  }
+
+  for (auto *cu : cus_)
+    cu->abort_dispatch(dispatch_id);
+}
+
 void CommandProcessor::on_cu_idle() {
   if (cus_.empty())
     return;
@@ -864,6 +938,8 @@ void CommandProcessor::process_queues() {
     if (hw_queues_[qi].is_sdma)
       continue;
     auto &qs = new_queue_states_[qi];
+    if (qs.status == HwQueueState::Status::BLOCKED)
+      continue;
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
 
@@ -1080,6 +1156,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 }
 
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
+  if (qs.status == HwQueueState::Status::BLOCKED)
+    return;
   if (!memory_)
     return;
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))

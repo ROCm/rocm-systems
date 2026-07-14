@@ -1651,6 +1651,9 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_DELAY=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
                     "RJ_CONSAN_EXPECT_TRAP=1"
+                    # Ask HIP to surface the queue exception as an API error
+                    # instead of aborting the test process in callbackQueue().
+                    "HIP_SKIP_ABORT_ON_GPU_ERROR=1"
             )
             rj_add_test(
                 NAME "ConSanLdsTest.DbiPaddedCleanStoreReportBufferStaysZero"

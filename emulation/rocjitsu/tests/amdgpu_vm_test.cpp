@@ -37,6 +37,7 @@ namespace {
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+constexpr uint32_t CDNA_S_TRAP_0 = 0xBF920000;
 
 using namespace rocjitsu;
 
@@ -329,6 +330,60 @@ TEST_P(IsaTest, DispatchAndCapacity) {
 
   // Both slots were used (wavefronts have now halted and been retired).
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST(WaveTrapTest, RaisesQueueExceptionWithoutCompletingDispatchSignal) {
+  VmFixture f("cdna4");
+  constexpr uint64_t kErrorReason = 0x6000;
+  constexpr uint32_t kErrorEvent = 7;
+  constexpr uint64_t kCompletionSignal = 0x7000;
+  constexpr uint64_t kFollowingSignal = 0x7100;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kErrorReason, 0);
+  f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+  f.mem()->write64(kFollowingSignal + kSignalValueOffset, 1);
+
+  uint32_t notified_process = std::numeric_limits<uint32_t>::max();
+  uint32_t notified_event = 0;
+  f.cp()->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+    notified_process = process_id;
+    notified_event = event_id;
+  });
+
+  const uint32_t code[] = {CDNA_S_TRAP_0, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, kErrorReason, kErrorEvent);
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = 64;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 64;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = ko;
+  pkt.completion_signal.handle = kCompletionSignal;
+  queue.submit(pkt);
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.dep_signal[0].handle = kCompletionSignal;
+  barrier.completion_signal.handle = kFollowingSignal;
+  hsa_kernel_dispatch_packet_t raw_barrier{};
+  static_assert(sizeof(raw_barrier) == sizeof(barrier));
+  std::memcpy(&raw_barrier, &barrier, sizeof(barrier));
+  queue.submit(raw_barrier);
+
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.mem()->read64(kErrorReason), 2u); // EC_QUEUE_WAVE_TRAP
+  EXPECT_EQ(notified_process, 0u);
+  EXPECT_EQ(notified_event, kErrorEvent);
+  EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 1u);
+  EXPECT_EQ(f.mem()->read64(kFollowingSignal + kSignalValueOffset), 1u);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {

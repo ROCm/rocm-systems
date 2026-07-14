@@ -305,7 +305,7 @@ def test_rdna4_s_waitcnt_compat_uses_gfx11_layout():
     assert 'uint8_t vm = (imm >> 10) & 0x3F;' in body
 
 
-def test_s_trap_execute_is_unimplemented():
+def test_s_trap_execute_faults_dispatch():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='rdna4',
@@ -323,7 +323,7 @@ def test_s_trap_execute_is_unimplemented():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOPP')
 
-    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert body == '  wf.trap();'
 
 
 def test_rdna4_s_waitcnt_compat_formats_with_gfx11_layout():

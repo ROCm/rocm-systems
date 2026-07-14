@@ -416,6 +416,9 @@ public:
   /// driven entirely by s_endpgm → end() → halt().
   void halt();
 
+  /// @brief Raise an unhandled wave trap and abort the owning dispatch.
+  void trap();
+
   /// @brief End program execution. If all memory ops are drained, halts
   /// immediately. Otherwise, transitions to ENDING and lets the memory
   /// pipeline drain remaining ops before halting.

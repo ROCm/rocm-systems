@@ -53,7 +53,10 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
 
       flush_caches(entry.process_id);
       plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-      if (entry.completion_signal != 0) {
+      // A faulted kernel does not receive a normal EOP completion. ROCR's
+      // queue exception callback marks pending commands failed and releases
+      // their waits after consuming the KFD exception event.
+      if (entry.completion_signal != 0 && !entry.faulted) {
         fire_signal(entry);
       }
       if (dispatch_retired_cb_)

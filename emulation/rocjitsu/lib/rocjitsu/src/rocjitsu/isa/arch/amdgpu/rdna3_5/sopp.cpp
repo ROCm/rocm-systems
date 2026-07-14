@@ -165,8 +165,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
 }
 
 void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.trap();
 }
 
 SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
