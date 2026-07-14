@@ -153,6 +153,12 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
     # from this executable (librccl.so is built with ENABLE_ROCSHMEM_GIN which
     # leaves rocshmem host symbols unresolved)
     target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
+    if (RCCL_SOURCE_DIR)
+        # Device LTO needs gin_anvil_sdma_oss7_enabled in the final alltoall_perf link.
+        target_sources(alltoall_perf PRIVATE ${RCCL_SOURCE_DIR}/src/gin/gin_anvil_sdma_oss7_device.cc)
+        set_source_files_properties(${RCCL_SOURCE_DIR}/src/gin/gin_anvil_sdma_oss7_device.cc
+            PROPERTIES COMPILE_OPTIONS "-x;hip")
+    endif()
 endif()
 if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
