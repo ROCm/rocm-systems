@@ -26,7 +26,7 @@ detect_architecture(const char* arch, char* out_name, size_t out_name_sz, int* o
         const char* needle;
         int         typ;
     } map[] = {
-        {"gfx1152", 6}, {"gfx1151", 6}, {"gfx1150", 6},
+        {"gfx1153", 6}, {"gfx1152", 6}, {"gfx1151", 6}, {"gfx1150", 6},
         {"gfx1201", 5}, {"gfx1200", 4},
         {"gfx950", 3},
         {"gfx942", 2}, {"gfx941", 2}, {"gfx940", 2}, {"gfx94", 2},

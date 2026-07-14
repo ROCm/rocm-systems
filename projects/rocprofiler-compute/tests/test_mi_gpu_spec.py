@@ -85,6 +85,7 @@ class TestMIGPUSpecs:
             "gfx1150",
             "gfx1151",
             "gfx1152",
+            "gfx1153",
             "gfx908",
             None,
             "",
@@ -173,10 +174,11 @@ class TestMIGPUSpecs:
 
     def test_get_num_dies_rdna_single_die(self):
         design = {"rdna_model": {}}
-        with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "rdna3.5"}
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 1
+        for arch in ("gfx1151", "gfx1153"):
+            with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
+                MIGPUSpecs, "_gpu_series_dict", {arch: "rdna3.5"}
+            ):
+                assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 1
 
     # -- get_memory_levels ---------------------------------------------------
 

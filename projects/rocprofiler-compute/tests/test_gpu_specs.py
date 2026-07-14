@@ -287,6 +287,7 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
     assert canonical_config_arch("gfx1150") == "gfx115x"
     assert canonical_config_arch("gfx1151") == "gfx115x"
     assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx1153") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
 
 
@@ -298,6 +299,7 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
         "gfx1150": "rdna35_point_1",
         "gfx1151": "rdna35_halo",
         "gfx1152": "rdna35_point_2",
+        "gfx1153": "rdna35_krackan2",
     }
 
     assert is_single_panel_config(str(tmp_path), supported_archs) is False

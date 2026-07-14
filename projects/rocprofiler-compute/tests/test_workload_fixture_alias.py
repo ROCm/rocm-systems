@@ -13,6 +13,10 @@ def test_workload_fixture_path_uses_alias_for_gfx115x_point_parts() -> None:
         common.workload_fixture_path("kernel", "RDNA35_POINT_1")
         == "tests/workloads/kernel/RDNA35_HALO"
     )
+    assert (
+        common.workload_fixture_path("vcopy", "RDNA35_KRACKAN2")
+        == "tests/workloads/vcopy/RDNA35_HALO"
+    )
 
 
 def test_workload_fixture_path_passthrough_for_unaliased_arch() -> None:

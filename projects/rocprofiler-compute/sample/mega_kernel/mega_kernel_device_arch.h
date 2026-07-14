@@ -35,9 +35,9 @@
 #endif
 
 // Strix Point / Strix Halo / Krackan / gfx115x RDNA 3.5 APU iGPU family
-#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
 #    define ARCH_RDNA35_APU     1
-#    define ARCH_NAME           "RDNA 3.5 APU (gfx115x - Strix/Krackan)"
+#    define ARCH_NAME           "RDNA 3.5 APU (gfx115x - Strix/Krackan/Krackan2)"
 #    define HAS_HW_FP64_ATOMICS 0
 #    define HAS_FP8             0
 #    define HAS_ASYNC_LDS       1

@@ -80,6 +80,7 @@ WORKLOADS_BY_ARCH = {
     "MI350": ["no_roof", "vcopy", "vcopy_iteration_multiplexing"],
     "RDNA35_HALO": _GFX115X_WORKLOADS,
     "RDNA35_POINT_2": _GFX115X_WORKLOADS,
+    "RDNA35_KRACKAN2": _GFX115X_WORKLOADS,
 }
 
 # All workloads exit 0 except these.
