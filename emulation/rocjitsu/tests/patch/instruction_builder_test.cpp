@@ -182,6 +182,9 @@ TEST(InstructionBuilder, BuildSGetpcB64) {
   EXPECT_EQ(build_s_getpc_b64(/*sdst_pair_base=*/0, ROCJITSU_CODE_ARCH_CDNA2), 0xBE801C00u);
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA2), 0xBE801F00u);
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE804700u);
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE804700u);
+  // gfx1250 renames the family (s_get_pc_i64) but keeps opcode 0x47.
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE804700u);
 }
 
 TEST(InstructionBuilder, BuildSAddU32) {
@@ -206,6 +209,9 @@ TEST(InstructionBuilder, BuildSSwappcB64) {
       0xBE9E1E00u);
   EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA2), 0xBE9E2100u);
   EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE9E4900u);
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE9E4900u);
+  // gfx1250: s_swap_pc_i64, opcode 0x49
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE9E4900u);
 }
 
 TEST(InstructionBuilder, BuildSCselectB32) {
@@ -216,6 +222,13 @@ TEST(InstructionBuilder, BuildSCselectB32) {
   EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
                                 ROCJITSU_CODE_ARCH_RDNA3),
             0x98028081u);
+  EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                                ROCJITSU_CODE_ARCH_RDNA4),
+            0x98028081u);
+  // gfx1250 uses the GFX11+ opcode 0x30.
+  EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                                ROCJITSU_CODE_ARCH_GFX1250),
+            0x98028081u);
 }
 
 TEST(InstructionBuilder, BuildSCmpLgU32) {
@@ -223,6 +236,11 @@ TEST(InstructionBuilder, BuildSCmpLgU32) {
   EXPECT_EQ(
       build_s_cmp_lg_u32(/*ssrc0=*/2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA2),
       0xBF078002u);
+  // Opcode 7 is invariant across gens, including gfx1250.
+  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
+            0xBF078002u);
+  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250),
+            0xBF078002u);
 }
 
 } // namespace

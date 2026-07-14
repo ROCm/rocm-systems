@@ -114,7 +114,8 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::memcpy(image.data() + text_offset, &text_word, text_size);
-  std::memcpy(image.data() + rodata_offset, rodata.data(), rodata.size());
+  if (!rodata.empty())
+    std::memcpy(image.data() + rodata_offset, rodata.data(), rodata.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
