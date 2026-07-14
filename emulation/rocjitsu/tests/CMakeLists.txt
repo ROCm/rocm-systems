@@ -614,11 +614,21 @@ if(RJ_HAS_GFX1201_GPU)
             --gtest_filter=GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
+    add_test(
+        NAME "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
     set_tests_properties(
         "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
         "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
         "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
+        "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
         PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
     )
     foreach(
@@ -629,6 +639,7 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
+            "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
     )
         rj_set_default_runtime_dir("${_guest_kfd_test}")
     endforeach()
@@ -701,6 +712,55 @@ rj_add_test(
     INSTALL_ENVIRONMENT
         "LD_PRELOAD=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
+
+# --- interposer dup/backend bookkeeping test (CLI launcher) ---
+# Runs a small gtest binary via the rocjitsu CLI launcher (which preloads the
+# interposer and writes the config_path file it reads) so open("/dev/kfd") is
+# serviced by the simulated driver, then exercises dup/dup2/dup3/fcntl(F_DUPFD)
+# fd tracking that the SimulatedKfd-level unit tests cannot reach.
+add_executable(interposer_dup_test interposer_dup_test.cpp)
+rj_configure_target(interposer_dup_test TEST)
+target_include_directories(
+    interposer_dup_test
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+)
+target_link_libraries(interposer_dup_test PRIVATE GTest::gtest_main)
+add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(interposer_dup_test)
+endif()
+foreach(
+    _interposer_dup_test
+    IN
+    ITEMS
+        DupKeepsKfdRoutingAfterPrimaryClose
+        FcntlDupfdKeepsKfdRouting
+        Dup2OverPrimaryInvalidatesKfdIdentity
+        Dup2OntoFreshFdRoutesKfd
+        Dup3RoutesKfdAndRejectsSameFd
+        ReopenAfterPrimaryOverwriteKeepsBackend
+        SerializedReopenUnderContentionStaysRoutable
+)
+    rj_add_test(
+        NAME "InterposerDupTest.${_interposer_dup_test}"
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
+    )
+endforeach()
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
@@ -1471,6 +1531,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+                RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
                 RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
                 RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
@@ -1478,6 +1539,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
+                RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
         add_dependencies(
@@ -1485,6 +1547,7 @@ if(RJ_ENABLE_HIP_TESTS)
             rocjitsu_bin
             hip_vector_add_test_target
             hip_memcpy_test_target
+            interposer_dup_test
         )
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(daemon_test)
@@ -1495,6 +1558,10 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
             DaemonTest.TwoIndependentClients
+            DaemonTest.InterposerDupReopenAfterPrimaryOverwriteRemote
+            DaemonTest.InterposerDupSerializedReopenUnderContentionRemote
+            DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
+            DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
         )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(

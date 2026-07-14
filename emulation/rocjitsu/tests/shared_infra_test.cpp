@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/vop1.h"
@@ -72,6 +73,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -79,6 +81,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -105,6 +108,9 @@ static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
 static_assert(!HasMonolithicWaitcnt<gfx1250::Isa>);
 static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).supports_wgp_mode);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).supports_wgp_mode);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_GFX1250).supports_wgp_mode);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -1096,7 +1102,8 @@ TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1104,15 +1111,140 @@ TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
   mem.write32(kAddr, kNewValue);
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
+}
+
+TEST(GpuMemoryTest, BlockAccessSpansSparseFallbackPages) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint64_t kAddr = amdgpu::GpuMemory::PAGE_SIZE - 8;
+  constexpr std::array<uint8_t, 16> kData = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                             0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+  mem.write_block(kAddr, std::span<const uint8_t>(kData));
+  std::array<uint8_t, kData.size()> result{};
+  mem.read_block(kAddr, std::span<uint8_t>(result));
+
+  EXPECT_EQ(result, kData);
+}
+
+TEST(GpuMemoryTest, BlockAccessSpansMappedPages) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 8;
+  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr std::array<uint8_t, 16> kData = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                             0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[0] = {first_page.data(), amdgpu::Mtype::RW};
+  page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write_block(kAddr, std::span<const uint8_t>(kData), kVmid);
+  std::array<uint8_t, kData.size()> result{};
+  mem.read_block(kAddr, std::span<uint8_t>(result), kVmid);
+
+  EXPECT_EQ(result, kData);
+}
+
+TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 9;
+  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr std::array<uint8_t, 16> kReadData = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                                                 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27};
+  constexpr std::array<uint8_t, 16> kWriteData = {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+                                                  0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
+
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  std::copy(kReadData.begin() + 8, kReadData.end(), second_page.begin());
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+  for (size_t i = 0; i < 8; ++i)
+    mem.write8(kAddr + i, kReadData[i], kVmid);
+
+  std::array<uint8_t, kReadData.size()> result{};
+  mem.read_block(kAddr, std::span<uint8_t>(result), kVmid);
+  EXPECT_EQ(result, kReadData);
+
+  mem.write_block(kAddr, std::span<const uint8_t>(kWriteData), kVmid);
+  for (size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(mem.read8(kAddr + i, kVmid), kWriteData[i]);
+  EXPECT_TRUE(std::equal(kWriteData.begin() + 8, kWriteData.end(), second_page.begin()));
+}
+
+TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7800;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x01234567u, 0x89ABCDEFu, 0x76543210u, 0xFEDCBA98u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x11112222u, 0x33334444u, 0x55556666u, 0x77778888u};
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + 0x100;
+  std::array<uint8_t, 64 * sizeof(kLane0)> store_bytes{};
+  std::memcpy(store_bytes.data(), kLane0.data(), sizeof(kLane0));
+  std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
+
+  l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
+  EXPECT_EQ(l1.store_l2_writes(), 2u);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+
+  std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
+  l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
+  EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
+}
+
+TEST(L1VectorCacheTest, UcDwordx4CoalescesAdjacentLanes) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7900;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x01234567u, 0x89ABCDEFu, 0x76543210u, 0xFEDCBA98u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x11112222u, 0x33334444u, 0x55556666u, 0x77778888u};
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + sizeof(kLane0);
+  std::array<uint8_t, 64 * sizeof(kLane0)> store_bytes{};
+  std::memcpy(store_bytes.data(), kLane0.data(), sizeof(kLane0));
+  std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
+
+  l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
+  EXPECT_EQ(l1.store_l2_writes(), 1u);
+  EXPECT_EQ(l2.backing_write_transactions(), 1u);
+
+  std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
+  l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
+  EXPECT_EQ(l2.backing_read_transactions(), 1u);
+  EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
+  EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
 }
 
 TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
@@ -1131,7 +1263,8 @@ TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1139,11 +1272,12 @@ TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
   std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
   std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
-           amdgpu::Mtype::UC, /*non_temporal=*/false);
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1164,7 +1298,8 @@ TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1174,13 +1309,15 @@ TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1201,7 +1338,8 @@ TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1211,13 +1349,15 @@ TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1238,7 +1378,8 @@ TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1246,11 +1387,12 @@ TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
   std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
   std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
-           amdgpu::Mtype::RW, /*non_temporal=*/true);
+           amdgpu::Mtype::RW, /*non_temporal=*/true, cdna3::Isa::WF_SIZE);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1665,6 +1807,7 @@ struct Rdna1DppTraits {
   using Vop1VopDpp8MachineInst = rdna1::Vop1VopDpp8MachineInst;
   using VMovB32Vop1 = rdna1::VMovB32Vop1;
   using VCmpEqU32Vopc = rdna1::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = rdna1::VCmpxEqU32Vopc;
 };
 
 struct Rdna2DppTraits {
@@ -1676,12 +1819,14 @@ struct Rdna2DppTraits {
   using Vop1VopDpp8MachineInst = rdna2::Vop1VopDpp8MachineInst;
   using VMovB32Vop1 = rdna2::VMovB32Vop1;
   using VCmpEqU32Vopc = rdna2::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = rdna2::VCmpxEqU32Vopc;
 };
 
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
   using MachineInst = rdna4::MachineInst;
+  using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna4::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna4::VopcVopDpp16MachineInst;
@@ -1694,6 +1839,7 @@ struct Rdna3DppTraits {
   static constexpr const char *name = "rdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3;
   using MachineInst = rdna3::MachineInst;
+  using VopcMachineInst = rdna3::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna3::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna3::VopcVopDpp16MachineInst;
@@ -1706,6 +1852,7 @@ struct Rdna3_5DppTraits {
   static constexpr const char *name = "rdna3_5";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3_5;
   using MachineInst = rdna3_5::MachineInst;
+  using VopcMachineInst = rdna3_5::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3_5::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna3_5::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna3_5::VopcVopDpp16MachineInst;
@@ -1718,6 +1865,7 @@ struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
   using MachineInst = gfx1250::MachineInst;
+  using VopcMachineInst = gfx1250::VopcMachineInst;
   using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = gfx1250::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = gfx1250::VopcVopDpp16MachineInst;
@@ -2350,9 +2498,9 @@ template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
 
-  constexpr uint64_t kOldExec = 0x00000000FFFF005AULL;
+  constexpr uint64_t kOldExec = 0xA5A55A5AFFFF005AULL;
   constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
-  wf->set_exec(kOldExec);
+  wf->set_exec_raw(kOldExec);
   wf->set_vcc(kOldVcc);
 
   constexpr uint32_t kSrc0 = 4;
@@ -2383,6 +2531,49 @@ template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_
 
   EXPECT_EQ(wf->vcc(), kOldVcc);
   EXPECT_EQ(wf->exec(), 0x00000000FFEF005AULL);
+  EXPECT_EQ(wf->exec_raw(), 0xA5A55A5AFFEF005AULL);
+}
+
+template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_cu",
+                                            cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec_raw(0xA5A55A5AFFFFFFFFULL);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc0, lane, lane);
+    cu->write_vgpr(vbase + kSrc1, lane, (lane & 4u) == 0 ? lane : lane + 1);
+  }
+
+  constexpr uint32_t kVgprSrcEncodingBase = 256;
+  typename Traits::VopcMachineInst raw{};
+  raw.src0 = kVgprSrcEncodingBase + kSrc0;
+  raw.vsrc1 = kSrc1;
+
+  typename Traits::VCmpxEqU32Vopc inst(
+      reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->exec(), 0x0F0F0F0FULL);
+  EXPECT_EQ(wf->exec_raw(), 0xA5A55A5A0F0F0F0FULL);
 }
 
 template <typename Traits> void unsupported_rdna_vopc_dpp_throws() {
@@ -2506,6 +2697,15 @@ TEST(DppPermuteTest, RdnaGeneratedVcmpxDppWave32WriteMaskPreservesExec) {
 
 TEST(DppPermuteTest, Gfx1250GeneratedVcmpxDppWave32WriteMaskPreservesExec) {
   wave32_generated_vcmpx_dpp_write_mask_preserves_exec<Gfx1250DppTraits>();
+}
+
+TEST(ExecMaskTest, RdnaGeneratedVcmpxWave32PreservesExecHi) {
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna1DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna2DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna3DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna3_5DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna4DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, Rdna1VopcDppThrowsUnsupported) {

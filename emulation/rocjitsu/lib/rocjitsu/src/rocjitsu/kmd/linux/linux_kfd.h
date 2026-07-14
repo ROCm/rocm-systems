@@ -47,7 +47,43 @@ public:
   virtual void reset_after_fork() {}
 
   /// @brief Retain one duplicate open reference, if this driver tracks them.
-  virtual void retain_local_open() {}
+  /// @retval true A reference was added.
+  /// @retval false This driver does not track open references, or there is no
+  ///         live local process to retain (e.g. it was already torn down); the
+  ///         caller must NOT treat the fd as retained.
+  [[nodiscard]] virtual bool retain_local_open() { return false; }
+
+  /// @brief Outcome of invalidate_primary_fd(), telling the interposer how to
+  /// follow up on a dup2/dup3 that overwrote a primary KFD fd number.
+  enum class PrimaryInvalidation {
+    /// @brief @p fd is not this driver's primary (or a concurrent overwrite
+    /// already cleared it). The caller must NOT drop an open reference and should
+    /// fall through to its dup-tracking path.
+    kNotPrimary,
+    /// @brief The primary was cleared AND it held one open reference the caller
+    /// must now drop (via close()); used by drivers whose primary fd is counted
+    /// in their open-reference bookkeeping (e.g. SimulatedKfd).
+    kClearedDropRef,
+    /// @brief The primary classification was cleared, but the caller must NOT
+    /// drop an open reference: the driver's primary fd is internal and not part of
+    /// the app-facing open-reference count (e.g. GuestKfd's hidden real /dev/kfd
+    /// fd, which is kept alive by app dup references, not by the primary number).
+    kClearedKeepRefs,
+  };
+
+  /// @brief Forget the primary KFD fd number without touching process state.
+  /// @details Called by the interposer when dup2/dup3 atomically overwrites the
+  /// primary KFD fd number: the number no longer refers to this driver, so it
+  /// must stop reporting that number from fd()/owns_fd(). Default no-op for
+  /// drivers that do not expose a primary fd number this way.
+  /// @returns How the caller should follow up (see PrimaryInvalidation). Only
+  ///          kClearedDropRef asks the caller to drop the primary's open reference
+  ///          via close(), so a lost race or a driver whose primary carries no
+  ///          counted reference never triggers a double/spurious release.
+  [[nodiscard]] virtual PrimaryInvalidation invalidate_primary_fd(int fd) {
+    (void)fd;
+    return PrimaryInvalidation::kNotPrimary;
+  }
 
   /// @brief Return true when @p fd is owned internally by the driver.
   [[nodiscard]] virtual bool owns_fd(int fd) const = 0;
