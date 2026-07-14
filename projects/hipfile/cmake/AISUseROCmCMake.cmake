@@ -13,8 +13,8 @@ if(NOT ROCmCMakeBuildTools_FOUND)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
         rocm-cmake
-        URL https://github.com/ROCm/rocm-cmake/archive/refs/tags/rocm-6.4.3.tar.gz
-        DOWNLOAD_EXTRACT_TIMESTAMP true
+        GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+        GIT_TAG ecc716b97c2239cff00422ed7a43cd52a0839a0e  # rocm-6.4.3
         SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
         SYSTEM
     )
