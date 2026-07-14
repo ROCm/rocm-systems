@@ -8103,14 +8103,53 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   }
                 ''')
 
+        # GFX12 expands the ordinary SGPR range through s105. Encodings
+        # 102/103 therefore name s102/s103, while the explicit flat-scratch
+        # source selectors moved to 230/231. Older ISAs retain the legacy
+        # flat_scratch_lo/hi aliases at 102/103.
+        legacy_scratch_pair = self.isa_spec.profile.legacy_flat_scratch_operand_pair
+        legacy_scratch_read32 = (
+            ''
+            if legacy_scratch_pair is None
+            else f'  if (ev == {legacy_scratch_pair[0]})\n'
+            '    return static_cast<uint32_t>(wf.scratch_base());\n'
+            f'  if (ev == {legacy_scratch_pair[1]})\n'
+            '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
+        )
+        legacy_scratch_read64 = (
+            ''
+            if legacy_scratch_pair is None
+            else f'  if (ev == {legacy_scratch_pair[0]})\n' '    return wf.scratch_base();\n'
+        )
+        legacy_scratch_write32 = (
+            ''
+            if legacy_scratch_pair is None
+            else f'  if (ev == {legacy_scratch_pair[0]}) {{\n'
+            '    uint64_t sb = wf.scratch_base();\n'
+            '    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);\n'
+            '    return;\n'
+            '  }\n'
+            f'  if (ev == {legacy_scratch_pair[1]}) {{\n'
+            '    uint64_t sb = wf.scratch_base();\n'
+            '    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
+            '    return;\n'
+            '  }\n'
+        )
+        legacy_scratch_write64 = (
+            ''
+            if legacy_scratch_pair is None
+            else f'  if (ev == {legacy_scratch_pair[0]}) {{\n'
+            '    wf.set_scratch_base(val);\n'
+            '    return;\n'
+            '  }\n'
+        )
+
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
             'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base());\n'
-            '  if (ev == 103)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
+            + legacy_scratch_read32
+            +
             '  if (ev <= 105)\n'
             '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '  if (ev == 106)\n'
@@ -8224,8 +8263,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '}\n'
             '\n'
             'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return wf.scratch_base();\n'
+            + legacy_scratch_read64
+            +
             '  if (ev <= 105) {\n'
             '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
@@ -8284,16 +8323,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             'void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 103) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
+            + legacy_scratch_write32
+            +
             '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
@@ -8335,10 +8366,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             'void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    wf.set_scratch_base(val);\n'
-            '    return;\n'
-            '  }\n'
+            + legacy_scratch_write64
+            +
             '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'

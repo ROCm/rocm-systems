@@ -845,6 +845,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return 'sgpr_pair'
 
     @property
+    def legacy_flat_scratch_operand_pair(self) -> tuple[int, int] | None:
+        """Scalar operand encodings which alias the legacy scratch-base pair."""
+        return (102, 103)
+
+    @property
     def has_vopd(self) -> bool:
         """True if this ISA supports VOPD dual-issue instructions (RDNA3+)."""
         return False
@@ -1383,6 +1388,12 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+
+    @property
+    def legacy_flat_scratch_operand_pair(self) -> tuple[int, int] | None:
+        # GFX12 uses 102/103 as ordinary SGPRs and exposes explicit scratch
+        # source selectors at 230/231.
+        return None
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:

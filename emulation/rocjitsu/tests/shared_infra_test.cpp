@@ -49,7 +49,10 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/sop1.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
@@ -2534,6 +2537,66 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
         kScratchBase + static_cast<uint64_t>(lane) * kPrivateSegmentSize + private_offset;
     EXPECT_EQ(d.per_lane_addr[lane], expected) << "lane " << lane;
   }
+}
+
+TEST(Rdna4ScalarOperandTest, HighSgprsDriveGetpcCarryAndSetpcWithoutChangingScratch) {
+  amdgpu::GpuMemory mem("rdna4_high_sgpr_mem");
+  amdgpu::L2Cache l2("rdna4_high_sgpr_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_high_sgpr_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 107, 32);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t kScratchSentinel = 0x1234'5678'9abc'def0ULL;
+  wf->set_scratch_base(kScratchSentinel);
+  wf->pc = 0xffff'fff0ULL;
+
+  rdna4::Sop1MachineInst getpc_bits{};
+  getpc_bits.sdst = 102;
+  rdna4::SGetpcB64Sop1 getpc(reinterpret_cast<const rdna4::MachineInst *>(&getpc_bits));
+  getpc.execute_impl(*wf);
+
+  uint32_t sb = wf->sgpr_alloc().base;
+  EXPECT_EQ(cu->read_sgpr(sb + 102), 0xffff'fff4u);
+  EXPECT_EQ(cu->read_sgpr(sb + 103), 0u);
+  EXPECT_EQ(wf->scratch_base(), kScratchSentinel);
+
+  cu->write_sgpr(sb + 104, 0x20u);
+  rdna4::Sop2MachineInst add_lo_bits{};
+  add_lo_bits.sdst = 102;
+  add_lo_bits.ssrc0 = 102;
+  add_lo_bits.ssrc1 = 104;
+  rdna4::SAddCoU32Sop2 add_lo(reinterpret_cast<const rdna4::MachineInst *>(&add_lo_bits));
+  add_lo.execute_impl(*wf);
+  EXPECT_EQ(cu->read_sgpr(sb + 102), 0x14u);
+  EXPECT_TRUE(wf->read_scc());
+
+  cu->write_sgpr(sb + 105, 0xffff'ffffu);
+  rdna4::Sop2MachineInst add_hi_bits{};
+  add_hi_bits.sdst = 103;
+  add_hi_bits.ssrc0 = 103;
+  add_hi_bits.ssrc1 = 105;
+  rdna4::SAddCoCiU32Sop2 add_hi(reinterpret_cast<const rdna4::MachineInst *>(&add_hi_bits));
+  add_hi.execute_impl(*wf);
+  EXPECT_EQ(cu->read_sgpr(sb + 103), 0u);
+  EXPECT_TRUE(wf->read_scc());
+  EXPECT_EQ(wf->scratch_base(), kScratchSentinel);
+
+  rdna4::Operand return_pc(64, rdna4::OperandType::OPR_SSRC, 102);
+  EXPECT_EQ(return_pc.read_scalar64(*wf), 0x14u);
+
+  rdna4::Sop1MachineInst setpc_bits{};
+  setpc_bits.ssrc0 = 102;
+  rdna4::SSetpcB64Sop1 setpc(reinterpret_cast<const rdna4::MachineInst *>(&setpc_bits));
+  setpc.execute_impl(*wf);
+  EXPECT_EQ(wf->pc, 0x10u);
+  EXPECT_EQ(wf->scratch_base(), kScratchSentinel);
 }
 
 TEST(RdnaAddrCalcTest, Rdna4SmemSoffsetHandlesNullM0AndSgprSelectors) {

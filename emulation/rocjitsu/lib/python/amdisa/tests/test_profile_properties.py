@@ -172,6 +172,9 @@ class TestRdna3Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_legacy_flat_scratch_operand_pair(self):
+        assert self.p.legacy_flat_scratch_operand_pair == (102, 103)
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -216,6 +219,9 @@ class TestRdna4Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_no_legacy_flat_scratch_operand_pair(self):
+        assert self.p.legacy_flat_scratch_operand_pair is None
+
 
 class TestGfx1250Profile:
     def setup_method(self):
@@ -232,6 +238,9 @@ class TestGfx1250Profile:
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
+
+    def test_no_legacy_flat_scratch_operand_pair(self):
+        assert self.p.legacy_flat_scratch_operand_pair is None
 
     def test_field_renames_literal(self):
         assert self.p.field_renames('ENC_SOP1').get('literal') == 'simm32'

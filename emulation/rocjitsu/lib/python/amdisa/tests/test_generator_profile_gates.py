@@ -1880,10 +1880,17 @@ def test_ev124_125_arch_gating_in_generated_operand():
     rdna4_op = (gen_root / 'rdna4' / 'operand.cpp').read_text()
     assert 'if (ev == 124)\n    return 0u; // NULL' in rdna4_op
     assert 'if (ev == 125)\n    return wf.m0()' in rdna4_op
+    assert 'if (ev == 102)\n    return static_cast<uint32_t>(wf.scratch_base())' not in rdna4_op
+    assert 'if (ev == 102) {\n    uint64_t sb = wf.scratch_base()' not in rdna4_op
+
+    gfx1250_op = (gen_root / 'gfx1250' / 'operand.cpp').read_text()
+    assert 'if (ev == 102)\n    return static_cast<uint32_t>(wf.scratch_base())' not in gfx1250_op
+    assert 'if (ev == 102) {\n    uint64_t sb = wf.scratch_base()' not in gfx1250_op
 
     rdna3_op = (gen_root / 'rdna3' / 'operand.cpp').read_text()
     assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_op
     assert 'if (ev == 125)\n    return wf.m0()' in rdna3_op
+    assert 'if (ev == 102)\n    return static_cast<uint32_t>(wf.scratch_base())' in rdna3_op
 
     rdna3_5_op = (gen_root / 'rdna3_5' / 'operand.cpp').read_text()
     assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_5_op
