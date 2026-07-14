@@ -18,8 +18,6 @@ rtc:
   Unit_hiprtc_devicemalloc:
     <<: *level_2
     tags: [integration]
-    # ROCM-27071: COMGr does not handle asan flags properly
-    disabled: [asan]
   Unit_hiprtcGetLoweredName_templateKrnls:
     <<: *level_2
     # AIRUNTIME-2410
