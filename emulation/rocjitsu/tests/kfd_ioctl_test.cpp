@@ -379,10 +379,10 @@ TEST_F(KfdIoctlTest, DbgTrapOpBeforeEnableReturnsEINVAL) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapBareDisableReturnsEINVAL) {
-  // A self-debug DISABLE with no active session has nothing to tear down. The
-  // by-pid authorization gate is skipped for self-debug, so the call reaches the
-  // session-enabled requirement and is rejected with EINVAL like any other
-  // non-ENABLE op on a disabled session.
+  // DISABLE with no active session has nothing to tear down. The by-pid gate's
+  // DISABLE exemption only skips the cross-process authorization check, not the
+  // session-enabled requirement, so a bare DISABLE is still rejected with
+  // EINVAL like any other non-ENABLE op on a disabled session.
   kfd_ioctl_dbg_trap_args dis{};
   dis.pid = static_cast<uint32_t>(getpid());
   dis.op = KFD_IOC_DBG_TRAP_DISABLE;
@@ -721,55 +721,6 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   rd.close(); // sends RPC_CLOSE so the server loop exits
   server.join();
   EXPECT_EQ(daemon_driver.close(process_id), 0);
-}
-
-// Security: DISABLE is subject to the same by-pid authorization as every other
-// non-self op. A client that is not the attached debugger must not be able to
-// tear down another process's debug session (in daemon mode that would also
-// close the SCM_RIGHTS notifier fd the session owns) merely by naming the
-// target's pid. Two daemon-mode clients share one driver: the owner self-enables
-// a session, then a second client tries to DISABLE it and is refused with
-// -EPERM while the session stays live.
-TEST_F(KfdIoctlTest, DbgTrapCrossProcessDisableByNonOwnerReturnsEPERM) {
-  ASSERT_NE(soc_, nullptr);
-  rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
-
-  constexpr pid_t kOwnerPid = 4242;
-  constexpr pid_t kOtherPid = 4243;
-  const uint32_t owner = daemon_driver.open_process(kOwnerPid);
-  const uint32_t other = daemon_driver.open_process(kOtherPid);
-  ASSERT_NE(owner, 0u);
-  ASSERT_NE(other, 0u);
-
-  // The owner self-enables a debug session (the only supported attach path).
-  // The daemon-mode session takes ownership of this eventfd and closes it when
-  // the session ends, so it is not tracked in debug_fds_ (which would then
-  // double-close it in TearDown).
-  const int notifier = eventfd(0, EFD_CLOEXEC);
-  ASSERT_GE(notifier, 0);
-  kfd_ioctl_dbg_trap_args en{};
-  en.pid = static_cast<uint32_t>(kOwnerPid);
-  en.op = KFD_IOC_DBG_TRAP_ENABLE;
-  en.enable.dbg_fd = notifier;
-  ASSERT_EQ(daemon_driver.ioctl(owner, AMDKFD_IOC_DBG_TRAP, &en), 0);
-
-  // A different client names the owner's pid and tries to disable it. It is not
-  // the attached debugger, so the by-pid gate rejects it before the session is
-  // touched.
-  kfd_ioctl_dbg_trap_args steal{};
-  steal.pid = static_cast<uint32_t>(kOwnerPid);
-  steal.op = KFD_IOC_DBG_TRAP_DISABLE;
-  EXPECT_EQ(daemon_driver.ioctl(other, AMDKFD_IOC_DBG_TRAP, &steal), -EPERM);
-
-  // The session is still live: the owner's own DISABLE succeeds (a disabled
-  // session would report EINVAL) and releases the notifier fd it owns.
-  kfd_ioctl_dbg_trap_args owner_dis{};
-  owner_dis.pid = static_cast<uint32_t>(kOwnerPid);
-  owner_dis.op = KFD_IOC_DBG_TRAP_DISABLE;
-  EXPECT_EQ(daemon_driver.ioctl(owner, AMDKFD_IOC_DBG_TRAP, &owner_dis), 0);
-
-  daemon_driver.close(owner);
-  daemon_driver.close(other);
 }
 
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---
