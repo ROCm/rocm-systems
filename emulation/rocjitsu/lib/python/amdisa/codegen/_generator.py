@@ -7,6 +7,7 @@ Generates the following C++ files from a parsed ``IsaSpec``:
 
 * ``machine_insts.h`` - bitfield structs for each encoding's microcode.
 * ``opcodes.h`` - per-ISA symbolic opcode constants keyed by mnemonic.
+* ``builders.h`` - per-ISA instruction builders keyed by encoding format.
 * ``encodings.h/.cpp`` - encoding classes (mnemonic, size, modifiers).
 * ``operand_types.h`` - operand type enum and operand selector metadata.
 * ``operand.h/.cpp`` - ISA-specific operand class with read/write methods.
@@ -399,6 +400,185 @@ class CodeGenerator:
         with open(os.path.join(arch_out_path, 'opcodes.h'), 'w') as f:
             f.write('\n'.join(lines))
 
+    @staticmethod
+    def _builder_field_type(bit_count: int) -> str:
+        """Return the smallest conventional type able to hold an XML field."""
+        if bit_count <= 8:
+            return 'uint8_t'
+        if bit_count <= 16:
+            return 'uint16_t'
+        if bit_count <= 32:
+            return 'uint32_t'
+        return 'uint64_t'
+
+    @staticmethod
+    def _builder_name(enc: InstEncoding) -> str:
+        """Return the snake-case builder name for an encoding format."""
+        name = enc.enc_name
+        if name.startswith('ENC_'):
+            name = name[len('ENC_') :]
+        return f'build_{name.lower()}'
+
+    def _builder_encoding_value(self, enc: InstEncoding) -> int:
+        """Return the MachineInst ``encoding`` bitfield value for *enc*.
+
+        Primary decode selectors are indexed by ``word0 >> 23``.  The XML
+        encoding field can begin above bit 23 (VOP3 begins at bit 26, for
+        example), so its MachineInst value is the selector shifted back down
+        to the field's origin.  Opcode bits below the encoding field disappear
+        in that shift, leaving the fixed format selector.
+        """
+        encoding_field = next(
+            (field for field in enc.ucode_fields if field.name == 'encoding'),
+            None,
+        )
+        if encoding_field is None:
+            raise ValueError(f'{enc.enc_name} has no encoding field')
+        if encoding_field.bit_offset < 23:
+            raise ValueError(
+                f'{enc.enc_name} encoding field starts below primary decode bit 23'
+            )
+
+        values = self._primary_decode_values(enc)
+        if not values:
+            raise ValueError(f'{enc.enc_name} has no primary decode selector')
+        mask = (1 << encoding_field.bit_cnt) - 1
+        return (min(values) >> (encoding_field.bit_offset - 23)) & mask
+
+    def gen_instruction_builders(self) -> None:
+        """Generate compact, format-level instruction encoding helpers.
+
+        A builder fixes the XML-derived encoding selector and accepts the raw
+        generated opcode plus a value-initialized field structure.  Padding,
+        opcode, and encoding fields are intentionally absent from that public
+        structure: callers should describe only operands and modifiers, while
+        the generator remains responsible for the binary layout.
+        """
+        arch = self.isa_spec.arch_name
+        body: list[str] = [
+            CppFile._prologue_comment(),
+            f'#ifndef ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+            f'#define ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+            '',
+            '#include <array>',
+            '#include <cstddef>',
+            '#include <cstdint>',
+            '',
+            'namespace rocjitsu {',
+            f'namespace {arch} {{',
+            '',
+            'namespace builder_detail {',
+            '',
+            '/// @brief Insert one XML field into an encoded instruction.',
+            'template <std::size_t NumWords>',
+            'constexpr void set_field(std::array<uint32_t, NumWords> &words, uint64_t value,',
+            '                         std::size_t bit_offset, std::size_t bit_count) {',
+            '  while (bit_count != 0) {',
+            '    const std::size_t word_index = bit_offset / 32;',
+            '    const std::size_t word_offset = bit_offset % 32;',
+            '    const std::size_t bits_here = bit_count < (32 - word_offset) ? bit_count :',
+            '                                                                  (32 - word_offset);',
+            '    const uint32_t mask = bits_here == 32 ? ~uint32_t{0} :',
+            '                                                  ((uint32_t{1} << bits_here) - 1);',
+            '    words[word_index] |= (static_cast<uint32_t>(value) & mask) << word_offset;',
+            '    value >>= bits_here;',
+            '    bit_offset += bits_here;',
+            '    bit_count -= bits_here;',
+            '  }',
+            '}',
+            '',
+            '} // namespace builder_detail',
+        ]
+
+        for enc in self.isa_spec.inst_encodings:
+            # Alternate decoder-only encodings have no instructions of their
+            # own.  Their selector conditions (for example src0 == 0xfa for
+            # DPP) are not fixed format fields and therefore are not safe to
+            # expose as standalone builders yet.
+            if not enc.insts:
+                continue
+
+            fields = [
+                field
+                for field in enc.ucode_fields
+                if field.name not in ('op', 'encoding')
+                and not field.name.startswith('pad_')
+            ]
+            field_struct = f'{enc.fmt_enc_name}BuilderFields'
+            word_count = (enc.bit_cnt + 31) // 32
+            opcode_field = next(
+                (field for field in enc.ucode_fields if field.name == 'op'), None
+            )
+            encoding_field = next(
+                field for field in enc.ucode_fields if field.name == 'encoding'
+            )
+            encoding_value = self._builder_encoding_value(enc)
+
+            body.extend(
+                [
+                    '',
+                    f'/// @brief Caller-controlled fields for {enc.enc_name}.',
+                    f'struct {field_struct} {{',
+                ]
+            )
+            body.extend(
+                f'  {self._builder_field_type(field.bit_cnt)} {field.name} = 0;'
+                for field in fields
+            )
+            body.extend(
+                [
+                    '};',
+                    '',
+                    f'/// @brief Build one {enc.enc_name} instruction.',
+                    f'[[nodiscard]] constexpr std::array<uint32_t, {word_count}>',
+                    (
+                        f'{self._builder_name(enc)}(uint16_t op, '
+                        f'{field_struct} fields = {{}}) {{'
+                        if opcode_field is not None
+                        else f'{self._builder_name(enc)}({field_struct} fields = {{}}) {{'
+                    ),
+                    f'  std::array<uint32_t, {word_count}> words{{}};',
+                ]
+            )
+            if opcode_field is not None:
+                body.extend(
+                    [
+                        f'  builder_detail::set_field(words, op, {opcode_field.bit_offset},',
+                        f'                            {opcode_field.bit_cnt});',
+                    ]
+                )
+            body.extend(
+                [
+                    f'  builder_detail::set_field(words, {encoding_value},',
+                    f'                            {encoding_field.bit_offset},',
+                    f'                            {encoding_field.bit_cnt});',
+                ]
+            )
+            for field in fields:
+                body.extend(
+                    [
+                        f'  builder_detail::set_field(words, fields.{field.name},',
+                        f'                            {field.bit_offset}, {field.bit_cnt});',
+                    ]
+                )
+            body.extend(['  return words;', '}'])
+
+        body.extend(
+            [
+                '',
+                f'}} // namespace {arch}',
+                '} // namespace rocjitsu',
+                '',
+                f'#endif // ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+                '',
+            ]
+        )
+
+        arch_out_path = os.path.join(self.out_path, arch)
+        os.makedirs(arch_out_path, exist_ok=True)
+        with open(os.path.join(arch_out_path, 'builders.h'), 'w') as f:
+            f.write('\n'.join(body))
+
     def _constructor_operand_type(
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> str:
@@ -597,6 +777,7 @@ class CodeGenerator:
         """
         self.gen_machine_inst_encodings()
         self.gen_opcode_constants()
+        self.gen_instruction_builders()
         self.gen_encodings()
         self.gen_operand_types()
         self.gen_operand()
@@ -5659,6 +5840,30 @@ class CodeGenerator:
                     public_members.append(
                         cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                     )
+                    # A sub-dword (< 32-bit) destination writes only part of its
+                    # 32-bit register lane, so the old value survives and the
+                    # register is also a read. Surface these partial defs as
+                    # implicit uses. Runtime-sized outputs are never sub-dword,
+                    # so a static size check suffices. Immediate/label outputs
+                    # (e.g. the S_SETREG hwreg selector) never name a register,
+                    # so skip them to avoid dead overrides.
+                    _partial_def_outputs = [
+                        o.name
+                        for o in inst.operands
+                        if o.is_output
+                        and operand_size_exprs.get(o.name, str(o.size)) == str(o.size)
+                        and 0 < o.size < 32
+                        and not any(
+                            tag in o.operand_type.upper()
+                            for tag in ('IMM', 'LABEL', 'CONST')
+                        )
+                    ]
+                    if _partial_def_outputs:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -6505,6 +6710,21 @@ class CodeGenerator:
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
                                 f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
+                                f'}}'
+                            )
+                        )
+                    if _partial_def_outputs:
+                        _pd_body = ''.join(
+                            f'  if (auto r = {name}.to_register_ref())\n'
+                            f'    uses.expand(*r);\n'
+                            for name in _partial_def_outputs
+                        )
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'{_pd_body}'
                                 f'}}'
                             )
                         )
