@@ -654,6 +654,16 @@ Full gfx950 support means:
   base distinct, and 155 generator/profile tests pass. The complete gfx1201
   hip-moi baseline and documented SuperCollider/LDS-trap profile each pass all
   46 CTest entries, comprising 180 nested GTests plus six tutorials.
+- 2026-07-14: commit `bd1225dcd6` closes both Rocjitsu baseline defects from
+  the 203/209 `X1BSC` reduction. RDNA4 now enables the gfx12 packed-workitem
+  launch ABI and initializes packed `v0` for every component-count encoding;
+  the five multidimensional modules pass all 32 internal cases. The remaining
+  kernel was traced to `v_cvt_pk_fp8_f32`. A native gfx950 probe confirms that
+  finite overflow produces signed E4M3FN NaN, while the exact 464 tie remains
+  finite; an instruction-specific helper now implements that contract without
+  changing the general saturating conversion. Focused C++ tests pass 5/5,
+  generator tests pass 334/334, and the complete small-float module passes
+  22/22. The no-hook and four instrumented 209-test sweeps now resume serially.
 
 ## DAG Overview
 
