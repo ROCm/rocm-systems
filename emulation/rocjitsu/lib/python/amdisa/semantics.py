@@ -243,8 +243,14 @@ _SOP1_SCC_NONE_OPS = frozenset(
     {
         'bitset0',
         'bitset1',
-        # SOP1 scalar conversions preserve SCC; only count/bit-scan style
-        # scalar unary ops write SCC from the computed result.
+        # SOP1 scan/convert operations below have no implicit SCC output in
+        # the MR ISA. Other bit/count unary operations, such as S_NOT and
+        # S_BCNT*, do explicitly write SCC.
+        'clz',
+        'clz64',
+        'cls',
+        'cls64',
+        'ctz',
         'cvt_f16_f32',
         'cvt_f32_f16',
         'cvt_f32_i32',
@@ -252,6 +258,11 @@ _SOP1_SCC_NONE_OPS = frozenset(
         'cvt_hi_f32_f16',
         'cvt_i32_f32',
         'cvt_u32_f32',
+        'ff0',
+        'ff1',
+        'flbit',
+        'flbit_i32',
+        'flbit_i32_i64',
     }
 )
 
@@ -451,7 +462,7 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             'scalar_unary',
             operation='flbit_i32',
             data_type='i32',
-            sets_scc='nonzero',
+            sets_scc='none',
         )
 
     # Sign-extend instructions
@@ -471,7 +482,16 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             'scalar_unary',
             operation='flbit_i32_i64',
             data_type='i64',
-            sets_scc='nonzero',
+            sets_scc='none',
+        )
+
+    if name == 'S_CLS_I32_I64':
+        return InstructionSemantics(
+            name,
+            'scalar_unary',
+            operation='cls',
+            data_type='i64',
+            sets_scc='none',
         )
 
     # Try matching each known stem against the name. We prefer a
