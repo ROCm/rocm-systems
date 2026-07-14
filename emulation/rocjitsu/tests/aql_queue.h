@@ -21,6 +21,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <thread>
 
 namespace rocjitsu::test {
@@ -55,17 +56,18 @@ public:
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
-           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, bool xcd_fanout = false,
-           uint32_t queue_id = 1)
+           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, uint32_t process_id = 0,
+           bool xcd_fanout = false, uint32_t queue_id = 1)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
-        doorbell_addr_(doorbell_addr) {
+        doorbell_addr_(doorbell_addr), process_id_(process_id) {
     uint64_t zero = 0;
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, read_ptr_addr_);
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, write_ptr_addr_);
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, doorbell_addr_);
+    write_block(read_ptr_addr_, &zero, sizeof(zero));
+    write_block(write_ptr_addr_, &zero, sizeof(zero));
+    write_block(doorbell_addr_, &zero, sizeof(zero));
 
     amdgpu::HwQueue hw{};
+    hw.process_id = process_id;
     hw.queue_id = queue_id;
     hw.ring_base_va = ring_addr_;
     hw.ring_size = ring_size_;
@@ -76,14 +78,20 @@ public:
     cp_->register_queue(std::move(hw));
   }
 
+  AqlQueue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint64_t ring_addr,
+           uint32_t ring_size, uint64_t read_ptr_addr, uint64_t write_ptr_addr,
+           uint64_t doorbell_addr, bool xcd_fanout, uint32_t queue_id = 1)
+      : AqlQueue(memory, cp, ring_addr, ring_size, read_ptr_addr, write_ptr_addr, doorbell_addr,
+                 /*process_id=*/0, xcd_fanout, queue_id) {}
+
   /// Write an AQL dispatch packet and ring the doorbell via GPU memory.
   void submit(const hsa_kernel_dispatch_packet_t &pkt) {
     uint32_t slot = static_cast<uint32_t>(write_idx_ % (ring_size_ / 64));
     uint64_t pkt_addr = ring_addr_ + slot * 64;
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&pkt), 64, pkt_addr);
+    write_block(pkt_addr, &pkt, sizeof(pkt));
     ++write_idx_;
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&write_idx_), 8, write_ptr_addr_);
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&write_idx_), 8, doorbell_addr_);
+    write_block(write_ptr_addr_, &write_idx_, sizeof(write_idx_));
+    write_block(doorbell_addr_, &write_idx_, sizeof(write_idx_));
     // Inject a doorbell event so the engine processes it on the next drain.
     cp_->engine()->schedule_event_now(cp_->doorbell_event());
   }
@@ -186,6 +194,15 @@ public:
   }
 
 private:
+  void write_block(uint64_t address, const void *source, size_t size) {
+    auto *bytes = static_cast<const uint8_t *>(source);
+    if (process_id_ == 0) {
+      memory_->load_image(bytes, size, address);
+      return;
+    }
+    memory_->write_block(address, std::span<const uint8_t>(bytes, size), process_id_);
+  }
+
   amdgpu::GpuMemory *memory_;
   amdgpu::CommandProcessor *cp_;
   uint64_t ring_addr_;
@@ -193,6 +210,7 @@ private:
   uint64_t read_ptr_addr_;
   uint64_t write_ptr_addr_;
   uint64_t doorbell_addr_;
+  uint32_t process_id_;
   uint64_t write_idx_ = 0;
 };
 

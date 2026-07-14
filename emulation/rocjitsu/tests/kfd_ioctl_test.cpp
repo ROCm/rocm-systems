@@ -726,6 +726,11 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
   if (reserved == MAP_FAILED && errno == EEXIST)
     GTEST_SKIP() << "test GPUVA reservation is already occupied";
   ASSERT_EQ(reserved, reinterpret_cast<void *>(kGpuVa)) << std::strerror(errno);
+  struct ScopedReservation {
+    void *address;
+    size_t size;
+    ~ScopedReservation() { munmap(address, size); }
+  } reservation{reserved, kSize};
 
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = kGpuVa;
@@ -733,6 +738,17 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  struct ScopedAllocation {
+    rocjitsu::SimulatedKfd *driver;
+    uint64_t handle;
+    ~ScopedAllocation() {
+      if (handle != 0) {
+        kfd_ioctl_free_memory_of_gpu_args args{};
+        args.handle = handle;
+        driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &args);
+      }
+    }
+  } allocation{driver_, alloc.handle};
   ASSERT_NE(alloc.handle, 0u);
 
   kfd_ioctl_map_memory_to_gpu_args map{};
@@ -741,7 +757,7 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
   EXPECT_EQ(map.n_success, 1u);
 
-  auto *page = soc_->memory()->resolve_host_ptr(kGpuVa, driver_->local_process_id());
+  uint8_t *page = soc_->memory()->resolve_host_ptr(kGpuVa, driver_->local_process_id());
   ASSERT_EQ(page, reinterpret_cast<uint8_t *>(kGpuVa));
 
   soc_->memory()->write32(kGpuVa, kExpected, driver_->local_process_id());
@@ -750,7 +766,8 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
   kfd_ioctl_free_memory_of_gpu_args free_args{};
   free_args.handle = alloc.handle;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
-  munmap(reserved, kSize);
+  allocation.handle = 0;
+  EXPECT_FALSE(soc_->memory()->has_page_table_mapping(kGpuVa, driver_->local_process_id()));
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {

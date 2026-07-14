@@ -1797,8 +1797,8 @@ kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const
       .scratch_limit = scratch_base + 0xFFFFFFFFULL,
       // rocjitsu maps GPU VAs directly to host pointers, so the aperture must
       // cover the host addresses accepted by the runtime.
-      .gpuvm_base = 0x10000ULL,
-      .gpuvm_limit = 0x7FFFFFFFFFFFULL,
+      .gpuvm_base = KfdProcess::kGpuVmBase,
+      .gpuvm_limit = KfdProcess::kGpuVmLimit,
       .gpu_id = ordinal < gpus_.size() ? gpus_[ordinal].gpu_id : 0,
       .pad = 0,
   };
@@ -2075,7 +2075,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    if (alloc.host_ptr)
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
     if (alloc.memfd >= 0) {
       {
@@ -2122,6 +2122,14 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
                       alloc.host_ptr != nullptr);
   });
+  if (!daemon_mode_ && alloc.user_va && alloc.host_ptr == nullptr &&
+      !(alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL))) {
+    auto *host_ptr = reinterpret_cast<void *>(alloc.gpu_va);
+    if (libc_passthrough().mprotect(host_ptr, alloc.size, PROT_READ | PROT_WRITE) == 0)
+      alloc.host_ptr = host_ptr;
+    else
+      return -errno;
+  }
   if (alloc.host_ptr)
     map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
   args->n_success = args->n_devices;

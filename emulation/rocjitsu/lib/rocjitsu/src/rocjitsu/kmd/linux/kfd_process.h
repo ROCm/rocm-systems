@@ -44,6 +44,17 @@ namespace rocjitsu {
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
+  /// @brief Log2 of the simulated KFD GPU page size.
+  static constexpr uint64_t kPageShift = 12;
+  /// @brief Simulated KFD GPU page size in bytes.
+  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
+  /// @brief Lowest address in the GPUVM aperture reported to userspace.
+  static constexpr uint64_t kGpuVmBase = 0x10000ULL;
+  /// @brief Inclusive highest address in the GPUVM aperture reported to userspace.
+  static constexpr uint64_t kGpuVmLimit = 0x7FFFFFFFFFFFULL;
+  /// @brief First GPUVA considered for allocations selected by the simulated driver.
+  static constexpr uint64_t kGpuVmAllocationBase = 0x1000000000ULL;
+
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
     /// @brief One live client mapping of the canonical doorbell backing.
@@ -70,7 +81,7 @@ public:
   /// @param process_id Unique identifier (analogous to PASID) for CP routing.
   /// @param num_gpus Number of GPU devices (sizes per-GPU state vector).
   explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1)
-      : process_id_(process_id), next_gpu_va_(0x1000000000ULL), gpu_state_(num_gpus) {}
+      : process_id_(process_id), next_gpu_va_(kGpuVmAllocationBase), gpu_state_(num_gpus) {}
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }

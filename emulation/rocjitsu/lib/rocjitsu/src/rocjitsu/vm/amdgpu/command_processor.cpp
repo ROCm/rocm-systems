@@ -493,8 +493,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
-        scratch_allocator_) {
+    if (memory_ && scratch_allocator_ &&
+        !memory_->has_page_table_mapping(wave_scratch, pkt.process_id)) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.

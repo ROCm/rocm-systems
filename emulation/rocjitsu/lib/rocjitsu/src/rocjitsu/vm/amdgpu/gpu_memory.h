@@ -318,6 +318,19 @@ public:
     return every_page(addr, size, [&](uint64_t page_addr) { return is_mapped(page_addr, vmid); });
   }
 
+  /// @brief Return whether a GPU VA has host backing in a VMID page table.
+  /// @details Unlike resolve_host_ptr(), this query never falls back to identity
+  /// passthrough. Callers use it when they need to distinguish explicit backing
+  /// from an otherwise valid host virtual address.
+  bool has_page_table_mapping(uint64_t addr, uint32_t vmid) const {
+    if (vmid == 0)
+      return false;
+    static thread_local PteCache cache;
+    return cached_walk(addr, vmid, cache, [](const KfdProcess::PageTableEntry *pte) {
+      return pte && pte->host_ptr != nullptr;
+    });
+  }
+
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
   /// @details This reads only the page-wide policy. It deliberately avoids the
   /// host-extent copy, addressability checks, and external allocator queries

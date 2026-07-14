@@ -99,18 +99,20 @@ constexpr uint32_t SOPP_S_TRAP_1 = 0xBF920001;
 
 using namespace rocjitsu;
 
-TEST(GpuMemoryPassthroughTest, DoesNotTreatUnmappedGpuVmApertureAsHostPointer) {
+TEST(GpuMemoryPassthroughTest, PageTableMappingQueryIgnoresHostPassthrough) {
   constexpr uint32_t kVmid = 42;
   constexpr uint64_t kGpuVa = KfdProcess::kGpuVmBase + 0x45000;
-  constexpr uint32_t kValue = 0x12345678u;
 
   amdgpu::GpuMemory mem("test.vram");
   mem.set_passthrough(true);
 
-  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), nullptr);
-  mem.write32(kGpuVa, kValue, kVmid);
-  EXPECT_EQ(mem.read32(kGpuVa, kVmid), kValue);
-  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), nullptr);
+  KfdProcess proc(kVmid);
+  mem.register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+
+  EXPECT_FALSE(mem.has_page_table_mapping(kGpuVa, kVmid));
+  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), reinterpret_cast<uint8_t *>(kGpuVa));
+
+  mem.unregister_process(kVmid);
 }
 
 TEST(GpuMemoryPassthroughTest, MappedGpuVmApertureStillUsesProcessPageTable) {
@@ -126,6 +128,7 @@ TEST(GpuMemoryPassthroughTest, MappedGpuVmApertureStillUsesProcessPageTable) {
   proc.map_pages(kGpuVa, backing.data(), backing.size());
   mem.register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
 
+  EXPECT_TRUE(mem.has_page_table_mapping(kGpuVa, kVmid));
   ASSERT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), backing.data());
   mem.write32(kGpuVa, kValue, kVmid);
   uint32_t observed = 0;
@@ -367,6 +370,96 @@ TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
       EXPECT_EQ(snapshots->snapshots().front().vgpr(0, 43), 43u);
     }
   }
+}
+
+TEST(AqlQueueTest, DefaultProcessKeepsQueueStateInSparseMemoryWithPassthrough) {
+  constexpr uint64_t kHostSentinel = 0xA5A5A5A5A5A5A5A5ULL;
+  alignas(64) std::array<uint8_t, test::AqlQueue::DEFAULT_RING_SIZE> ring{};
+  ring.fill(0xA5);
+  uint64_t read_ptr = kHostSentinel;
+  uint64_t write_ptr = kHostSentinel;
+  uint64_t doorbell = kHostSentinel;
+  VmFixture f;
+  f.mem()->set_passthrough(true);
+
+  test::AqlQueue queue(f.mem(), f.cp(), reinterpret_cast<uint64_t>(ring.data()), ring.size(),
+                       reinterpret_cast<uint64_t>(&read_ptr),
+                       reinterpret_cast<uint64_t>(&write_ptr),
+                       reinterpret_cast<uint64_t>(&doorbell));
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  queue.submit(pkt);
+
+  EXPECT_TRUE(std::all_of(ring.begin(), ring.end(), [](uint8_t byte) { return byte == 0xA5; }));
+  EXPECT_EQ(read_ptr, kHostSentinel);
+  EXPECT_EQ(write_ptr, kHostSentinel);
+  EXPECT_EQ(doorbell, kHostSentinel);
+
+  f.mem()->set_passthrough(false);
+  EXPECT_EQ(f.mem()->read64(reinterpret_cast<uint64_t>(&read_ptr)), 0u);
+  EXPECT_EQ(f.mem()->read64(reinterpret_cast<uint64_t>(&write_ptr)), 1u);
+  EXPECT_EQ(f.mem()->read64(reinterpret_cast<uint64_t>(&doorbell)), 1u);
+}
+
+TEST(CommandProcessorScratchBackingTest, ExplicitPteControlsAllocatorWithPassthrough) {
+  constexpr uint32_t kVmid = 44;
+  constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
+  constexpr uint32_t kPrivateSegmentSize = 4;
+  constexpr size_t kExpectedScratchSize = kPrivateSegmentSize * 64;
+
+  KfdProcess proc(kVmid);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> scratch_backing{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> ring{};
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> kernel{};
+  alignas(uint64_t) uint64_t read_ptr = 0;
+  alignas(uint64_t) uint64_t write_ptr = 0;
+  alignas(uint64_t) uint64_t doorbell = 0;
+  VmFixture f;
+  f.mem()->set_passthrough(true);
+  f.mem()->register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+
+  size_t allocator_calls = 0;
+  f.cp()->set_scratch_backing_allocator([&](uint32_t process_id, uint64_t gpu_va, size_t size) {
+    EXPECT_EQ(process_id, kVmid);
+    EXPECT_EQ(gpu_va, kScratchPool);
+    EXPECT_EQ(size, kExpectedScratchSize);
+    ++allocator_calls;
+    return true;
+  });
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  std::memcpy(kernel.data(), &descriptor, sizeof(descriptor));
+  std::memcpy(kernel.data() + sizeof(descriptor), &SOPP_S_ENDPGM, sizeof(SOPP_S_ENDPGM));
+  uint64_t kernel_object = reinterpret_cast<uint64_t>(kernel.data());
+  test::AqlQueue queue(f.mem(), f.cp(), reinterpret_cast<uint64_t>(ring.data()), ring.size(),
+                       reinterpret_cast<uint64_t>(&read_ptr),
+                       reinterpret_cast<uint64_t>(&write_ptr),
+                       reinterpret_cast<uint64_t>(&doorbell), kVmid);
+
+  auto dispatch = [&]() {
+    hsa_kernel_dispatch_packet_t pkt{};
+    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    pkt.setup = 1;
+    pkt.workgroup_size_x = 64;
+    pkt.workgroup_size_y = 1;
+    pkt.workgroup_size_z = 1;
+    pkt.grid_size_x = 64;
+    pkt.grid_size_y = 1;
+    pkt.grid_size_z = 1;
+    pkt.private_segment_size = kPrivateSegmentSize;
+    pkt.kernel_object = kernel_object;
+    queue.submit(pkt);
+    step_until_halted(*f.engine, {f.cu()});
+  };
+
+  dispatch();
+  EXPECT_EQ(allocator_calls, 1u);
+
+  proc.map_pages(kScratchPool, scratch_backing.data(), scratch_backing.size());
+  dispatch();
+  EXPECT_EQ(allocator_calls, 1u);
 }
 
 std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
