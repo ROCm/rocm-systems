@@ -50,7 +50,8 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     _connection = libpyrocpd.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info, _schema_versions = _create_temp_views(_connection, _input)
-    _create_meta_views(_connection)
+    _schema_version = _schema_versions[0] if _schema_versions else "0.0.0"
+    _create_meta_views(_connection, _schema_version)
     return (_connection, _input, _table_info, _schema_versions)
 
 
@@ -215,8 +216,8 @@ def _create_temp_views(connection, input):
     return all_tables, schema_versions
 
 
-def _create_meta_views(connection):
-    schema = RocpdSchema()
+def _create_meta_views(connection, schema_version="0.0.0"):
+    schema = RocpdSchema(version=schema_version)
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
 
