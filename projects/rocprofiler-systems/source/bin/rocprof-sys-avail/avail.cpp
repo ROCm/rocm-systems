@@ -794,7 +794,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                                        rocprofsys::delimit(itr.categories(), ", ");
                                    for(auto& _v : _categories)
                                    {
-                                       _v = "component::" + _v;
+                                       _v = fmt::format("component::{}", _v);
                                        if(category_view.count(_v) > 0) return false;
                                    }
                                    return true;
