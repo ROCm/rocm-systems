@@ -541,6 +541,15 @@ Full gfx950 support means:
   a typed resource error and returns the original object instead of guessing.
   A synthetic two-site regression covers this containment, the focused gate
   passes 264/264, and isolated IREE tests 1663, 1809, 1840, and 1853 all pass.
+- 2026-07-14: `T4RRC` isolated the residual IREE loader error in test 1833.
+  The workspace TheRock runtime reached a 237,536-byte gfx950 object containing
+  unsupported VOP3P word `0xD3AD0130`; kernels with that decoder error were
+  still entering whole-object MOI resource planning, so the decoder exception
+  escaped the HSA C hook and appeared as `HIP_ERROR_UNKNOWN`. MOI now excludes
+  decoder-error kernels/functions from candidates and CFG resource planning
+  while retaining valid owners in the same object. A synthetic mixed-owner
+  regression passes, and test 1833 passes under the record/replay hook with
+  `/tmp/xx/TheRock/build/dist/rocm`. The clean broad rerun remains in progress.
 
 ## DAG Overview
 
@@ -2371,8 +2380,12 @@ Goal: run the same inventory under standard record/replay.
 Current status: `ACTIVE`. The first parallel sweep exposed failures in large
 data-tiled/MXFP4 and dot workloads, including memory-aperture exceptions; a
 simultaneous GPU exception can contaminate other subprocesses, so these are
-being rerun individually before attribution. This broad profile deliberately
-does not require a patch or record from every object.
+being rerun individually before attribution. The remaining reproducible loader
+failure was traced to an unsupported gfx950 VOP3P word in a decoder-error
+kernel entering MOI CFG resource planning; decoder-error owners are now
+excluded while valid owners in the same object remain eligible, and isolated
+test 1833 passes. This broad profile deliberately does not require a patch or
+record from every object.
 
 This aggregate now has three bounded subnodes:
 

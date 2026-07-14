@@ -2218,12 +2218,19 @@ struct MoiResourcePlanningState {
     kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
 
     std::vector<BasicBlock::CodeRange> code_ranges;
-    code_ranges.reserve(code_object.functions().size());
-    for (const AmdGpuFunctionInfo &function : code_object.functions()) {
-      if (function.code_size != 0)
+    code_ranges.reserve(result.kernels.size() + result.functions.size());
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      if (kernel.has_text_range && kernel.code_size != 0 && kernel.stats.decode_error_count == 0)
+        code_ranges.push_back({.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+    }
+    for (const ConSanFunctionInfo &function : result.functions) {
+      if (function.code_size != 0 && function.stats.decode_error_count == 0)
         code_ranges.push_back(
             {.start_offset = function.entry_text_offset, .size = function.code_size});
     }
+
+    if (code_ranges.empty())
+      return;
 
     blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
     block_index = build_block_offset_index(blocks);
@@ -9325,10 +9332,14 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.modified = false;
   result.elf_bytes.clear();
   result.moi_candidates.clear();
-  for (const ConSanKernelInfo &kernel : result.kernels)
-    append_moi_candidates(kernel, effective_options.flat_provenance_mode, result);
-  for (const ConSanFunctionInfo &function : result.functions)
-    append_moi_candidates(function, effective_options.flat_provenance_mode, result);
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (kernel.stats.decode_error_count == 0)
+      append_moi_candidates(kernel, effective_options.flat_provenance_mode, result);
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    if (function.stats.decode_error_count == 0)
+      append_moi_candidates(function, effective_options.flat_provenance_mode, result);
+  }
   rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_owner_sgpr(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);

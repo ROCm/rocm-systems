@@ -11818,5 +11818,46 @@ TEST(ConSan, InvalidCdna4KernelDoesNotContainValidCandidatePatching) {
   EXPECT_EQ(result.patches.front().anchor_offset, sizeof(invalid_kernel));
 }
 
+TEST(ConSanMoi, InvalidCdna4KernelIsExcludedFromResourcePlanning) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  constexpr uint64_t kTextFileOffset = 0x100;
+  const std::array<uint32_t, 2> invalid_kernel = {
+      0xD3AD0130u, // gfx950 VOP3P encoding not represented by this decoder
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::array<uint32_t, 2> valid_kernel = {
+      0xD81A0000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  std::memcpy(bytes.data() + kTextFileOffset, invalid_kernel.data(), sizeof(invalid_kernel));
+  std::memcpy(bytes.data() + kTextFileOffset + sizeof(invalid_kernel), valid_kernel.data(),
+              sizeof(valid_kernel));
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::RecordReplay;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  const auto invalid = std::ranges::find(result.kernels, "shared_owner_0", &ConSanKernelInfo::name);
+  const auto valid = std::ranges::find(result.kernels, "shared_owner_1", &ConSanKernelInfo::name);
+  ASSERT_NE(invalid, result.kernels.end());
+  ASSERT_NE(valid, result.kernels.end());
+  EXPECT_EQ(invalid->stats.decode_error_count, 1u);
+  EXPECT_EQ(valid->stats.decode_error_count, 0u);
+  ASSERT_FALSE(result.moi_candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
+    return candidate.container_name == "shared_owner_0";
+  }));
+  EXPECT_NE(std::ranges::find(result.moi_candidates, "shared_owner_1",
+                              &ConSanMoiCandidate::container_name),
+            result.moi_candidates.end());
+  EXPECT_EQ(result.resource_plans.size(), result.moi_candidates.size());
+}
+
 } // namespace
 } // namespace rocjitsu
