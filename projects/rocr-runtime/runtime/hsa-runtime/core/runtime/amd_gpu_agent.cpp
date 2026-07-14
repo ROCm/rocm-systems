@@ -128,7 +128,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       large_bar_enabled_(false),
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
-      kern_cluster_max_dim_({ UINT32_MAX, UINT32_MAX, UINT32_MAX }),
+      kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
       cluster_max_dim_({ 1, 1, 1 }) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
@@ -210,9 +210,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     extended_aql_dispatch_supported_ = true;
     workgroup_clusters_supported_ = true;
   }
-
-  if (supported_isas_[0]->GetMajorVersion() >= 12)
-    kern_cluster_max_dim_ = { UINT32_MAX, UINT16_MAX, UINT16_MAX };
 
   if (workgroup_clusters_supported_) {
     const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
@@ -2247,7 +2244,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       hsa_dim3_t* dim3 = reinterpret_cast<hsa_dim3_t*>(value);
 
       dim3->x = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.x,
-        static_cast<uint64_t>(UINT32_MAX)));
+        static_cast<uint64_t>(INT32_MAX)));
 
       dim3->y = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.y,
         static_cast<uint64_t>(UINT16_MAX)));
@@ -2257,7 +2254,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     } break;
     case HSA_AGENT_INFO_GRID_MAX_SIZE:
       *((uint32_t*)value) = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.x,
-        static_cast<uint64_t>(UINT32_MAX)));
+        static_cast<uint64_t>(INT32_MAX)));
       break;
     case HSA_AGENT_INFO_FBARRIER_MAX_SIZE:
       // TODO: to confirm
