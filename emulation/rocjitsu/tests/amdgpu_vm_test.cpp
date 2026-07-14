@@ -99,6 +99,42 @@ constexpr uint32_t SOPP_S_TRAP_1 = 0xBF920001;
 
 using namespace rocjitsu;
 
+TEST(GpuMemoryPassthroughTest, DoesNotTreatUnmappedGpuVmApertureAsHostPointer) {
+  constexpr uint32_t kVmid = 42;
+  constexpr uint64_t kGpuVa = KfdProcess::kGpuVmBase + 0x45000;
+  constexpr uint32_t kValue = 0x12345678u;
+
+  amdgpu::GpuMemory mem("test.vram");
+  mem.set_passthrough(true);
+
+  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), nullptr);
+  mem.write32(kGpuVa, kValue, kVmid);
+  EXPECT_EQ(mem.read32(kGpuVa, kVmid), kValue);
+  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), nullptr);
+}
+
+TEST(GpuMemoryPassthroughTest, MappedGpuVmApertureStillUsesProcessPageTable) {
+  constexpr uint32_t kVmid = 43;
+  constexpr uint64_t kGpuVa = KfdProcess::kGpuVmBase + 0x46000;
+  constexpr uint32_t kValue = 0xA5A55A5Au;
+
+  amdgpu::GpuMemory mem("test.vram");
+  mem.set_passthrough(true);
+
+  KfdProcess proc(kVmid);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  proc.map_pages(kGpuVa, backing.data(), backing.size());
+  mem.register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
+
+  ASSERT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), backing.data());
+  mem.write32(kGpuVa, kValue, kVmid);
+  uint32_t observed = 0;
+  std::memcpy(&observed, backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+
+  mem.unregister_process(kVmid);
+}
+
 struct VmFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc_ptr = nullptr;

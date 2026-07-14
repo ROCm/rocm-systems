@@ -43,6 +43,10 @@
 #include <thread>
 #include <vector>
 
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
 namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
@@ -710,6 +714,43 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
 
   munmap(addr, kSize);
   close(memfd);
+}
+
+TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
+  constexpr uint64_t kGpuVa = rocjitsu::KfdProcess::kGpuVmBase + 0x3210000;
+  constexpr size_t kSize = 4096;
+  constexpr uint32_t kExpected = 0xC001CAFEu;
+
+  void *reserved = mmap(reinterpret_cast<void *>(kGpuVa), kSize, PROT_NONE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1, 0);
+  if (reserved == MAP_FAILED && errno == EEXIST)
+    GTEST_SKIP() << "test GPUVA reservation is already occupied";
+  ASSERT_EQ(reserved, reinterpret_cast<void *>(kGpuVa)) << std::strerror(errno);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = kGpuVa;
+  alloc.size = kSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_NE(alloc.handle, 0u);
+
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+
+  auto *page = soc_->memory()->resolve_host_ptr(kGpuVa, driver_->local_process_id());
+  ASSERT_EQ(page, reinterpret_cast<uint8_t *>(kGpuVa));
+
+  soc_->memory()->write32(kGpuVa, kExpected, driver_->local_process_id());
+  EXPECT_EQ(*reinterpret_cast<volatile uint32_t *>(kGpuVa), kExpected);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  munmap(reserved, kSize);
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
