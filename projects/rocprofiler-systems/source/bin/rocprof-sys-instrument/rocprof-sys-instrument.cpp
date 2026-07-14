@@ -302,8 +302,8 @@ main(int argc, char** argv)
         lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems");
         lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems/lib");
         lib_search_paths.emplace_back(rocprofsys_root + "/lib/rocprofiler-systems/lib64");
-        ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
-                                 "::", "rocprofiler-systems root path: ", rocprofsys_root);
+        ROCPROFSYS_ADD_LOG_ENTRY(
+            argv[0], "::", "rocprofiler-systems root path: ", rocprofsys_root);
     }
 
     auto _rocprofsys_exe_filepath = path::realpath(get_absolute_exe_filepath(argv[0]));
@@ -328,7 +328,8 @@ main(int argc, char** argv)
 
     ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
                              "::", "rocprofsys bin path: ", _rocprofsys_exe_filepath);
-    ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys lib path: ", _rocprofsys_lib_path);
+    ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
+                             "::", "rocprofsys lib path: ", _rocprofsys_lib_path);
     ROCPROFSYS_ADD_LOG_ENTRY(
         argv[0], "::", "rocprofsys libexec path: ", _rocprofsys_internal_libexec_path);
 
