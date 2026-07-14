@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -46,7 +47,7 @@ struct VmFixture {
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
   VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64) {
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -72,7 +73,9 @@ struct VmFixture {
                        R"({"key":"num_wf_slots","value":")" +
                        std::to_string(num_wf_slots) +
                        R"("},)"
-                       R"({"key":"sgprs_per_wf","value":"104"},)"
+                       R"({"key":"sgprs_per_wf","value":")" +
+                       std::to_string(sgprs_per_wf) +
+                       R"("},)"
                        R"({"key":"vgprs_per_wf","value":"256"},)"
                        R"({"key":"lds_size_kb","value":")" +
                        std::to_string(lds_size_kb) +
@@ -97,7 +100,8 @@ struct VmFixture {
   /// Write a kernel descriptor + instructions to GPU memory per AMDHSA ABI.
   /// Returns the kernel_object address.
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
-                        uint32_t vgprs = 256, uint32_t user_sgprs = 2) {
+                        uint32_t vgprs = 256, uint32_t user_sgprs = 2,
+                        uint32_t group_segment_fixed_size = 0, bool wgp_mode = false) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -106,6 +110,8 @@ struct VmFixture {
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
+    kd.group_segment_fixed_size = group_segment_fixed_size;
 
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
@@ -171,6 +177,113 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
+  constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
+  constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  for (const char *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, kWgpLdsBytes,
+                                 /*wgp_mode=*/true);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    EXPECT_NO_THROW(f.engine->run());
+    EXPECT_EQ(f.cu(0)->lds().size_bytes(), kPerCuLdsBytes);
+    EXPECT_EQ(f.se()->spi().max_wgp_lds_bytes(), kWgpLdsBytes);
+
+    amdgpu::Wavefront *wf = nullptr;
+    for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
+      auto *cu = f.cu(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+          wf = cu->wf(wf_idx);
+          break;
+        }
+      }
+    }
+    ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
+    wf->lds().write32(kPerCuLdsBytes + 4, 0xC001D00Du);
+    EXPECT_EQ(wf->lds().read32(kPerCuLdsBytes + 4), 0xC001D00Du);
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("gfx1250", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "gfx1250 must not enable WGP mode from the descriptor bit";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("in CU mode"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, LegacySpiQueueRejectsWgpMode) {
+  VmFixture f("rdna4", 2);
+  amdgpu::DispatchEntry entry{};
+  entry.wgp_mode = true;
+
+  EXPECT_THROW(f.se()->spi().enqueue_wg(0, 0, &entry), std::invalid_argument);
+}
+
+TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 64 * 1024 + 1,
+                               /*wgp_mode=*/false);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized CU-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 65537 bytes of LDS (65792 bytes after alignment) in CU mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 65536 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024 + 1,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized WGP-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 131073 bytes of LDS (131328 bytes after alignment) in WGP mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 131072 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -676,6 +789,57 @@ constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
+
+TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
+  constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
+  constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
+  constexpr uint32_t kAddress = kPerCuLdsBytes + 4;
+  constexpr uint32_t kValue = 0xC001D00D;
+  constexpr uint32_t kDsStoreB32 = 26;
+  constexpr uint32_t kDsLoadB32 = 108;
+  constexpr uint32_t kRdna4WaitcntLgkm0 = 0xBF89FC07;
+  constexpr uint32_t kRdna4Endpgm = 0xBFB00000;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),
+      kAddress,
+      s_mov_b32(SGPR(5), 255),
+      kValue,
+      v_mov_b32(0, SGPR(4)),
+      v_mov_b32(1, SGPR(5)),
+      ds_lo(kDsStoreB32),
+      ds_hi(/*vdst=*/0, /*data0=*/1, /*addr=*/0),
+      kRdna4WaitcntLgkm0,
+      ds_lo(kDsLoadB32),
+      ds_hi(/*vdst=*/2, /*data0=*/0, /*addr=*/0),
+      kRdna4WaitcntLgkm0,
+      kRdna4Endpgm,
+  };
+
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 128, 64, 2, kWgpLdsBytes,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 32, 32);
+
+  ASSERT_NO_THROW(f.engine->run());
+
+  amdgpu::Wavefront *wf = nullptr;
+  for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
+    auto *cu = f.cu(cu_idx);
+    for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+      if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+        wf = cu->wf(wf_idx);
+        break;
+      }
+    }
+  }
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
+  EXPECT_EQ(wf->lds().read32(kAddress), kValue);
+  EXPECT_EQ(wf->cu().read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
+}
 
 struct ExecFixture {
   VmFixture f;
