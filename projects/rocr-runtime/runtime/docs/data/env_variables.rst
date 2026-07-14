@@ -105,6 +105,12 @@
       - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable HotSwap diagnostic logging.
         | Any other non-empty value: Enable HotSwap diagnostic logging.
 
+    * - | ``HSA_HOTSWAP_STRICT_MODE``
+        | Enables the opt-in HotSwap strict mask workaround request for non-A0 ``gfx1250`` targets.
+      - ``0``
+      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable strict mask workaround requests.
+        | Any other non-empty value: Request COMGR strict mask workarounds for non-A0 ``gfx1250`` HotSwap rewrites.
+
     * - | ``AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES``
         | Controls whether ROCr requests COMGR entry-trampoline HotSwap rewriting for gfx12.5 targets. Disabled by default.
       - ``0``
