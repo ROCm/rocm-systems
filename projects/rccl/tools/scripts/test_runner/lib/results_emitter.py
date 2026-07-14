@@ -448,7 +448,15 @@ class ResultsEmitter:
                                 "not be bundled: %s", e)
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
-                shutil.copytree(report_dir, dst, dirs_exist_ok=True)
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial report bundle rather than no results.
+                try:
+                    shutil.copytree(report_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some coverage report files "
+                                "could not be bundled: %s", e)
 
             tarball = os.path.join(self.results_dir, f"{self.run_id}.tar.gz")
             tmp_tar = f"{tarball}.tmp"
