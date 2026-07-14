@@ -559,6 +559,15 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
         if(!obj) continue;
 
         std::string binary_path = obj->pathName();
+        // Skip libraries that are excluded as a whole and whose symbol tables are
+        // prohibitively large to parse
+        if(skip_symbol_parsing(binary_path))
+        {
+            verbprintf(2, "Skipping symbol parsing for internal library: %s\n",
+                       binary_path.c_str());
+            continue;
+        }
+
         // Open Symtab directly for comprehensive symbol access
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))

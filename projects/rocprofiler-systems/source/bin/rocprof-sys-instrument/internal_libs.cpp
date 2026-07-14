@@ -264,17 +264,6 @@ get_library_search_paths_impl()
 // module-level exclusion works, but we skip enumerating every module/function.
 constexpr auto no_parse_libs = strview_init_t{ "libclang-cpp.so", "libLLVM.so" };
 
-bool
-skip_symbol_parsing(const std::string& _path)
-{
-    auto _base = std::string{ filepath::basename(_path) };
-    for(const auto& _lib : no_parse_libs)
-    {
-        if(std::string_view{ _base }.substr(0, _lib.size()) == _lib) return true;
-    }
-    return false;
-}
-
 std::set<std::string>
 get_internal_basic_libs_impl()
 {
@@ -548,6 +537,17 @@ ordered(const std::unordered_map<KeyT, MappedT, TailT...>& _unordered)
     for(const auto& itr : _unordered)
         _ordered.emplace(itr.first, itr.second);
     return _ordered;
+}
+
+bool
+skip_symbol_parsing(const std::string& _path)
+{
+    auto _base = std::string{ filepath::basename(_path) };
+    for(const auto& _lib : no_parse_libs)
+    {
+        if(std::string_view{ _base }.substr(0, _lib.size()) == _lib) return true;
+    }
+    return false;
 }
 
 std::optional<std::string>

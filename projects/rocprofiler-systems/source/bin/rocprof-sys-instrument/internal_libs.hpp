@@ -128,6 +128,11 @@ template <typename KeyT, typename MappedT, typename... TailT>
 std::map<KeyT, MappedT>
 ordered(const std::unordered_map<KeyT, MappedT, TailT...>&);
 
+// True for libraries excluded from instrumentation as a whole whose symbol
+// tables are too large / unsafe to parse.
+bool
+skip_symbol_parsing(const std::string&);
+
 std::optional<std::string> find_library(std::string_view);
 
 std::vector<std::string> find_libraries(std::string_view);
