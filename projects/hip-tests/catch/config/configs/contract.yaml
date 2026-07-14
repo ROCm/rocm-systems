@@ -807,6 +807,21 @@ contract:
   Contract_KernelNameRef_ByFunction_NamesResolvedKernel:
     <<: *level_0
     tags: [kernel_name_ref]
+  Contract_GraphicsInterop_MapResources_NullResources_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_UnregisterResource_NullHandle_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_ResourceGetMappedPointer_NullHandle_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
   Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue:
     <<: *level_0
     tags: [graph_batch_mem_op]

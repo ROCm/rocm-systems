@@ -40,6 +40,7 @@ The first domains are:
 - `multi_device_launch`: discrete-GPU-gated cooperative, extended, and module-based multi-device kernel launch contracts
 - `driver_launch_ex`: discrete-GPU-gated driver-style extended kernel launch and SM-resource group-split contracts
 - `kernel_name_ref`: AMD kernel-name reflection contracts by function handle and host function pointer
+- `graphics_interop`: graphics-interop resource map, unmap, unregister, and mapped-pointer/array query invalid-input rejection contracts
 - `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
