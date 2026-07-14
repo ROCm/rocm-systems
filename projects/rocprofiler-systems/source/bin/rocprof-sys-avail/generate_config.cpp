@@ -10,9 +10,9 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
-#include <spdlog/fmt/fmt.h>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>

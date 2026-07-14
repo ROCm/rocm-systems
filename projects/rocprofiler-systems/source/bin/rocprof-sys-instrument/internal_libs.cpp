@@ -180,7 +180,9 @@ get_library_search_paths_impl()
     // search paths from environment variables
     for(const auto& path :
         rocprofsys::delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
+    {
         _emplace_if_exists(path);
+    }
 
     for(const auto& rocm_path :
         { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),

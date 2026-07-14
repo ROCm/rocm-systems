@@ -22,8 +22,8 @@
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/types.h"
-#include <spdlog/fmt/fmt.h>
 
+#include <spdlog/fmt/fmt.h>
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
