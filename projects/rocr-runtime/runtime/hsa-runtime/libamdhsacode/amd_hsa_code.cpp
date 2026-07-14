@@ -1425,10 +1425,17 @@ constexpr size_t kMaxAmdNoteBufferSize = 4096;
 
     void AmdHsaCode::PrintRawData(std::ostream& out, Section* section)
     {
+      constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
       out << "    Data:" << std::endl;
-      unsigned char *sdata = (unsigned char*)alloca(section->size());
-      section->getData(0, sdata, section->size());
-      PrintRawData(out, sdata, section->size());
+      const size_t section_size = section->size();
+      if (section_size > kMaxSectionPrintSize) {
+        out << "      (section data too large to display: " << section_size
+            << " bytes)" << std::endl;
+        return;
+      }
+      std::vector<unsigned char> sdata(section_size);
+      section->getData(0, sdata.data(), section_size);
+      PrintRawData(out, sdata.data(), section_size);
     }
 
     void AmdHsaCode::PrintRawData(std::ostream& out, const unsigned char *data, size_t size)
