@@ -221,7 +221,7 @@ jobs:
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          export ROCJITSU_CORPUS_TEST_DIR="${{ env.ROCJITSU_SOURCE_DIR }}/tests/corpus"
+          export ROCJITSU_CORPUS_TEST_DIR="${ROCJITSU_SOURCE_DIR}/tests/corpus"
 
           bash "${ROCJITSU_CORPUS_TEST_DIR}/run-corpus-tests.sh" \
             "${targets[@]}"
