@@ -31,5 +31,6 @@ add_custom_target(gen_elf_fixtures DEPENDS ${ELF_FIXTURES})
 
 hip_add_exe_to_target(NAME oob_module
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+                      LINKER_LIBS hiprtc::hiprtc)
 add_dependencies(oob_module gen_oob_kernel gen_elf_fixtures)
