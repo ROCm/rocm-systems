@@ -99,6 +99,50 @@ def test_simm32_literal_operand_is_initialized_from_extension_word():
     ) == stmt
 
 
+def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
+    sem = InstructionSemantics(
+        'V_FMAC_F64',
+        'vector_binop',
+        operation='fmac',
+        data_type='f64',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC_VGPR', size=64),
+        'Vop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == stmt
+
+
+def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
+    sem = InstructionSemantics(
+        'S_MUL_U64',
+        'scalar_binop',
+        operation='mul',
+        data_type='u64',
+        sets_scc='none',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64),
+        'Sop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
 def test_simm16_literal_operand_uses_low_half_of_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(16, 'OPR_SIMM16'), 'Vop2InstLiteralMachineInst'
