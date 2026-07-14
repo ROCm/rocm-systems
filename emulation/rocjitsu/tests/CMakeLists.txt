@@ -241,6 +241,23 @@ function(rj_add_test)
         message(FATAL_ERROR "rj_add_test(${ARG_NAME}) requires COMMAND")
     endif()
 
+    if(RJ_EMULATE_GFX1201_CONSAN_TESTS)
+        list(GET ARG_COMMAND 0 _command_executable)
+        if(
+            _command_executable MATCHES
+            "/hip_consan_(lds|inline_shadow|moi)_test$"
+        )
+            set(
+                ARG_COMMAND
+                ${RJ_CLI}
+                --config
+                ${RJ_HIP_TEST_CONFIG}
+                --
+                ${ARG_COMMAND}
+            )
+        endif()
+    endif()
+
     rj_environment_has_runtime_dir(_has_runtime_dir ${ARG_ENVIRONMENT})
     if(NOT _has_runtime_dir)
         # Each launcher test writes the active config into its runtime dir for
@@ -498,6 +515,19 @@ set(RJ_HIP_TEST_CONFIG
     CACHE FILEPATH
     "rocjitsu config used by basic HIP smoke tests"
 )
+option(
+    RJ_EMULATE_GFX1201_CONSAN_TESTS
+    "Build and run gfx1201 ConSan HIP tests through the rocjitsu simulator"
+    OFF
+)
+if(RJ_EMULATE_GFX1201_CONSAN_TESTS)
+    if(NOT RJ_HIP_TEST_ARCH STREQUAL "gfx1201")
+        message(
+            FATAL_ERROR
+            "RJ_EMULATE_GFX1201_CONSAN_TESTS requires RJ_HIP_TEST_ARCH=gfx1201"
+        )
+    endif()
+endif()
 set(RJ_HIP_TEST_2GPU_CONFIG
     "${RJ_CDNA4_KMD_2GPU_CONFIG}"
     CACHE FILEPATH
@@ -1420,7 +1450,10 @@ if(RJ_ENABLE_HIP_TESTS)
             SOURCE dbi/hip_consan_lds_test.hip
         )
         add_dependencies(hip_consan_lds_test_target rocjitsu_dbi_hooks)
-        if(HAS_GFX1201_GPU AND RJ_HIP_TEST_ARCH STREQUAL "gfx1201")
+        if(
+            (HAS_GFX1201_GPU OR RJ_EMULATE_GFX1201_CONSAN_TESTS)
+            AND RJ_HIP_TEST_ARCH STREQUAL "gfx1201"
+        )
             rj_add_hip_test(
                 hip_consan_inline_shadow_test
                 ARCH gfx1201

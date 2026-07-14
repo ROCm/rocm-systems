@@ -77,7 +77,7 @@ tier1_regex() {
 tier0_live_regex() {
   case "${gpu_arch}" in
     gfx1201)
-      printf '%s' '^ConSan(SpillHipTest|LdsTest|InlineShadowTest|MoiHipTest)\.'
+      printf '%s' '^ConSan(LdsTest|InlineShadowTest|MoiHipTest)\.|^ConSanSpillHipTest\.Gfx1201'
       ;;
     gfx950)
       printf '%s' '^ConSan(SpillHipTest\.Gfx950|LdsGfx950Test\.|MoiGfx950Test\.)'
