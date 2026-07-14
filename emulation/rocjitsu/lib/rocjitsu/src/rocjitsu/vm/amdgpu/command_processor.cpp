@@ -309,12 +309,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
     const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, cu->wf_size());
     if (packed_tid_) {
-      uint32_t packed = id.x & 0x3FFu;
-      if (pkt.enable_vgpr_workitem_id >= 1)
-        packed |= (id.y & 0x3FFu) << 10;
-      if (pkt.enable_vgpr_workitem_id >= 2)
-        packed |= (id.z & 0x3FFu) << 20;
-      cu->write_vgpr(vbase, lane, packed);
+      cu->write_vgpr(vbase, lane, pack_workitem_id(id, pkt.enable_vgpr_workitem_id));
     } else {
       cu->write_vgpr(vbase, lane, id.x);
       if (pkt.enable_vgpr_workitem_id >= 1)
