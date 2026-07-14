@@ -483,6 +483,28 @@ TEST_F(KfdIoctlTest, DbgTrapEnableBadFdReturnsEBADF) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &after), -EINVAL);
 }
 
+// The driver signals the notifier to wake the debugger, so a read-only
+// descriptor is an unusable target even though it is a valid open fd. ENABLE
+// validates the access mode (fcntl F_GETFL) and rejects a non-writable fd with
+// -EBADF, matching a closed one; it must not be stored on the session.
+TEST_F(KfdIoctlTest, DbgTrapEnableReadOnlyFdReturnsEBADF) {
+  const int ro_fd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(ro_fd, 0);
+  debug_fds_.push_back(ro_fd); // closed in TearDown
+
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = static_cast<uint32_t>(ro_fd);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EBADF);
+
+  // The rejected enable left the session disabled.
+  kfd_ioctl_dbg_trap_args after{};
+  after.pid = static_cast<uint32_t>(getpid());
+  after.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &after), -EINVAL);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());

@@ -1806,10 +1806,16 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       return -EALREADY; // target process is already debug enabled
 
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
-    // In daemon mode the notifier fd has already been substituted for its real
-    // value in our fd space (the transport received it via SCM_RIGHTS), so it is
-    // validated here just like the debugger's own fd in local mode.
-    if (fcntl(dbg_fd, F_GETFD) == -1)
+    // Validate the notifier before trusting it. In daemon mode the fd was
+    // received via SCM_RIGHTS and already substituted into our fd space; in
+    // local mode it is the debugger's own descriptor. Either way the driver
+    // *writes* to it to wake the debugger, so it must be a live, writable
+    // descriptor. fcntl(F_GETFL) both proves the fd is open (EBADF otherwise)
+    // and reports its access mode, so a read-only or otherwise unusable fd —
+    // e.g. one a client passed over SCM_RIGHTS that is not a real event target —
+    // is rejected instead of being stored on the session.
+    const int fl = fcntl(dbg_fd, F_GETFL);
+    if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
 
     sess.enabled = true;
