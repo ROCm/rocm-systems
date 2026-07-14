@@ -200,7 +200,7 @@ jobs:
         run: |
           cd lib/python && pip install -e . && pytest amdisa/tests
 
-      - name: Run cts testing suite
+      - name: Run iree, kernels testing suite
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
@@ -224,7 +224,7 @@ jobs:
             if ! pytest --run-wrapper "rocjitsu --config ${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config} --" \
               tests/test_corpus.py -vv \
               --target "${name}" \
-              --suite cts \
+              --suite iree,kernels \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
               --timeout 15; then
               corpus_status=1
@@ -233,7 +233,7 @@ jobs:
           done
           exit "${corpus_status}"
 
-      - name: Run corpus tests
+      - name: Run cts tests
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
@@ -260,7 +260,7 @@ jobs:
               -- pytest \
               tests/test_corpus.py -vv \
               --target "${name}" \
-              --suite iree,kernels \
+              --suite cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
               --timeout 15; then
               corpus_status=1
