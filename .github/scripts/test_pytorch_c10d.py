@@ -64,16 +64,19 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
 
 
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
-    """Verify that the CI-built librccl.so is loadable via LD_LIBRARY_PATH."""
-    try:
-        ctypes.CDLL("librccl.so")
-        log.info("Successfully loaded librccl.so via LD_LIBRARY_PATH")
-    except OSError as e:
-        log.error("Failed to load librccl.so: %s", e)
+    """Verify that the CI-built librccl.so exists and is loadable."""
+    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
+    if not ci_rccl.exists():
+        log.error("CI-built librccl.so not found at %s", ci_rccl)
         sys.exit(1)
-
-    ci_rccl = rccl_lib_dir / "librccl.so"
     log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_rccl.stat().st_size)
+
+    try:
+        ctypes.CDLL(str(ci_rccl))
+        log.info("Successfully loaded %s", ci_rccl)
+    except OSError as e:
+        log.error("Failed to load %s: %s", ci_rccl, e)
+        sys.exit(1)
 
     try:
         import torch
