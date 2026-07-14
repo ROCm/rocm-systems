@@ -262,7 +262,7 @@ get_library_search_paths_impl()
 // tables are prohibitively large to parse. These are excluded
 // from instrumentation as a whole: we still register the library path so
 // module-level exclusion works, but we skip enumerating every module/function.
-constexpr auto no_parse_libs = strview_init_t{ "libclang-cpp.so", "libLLVM.so" };
+const auto no_parse_libs = strview_init_t{ "libclang-cpp.so", "libLLVM.so" };
 
 std::set<std::string>
 get_internal_basic_libs_impl()
