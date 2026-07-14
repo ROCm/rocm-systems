@@ -26,7 +26,6 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -43,15 +42,6 @@
 #include <vector>
 
 using namespace rocjitsu;
-
-#ifndef __has_feature
-#define __has_feature(x) 0
-#endif
-
-#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
-#define RJ_BUILT_WITH_ASAN 1
-extern "C" void __asan_init();
-#endif
 
 namespace {
 
@@ -185,27 +175,6 @@ void prepend_env_path(const char *name, const std::string &value) {
     return;
   }
   setenv(name, value.c_str(), 1);
-}
-
-std::string find_loaded_asan_runtime() {
-#if defined(RJ_BUILT_WITH_ASAN)
-  Dl_info info{};
-  if (!dladdr(reinterpret_cast<void *>(&__asan_init), &info) || !info.dli_fname)
-    return {};
-
-  const std::filesystem::path runtime_path(info.dli_fname);
-  if (runtime_path.filename().string().find("asan") == std::string::npos)
-    return {};
-  return canonical_existing_path(runtime_path);
-#else
-  return {};
-#endif
-}
-
-void prepend_launch_preloads(const std::string &interposer_path) {
-  prepend_env_path("LD_PRELOAD", interposer_path);
-  if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
-    prepend_env_path("LD_PRELOAD", asan_runtime);
 }
 
 bool write_config_file(const std::string &config_path, pid_t pid) {
@@ -650,7 +619,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  prepend_launch_preloads(lib_path);
+  prepend_env_path("LD_PRELOAD", lib_path);
   if (dbt_guest_mode) {
     maybe_expand_rocr_visible_devices(dbt_guest_config);
     // The HSA hook still uses the legacy tools callback path. Disable only the
