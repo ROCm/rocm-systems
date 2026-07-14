@@ -9023,6 +9023,131 @@ std::vector<uint32_t> expand_v_cvt_f32_bf16_vop3(const Instruction &inst, uint32
                                        /*high_half=*/(src.opsel & 0x1u) != 0, literal_word);
 }
 
+ExpandResult lower_v_cvt_norm_f16(const Instruction &inst, const LivenessAnalysis &liveness,
+                                  uint8_t vdst, uint16_t src0, bool src_high, bool dst_high,
+                                  bool is_signed, std::optional<uint32_t> literal_word) {
+  std::vector<uint8_t> avoid{vdst};
+  add_avoid_src_vgpr(avoid, src0);
+  const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
+  if (!tmp_opt || *tmp_opt > 255u) {
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) + " lowering needs one free temporary VGPR",
+        {"Reduce VGPR pressure or add private spilling for normalized f16 conversion lowering."});
+  }
+  const auto tmp = static_cast<uint8_t>(*tmp_opt);
+
+  constexpr uint8_t kOpCvtF32F16 = 11;
+  constexpr uint8_t kOpCvtU32F32 = 7;
+  constexpr uint8_t kOpCvtI32F32 = 8;
+  constexpr uint8_t kOpMulF32 = 8;
+  constexpr uint8_t kOpMinI32 = 17;
+  constexpr uint8_t kOpMaxI32 = 18;
+  constexpr uint8_t kOpMinU32 = 19;
+  constexpr uint32_t kSignedScale = 0x46FFFE00u;   // 32767.0f
+  constexpr uint32_t kUnsignedScale = 0x477FFF00u; // 65535.0f
+
+  std::vector<uint32_t> words;
+  words.reserve(is_signed ? 21 : 18);
+  if (!append_materialize_b16_half(words, tmp, src0, src_high, literal_word))
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " has an unsupported source");
+
+  append_wait_valu_vgpr(words);
+  append_vop1(words, kOpCvtF32F16, tmp, vgpr_src(tmp));
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpMulF32, tmp, 255, tmp, is_signed ? kSignedScale : kUnsignedScale);
+  append_wait_valu_vgpr(words);
+  append_vop1(words, is_signed ? kOpCvtI32F32 : kOpCvtU32F32, tmp, vgpr_src(tmp));
+  append_wait_valu_vgpr(words);
+
+  // RDNA4's native normalized conversion rounds at the half-way boundaries,
+  // while gfx1250 multiplies in f32, truncates toward zero, and saturates.
+  // The ordinary f32-to-integer conversions provide the required truncation
+  // and NaN-to-zero behavior; integer min/max then reproduce the 16-bit clamp.
+  if (is_signed) {
+    append_vop2(words, kOpMaxI32, tmp, 255, tmp, 0xFFFF8000u);
+    append_wait_valu_vgpr(words);
+    append_vop2(words, kOpMinI32, tmp, 255, tmp, 0x00007FFFu);
+  } else {
+    append_vop2(words, kOpMinU32, tmp, 255, tmp, 0x0000FFFFu);
+  }
+  append_wait_valu_vgpr(words);
+  append_merge_b16_result(words, vdst, tmp, dst_high);
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_v_cvt_norm_f16_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                        std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                        TranslationContext &, const LaneLayout *,
+                                        const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < static_cast<int>(sizeof(gfx1250::Vop1MachineInst)))
+    return ExpandResult::failed("Normalized f16 VOP1 has a malformed encoding");
+
+  const auto src = std::bit_cast<gfx1250::Vop1MachineInst>(raw[0]);
+  const bool is_signed = src.op == 99u;
+  if (!is_signed && src.op != 100u)
+    return ExpandResult::not_handled();
+  if (src.src0 == 254u)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255u) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  } else if (inst.size() != static_cast<int>(sizeof(gfx1250::Vop1MachineInst))) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support an extended DPP or SDWA source");
+  }
+
+  const uint8_t vdst = static_cast<uint8_t>(src.vdst & 0x7Fu);
+  const bool dst_high = (src.vdst & 0x80u) != 0;
+  uint16_t lowered_src = static_cast<uint16_t>(src.src0);
+  bool src_high = false;
+  if (const auto src_vgpr = vgpr_index(lowered_src)) {
+    src_high = (*src_vgpr & 0x80u) != 0;
+    lowered_src = vgpr_src(static_cast<uint8_t>(*src_vgpr & 0x7Fu));
+  }
+
+  return lower_v_cvt_norm_f16(inst, liveness, vdst, lowered_src, src_high, dst_high, is_signed,
+                              literal_word);
+}
+
+ExpandResult expand_v_cvt_norm_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                        std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                        TranslationContext &, const LaneLayout *,
+                                        const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
+    return ExpandResult::failed("Normalized f16 VOP3 has a malformed encoding");
+
+  gfx1250::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const bool is_signed = src.op == 483u;
+  if (!is_signed && src.op != 484u)
+    return ExpandResult::not_handled();
+  if (src.abs != 0u || (src.opsel & ~0x9u) != 0u || src.clamp != 0u || src.omod != 0u ||
+      src.neg != 0u) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " uses unsupported modifiers");
+  }
+  if (src.src0 == 254u)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255u) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  } else if (static_cast<size_t>(inst.size()) != sizeof(gfx1250::Vop3MachineInst)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support an extended DPP source");
+  }
+
+  return lower_v_cvt_norm_f16(inst, liveness, static_cast<uint8_t>(src.vdst),
+                              static_cast<uint16_t>(src.src0), (src.opsel & 0x1u) != 0,
+                              (src.opsel & 0x8u) != 0, is_signed, literal_word);
+}
+
 std::vector<uint32_t> expand_v_cvt_f32_fp8_e5m3_vop3(const Instruction &inst, uint32_t, uint64_t,
                                                      std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
@@ -11824,7 +11949,11 @@ constexpr uint16_t kOpVMinNumF64E32 = 13;
 constexpr uint16_t kOpVMaxNumF64E32 = 14;
 constexpr uint16_t kOpVMovB16Vop1 = 28;
 constexpr uint16_t kOpVMovB64Vop1 = 29;
+constexpr uint16_t kOpVCvtNormI16F16Vop1 = 99;
+constexpr uint16_t kOpVCvtNormU16F16Vop1 = 100;
 constexpr uint16_t kOpVMovB64Vop3 = 413;
+constexpr uint16_t kOpVCvtNormI16F16Vop3 = 483;
+constexpr uint16_t kOpVCvtNormU16F16Vop3 = 484;
 constexpr uint16_t kOpVMulU64Vop3 = 0;
 constexpr uint16_t kOpVLshlAddU32Vop3 = 582;
 constexpr uint16_t kOpVLshlAddU64Vop3 = 594;
@@ -11961,6 +12090,36 @@ constexpr uint16_t kOpDsLoadTr8B64 = 0xFD;
 
 #define RJ_VOP3_EXPAND_RULE(ENC, OP, FN)                                                           \
   { ENC, OP, RuleAction::Expand, 0, 0, nullptr, RJ_GFX1250_EXPAND(FN), nullptr, nullptr }
+
+#define RJ_VOP1_CVT_NORM_F16_RULES(ENC)                                                            \
+  {ENC,                                                                                            \
+   kOpVCvtNormI16F16Vop1,                                                                          \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_v_cvt_norm_f16_vop1,                                                                     \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+  {                                                                                                \
+    ENC, kOpVCvtNormU16F16Vop1, RuleAction::Expand, 0, 0, nullptr, expand_v_cvt_norm_f16_vop1,     \
+        nullptr, nullptr                                                                           \
+  }
+
+#define RJ_VOP3_CVT_NORM_F16_RULES(ENC)                                                            \
+  {ENC,                                                                                            \
+   kOpVCvtNormI16F16Vop3,                                                                          \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_v_cvt_norm_f16_vop3,                                                                     \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+  {                                                                                                \
+    ENC, kOpVCvtNormU16F16Vop3, RuleAction::Expand, 0, 0, nullptr, expand_v_cvt_norm_f16_vop3,     \
+        nullptr, nullptr                                                                           \
+  }
 
 #define RJ_VOP3_SCALED_CVT_RULE(ENC, OP)                                                           \
   { ENC, OP, RuleAction::Expand, 0, 0, nullptr, expand_v_cvt_scaled_lowp_vop3, nullptr, nullptr }
@@ -12168,6 +12327,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_0, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_0),
     {kEncVop1_0, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
     {kEncVop1_0, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12188,6 +12348,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_1, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_1),
     {kEncVop1_1, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
     {kEncVop1_1, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12208,6 +12369,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_2, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_2),
     {kEncVop1_2, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
     {kEncVop1_2, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12228,6 +12390,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_3, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_3),
     {kEncVop1_3, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
     {kEncVop1_3, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12392,6 +12555,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_0, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_0),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_0),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_0),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_0),
@@ -12427,6 +12591,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_1, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_1),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_1),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_1),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_1),
@@ -12462,6 +12627,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_2, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_2),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_2),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_2),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_2),
@@ -12497,6 +12663,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_3, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_3),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_3),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_3),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_3),
@@ -12532,6 +12699,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_4, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_4),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_4),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_4),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_4),
@@ -12572,6 +12740,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_5, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_5),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_5),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_5),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_5),
@@ -12608,6 +12777,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_6, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_6),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_6),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_6),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_6),
@@ -12657,6 +12827,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_7, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_7),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_7),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_7),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_7),
@@ -12728,6 +12899,8 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
 
 #undef RJ_VOPD3_RULE
 #undef RJ_VOPD_RULE
+#undef RJ_VOP1_CVT_NORM_F16_RULES
+#undef RJ_VOP3_CVT_NORM_F16_RULES
 #undef RJ_VOP3_SINGLE_SRC_RULE
 #undef RJ_VOP3_EXPAND_RULE
 #undef RJ_VOP3_PERMLANE_FAMILY_RULES

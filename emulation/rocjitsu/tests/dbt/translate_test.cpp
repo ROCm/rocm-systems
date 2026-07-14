@@ -9233,6 +9233,112 @@ TEST(BinaryTranslator, Gfx1250VCvtF32Bf16LowersToHalfwordShift) {
   EXPECT_EQ(hi_materialize.vsrc1, 21u);
 }
 
+TEST(BinaryTranslator, Gfx1250VCvtNormF16UsesTruncatingScaledIntegerLowering) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kSignedScale = 0x46FFFE00u;
+  constexpr uint32_t kUnsignedScale = 0x477FFF00u;
+
+  gfx1250::Vop1MachineInst i16_e32{};
+  i16_e32.encoding = 0x3F;
+  i16_e32.op = gfx1250::kVCvtNormI16F16Vop1;
+  i16_e32.vdst = 1;
+  i16_e32.src0 = 256 + 2;
+
+  gfx1250::Vop1MachineInst u16_e32 = i16_e32;
+  u16_e32.op = gfx1250::kVCvtNormU16F16Vop1;
+  u16_e32.vdst = 3;
+  u16_e32.src0 = 256 + 4;
+
+  gfx1250::Vop3MachineInst i16_e64{};
+  i16_e64.encoding = 0x35;
+  i16_e64.op = gfx1250::kVCvtNormI16F16Vop3;
+  i16_e64.vdst = 5;
+  i16_e64.src0 = 256 + 6;
+
+  gfx1250::Vop3MachineInst u16_e64 = i16_e64;
+  u16_e64.op = gfx1250::kVCvtNormU16F16Vop3;
+  u16_e64.vdst = 7;
+  u16_e64.src0 = 256 + 8;
+  u16_e64.opsel = 0x9; // Read and write the selected high half.
+
+  std::array<uint32_t, 7> text_words{};
+  text_words[0] = std::bit_cast<uint32_t>(i16_e32);
+  text_words[1] = std::bit_cast<uint32_t>(u16_e32);
+  std::memcpy(text_words.data() + 2, &i16_e64, sizeof(i16_e64));
+  std::memcpy(text_words.data() + 4, &u16_e64, sizeof(u16_e64));
+  text_words[6] = kGfx1250SEndpgm;
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *translations = find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  const auto cave_words = section_words_for_test(*translations);
+
+  EXPECT_EQ(std::ranges::count(cave_words, kSignedScale), 2u);
+  EXPECT_EQ(std::ranges::count(cave_words, kUnsignedScale), 2u);
+
+  size_t widen_count = 0;
+  size_t signed_convert_count = 0;
+  size_t unsigned_convert_count = 0;
+  size_t signed_lower_clamp_count = 0;
+  size_t signed_upper_clamp_count = 0;
+  size_t unsigned_upper_clamp_count = 0;
+  std::array<bool, 4> merged_destinations{};
+  for (size_t i = 0; i < cave_words.size(); ++i) {
+    const auto vop1 = std::bit_cast<rdna4::Vop1MachineInst>(cave_words[i]);
+    if (vop1.encoding == 0x3Fu) {
+      widen_count += vop1.op == rdna4::kVCvtF32F16Vop1;
+      signed_convert_count += vop1.op == rdna4::kVCvtI32F32Vop1;
+      unsigned_convert_count += vop1.op == rdna4::kVCvtU32F32Vop1;
+      EXPECT_NE(vop1.op, rdna4::kVCvtNormI16F16Vop1);
+      EXPECT_NE(vop1.op, rdna4::kVCvtNormU16F16Vop1);
+    }
+
+    const auto vop2 = std::bit_cast<rdna4::Vop2MachineInst>(cave_words[i]);
+    if (vop2.op == rdna4::kVMaxI32Vop2 && vop2.src0 == 255u && i + 1u < cave_words.size() &&
+        cave_words[i + 1u] == 0xFFFF8000u)
+      ++signed_lower_clamp_count;
+    if (vop2.op == rdna4::kVMinI32Vop2 && vop2.src0 == 255u && i + 1u < cave_words.size() &&
+        cave_words[i + 1u] == 0x00007FFFu)
+      ++signed_upper_clamp_count;
+    if (vop2.op == rdna4::kVMinU32Vop2 && vop2.src0 == 255u && i + 1u < cave_words.size() &&
+        cave_words[i + 1u] == 0x0000FFFFu)
+      ++unsigned_upper_clamp_count;
+    if (vop2.op == rdna4::kVOrB32Vop2) {
+      for (size_t dst = 0; dst < merged_destinations.size(); ++dst)
+        merged_destinations[dst] |= vop2.vdst == static_cast<uint8_t>(1u + 2u * dst);
+    }
+
+    if (i + 1u < cave_words.size()) {
+      rdna4::Vop3MachineInst vop3{};
+      std::memcpy(&vop3, cave_words.data() + i, sizeof(vop3));
+      if (vop3.encoding == 0x35u) {
+        EXPECT_NE(vop3.op, rdna4::kVCvtNormI16F16Vop3);
+        EXPECT_NE(vop3.op, rdna4::kVCvtNormU16F16Vop3);
+      }
+    }
+  }
+
+  EXPECT_EQ(widen_count, 4u);
+  EXPECT_EQ(signed_convert_count, 2u);
+  EXPECT_EQ(unsigned_convert_count, 2u);
+  EXPECT_EQ(signed_lower_clamp_count, 2u);
+  EXPECT_EQ(signed_upper_clamp_count, 2u);
+  EXPECT_EQ(unsigned_upper_clamp_count, 2u);
+  EXPECT_TRUE(std::ranges::all_of(merged_destinations, [](bool merged) { return merged; }));
+}
+
 TEST(BinaryTranslator, Gfx1250VCvtF32Fp8E5M3LowersClampSelectorToIntegerSequence) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint32_t kQuietNaN = 0x7FC00000u;
