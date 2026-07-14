@@ -25,6 +25,8 @@
 #include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
+#include <elfio/elfio.hpp>
+#include <elfio/elfio_symbols.hpp>
 
 #include <elf.h>
 #include <fcntl.h>
@@ -87,6 +89,7 @@ struct target_elf
 {
     std::string             path          = {};
     std::vector<uint8_t>    data          = {};
+    ELFIO::elfio            reader        = {};
     std::vector<Elf64_Phdr> load_segments = {};
 };
 
@@ -173,6 +176,21 @@ read_as(const std::vector<uint8_t>& data, uint64_t offset)
     auto value = Tp{};
     std::memcpy(&value, data.data() + offset, sizeof(Tp));
     return value;
+}
+
+Elf64_Phdr
+to_phdr(const ELFIO::segment& segment)
+{
+    auto phdr     = Elf64_Phdr{};
+    phdr.p_type   = segment.get_type();
+    phdr.p_flags  = segment.get_flags();
+    phdr.p_offset = segment.get_offset();
+    phdr.p_vaddr  = segment.get_virtual_address();
+    phdr.p_paddr  = segment.get_physical_address();
+    phdr.p_filesz = segment.get_file_size();
+    phdr.p_memsz  = segment.get_memory_size();
+    phdr.p_align  = segment.get_align();
+    return phdr;
 }
 
 std::string
@@ -450,7 +468,10 @@ read_file_if_matches_mapping(const std::string& path, const mapped_object& objec
     auto data = read_file_from_fd(fd.get(), path, static_cast<uint64_t>(st.st_size));
     if(!data || data->empty()) return std::nullopt;
 
-    return target_elf{path, std::move(*data), {}};
+    auto elf = target_elf{};
+    elf.path = path;
+    elf.data = std::move(*data);
+    return elf;
 }
 
 std::optional<target_elf>
@@ -488,37 +509,29 @@ open_target_elf(pid_t pid, const mapped_object& object)
 }
 
 bool
-parse_elf_headers(target_elf& elf)
+parse_target_elf(target_elf& elf)
 {
-    auto ehdr = read_as<Elf64_Ehdr>(elf.data, 0);
-    if(!ehdr)
+    auto elf_bytes = std::string{reinterpret_cast<const char*>(elf.data.data()), elf.data.size()};
+    auto stream    = std::istringstream{elf_bytes, std::ios::binary};
+    if(!elf.reader.load(stream))
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF is too small: " << elf.path;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to parse target ELF: " << elf.path;
         return false;
     }
 
-    if(std::memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0 || ehdr->e_ident[EI_CLASS] != ELFCLASS64 ||
-       ehdr->e_ident[EI_DATA] != ELFDATA2LSB || ehdr->e_machine != EM_X86_64 ||
-       ehdr->e_phentsize != sizeof(Elf64_Phdr))
+    if(elf.reader.get_class() != ELFCLASS64 || elf.reader.get_encoding() != ELFDATA2LSB ||
+       elf.reader.get_machine() != EM_X86_64 || elf.reader.get_type() != ET_DYN)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unsupported target ELF format: " << elf.path;
         return false;
     }
 
-    auto phdr_table_size = checked_mul(ehdr->e_phnum, sizeof(Elf64_Phdr));
-    if(ehdr->e_phnum == 0 || !phdr_table_size ||
-       !has_range(elf.data.size(), ehdr->e_phoff, *phdr_table_size))
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid program header table in " << elf.path;
-        return false;
-    }
-
     elf.load_segments.clear();
-    for(size_t i = 0; i < ehdr->e_phnum; ++i)
+    for(const auto& segment : elf.reader.segments)
     {
-        auto phdr = read_as<Elf64_Phdr>(elf.data, ehdr->e_phoff + i * sizeof(Elf64_Phdr));
-        if(!phdr) return false;
-        if(phdr->p_type == PT_LOAD) elf.load_segments.emplace_back(*phdr);
+        if(segment == nullptr || segment->get_type() != PT_LOAD) continue;
+
+        elf.load_segments.emplace_back(to_phdr(*segment));
     }
 
     if(elf.load_segments.empty())
@@ -631,63 +644,45 @@ vaddr_to_offset(const target_elf& elf, uint64_t vaddr, uint64_t size)
 }
 
 bool
-symbol_is_supported_function(const Elf64_Sym& sym)
+symbol_is_supported_function(unsigned char bind,
+                             unsigned char type,
+                             Elf64_Section section_index,
+                             unsigned char other)
 {
-    auto type       = ELF64_ST_TYPE(sym.st_info);
-    auto bind       = ELF64_ST_BIND(sym.st_info);
-    auto visibility = ELF64_ST_VISIBILITY(sym.st_other);
+    auto visibility = ELF64_ST_VISIBILITY(other);
 
-    return sym.st_shndx != SHN_UNDEF && type == STT_FUNC &&
+    return section_index != SHN_UNDEF && section_index != SHN_ABS && type == STT_FUNC &&
            (bind == STB_GLOBAL || bind == STB_WEAK) &&
            (visibility == STV_DEFAULT || visibility == STV_PROTECTED);
 }
 
-std::optional<Elf64_Sym>
+bool
+symbol_is_supported_function(const Elf64_Sym& sym)
+{
+    return symbol_is_supported_function(
+        ELF64_ST_BIND(sym.st_info), ELF64_ST_TYPE(sym.st_info), sym.st_shndx, sym.st_other);
+}
+
+std::optional<uint64_t>
 lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
 {
-    auto ehdr            = read_as<Elf64_Ehdr>(elf.data, 0);
-    auto shdr_table_size = ehdr ? checked_mul(ehdr->e_shnum, sizeof(Elf64_Shdr)) : std::nullopt;
-    if(!ehdr || ehdr->e_shoff == 0 || ehdr->e_shnum == 0 ||
-       ehdr->e_shentsize != sizeof(Elf64_Shdr) || !shdr_table_size ||
-       !has_range(elf.data.size(), ehdr->e_shoff, *shdr_table_size))
+    auto name = std::string{symbol_name};
+
+    for(const auto& section : elf.reader.sections)
     {
-        return std::nullopt;
-    }
+        if(section == nullptr || section->get_type() != SHT_DYNSYM) continue;
 
-    for(size_t i = 0; i < ehdr->e_shnum; ++i)
-    {
-        auto shdr = read_as<Elf64_Shdr>(elf.data, ehdr->e_shoff + i * sizeof(Elf64_Shdr));
-        if(!shdr || shdr->sh_type != SHT_DYNSYM || shdr->sh_entsize < sizeof(Elf64_Sym))
+        ELFIO::const_symbol_section_accessor symbols{elf.reader, section.get()};
+        auto                                 value = ELFIO::Elf64_Addr{0};
+        auto                                 size  = ELFIO::Elf_Xword{0};
+        auto                                 bind  = static_cast<unsigned char>(0);
+        auto                                 type  = static_cast<unsigned char>(0);
+        auto                                 index = ELFIO::Elf_Half{0};
+        auto                                 other = static_cast<unsigned char>(0);
+        if(symbols.get_symbol(name, value, size, bind, type, index, other) &&
+           symbol_is_supported_function(bind, type, index, other))
         {
-            continue;
-        }
-        if(shdr->sh_link >= ehdr->e_shnum) continue;
-
-        auto strtab =
-            read_as<Elf64_Shdr>(elf.data, ehdr->e_shoff + shdr->sh_link * sizeof(Elf64_Shdr));
-        if(!strtab || !has_range(elf.data.size(), strtab->sh_offset, strtab->sh_size) ||
-           !has_range(elf.data.size(), shdr->sh_offset, shdr->sh_size))
-        {
-            continue;
-        }
-
-        auto symbol_count = shdr->sh_size / shdr->sh_entsize;
-        if(symbol_count > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
-        for(size_t idx = 0; idx < symbol_count; ++idx)
-        {
-            auto sym_delta  = checked_mul(idx, shdr->sh_entsize);
-            auto sym_offset = sym_delta ? checked_add(shdr->sh_offset, *sym_delta) : std::nullopt;
-            if(!sym_offset) return std::nullopt;
-            auto sym = read_as<Elf64_Sym>(elf.data, *sym_offset);
-            if(!sym || sym->st_name >= strtab->sh_size) continue;
-            const auto* name =
-                reinterpret_cast<const char*>(elf.data.data() + strtab->sh_offset + sym->st_name);
-            auto max_name_len = strtab->sh_size - sym->st_name;
-            if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name &&
-               symbol_is_supported_function(*sym))
-            {
-                return sym;
-            }
+            return value;
         }
     }
 
@@ -764,19 +759,16 @@ symbol_count_from_gnu_hash(const target_elf& elf, uint64_t hash_vaddr)
     return std::nullopt;
 }
 
-std::optional<Elf64_Sym>
-lookup_symbol_from_dynamic(const target_elf& elf, std::string_view symbol_name)
+std::optional<uint64_t>
+lookup_symbol_from_pt_dynamic(const target_elf& elf, std::string_view symbol_name)
 {
     auto dynamic_segment = std::optional<Elf64_Phdr>{};
-    auto ehdr            = read_as<Elf64_Ehdr>(elf.data, 0);
-    if(!ehdr) return std::nullopt;
 
-    for(size_t i = 0; i < ehdr->e_phnum; ++i)
+    for(const auto& segment : elf.reader.segments)
     {
-        auto phdr = read_as<Elf64_Phdr>(elf.data, ehdr->e_phoff + i * sizeof(Elf64_Phdr));
-        if(phdr && phdr->p_type == PT_DYNAMIC)
+        if(segment != nullptr && segment->get_type() == PT_DYNAMIC)
         {
-            dynamic_segment = *phdr;
+            dynamic_segment = to_phdr(*segment);
             break;
         }
     }
@@ -841,18 +833,18 @@ lookup_symbol_from_dynamic(const target_elf& elf, std::string_view symbol_name)
         if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name &&
            symbol_is_supported_function(*sym))
         {
-            return sym;
+            return sym->st_value;
         }
     }
 
     return std::nullopt;
 }
 
-std::optional<Elf64_Sym>
+std::optional<uint64_t>
 lookup_dynamic_symbol(const target_elf& elf, std::string_view symbol_name)
 {
     if(auto sym = lookup_symbol_from_sections(elf, symbol_name)) return sym;
-    return lookup_symbol_from_dynamic(elf, symbol_name);
+    return lookup_symbol_from_pt_dynamic(elf, symbol_name);
 }
 
 bool
@@ -870,7 +862,7 @@ std::optional<uint64_t>
 resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view symbol)
 {
     auto elf = open_target_elf(pid, object);
-    if(!elf || !parse_elf_headers(*elf)) return std::nullopt;
+    if(!elf || !parse_target_elf(*elf)) return std::nullopt;
 
     auto load_bias = calculate_load_bias(*elf, object);
     if(!load_bias) return std::nullopt;
@@ -883,7 +875,7 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
         return std::nullopt;
     }
 
-    auto address = checked_add(*load_bias, sym->st_value);
+    auto address = checked_add(*load_bias, *sym);
     if(!address)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Resolved address for " << symbol << " in "
