@@ -438,34 +438,37 @@ TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
 TEST(CdnaDispatchTest, Wave64PackedTidHonorsRequestedComponents) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
 
-  for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
-    SCOPED_TRACE("component_count=" + std::to_string(component_count));
-    VmFixture f("cdna3");
-    ASSERT_TRUE(f.cp()->packed_tid());
-    uint64_t ko =
-        f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
+  for (const std::string &arch :
+       {std::string("cdna2"), std::string("cdna3"), std::string("cdna4")}) {
+    for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
+      SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
+      VmFixture f(arch);
+      ASSERT_TRUE(f.cp()->packed_tid());
+      uint64_t ko =
+          f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
 
-    test::AqlQueue queue(f.mem(), f.cp());
-    hsa_kernel_dispatch_packet_t pkt{};
-    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    pkt.setup = 3;
-    pkt.workgroup_size_x = 8;
-    pkt.workgroup_size_y = 4;
-    pkt.workgroup_size_z = 2;
-    pkt.grid_size_x = 8;
-    pkt.grid_size_y = 4;
-    pkt.grid_size_z = 2;
-    pkt.kernel_object = ko;
-    queue.submit(pkt);
-    step_until_halted(*f.engine, {f.cu()});
+      test::AqlQueue queue(f.mem(), f.cp());
+      hsa_kernel_dispatch_packet_t pkt{};
+      pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      pkt.setup = 3;
+      pkt.workgroup_size_x = 8;
+      pkt.workgroup_size_y = 4;
+      pkt.workgroup_size_z = 2;
+      pkt.grid_size_x = 8;
+      pkt.grid_size_y = 4;
+      pkt.grid_size_z = 2;
+      pkt.kernel_object = ko;
+      queue.submit(pkt);
+      step_until_halted(*f.engine, {f.cu()});
 
-    ASSERT_EQ(f.cu()->num_wfs(), 1u);
-    auto *wf = f.cu()->wf(0);
-    ASSERT_NE(wf, nullptr);
-    EXPECT_EQ(wf->wf_size(), 64u);
-    const uint32_t vbase = wf->vgpr_alloc().base;
-    EXPECT_EQ(f.cu()->read_vgpr(vbase, 40), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
-    EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+      ASSERT_EQ(f.cu()->num_wfs(), 1u);
+      auto *wf = f.cu()->wf(0);
+      ASSERT_NE(wf, nullptr);
+      EXPECT_EQ(wf->wf_size(), 64u);
+      const uint32_t vbase = wf->vgpr_alloc().base;
+      EXPECT_EQ(f.cu()->read_vgpr(vbase, 40), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
+      EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+    }
   }
 }
 
@@ -498,12 +501,12 @@ TEST(CdnaDispatchTest, Wave64MasksMultidimensionalGridTailAcrossLane32) {
   EXPECT_EQ(wf->exec(), 0x0000'001F'1F1F'1F1FULL);
 }
 
-TEST(CdnaDispatchTest, UnpackedTidHonorsRequestedComponents) {
+TEST(CdnaDispatchTest, Cdna1UnpackedTidHonorsRequestedComponents) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
 
   for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
     SCOPED_TRACE("component_count=" + std::to_string(component_count));
-    VmFixture f("cdna2");
+    VmFixture f("cdna1");
     ASSERT_FALSE(f.cp()->packed_tid());
     uint64_t ko =
         f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);

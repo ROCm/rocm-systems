@@ -207,6 +207,7 @@ inline constexpr uint32_t kPackedTidZShift = 20;
                                                          uint32_t global_wg_id,
                                                          uint32_t wf_index_in_wg,
                                                          uint32_t wave_size) {
+  assert(wave_size <= 64 && "AMDGPU wave size must not exceed 64 lanes");
   assert(entry.grid_size_x != 0 && entry.grid_size_y != 0 && entry.grid_size_z != 0 &&
          "kernel dispatch grid dimensions must be nonzero");
   const uint32_t relative_wg_id = global_wg_id >= entry.workgroup_id_offset
