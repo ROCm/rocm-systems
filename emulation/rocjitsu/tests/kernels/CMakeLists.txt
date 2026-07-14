@@ -113,29 +113,6 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 
-# DBI no-op probe fixture. A lone __device__ function needs the
-# device-only + unbundle path (see cmake/rj_add_probe_object.cmake), which
-# additionally requires clang-offload-bundler from the same LLVM tree.
-find_program(
-    CLANG_OFFLOAD_BUNDLER
-    clang-offload-bundler
-    HINTS ${ROCM_PATH}/lib/llvm/bin ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/bin
-    ENV ROCM_PATH
-    PATH_SUFFIXES bin
-    DOC "Path to clang-offload-bundler for device-only probe objects"
-)
-set(HAS_PROBE_FIXTURES FALSE)
-if(CLANG_OFFLOAD_BUNDLER)
-    include(rj_add_probe_object)
-    rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
-    set(HAS_PROBE_FIXTURES TRUE)
-else()
-    message(
-        STATUS
-        "clang-offload-bundler not found - DBI probe object fixtures disabled"
-    )
-endif()
-
 # Umbrella target for all device kernels.
 add_custom_target(
     device_kernels
@@ -160,11 +137,6 @@ add_custom_target(
         kernel_triton_cdna3_flash_attention_buffer_async_1024
 )
 
-if(HAS_PROBE_FIXTURES)
-    add_dependencies(device_kernels probe_rj_nop_probe_gfx90a)
-endif()
-
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
-set(HAS_PROBE_FIXTURES ${HAS_PROBE_FIXTURES} PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)

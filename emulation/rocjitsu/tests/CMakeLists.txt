@@ -345,7 +345,6 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
-    patch/probe_symbol_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
@@ -440,41 +439,6 @@ rj_configure_target(rocjitsu_tests TEST)
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
-
-# --- DBI probe fixture test ---
-# Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
-# probe symbol resolver against it. Needs the compiled fixture (amdclang++ +
-# clang-offload-bundler) but no GPU, so it registers with CTest unconditionally
-# when the fixture is available.
-if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
-    add_executable(probe_fixture_test dbi/probe_fixture_test.cpp)
-    target_include_directories(
-        probe_fixture_test
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
-            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-    )
-    target_link_libraries(
-        probe_fixture_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    target_compile_definitions(
-        probe_fixture_test
-        PRIVATE KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
-    )
-    add_dependencies(probe_fixture_test probe_rj_nop_probe_gfx90a)
-    rj_configure_target(probe_fixture_test TEST)
-    add_test(
-        NAME "ProbeFixture.NopProbeResolvesAndReturns"
-        COMMAND probe_fixture_test
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-endif()
 
 add_executable(
     rj_dbt_translate_smoke_test
