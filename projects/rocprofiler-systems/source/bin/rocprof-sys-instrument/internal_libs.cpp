@@ -258,6 +258,23 @@ get_library_search_paths_impl()
     return _paths;
 }
 
+// Shared libs that Dyninst will fail to instrument correctly and whose symbol
+// tables are prohibitively large to parse. These are excluded
+// from instrumentation as a whole: we still register the library path so
+// module-level exclusion works, but we skip enumerating every module/function.
+constexpr auto no_parse_libs = strview_init_t{ "libclang-cpp.so", "libLLVM.so" };
+
+bool
+skip_symbol_parsing(const std::string& _path)
+{
+    auto _base = std::string{ filepath::basename(_path) };
+    for(const auto& _lib : no_parse_libs)
+    {
+        if(std::string_view{ _base }.substr(0, _lib.size()) == _lib) return true;
+    }
+    return false;
+}
+
 std::set<std::string>
 get_internal_basic_libs_impl()
 {
@@ -317,16 +334,20 @@ get_internal_basic_libs_impl()
                                                    "libamd_smi.so",
                                                    "libamd_comgr.so" };
 
-    const auto _3rdparty_libs = strview_init_t{
-        // shared libs potentially used by timemory
-        "libcaliper.so", "liblikwid.so", "libprofiler.so", "libtcmalloc.so",
-        "libtcmalloc_and_profiler.so", "libtcmalloc_debug.so", "libtcmalloc_minimal.so",
-        "libtcmalloc_minimal_debug.so",
-        // shared libs that Dyninst will fail to instrument correctly
-        "libclang-cpp.so", "libLLVM.so"
-    };
+    const auto _3rdparty_libs =
+        strview_init_t{ // shared libs potentially used by timemory
+                        "libcaliper.so",
+                        "liblikwid.so",
+                        "libprofiler.so",
+                        "libtcmalloc.so",
+                        "libtcmalloc_and_profiler.so",
+                        "libtcmalloc_debug.so",
+                        "libtcmalloc_minimal.so",
+                        "libtcmalloc_minimal_debug.so"
+        };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
+    for(const auto& gitr :
+        { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs, no_parse_libs })
     {
         for(auto itr : gitr)
         {
@@ -441,6 +462,15 @@ get_internal_libs_data_impl()
     auto _odata = ordered(_data);
     for(const auto& itr : _odata)
     {
+        // Some libraries are excluded as a whole and have huge
+        // symbol tables and many functions. Parsing them would take far too long.
+        if(skip_symbol_parsing(itr.first))
+        {
+            verbprintf(0, "[internal] excluding library without parsing symbols: '%s'\n",
+                       itr.first.c_str());
+            continue;
+        }
+
         symtab_t* _symtab = get_symtab_file(itr.first);
         if(!_symtab) continue;
 
