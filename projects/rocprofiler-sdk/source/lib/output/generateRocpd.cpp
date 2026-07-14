@@ -1691,8 +1691,8 @@ write_rocpd(
                                      this_pid,
                                      &get_thread_id,
                                      &get_queue_id](const auto& _gen) {
-        auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_graph_launch");
-        auto   _deferred         = sql::deferred_transaction{db.conn};
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_graph_launch");
+        auto _deferred         = sql::deferred_transaction{db.conn};
 
         for(auto pitr : _gen)
         {
