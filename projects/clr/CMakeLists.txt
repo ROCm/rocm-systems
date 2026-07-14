@@ -40,6 +40,7 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_BUILD_TESTS "Build CLR unit tests" OFF)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -129,6 +130,14 @@ if(CLR_BUILD_HIP)
 endif()
 if(CLR_BUILD_OCL)
     add_subdirectory(opencl)
+endif()
+
+#############################
+# Unit tests (opt-in)
+#############################
+if(CLR_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(rocclr/device/tests)
 endif()
 
 #############################
