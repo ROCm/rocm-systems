@@ -267,11 +267,20 @@ class TestExpression:
         )
         assert "$denom" in result
 
-    def test_update_normal_unit_string_capitalizes_per_wave(self):
-        """update_normal_unit_string substitutes 'per wave' and capitalizes."""
-        result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
-        assert "per wave" in result.lower()
-        assert result[0].isupper()
+    @pytest.mark.parametrize(
+        "equation, normal_unit, expected",
+        [
+            ("(Prefix + $normUnit)", "per_wave", "Prefix per wave"),
+            ("GB/s", "per_kernel", "GB/s"),
+            ("Conflicts per Access", "per_kernel", "Conflicts per Access"),
+        ],
+    )
+    def test_update_normal_unit_string(self, equation, normal_unit, expected):
+        """Substitutes $normUnit and leaves case intact elsewhere.
+
+        Regression for .capitalize() mangling "GB/s" into "Gb/s".
+        """
+        assert update_normal_unit_string(equation, normal_unit) == expected
 
 
 # =============================================================================

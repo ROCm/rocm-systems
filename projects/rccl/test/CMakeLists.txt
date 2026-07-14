@@ -179,6 +179,7 @@ if(BUILD_TESTS)
     AllReduceTests.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
+    AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp

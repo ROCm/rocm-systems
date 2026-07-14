@@ -43,6 +43,7 @@
 #include "core/inc/hotswap.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <cstdint>
@@ -75,6 +76,9 @@ namespace {
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
+#ifdef ROCR_HOTSWAP_TESTING
+std::atomic<bool> g_force_retarget_code_object_failure_for_testing{false};
+#endif
 
 // -- Per-code-object retarget cache -------------------------------------------
 //
@@ -326,10 +330,16 @@ bool IsEnvFlagEnabled(const char* name) {
 
 bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 
-bool IsGfx12_5RewriteRequested() {
+bool AreEntryTrampolinesRequested() {
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  // Default-on policy owned by ROCR: only literal "0" opts out.
-  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
+  if (!os::IsEnvVarSet(kEnvName)) {
+    return kDefaultEntryTrampolinesEnabled;
+  }
+  return IsEnvFlagEnabled(kEnvName);
+}
+
+bool IsStrictModeRequested() {
+  return IsEnvFlagEnabled("HSA_HOTSWAP_STRICT_MODE");
 }
 
 bool IsVerboseLoggingEnabled() {
@@ -356,6 +366,7 @@ struct ComgrHotswapRewriteOptions {
 constexpr int kComgrStatusSuccess = 0;
 constexpr int kComgrDataKindExecutable = 0x8;
 constexpr uint64_t kComgrHotswapRewriteFlagEntryTrampolines = 0x1;
+constexpr uint64_t kComgrHotswapRewriteFlagStrictMode = 0x2;
 
 struct ComgrApi {
   os::LibHandle lib = nullptr;
@@ -509,8 +520,8 @@ std::string WithGfx1250SteppingFeature(const std::string& isa_name,
 bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
   return IsHotswapSupportedGfxRevision(gfx) ||
-         (options.gfx12_5_rewrite_enabled &&
-          IsGfx12_5Target(gfx.gfx_target));
+      (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
+      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target));
 }
 
 std::optional<RewriteDecision> DecideHotswapRewrite(
@@ -524,18 +535,33 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
-    return RewriteDecision{
-        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
-        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
-        false};
+    // Keep A0 retargeting on COMGR's legacy rewrite path. The B0 source and A0
+    // target ISA features select the required instruction patches without
+    // strict mode; B0 strict rewrites use hotswap_rewrite_with_options().
+    RewriteDecision decision;
+    decision.source_isa =
+        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
+    decision.target_isa =
+        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0);
+    decision.rewrite_required = true;
+    return decision;
   }
 
-  if (!options.gfx12_5_rewrite_enabled ||
-      !IsGfx12_5Target(gfx.gfx_target) || !IsGfx12_5Target(source_gfx)) {
+  const bool request_entry_trampolines = options.entry_trampolines_enabled &&
+      IsGfx12_5Target(gfx.gfx_target) && IsGfx12_5Target(source_gfx);
+  const bool request_strict_mode =
+      options.strict_mode_enabled && gfx.gfx_target == kGfx1250 &&
+      source_gfx == kGfx1250;
+  if (!request_entry_trampolines && !request_strict_mode) {
     return std::nullopt;
   }
 
-  RewriteDecision decision{source_isa, source_isa, true};
+  RewriteDecision decision;
+  decision.source_isa = source_isa;
+  decision.target_isa = source_isa;
+  decision.request_entry_trampolines = request_entry_trampolines;
+  decision.request_strict_mode = request_strict_mode;
+  decision.rewrite_required = request_strict_mode;
   if (source_gfx == kGfx1250) {
     decision.source_isa =
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
@@ -594,11 +620,23 @@ void LogRewrittenCodeObjectLoadFailure(hsa_status_t status) {
       static_cast<int>(status));
 }
 
+void LogRequiredRewriteFailure() {
+  HOTSWAP_LOG("hotswap: required rewrite failed, not falling back to original "
+              "code object\n");
+}
+
+void LogRequiredRewrittenLoadFailure(hsa_status_t status) {
+  HOTSWAP_LOG("hotswap: required rewritten load failed (status=%d), not falling "
+              "back to original code object\n",
+              static_cast<int>(status));
+}
+
 }  // namespace
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
                         const char* target_isa, OwnedElfBuffer* out_elf_buffer,
-                        size_t* out_elf_size, bool request_entry_trampolines) {
+                        size_t* out_elf_size, bool request_entry_trampolines,
+                        bool request_strict_mode) {
   ComgrApi* api = GetComgrApi();
   if (!api || !elf_data || elf_size == 0 || !source_isa || !target_isa || !out_elf_buffer ||
       !out_elf_size) {
@@ -617,15 +655,18 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
 
   ComgrData output = {};
   int status = kComgrStatusSuccess;
-  if (request_entry_trampolines) {
+  const uint64_t rewrite_flags =
+      (request_entry_trampolines ? kComgrHotswapRewriteFlagEntryTrampolines : 0) |
+      (request_strict_mode ? kComgrHotswapRewriteFlagStrictMode : 0);
+  if (rewrite_flags != 0) {
     if (!api->hotswap_rewrite_with_options) {
       api->release_data(input);
-      HOTSWAP_LOG("hotswap: COMGR entry-trampoline rewrite entry point unavailable\n");
+      HOTSWAP_LOG("hotswap: COMGR rewrite-with-options entry point unavailable\n");
       return false;
     }
     const ComgrHotswapRewriteOptions options{
         sizeof(ComgrHotswapRewriteOptions),
-        kComgrHotswapRewriteFlagEntryTrampolines};
+        rewrite_flags};
     status = api->hotswap_rewrite_with_options(input, source_isa, target_isa,
                                                &options, &output);
   } else {
@@ -663,16 +704,20 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   return true;
 }
 
-bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
+                                               hsa_agent_t agent,
+                                               OwnedElfBuffer* out_elf_buffer,
+                                               size_t* out_elf_size) {
   if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
-    return false;
+    return {};
   }
 
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
-  const RewriteOptions options{IsGfx12_5RewriteRequested()};
+  RewriteOptions options;
+  options.entry_trampolines_enabled = AreEntryTrampolinesRequested();
+  options.strict_mode_enabled = IsStrictModeRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
-    return false;
+    return {};
   }
 
   const std::string source_isa = GetCodeObjectIsaName(code_object.data, code_object.size);
@@ -682,12 +727,17 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   if (!decision) {
     HOTSWAP_LOG("hotswap: rewrite skipped, no decision (src='%s' tgt='%s')\n",
                 source_isa.c_str(), target_isa.c_str());
-    return false;
+    return {};
   }
 
-  const uint64_t cache_key = ComputeRetargetCacheKey(
+  uint64_t cache_key = ComputeRetargetCacheKey(
       code_object.data, code_object.size, decision->source_isa,
       decision->target_isa, decision->request_entry_trampolines);
+  // Strict-mode rewrites can differ from non-strict ones for the same code
+  // object, so keep their cache entries distinct.
+  if (decision->request_strict_mode) {
+    cache_key ^= 0x9E3779B97F4A7C15ULL;
+  }
 
 #if !defined(_WIN32) && !defined(_WIN64)
   const std::string disk_cache_dir = GetDiskCacheDir();
@@ -715,7 +765,10 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
       HOTSWAP_LOG("hotswap: cache hit (failed) src=%s tgt=%s entry_trampolines=%d in=%zu\n",
                   decision->source_isa.c_str(), decision->target_isa.c_str(),
                   decision->request_entry_trampolines, code_object.size);
-      return false;
+      if (decision->rewrite_required) {
+        return {RetargetCodeObjectStatus::kRequiredRewriteFailed, true};
+      }
+      return {};
     }
 
     if (cached_bytes) {
@@ -729,7 +782,7 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
                     decision->source_isa.c_str(), decision->target_isa.c_str(),
                     decision->request_entry_trampolines, code_object.size,
                     cached_bytes->size());
-        return true;
+        return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required};
       }
     }
   }
@@ -762,17 +815,25 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
         HOTSWAP_LOG("hotswap: disk cache hit src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu\n",
                     decision->source_isa.c_str(), decision->target_isa.c_str(),
                     decision->request_entry_trampolines, code_object.size, disk_bytes->size());
-        return true;
+        return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required};
       }
     }
   }
 #endif
 
-  const bool rewritten =
-      RetargetCodeObject(code_object.data, code_object.size,
-                         decision->source_isa.c_str(), decision->target_isa.c_str(),
-                         out_elf_buffer, out_elf_size,
-                         decision->request_entry_trampolines);
+  bool rewritten = false;
+#ifdef ROCR_HOTSWAP_TESTING
+  if (g_force_retarget_code_object_failure_for_testing.load(std::memory_order_relaxed)) {
+    HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
+  } else
+#endif
+  {
+    rewritten = RetargetCodeObject(code_object.data, code_object.size,
+                                   decision->source_isa.c_str(), decision->target_isa.c_str(),
+                                   out_elf_buffer, out_elf_size,
+                                   decision->request_entry_trampolines,
+                                   decision->request_strict_mode);
+  }
 
   // Cache the result. Only deterministic COMGR failures are cached;
   // transient allocation failures in this function are not, so a
@@ -808,17 +869,27 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   }
 #endif
 
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d required=%d "
+              "in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
-              decision->request_entry_trampolines, code_object.size,
-              rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
-  return rewritten;
+              decision->request_entry_trampolines, decision->request_strict_mode,
+              decision->rewrite_required, code_object.size, rewritten ? *out_elf_size : 0,
+              rewritten ? 1 : 0);
+  if (rewritten) {
+    return {RetargetCodeObjectStatus::kRewritten,
+            decision->rewrite_required};
+  }
+  if (decision->rewrite_required) {
+    return {RetargetCodeObjectStatus::kRequiredRewriteFailed, true};
+  }
+  return {};
 }
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+RetargetCodeObjectResult TryRetargetCodeObject(
+    amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
   if (!reader) {
-    return false;
+    return {};
   }
 
   CodeObjectView code_object;
@@ -840,7 +911,9 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
 
   OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
   size_t rewritten_elf_size = 0;
-  if (TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size)) {
+  const RetargetCodeObjectResult retarget_result =
+      TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size);
+  if (retarget_result.status == RetargetCodeObjectStatus::kRewritten) {
     hsa_code_object_t rewritten_code_object = {
         reinterpret_cast<uint64_t>(rewritten_elf_buffer.get())};
     hsa_status_t status = callbacks.load_rewritten_code_object(
@@ -850,7 +923,15 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
       RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
       return status;
     }
+    if (retarget_result.rewrite_required) {
+      LogRequiredRewrittenLoadFailure(status);
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
     LogRewrittenCodeObjectLoadFailure(status);
+  } else if (retarget_result.status ==
+             RetargetCodeObjectStatus::kRequiredRewriteFailed) {
+    LogRequiredRewriteFailure();
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
   return callbacks.load_original_code_object(callbacks.context, agent, original_code_object,
@@ -886,7 +967,7 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
   return it == g_retained_rewritten_elf_buffers.end() ? 0 : it->second.size();
 }
 
-bool EntryTrampolineRewriteAvailableForTesting() {
+bool HotswapRewriteWithOptionsAvailableForTesting() {
   ComgrApi* api = GetComgrApi();
   return api && api->hotswap_rewrite_with_options;
 }
@@ -899,6 +980,10 @@ size_t RetargetCacheSizeForTesting() {
 void ClearRetargetCacheForTesting() {
   std::scoped_lock lock(g_retarget_cache_mutex);
   g_retarget_cache.clear();
+}
+
+void ForceRetargetCodeObjectFailureForTesting(bool force) {
+  g_force_retarget_code_object_failure_for_testing.store(force, std::memory_order_relaxed);
 }
 #endif
 
