@@ -13,7 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
 * Added bias (accumulation) AllReduce on gfx1250 (MI450).
 * Added optimized scale-up ReduceScatter, AllGather, and AllToAll kernels.
-* Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default on).
+* Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
 * Added ROCProfiler-SDK coverage for `ncclCommGrow` and `ncclCommGetUniqueId`.
 * P2P batching auto-enabled for gfx950 in combination with non-AINIC NICs.
 * Display HIP/ROCm runtime versions in `NCCL_DEBUG` output.

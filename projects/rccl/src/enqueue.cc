@@ -86,7 +86,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
-NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 1);
+NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 0);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -2328,12 +2328,7 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       cb->base.event = finishedEvent;
       cb->base.fn = KernelFinishCallback_fn;
       cb->workFifoConsumed = comm->workFifoProduced;
-      // The callback advances comm->workFifoConsumed, which gates reuse of work-FIFO
-      // space in waitWorkFifoAvailable(). It must therefore only fire after the kernels
-      // that consume this FIFO region have completed. In the fast launch path
-      // (non-captured, single-stream, LAUNCH_ORDER_IMPLICIT=0) the event-record branch
-      // below is skipped, so record the stolen completion event on launchStream here to
-      // ensure the callback waits for real kernel completion before recycling the FIFO.
+      // Record completion on launchStream so the FIFO-recycling callback fires only after kernels finish.
       CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
       ncclIntruQueueEnqueue(&comm->eventCallbackQueue, &cb->base);
       // We just stole scratchEvent so must create a new one.
