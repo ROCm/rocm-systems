@@ -313,6 +313,16 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // In-Function Hardware (IFH) null-submit mode. When enabled, packet
+    // submissions (compute dispatch doorbells and blit copies) are not sent to
+    // the GPU; instead the runtime completes each packet's completion signal on
+    // the host so waiters make progress. This is a host-side profiling aid (it
+    // isolates code-object load / hotswap-rewrite cost from real kernel
+    // execution) and is NOT a correctness path: kernels never run, so any
+    // computed results are meaningless. Disabled unless HSA_ENABLE_IFH=1.
+    var = os::GetEnvVar("HSA_ENABLE_IFH");
+    enable_ifh_ = (var == "1") ? true : false;
+
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
@@ -489,6 +499,8 @@ class Flag {
 
   bool enable_dtif() const { return enable_dtif_; }
 
+  bool enable_ifh() const { return enable_ifh_; }
+
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
@@ -573,6 +585,7 @@ class Flag {
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
+  bool enable_ifh_ = false;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 

@@ -398,6 +398,20 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
                                              const std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal,
                                              std::vector<core::Signal*>& gang_signals) {
+  if (core::Runtime::runtime_singleton_->flag().enable_ifh()) {
+    // IFH null-submit: do not build/submit any SDMA commands. Complete the
+    // copy's completion signal (and any gang signals) on the host so waiters
+    // unblock without moving any data. Host-side profiling aid only -- the copy
+    // does not actually happen, so destination contents are meaningless.
+    out_signal.SubRelease(1);
+    for (core::Signal* gang_signal : gang_signals) {
+      if (gang_signal != nullptr) {
+        gang_signal->SubRelease(1);
+      }
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
   uint32_t num_poll_command = 0;
   uint32_t num_poll_signals = 0;
 

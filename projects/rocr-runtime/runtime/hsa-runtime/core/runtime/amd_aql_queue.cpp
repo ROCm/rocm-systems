@@ -479,7 +479,57 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
                      std::memory_order_release);
 }
 
+void AqlQueue::CompleteSubmittedPacketsIFH() {
+  core::AqlPacket* ring =
+      reinterpret_cast<core::AqlPacket*>(amd_queue_.hsa_queue.base_address);
+  const uint32_t size = amd_queue_.hsa_queue.size;
+  if (ring == nullptr || size == 0) {
+    return;
+  }
+  const uint32_t mask = size - 1;
+
+  const uint64_t write = atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
+  uint64_t read = atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_relaxed);
+
+  for (; read < write; ++read) {
+    const core::AqlPacket& pkt = ring[read & mask];
+    const uint16_t header = pkt.packet.header;
+    if (!core::AqlPacket::IsValid(header)) {
+      continue;
+    }
+
+    // Every 64-byte AQL packet the runtime places on the ring carries its
+    // completion_signal in the last 8 bytes (offset 56): kernel dispatch,
+    // barrier-and/or, agent dispatch, ext kernel dispatch, and AMD
+    // vendor-specific packets such as the PM4 IB packet emitted by
+    // ExecutePM4() during queue/scratch setup. Read it generically -- missing
+    // the PM4 IB packet leaves ExecutePM4's ACTIVE wait spinning forever, which
+    // hangs queue initialization under IFH. dispatch.completion_signal aliases
+    // that offset for all of these packet layouts.
+    const hsa_signal_t completion = pkt.dispatch.completion_signal;
+
+    if (completion.handle != 0) {
+      core::Signal* signal = core::Signal::Convert(completion);
+      if (signal != nullptr) {
+        signal->SubRelease(1);
+      }
+    }
+  }
+
+  // Mark every submitted packet as consumed so the queue looks drained, exactly
+  // as the GPU would advance the read index after executing them.
+  atomic::Store(&amd_queue_.read_dispatch_id, write, std::memory_order_release);
+}
+
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+  if (core::Runtime::runtime_singleton_->flag().enable_ifh()) {
+    // IFH null-submit: skip the doorbell entirely and complete the just-enqueued
+    // packets on the host so waiters unblock without any GPU execution. This is
+    // a host-side profiling aid, not a correctness path.
+    CompleteSubmittedPacketsIFH();
+    return;
+  }
+
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));

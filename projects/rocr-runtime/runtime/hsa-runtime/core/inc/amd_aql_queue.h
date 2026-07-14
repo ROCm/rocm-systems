@@ -312,6 +312,13 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Fill queue properties
   void GetInfoProperties(uint8_t value[8]) const;
 
+  /// @brief IFH (In-Function Hardware) null-submit support. Instead of ringing
+  /// the doorbell, walk the packets the caller just enqueued and complete each
+  /// packet's completion signal on the host so waiters make progress without
+  /// the GPU executing anything. Host-side profiling aid only (enabled via
+  /// HSA_ENABLE_IFH); kernels never run so results are meaningless.
+  void CompleteSubmittedPacketsIFH();
+
   // AQL packet ring buffer
   void* ring_buf_;
 
