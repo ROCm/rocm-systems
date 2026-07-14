@@ -473,18 +473,52 @@ class CodeGenerator:
         ordered.extend(op for op in src_operands if op.name not in ordered_names)
         return ordered
 
-    @staticmethod
-    def _execute_operand_participates(opnd: Operand) -> bool:
+    #: Keep track of field-less operand types that have been promoted from an
+    #: inert placeholder here. When all field-less operands have been promoted,
+    #: this and its consumers, _execute_operand_participates (codegen operand
+    #: visibility) and _fieldless_inert_cpp_cond (runtime C++ inert guard),
+    #: can be removed.
+    #:
+    #: MANUAL SYNC when changing this set. There are hand-written C++
+    #: consumers that this set does not auto-drive; test_field_less_operands.py
+    #: golden-locks the set so any change is forced through review):
+    #:   - isa/isa_operand_simd_inl.h -- AmdgpuIsaOperand<Isa>::simd_capable():
+    #:       unconditional mirror of the exempt type(s); update for ANY addition
+    #:       (else simd_capable and the generated read_* guards disagree).
+    #:   - isa/operand.h -- Operand::is_vgpr(): only when adding a VGPR-typed
+    #:       value-bearing operand.
+    #: The two Python consumers listed above (_execute_operand_participates,
+    #: _fieldless_inert_cpp_cond) derive from this set automatically.
+    _VALUE_BEARING_FIELDLESS_TYPES = frozenset({'OPR_SIMM32'})
+
+    @classmethod
+    def _execute_operand_participates(cls, opnd: Operand) -> bool:
         """Whether codegen should expose this operand to execute templates.
 
         Most field-less operands are hardwired side effects already handled by
-        the semantic emitters (VCC/EXEC/SCC/M0/PC). Field-less OPR_SIMM32 is
-        different: it is an instruction-local literal value and must remain in
-        the source list so execute bodies can read it as an operand. This will
-        allow us to gradually switch from hardwired effects to using the
-        operands.
+        the semantic emitters (VCC/EXEC/SCC/M0/PC) and we will gradually
+        switch them over from hard-coded to using the operands. Until then,
+        check _VALUE_BEARING_FIELDLESS_TYPES for the types that we have
+        switched over.
         """
-        return not opnd.field_less or opnd.operand_type == 'OPR_SIMM32'
+        return (
+            not opnd.field_less
+            or opnd.operand_type in cls._VALUE_BEARING_FIELDLESS_TYPES
+        )
+
+    @classmethod
+    def _fieldless_inert_cpp_cond(cls) -> str:
+        """C++ predicate identifying an inert placeholder field-less operand.
+
+        The runtime mirror of the inverse of ``_execute_operand_participates``:
+        a field-less operand is an inert placeholder unless its type is
+        value-bearing (see ``_VALUE_BEARING_FIELDLESS_TYPES``).
+        """
+        exempt = ' && '.join(
+            f'opr_type_ != OperandType::{t}'
+            for t in sorted(cls._VALUE_BEARING_FIELDLESS_TYPES)
+        )
+        return f'field_less_ && {exempt}' if exempt else 'field_less_'
 
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
@@ -8279,9 +8313,24 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             )
             _resolved_vgpr_encoded_call = 'Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())'
 
+        _inert_cond = self._fieldless_inert_cpp_cond()
+
+        def _inert_guard(ret_expr: str) -> str:
+            # Benign-inert read for placeholder/metadata field-less operands.
+            # Mirrors to_register_ref()'s field-less guard; the exemption for
+            # value-bearing types comes from _fieldless_inert_cpp_cond
+            # so this stays in lockstep with _execute_operand_participates.
+            return (
+                '  // TODO: placeholder/metadata field-less operands read\n'
+                '  // back inert. Promote each field-less operand.\n'
+                f'  if ({_inert_cond})\n'
+                f'    return {ret_expr};\n'
+            )
+
         read_lane_lines = [
             'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {',
             '  if (delegate()) return delegate()->read_lane(wf, lane);',
+            *_inert_guard('0u').rstrip('\n').split('\n'),
             '  int ev = encoding_value_;',
         ]
         if uses_packed_16bit_sources:
@@ -8314,7 +8363,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         _read_lane64_body = (
             'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
             '  if (delegate()) return delegate()->read_lane64(wf, lane);\n'
-            '  int ev = encoding_value_;\n'
+            + _inert_guard('0')
+            + '  int ev = encoding_value_;\n'
             f'  if (auto off = {_resolved_vgpr_read_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;\n'
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
@@ -8678,7 +8728,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + simd_methods
             + 'uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {\n'
             '  if (delegate()) return delegate()->read_scalar(wf);\n'
-            '  if (has_literal64_)\n'
+            + _inert_guard('0u')
+            + '  if (has_literal64_)\n'
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
@@ -8711,7 +8762,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             'uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {\n'
-            '  if (has_literal64_)\n'
+            + _inert_guard('0')
+            + '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return read_immediate64(opr_type_, encoding_value_);\n'

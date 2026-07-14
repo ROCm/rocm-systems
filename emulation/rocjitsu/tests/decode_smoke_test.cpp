@@ -25,6 +25,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -150,6 +151,11 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
     EXPECT_EQ(op->size_bits(), size_bits);
     EXPECT_EQ(op->encoding_value(), encoding_value);
     EXPECT_FALSE(op->to_register_ref().has_value());
+    // Inertness must span the register/SIMD classification surface too, not
+    // just def-use (to_register_ref): a field-less operand must not inherit
+    // VGPR/SIMD behavior from its operand type by accident.
+    EXPECT_FALSE(op->is_vgpr());
+    EXPECT_FALSE(op->simd_capable());
   };
 
   expect_inert_fieldless_operand(inst->dst_operand(1), 64, 126); // EXEC write.
@@ -157,6 +163,39 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   expect_inert_fieldless_operand(inst->src_operand(1), 64, 126); // EXEC read.
 
   EXPECT_EQ(inst->disassemble(), "s_and_saveexec_b64 s[0:1], s[0:1]");
+}
+
+// A field-less operand must not retain register/SIMD behavior from its operand
+// type by accident. Placeholder/metadata operands (the image `vaddr`,
+// generated as OPR_VGPR with canonical value 0) must be inert across
+// is_vgpr()/simd_capable()/to_register_ref(); value-bearing field-less operands
+// can stay live.
+TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing) {
+  // Control: a real (field-bearing) VGPR classifies and reads as a register.
+  rdna4::Operand v0(128, rdna4::OperandType::OPR_VGPR, 0);
+  EXPECT_TRUE(v0.is_vgpr());
+  EXPECT_TRUE(v0.simd_capable());
+  EXPECT_TRUE(v0.to_register_ref().has_value());
+
+  // Placeholder: the field-less image address must be inert everywhere -- it is
+  // not a decoded v0, and gfx12 NSA addressing a single Operand can't express.
+  rdna4::Operand vaddr(128, rdna4::OperandType::OPR_VGPR, 0);
+  vaddr.set_field_less(true);
+  EXPECT_TRUE(vaddr.is_field_less());
+  EXPECT_FALSE(vaddr.is_vgpr());
+  EXPECT_FALSE(vaddr.simd_capable());
+  EXPECT_FALSE(vaddr.to_register_ref().has_value());
+
+  // Value-bearing exemption: a field-less inline literal is suppressed from
+  // disasm/def-use (to_register_ref) but still carries a value, so it must stay
+  // SIMD-capable (immediate broadcast) -- this is what keeps FMA-K /
+  // S_SETREG_IMM32_B32 literals readable.
+  rdna4::Operand simm(32, rdna4::OperandType::OPR_SIMM32, 0x1234);
+  simm.set_field_less(true);
+  EXPECT_TRUE(simm.is_field_less());
+  EXPECT_FALSE(simm.is_vgpr());
+  EXPECT_TRUE(simm.simd_capable());
+  EXPECT_FALSE(simm.to_register_ref().has_value());
 }
 
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {

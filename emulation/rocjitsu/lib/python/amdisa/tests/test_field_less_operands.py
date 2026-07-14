@@ -237,3 +237,25 @@ def test_execute_operand_participation_keeps_only_fieldless_simm32():
     assert not CodeGenerator._execute_operand_participates(vcc)
     assert CodeGenerator._execute_operand_participates(simm32)
     assert CodeGenerator._execute_operand_participates(src0)
+
+
+def test_value_bearing_fieldless_types_is_locked():
+    # Golden lock on the single source of truth for "which field-less operands
+    # stay live". Changing this set deliberately flips runtime inertness for a
+    # type across is_vgpr / simd_capable / read_* (via
+    # _fieldless_inert_cpp_cond) AND its execute-body visibility (via
+    # _execute_operand_participates), so update this assertion consciously
+    # rather than by accident.
+    assert CodeGenerator._VALUE_BEARING_FIELDLESS_TYPES == frozenset({'OPR_SIMM32'})
+
+
+def test_fieldless_inert_cpp_cond_is_derived_from_value_bearing_set():
+    # The C++ guard emitted into every generated read_*/simd_capable body must
+    # be derived from _VALUE_BEARING_FIELDLESS_TYPES so it can never drift from
+    # the participation rule (the whole point of single-sourcing the set).
+    cond = CodeGenerator._fieldless_inert_cpp_cond()
+    assert cond.startswith('field_less_ && ')
+    for t in CodeGenerator._VALUE_BEARING_FIELDLESS_TYPES:
+        assert f'opr_type_ != OperandType::{t}' in cond
+    # Golden for the current single-type set.
+    assert cond == 'field_less_ && opr_type_ != OperandType::OPR_SIMM32'

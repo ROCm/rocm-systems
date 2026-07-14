@@ -1325,6 +1325,10 @@ uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (delegate())
     return delegate()->read_scalar(wf);
+  // TODO: placeholder/metadata field-less operands read
+  // back inert. Promote each field-less operand.
+  if (field_less_ && opr_type_ != OperandType::OPR_SIMM32)
+    return 0u;
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -1335,6 +1339,10 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return delegate()->read_lane(wf, lane);
+  // TODO: placeholder/metadata field-less operands read
+  // back inert. Promote each field-less operand.
+  if (field_less_ && opr_type_ != OperandType::OPR_SIMM32)
+    return 0u;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
@@ -1363,6 +1371,10 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return delegate()->read_lane64(wf, lane);
+  // TODO: placeholder/metadata field-less operands read
+  // back inert. Promote each field-less operand.
+  if (field_less_ && opr_type_ != OperandType::OPR_SIMM32)
+    return 0;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
@@ -1390,6 +1402,10 @@ void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) c
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
+  // TODO: placeholder/metadata field-less operands read
+  // back inert. Promote each field-less operand.
+  if (field_less_ && opr_type_ != OperandType::OPR_SIMM32)
+    return 0;
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))

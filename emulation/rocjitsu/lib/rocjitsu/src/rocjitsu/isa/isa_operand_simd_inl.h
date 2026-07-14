@@ -39,6 +39,13 @@ std::optional<uint32_t> resolved_vgpr_offset_for_operand(const amdgpu::Wavefront
 template <typename Isa> bool AmdgpuIsaOperand<Isa>::simd_capable() const {
   if (this->delegate())
     return this->delegate()->simd_capable();
+  // Placeholder/metadata field-less operands (e.g. image vaddr) are inert and
+  // must not inherit VGPR/immediate SIMD-capability from their operand type;
+  // value-bearing field-less operands are exempt. This is a hand-written mirror
+  // of CodeGenerator._VALUE_BEARING_FIELDLESS_TYPES -- keep the exempt type(s)
+  // here in sync with that set (a pytest golden-locks it).
+  if (this->is_field_less() && this->opr_type_ != Isa::OperandType::OPR_SIMM32)
+    return false;
   return Isa::simd_capable_value(this->opr_type_, this->encoding_value_);
 }
 

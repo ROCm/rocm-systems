@@ -84,7 +84,12 @@ public:
   /// @brief Whether this operand references a VGPR or AccVGPR.
   /// @details Classified at construction time by ISA-specific subclasses using
   /// the auto-generated is_vgpr_operand_type() from operand_types.h.
-  [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+  /// TODO: field-less operands are currently inert. Update this as they
+  /// switch over to being used. (Stay in sync with
+  /// CodeGenerator._VALUE_BEARING_FIELDLESS_TYPES). Currently, the only
+  /// operands in this are non-VGPR so gating on field_less_ alone is
+  /// sufficient here.
+  [[nodiscard]] bool is_vgpr() const { return !field_less_ && is_vgpr_; }
 
   /// @brief Whether this operand is field-less
   /// @details Field-less operands (has no encoding field in MR ISA) are
