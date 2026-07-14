@@ -556,6 +556,9 @@ TEST(HotswapRewrite, RuntimeLoadRewrittenLoadFailureFallsBackToOriginal) {
 TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
   ResetRuntimeTestEnv();
   if (!NewComgrHotswapApiAvailable()) return;
+  // In-memory-tier test: disable the disk cache so a stale on-disk entry from a
+  // prior run can't turn the "first load" below into a disk hit.
+  g_fake_env_vars["HSA_HOTSWAP_DISK_CACHE"] = "0";
   rocr::hotswap::ClearRetargetCacheForTesting();
   ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
 
@@ -599,6 +602,9 @@ TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
 TEST(HotswapRewrite, RetargetCacheClearResetsCacheSize) {
   ResetRuntimeTestEnv();
   if (!NewComgrHotswapApiAvailable()) return;
+  // In-memory-tier test: disable the disk cache so a stale on-disk entry can't
+  // affect the in-memory cache-size assertions below.
+  g_fake_env_vars["HSA_HOTSWAP_DISK_CACHE"] = "0";
   rocr::hotswap::ClearRetargetCacheForTesting();
 
   // Populate the cache with one entry.

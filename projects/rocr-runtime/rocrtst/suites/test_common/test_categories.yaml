@@ -30,8 +30,6 @@ test_categories:
       - "rocrtstFunc.MemoryFillTest"
       - "rocrtstFunc.AgentProp_UUID"
       - "rocrtstFunc.AgentPropertiesTests"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     exclude_windows: []
@@ -200,8 +198,6 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

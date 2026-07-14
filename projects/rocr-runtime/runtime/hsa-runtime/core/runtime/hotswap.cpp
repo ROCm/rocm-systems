@@ -186,12 +186,26 @@ std::string GetDiskCacheDir() {
 }
 
 #if !defined(_WIN32) && !defined(_WIN64)
+struct ComgrApi;
+ComgrApi* GetComgrApi();
+
+// Resolve the COMGR path for the disk-cache salt. Force the (cheap, memoized)
+// COMGR resolution so g_comgr_lib_path is set regardless of load ordering;
+// otherwise a salt computed before COMGR loads differs from one computed after,
+// and warm runs miss the entry the cold run wrote. The retarget still only runs
+// on a genuine cold miss.
+std::string ResolveComgrPathForSalt() {
+  (void)GetComgrApi();
+  return g_comgr_lib_path;
+}
+
 uint64_t ComgrIdentitySalt() {
   uint64_t salt = static_cast<uint64_t>(kDiskCacheFormatVersion) * 1000003ULL;
-  if (!g_comgr_lib_path.empty()) {
-    salt ^= FnvHash(g_comgr_lib_path.data(), g_comgr_lib_path.size());
+  const std::string comgr_path = ResolveComgrPathForSalt();
+  if (!comgr_path.empty()) {
+    salt ^= FnvHash(comgr_path.data(), comgr_path.size());
     struct stat st = {};
-    if (::stat(g_comgr_lib_path.c_str(), &st) == 0) {
+    if (::stat(comgr_path.c_str(), &st) == 0) {
       salt ^= static_cast<uint64_t>(st.st_size) * 2654435761ULL;
       salt ^= static_cast<uint64_t>(st.st_mtime) * 40503ULL;
     }
