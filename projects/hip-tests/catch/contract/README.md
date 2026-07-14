@@ -25,6 +25,7 @@ The first domains are:
 - `stream_cu_mask`: AMD stream CU-mask create and query contracts
 - `stream_attach`: managed-memory stream attach contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
+- `mem_batch_copy`: batch async device-to-device copy round-trip, per-copy attribute, and invalid-input contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `driver_memset_async`: driver-style directed async byte, word, and dword memset contracts
 - `driver_memset_2d`: driver-style directed 2D byte, word, and dword memset contracts
