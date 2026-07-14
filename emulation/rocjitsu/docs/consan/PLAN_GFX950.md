@@ -597,6 +597,13 @@ Full gfx950 support means:
   exact-context mismatch remains under ISA-level reduction. Neither class is
   waived. The separate gfx1201 IREE build/launcher track is also in progress;
   the existing gfx950 IREE build remains untouched.
+- 2026-07-14: `X1I0` is `DONE` and `X1IS` is `ACTIVE`. The separate
+  `/tmp/xx/iree-build-gfx1201-rocjitsu` uses Clang 21, workspace ROCm, and the
+  existing host IREE compiler tools; its VMFB records `gfx1201`. Wrapping CTest
+  itself in Rocjitsu provides a launcher inherited by every child process. The
+  first encoding CTest passes 1/1 with all four internal module checks under
+  true gfx1201 emulation. The four guarded selected profiles are next and run
+  serially to keep IREE temporary directories isolated.
 
 ## DAG Overview
 
@@ -844,8 +851,8 @@ flowchart LR
   X1SA["X1SA: Sampled Immediate Semantics"]:::done
   X1F["X1F: Focused Emulator Gate"]:::active
   X1H["X1H: hip-moi Emulator Tier"]:::active
-  X1I0["X1I0: IREE Build And Emulator Launcher"]:::active
-  X1IS["X1IS: Selected IREE Emulator Tier"]:::todo
+  X1I0["X1I0: IREE Build And Emulator Launcher"]:::done
+  X1IS["X1IS: Selected IREE Emulator Tier"]:::active
   X1BSC["X1BSC: SuperCollider Broad IREE"]:::todo
   X1BRR["X1BRR: Record/Replay Broad IREE"]:::todo
   X1BSA["X1BSA: Sampled Broad IREE"]:::todo
@@ -2609,9 +2616,9 @@ Sub-DAG:
   result is 36/37; the only residual reaches Rocjitsu's unimplemented trap.
 - `X1H` (ACTIVE): build and run every `LOCAL_TESTING.md` hip-moi gfx1201 control
   through the emulator.
-- `X1I0` (ACTIVE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
+- `X1I0` (DONE): create a gfx1201 IREE build and a CTest-compatible Rocjitsu
   launcher without changing the existing gfx950 build.
-- `X1IS` (TODO): run guarded selected IREE profiles with non-vacuity checks.
+- `X1IS` (ACTIVE): run guarded selected IREE profiles with non-vacuity checks.
 - `X1BSC`, `X1BRR`, `X1BSA`, and `X1BIS` (TODO): run and independently reduce
   the four broad profiles; `X1BG` collects their accepted results.
 
