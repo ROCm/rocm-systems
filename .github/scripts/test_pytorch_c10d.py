@@ -225,17 +225,20 @@ def run_tests(pytorch_src: Path, results_log: Path) -> int:
     log.info("Running: %s", " ".join(cmd))
 
     with open(results_log, "w") as log_file:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=pytorch_src,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
-        log_file.write(proc.stdout)
-        # Also print to stdout for CI log visibility
-        print(proc.stdout, end="")
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_file.write(line)
+        proc.wait()
 
     log.info("Test exit code: %d", proc.returncode)
     log.info("Results written to: %s", results_log)
