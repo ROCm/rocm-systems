@@ -107,7 +107,9 @@ __global__ __launch_bounds__(128) void gfx950_moi_forced_inline_spill(uint32_t *
   };
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
-                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7])
+               :
+               : "v23");
   if (tid == 0u || tid == 64u) {
     asm volatile("ds_write_b32 %0, %1\n\t"
                  ".rept 128\n\t"
@@ -119,7 +121,9 @@ __global__ __launch_bounds__(128) void gfx950_moi_forced_inline_spill(uint32_t *
   }
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
-                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7])
+               :
+               : "v23");
   const uint32_t base = tid * 8u;
   for (uint32_t i = 0; i < 8u; ++i)
     out[base + i] = values[i];
@@ -434,7 +438,9 @@ __global__ __launch_bounds__(128) void gfx950_moi_forced_barrier_spill(uint32_t 
   };
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
-                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7])
+               :
+               : "v23");
   if (tid == 0u) {
     asm volatile("s_nop 0\n\t"
                  "ds_write_b32 %0, %1\n\t"
@@ -458,7 +464,9 @@ __global__ __launch_bounds__(128) void gfx950_moi_forced_barrier_spill(uint32_t 
   }
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
-                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7])
+               :
+               : "v23");
   const uint32_t base = tid * 8u;
   for (uint32_t i = 0; i < 8u; ++i)
     out[base + i] = values[i];

@@ -2683,7 +2683,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_single_lds_store"
                 "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_LOG=1"
-                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
                 "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         set_tests_properties(
