@@ -34,7 +34,7 @@ struct Fallback : public Backend {
 
     void async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
-                  std::shared_ptr<IStream> stream);
+                  std::shared_ptr<IStream> stream) override;
 
     // Once we can import gtest.h and make test suites or test friends everything
     // below here should be made protected.

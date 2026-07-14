@@ -220,6 +220,23 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     return static_cast<ssize_t>(nbytes);
 }
 
+void
+Fastpath::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
+                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
+                   std::shared_ptr<IStream> stream)
+{
+    (void)type;
+    (void)file;
+    (void)buffer;
+    (void)size_p;
+    (void)file_offset_p;
+    (void)buffer_offset_p;
+    (void)bytes_transferred_p;
+    (void)stream;
+
+    throw BackendDisabled();
+}
+
 bool
 Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
 {
