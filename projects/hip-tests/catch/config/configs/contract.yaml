@@ -1311,6 +1311,21 @@ contract:
   Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable:
     <<: *level_0
     tags: [device_lifecycle]
+  Contract_GreenContext_GetDevResource_ReportsSmCount:
+    <<: *level_0
+    tags: [green_context]
+  Contract_GreenContext_SplitByCount_ProducesBoundedSubset:
+    <<: *level_0
+    tags: [green_context]
+  Contract_GreenContext_Create_QueriesDeviceAndResource:
+    <<: *level_0
+    tags: [green_context]
+  Contract_GreenContext_Stream_LaunchesObservableWork:
+    <<: *level_0
+    tags: [green_context]
+  Contract_GreenContext_Event_RecordAndWaitRoundTrips:
+    <<: *level_0
+    tags: [green_context]
   Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported:
     <<: *level_0
     tags: [memory_pool_lifecycle]
