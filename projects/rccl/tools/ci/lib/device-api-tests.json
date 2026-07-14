@@ -13,7 +13,7 @@
 
   "bench_args": "-b 8 -e 1G -f 2 -g 1",
 
-  "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1"],
+  "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1", "RCCL_USE_AMD_SMI_LIB=1"],
 
   "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
 
