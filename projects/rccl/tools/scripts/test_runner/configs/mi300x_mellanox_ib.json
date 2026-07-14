@@ -559,15 +559,14 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
-<<<<<<< HEAD
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
-=======
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility tests",
           "test_filter": "DdaFabricEligibilityTest.*"
->>>>>>> origin/develop
         },
         {
           "name": "TimeoutTests",
