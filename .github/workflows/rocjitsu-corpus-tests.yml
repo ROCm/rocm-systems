@@ -104,7 +104,7 @@ jobs:
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           # Last updated on 2026/07/14.
-          ref: 11cea7e64ec845ca91454655a89b06e59f0c6578
+          ref: ${{ github.event.inputs.corpus_ref || '11cea7e64ec845ca91454655a89b06e59f0c6578' }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
