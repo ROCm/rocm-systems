@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3p_mov_b32_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for
-/// v_pk_mov_b32_vop3p on CDNA4. Default packing only (op_sel=0,
-/// op_sel_hi=3): the 64-bit result is (src0_lo, src1_hi), where each src
-/// pair lives in consecutive VGPRs {base, base+1}. The SIMD path uses
-/// read_simd64/write_simd64 to fetch and store the 64-bit pair. Each case runs
-/// TWICE in the same process -- once forcing the scalar body, once the SIMD fast
-/// path, with identical inputs/EXEC -- and the 64-bit dst results are asserted
-/// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
-/// in-process). In-process inactive lanes must keep the sentinel.
+/// @brief Golden selector check for v_pk_mov_b32_vop3p on CDNA targets.
+///
+/// Hardware-observed behavior for the assembler's default op_sel_hi value:
+/// op_sel[0] selects the low output dword from src0.{lo,hi}, and op_sel[1]
+/// selects the high output dword from src1.{lo,hi}. Each case runs twice in
+/// the same process -- once forcing the scalar body, once allowing the SIMD
+/// fast path -- and both paths must match the same golden 64-bit result.
+/// In-process inactive lanes must keep the sentinel.
 
 #include "util/simd_test_hooks.h"
 
@@ -41,10 +40,22 @@ constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 8; // pair occupies kDstVgpr..kDstVgpr+1
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
 
+struct ArchCase {
+  rj_code_arch_t arch;
+  const char *name;
+};
+
+constexpr std::array<ArchCase, 3> kArchCases{{
+    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
+    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+}};
+
 constexpr void vop3p_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
-                            uint32_t words[2]) {
-  // op_sel = 0, op_sel_hi = 3 (default packing). neg / neg_hi / clamp = 0.
-  words[0] = (vdst & 0xFFu) | ((op & 0x7Fu) << 16) | (0x1A7u << 23);
+                            uint32_t op_sel, uint32_t words[2]) {
+  // op_sel_hi = 3 is what LLVM emits for v_pk_mov_b32 op_sel:[x,y].
+  // neg / neg_hi / clamp = 0.
+  words[0] = (vdst & 0xFFu) | ((op_sel & 0x3u) << 11) | ((op & 0x7Fu) << 16) | (0x1A7u << 23);
   words[1] = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | (0x3u << 27);
 }
 
@@ -72,15 +83,18 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3p_mov_b32_mem"), l2("vop3p_mov_b32_l2") {
+  explicit Fixture(const ArchCase &arch)
+      : gpu_mem(std::string("vop3p_mov_b32_mem_") + arch.name),
+        l2(std::string("vop3p_mov_b32_l2_") + arch.name) {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch.arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3p_mov_b32", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    cu = amdgpu::ComputeUnitCore::create(std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
+                                         &gpu_mem, &l2);
+    decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -120,17 +134,38 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
+std::array<uint64_t, WF_SIZE> expected(uint32_t rot, uint64_t exec, uint32_t op_sel) {
+  std::array<uint64_t, WF_SIZE> out{};
+  const uint64_t sentinel = uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      out[lane] = sentinel;
+      continue;
+    }
+    const uint32_t src0_lo = kVals[lane % kVals.size()];
+    const uint32_t src0_hi = kVals[(lane + 1) % kVals.size()];
+    const uint32_t src1_lo = kVals[(lane + rot) % kVals.size()];
+    const uint32_t src1_hi = kVals[(lane + rot + 1) % kVals.size()];
+    const uint32_t lo = (op_sel & 1u) ? src0_hi : src0_lo;
+    const uint32_t hi = (op_sel & 2u) ? src1_hi : src1_lo;
+    out[lane] = uint64_t{lo} | (uint64_t{hi} << 32);
+  }
+  return out;
+}
+
 void check(uint64_t exec) {
   ForceScalarGuard gate_guard;
 
-  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
+  auto run_mode = [&](const ArchCase &arch, bool force_scalar, uint32_t rot,
+                      uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx;
+    Fixture fx(arch);
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     // src0 = VGPR 256 (pair v0:v1), src1 = VGPR 258 (pair v2:v3).
-    vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, words);
+    vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, op_sel, words);
     Instruction *inst = fx.decoder->decode(words);
     EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
     auto out = fx.run(inst, rot, exec);
@@ -138,21 +173,32 @@ void check(uint64_t exec) {
     return out;
   };
 
-  for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
-    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+  for (const auto &arch : kArchCases) {
+    for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
+      for (uint32_t op_sel = 0; op_sel < 4; ++op_sel) {
+        const auto golden = expected(rot, exec, op_sel);
+        const auto scalar_out = run_mode(arch, /*force_scalar=*/true, rot, op_sel);
+        const auto simd_out = run_mode(arch, /*force_scalar=*/false, rot, op_sel);
 
-    EXPECT_EQ(scalar_out, simd_out)
-        << "v_pk_mov_b32_vop3p rot=" << rot << ": SIMD path diverged from scalar body";
+        EXPECT_EQ(scalar_out, golden)
+            << arch.name << " v_pk_mov_b32_vop3p rot=" << rot << " op_sel=" << op_sel
+            << ": scalar path diverged from hardware-observed semantics";
+        EXPECT_EQ(simd_out, golden)
+            << arch.name << " v_pk_mov_b32_vop3p rot=" << rot << " op_sel=" << op_sel
+            << ": SIMD path diverged from hardware-observed semantics";
 
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      const bool active = (exec >> lane) & 1ULL;
-      if (!active) {
-        const uint64_t sentinel = uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32);
-        EXPECT_EQ(simd_out[lane], sentinel)
-            << "rot=" << rot << ": clobbered inactive lane " << lane;
-        EXPECT_EQ(scalar_out[lane], sentinel)
-            << "rot=" << rot << ": clobbered inactive lane " << lane;
+        for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+          const bool active = (exec >> lane) & 1ULL;
+          if (!active) {
+            const uint64_t sentinel = uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32);
+            EXPECT_EQ(simd_out[lane], sentinel) << arch.name << " rot=" << rot
+                                                << " op_sel=" << op_sel
+                                                << ": clobbered inactive lane " << lane;
+            EXPECT_EQ(scalar_out[lane], sentinel) << arch.name << " rot=" << rot
+                                                  << " op_sel=" << op_sel
+                                                  << ": clobbered inactive lane " << lane;
+          }
+        }
       }
     }
   }
