@@ -98,6 +98,31 @@ def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
     print(f"\nRefer to `{script} -h` for more details.", file=file)
 
 
+def find_cli_dir(*start_dirs):
+    """Return the amd-smi CLI dir (the one holding amdsmi_cli_exceptions.py), or None.
+
+    Walks up from each start dir, checking the installed (``libexec/amdsmi_cli``)
+    and source (``amdsmi_cli``) layouts. Pass ``amdsmi_path`` first so an
+    AMDSMI_PATH override selects the CLI from the matching install; callers skip
+    the suite when the result is None.
+    """
+    sentinel = "amdsmi_cli_exceptions.py"
+    for start in start_dirs:
+        if not start:
+            continue
+        directory = os.path.abspath(start)
+        while True:
+            for rel in (("libexec", "amdsmi_cli"), ("amdsmi_cli",)):
+                candidate = os.path.join(directory, *rel)
+                if os.path.isfile(os.path.join(candidate, sentinel)):
+                    return candidate
+            parent = os.path.dirname(directory)
+            if parent == directory:  # reached filesystem root
+                break
+            directory = parent
+    return None
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
