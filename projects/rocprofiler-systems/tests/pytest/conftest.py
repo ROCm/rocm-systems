@@ -329,6 +329,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip",
         "scratch_memory",
         "rocm",
+        "spm",
         "kfd",
         "unified_memory",
         "validation_usm",

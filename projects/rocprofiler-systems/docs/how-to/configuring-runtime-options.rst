@@ -265,6 +265,77 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+ROCm SPM sampling (beta)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports beta collection of ROCm Streaming Performance
+Monitor (SPM) counters through ROCprofiler-SDK. SPM collection samples selected
+GPU counters while dispatches are running and exports the samples to Perfetto
+counter tracks. RocPD output for SPM samples is planned as follow-up work.
+
+SPM is configured with the following settings:
+
+* ``ROCPROFSYS_ROCM_SPM_EVENTS`` specifies the SPM counter list. Use the
+  ``:device=N`` suffix to restrict collection to one GPU device, for example
+  ``SQ_WAVES:device=0``. Setting this option enables SPM collection.
+* ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL`` specifies the sampling interval.
+* ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT`` specifies the interval unit. The
+  beta implementation supports ``sclk_cycles``.
+
+The equivalent command-line options are:
+
+* ``--spm-events``
+* ``--spm-sample-interval``
+* ``--spm-sample-interval-unit``
+
+SPM collection is mutually exclusive with the existing ROCm GPU counter paths in
+this beta. Do not combine ``ROCPROFSYS_ROCM_SPM_EVENTS`` with either
+``ROCPROFSYS_ROCM_EVENTS`` or ``ROCPROFSYS_GPU_PERF_COUNTERS`` in the same run.
+
+The following example collects ``SQ_WAVES`` SPM samples from device 0 while
+running the ``transpose`` example and writes a Perfetto trace:
+
+.. code-block:: shell
+
+   ROCPROFSYS_TRACE=ON \
+   ROCPROFSYS_PROFILE=OFF \
+   ROCPROFSYS_USE_SAMPLING=OFF \
+   ROCPROFSYS_USE_PROCESS_SAMPLING=OFF \
+   ROCPROFSYS_USE_KOKKOSP=OFF \
+   ROCPROFSYS_OUTPUT_PATH=/tmp/rocprofsys-spm \
+   ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES:device=0 \
+   ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL=32768 \
+   ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT=sclk_cycles \
+   rocprof-sys-run -- ./transpose
+
+You can configure the same run with command-line options:
+
+.. code-block:: shell
+
+   ROCPROFSYS_TRACE=ON \
+   ROCPROFSYS_OUTPUT_PATH=/tmp/rocprofsys-spm \
+   rocprof-sys-run \
+      --spm-events SQ_WAVES:device=0 \
+      --spm-sample-interval 32768 \
+      --spm-sample-interval-unit sclk_cycles \
+      -- ./transpose
+
+Open the generated ``perfetto-trace-<pid>.proto`` file in the Perfetto UI and
+search for tracks named ``GPU SPM ...``. For example, on a multi-XCC GPU,
+``SQ_WAVES:device=0`` produces tracks such as
+``GPU SPM SQ_WAVES [0] XCC 0 SE 0 Instance 0``. Each track is a sampled counter
+stream for one hardware partition. In the selected counter details, use the
+``Value`` field as the sampled counter value; ``Delta`` and ``Rate`` are derived
+by Perfetto from adjacent samples.
+
+``rocprof-sys-avail`` SPM counter discovery is planned as follow-up work. To
+check whether a counter is reported as SPM-capable by the installed
+ROCprofiler-SDK, use the SDK tool:
+
+.. code-block:: shell
+
+   rocprofv3-avail list --spm
+
 ROCPROFSYS_ROCM_GROUP_BY_QUEUE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

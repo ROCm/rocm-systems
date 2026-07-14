@@ -17,11 +17,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -58,8 +60,21 @@ struct spm_dimensions
     std::uint32_t instance      = 0;
 };
 
+struct requested_counter
+{
+    std::string                  name      = {};
+    std::optional<std::uint64_t> device_id = std::nullopt;
+};
+
+struct agent_spm_config_result
+{
+    bool                                           requested = false;
+    std::optional<rocprofiler_counter_config_id_t> config    = std::nullopt;
+};
+
 using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configuration_t>;
 using spm_counter_id_vec_t       = std::vector<rocprofiler_counter_id_t>;
+using requested_counter_vec_t    = std::vector<requested_counter>;
 using spm_dimension_cache_t =
     std::unordered_map<rocprofiler_counter_instance_id_t, spm_dimensions>;
 
@@ -94,26 +109,67 @@ spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
 }
 
 std::string
-counter_name_token(std::string_view value)
+trim(std::string_view value)
 {
     const auto begin = value.find_first_not_of(" \t\n\r");
     if(begin == std::string_view::npos) return {};
 
-    auto end = value.find_first_of(": \t\n\r", begin);
-    if(end == std::string_view::npos) end = value.size();
-    return std::string{ value.substr(begin, end - begin) };
+    const auto end = value.find_last_not_of(" \t\n\r");
+    return std::string{ value.substr(begin, end - begin + 1) };
 }
 
-std::unordered_set<std::string>
-requested_counter_names(const beta_request& request)
+std::optional<std::uint64_t>
+parse_device_id(std::string_view value)
 {
-    auto names = std::unordered_set<std::string>{};
+    std::uint64_t result = 0;
+    if(value.empty()) return std::nullopt;
+
+    const auto* first  = value.data();
+    const auto* last   = value.data() + value.size();
+    const auto  parsed = std::from_chars(first, last, result);
+    if(parsed.ec != std::errc{} || parsed.ptr != last) return std::nullopt;
+    return result;
+}
+
+requested_counter_vec_t
+requested_counters(const beta_request& request)
+{
+    constexpr auto device_qualifier = std::string_view{ ":device=" };
+
+    auto counters = requested_counter_vec_t{};
+    counters.reserve(request.events.size());
     for(const auto& event : request.events)
     {
-        auto name = counter_name_token(event);
-        if(!name.empty()) names.emplace(std::move(name));
+        const auto trimmed_event = trim(event);
+        if(trimmed_event.empty()) continue;
+
+        const auto pos = trimmed_event.find(device_qualifier);
+        if(pos == std::string::npos)
+        {
+            counters.push_back({ trimmed_event, std::nullopt });
+            continue;
+        }
+
+        auto name   = trim(std::string_view{ trimmed_event }.substr(0, pos));
+        auto device = parse_device_id(
+            std::string_view{ trimmed_event }.substr(pos + device_qualifier.size()));
+
+        if(name.empty() || !device)
+        {
+            LOG_WARNING("Invalid SPM device qualifier '{}'. Expected COUNTER:device=N",
+                        event);
+            continue;
+        }
+
+        counters.push_back({ std::move(name), *device });
     }
-    return names;
+    return counters;
+}
+
+bool
+requested_on_device(const requested_counter& counter, std::uint64_t device_id)
+{
+    return !counter.device_id || *counter.device_id == device_id;
 }
 
 bool
@@ -137,24 +193,34 @@ sample_interval_supported(rocprofiler_agent_id_t agent_id, const beta_request& r
     });
 }
 
-std::optional<rocprofiler_counter_config_id_t>
-create_agent_spm_config(rocprofiler_agent_id_t agent_id, const beta_request& request)
+agent_spm_config_result
+create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id,
+                        const beta_request& request)
 {
-    if(!sample_interval_supported(agent_id, request))
+    auto requested = requested_counters(request);
+    requested.erase(std::remove_if(requested.begin(), requested.end(),
+                                   [device_id](const auto& itr) {
+                                       return !requested_on_device(itr, device_id);
+                                   }),
+                    requested.end());
+    if(requested.empty())
     {
-        LOG_WARNING("SPM sample interval {} {} is not supported for agent {}",
-                    request.sample_interval, request.sample_interval_unit,
-                    agent_id.handle);
-        return std::nullopt;
+        LOG_DEBUG("No SPM counters requested for device {}", device_id);
+        return {};
     }
 
-    auto requested_names = requested_counter_names(request);
-    if(requested_names.empty())
+    if(!sample_interval_supported(agent_id, request))
     {
-        LOG_WARNING("SPM runtime collection requested but no valid counter names were "
-                    "parsed from the request");
-        return std::nullopt;
+        LOG_WARNING("SPM sample interval {} {} is not supported for device {} "
+                    "(agent {})",
+                    request.sample_interval, request.sample_interval_unit, device_id,
+                    agent_id.handle);
+        return { true, std::nullopt };
     }
+
+    auto requested_names = std::unordered_set<std::string>{};
+    for(const auto& itr : requested)
+        requested_names.emplace(itr.name);
 
     auto supported = spm_counter_id_vec_t{};
     auto status    = rocprofiler_spm_iterate_agent_supported_counters(
@@ -163,7 +229,7 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, const beta_request& req
     {
         LOG_WARNING("Failed to query SPM counters for agent {}: {} ({})", agent_id.handle,
                     static_cast<int>(status), status_name(status));
-        return std::nullopt;
+        return { true, std::nullopt };
     }
 
     auto counters = spm_counter_id_vec_t{};
@@ -189,11 +255,12 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, const beta_request& req
         {
             if(matched.count(name) == 0)
             {
-                LOG_WARNING("Requested SPM counter '{}' is not supported for agent {}",
-                            name, agent_id.handle);
+                LOG_WARNING("Requested SPM counter '{}' is not supported for device {} "
+                            "(agent {})",
+                            name, device_id, agent_id.handle);
             }
         }
-        return std::nullopt;
+        return { true, std::nullopt };
     }
 
     auto param = rocprofiler_spm_parameters_t{
@@ -204,17 +271,22 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, const beta_request& req
     auto params = std::array<rocprofiler_spm_parameters_t*, 1>{ &param };
     auto config = rocprofiler_counter_config_id_t{};
 
+    LOG_DEBUG("Creating SPM counter config for device {} (agent {}) with {} counters",
+              device_id, agent_id.handle, requested_names.size());
+
     status =
         rocprofiler_spm_create_counter_config(agent_id, counters.data(), counters.size(),
                                               params.data(), params.size(), &config);
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        LOG_WARNING("Failed to create SPM counter config for agent {}: {} ({})",
-                    agent_id.handle, static_cast<int>(status), status_name(status));
-        return std::nullopt;
+        LOG_WARNING("Failed to create SPM counter config for device {} (agent {}): {} "
+                    "({})",
+                    device_id, agent_id.handle, static_cast<int>(status),
+                    status_name(status));
+        return { true, std::nullopt };
     }
 
-    return config;
+    return { true, config };
 }
 
 bool
@@ -228,16 +300,27 @@ configure_agent_spm_configs(client_data& data, const beta_request& request)
 
     return data.agent_spm_counter_configs.wlock([&](auto& configs) {
         configs.clear();
+        auto matched_agent = false;
         for(const auto& agent : data.gpu_agents)
         {
             if(agent.agent == nullptr) continue;
-            auto config = create_agent_spm_config(
-                rocprofiler_agent_id_t{ agent.agent->handle }, request);
-            if(!config) return false;
+            const auto device_id     = agent.device_id;
+            auto       config_result = create_agent_spm_config(
+                rocprofiler_agent_id_t{ agent.agent->handle }, device_id, request);
+            if(!config_result.requested) continue;
+            if(!config_result.config) return false;
 
-            configs.emplace(rocprofiler_agent_id_t{ agent.agent->handle }, *config);
+            configs.emplace(rocprofiler_agent_id_t{ agent.agent->handle },
+                            *config_result.config);
+            matched_agent = true;
         }
-        return true;
+
+        if(!matched_agent)
+        {
+            LOG_WARNING("SPM runtime collection requested but no GPU agent matched the "
+                        "requested counters and device filters");
+        }
+        return matched_agent;
     });
 }
 

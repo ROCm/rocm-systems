@@ -95,17 +95,6 @@ getenv_string(std::string_view key, std::string_view default_value)
     return (val != nullptr) ? std::string{ val } : std::string{ default_value };
 }
 
-[[nodiscard]] std::optional<std::string_view>
-lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
-{
-    const auto prefix = std::string{ key } + "=";
-    for(auto itr = envs.rbegin(); itr != envs.rend(); ++itr)
-    {
-        if(itr->find(prefix) == 0) return std::string_view{ *itr }.substr(prefix.size());
-    }
-    return std::nullopt;
-}
-
 // All string_view fields point at static-storage data (string literals from the
 // make_*_config factories). Do not assign from temporaries.
 struct tool_config
