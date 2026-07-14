@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file register_access.h
-/// @brief Instruction-facing register access facade for observed VGPR regions.
+/// @brief Instruction-facing facade for observed AMDGPU register access.
 ///
 /// @details AMDGPU instruction emulation has two competing needs. Most code
 /// reads and writes logical operands, while hot SIMD and matrix paths also need
@@ -11,12 +11,12 @@
 /// by ComputeUnitCore.
 ///
 /// Reads acquired through RegisterAccess notify the execution plugin before
-/// exposing scalar values, SIMD storage, or physical VGPR regions. Write-only
+/// exposing scalar values, SIMD storage, or physical register regions. Write-only
 /// accessors do not report reads. Read-write accessors report the read part at
 /// acquisition time and then allow the caller to update the same instruction-
 /// scoped storage. VM/storage code may still use raw register storage for tasks
 /// such as memory completion, but instruction emulators should use this facade
-/// for operand and physical VGPR access.
+/// for operand and physical register access.
 
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
@@ -38,11 +38,11 @@
 
 namespace rocjitsu::amdgpu {
 
-/// @brief Facade for instruction-visible VGPR reads and writes.
+/// @brief Facade for instruction-visible register reads and writes.
 ///
 /// @details This class centralizes the observation contract for
-/// instruction-visible VGPR access. Callers should not pair raw storage access
-/// with ad hoc plugin notifications. Instead, they acquire one of two forms of
+/// instruction-visible register access. Callers should not pair raw storage access
+/// with ad hoc plugin notifications. Instead, they acquire one of these forms of
 /// access here:
 ///
 /// - Logical operand access, including scalar/lane/chunk reads and SIMD views
@@ -50,6 +50,8 @@ namespace rocjitsu::amdgpu {
 ///   contiguous VGPR lane storage.
 /// - Physical VGPR regions, used by matrix, memory-address, and other helpers
 ///   that already operate on physical register indices.
+/// - Physical SGPR access, used by address, descriptor, and generated
+///   SGPR-relative helpers.
 ///
 /// API selection guide:
 /// - Use read_scalar(), read_lane(), and the 64-bit variants for
@@ -81,8 +83,8 @@ namespace rocjitsu::amdgpu {
 /// here. They should be acquired during a single instruction's emulation and
 /// not cached across instructions.
 ///
-/// Logical operand APIs require construction from a Wavefront. Physical VGPR
-/// region APIs may be constructed from a ComputeUnitCore; write access requires
+/// Logical operand APIs require construction from a Wavefront. Physical register
+/// APIs may be constructed from a ComputeUnitCore; write access requires
 /// a mutable ComputeUnitCore.
 class RegisterAccess {
   template <typename T>
@@ -333,7 +335,7 @@ public:
     OperandReadWrite64View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage)
         : op_(&op), wf_(&wf), storage_(storage) {
       if (!storage_.lo)
-        scalar_fallback_.emplace(op.read_scalar64(wf));
+        scalar_fallback_.emplace(op.read_lane64(wf, 0));
     }
 
     uint64_t scalar_fallback() const {
@@ -647,17 +649,24 @@ public:
     return OperandReadPair32View(op, wf, storage);
   }
 
-  OperandWriteView write_operand(const Operand &op, uint64_t /*lane_mask*/) const {
+  OperandWriteView write_operand(const Operand &op, uint64_t lane_mask) const {
+    // Kept at acquisition time so future write-observation plugins can validate
+    // the instruction's destination lane set before writable storage is exposed.
+    (void)lane_mask;
     Wavefront &wf = mutable_wavefront();
     return OperandWriteView(op, wf, op.simd_vgpr_storage_mut(wf));
   }
 
-  OperandWrite64View write_operand64(const Operand &op, uint64_t /*lane_mask*/) const {
+  OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
+    // See write_operand().
+    (void)lane_mask;
     Wavefront &wf = mutable_wavefront();
     return OperandWrite64View(op, wf, op.simd_vgpr_storage64_mut(wf));
   }
 
-  OperandWritePair32View write_operand_pair32(const Operand &op, uint64_t /*lane_mask*/) const {
+  OperandWritePair32View write_operand_pair32(const Operand &op, uint64_t lane_mask) const {
+    // See write_operand().
+    (void)lane_mask;
     Wavefront &wf = mutable_wavefront();
     return OperandWritePair32View(op, wf, op.simd_vgpr_storage64_mut(wf));
   }
