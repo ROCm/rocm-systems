@@ -116,7 +116,7 @@ jobs:
             runner="${RUNNER_MAP[$arch]}"
             if [ -n "$runner" ]; then
               MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | \
-                jq --arg arch "$arch" --arg runner "$runner" \
+                jq -c --arg arch "$arch" --arg runner "$runner" \
                 '[.[] | if .arch == $arch then .runner = $runner else . end]')
             fi
           done
