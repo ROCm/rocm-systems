@@ -718,36 +718,72 @@ def check_run_ci_split_stage_contract(verbose: bool) -> None:
     ok("run-ci.py split test stage preserves JUnit and repeat behavior")
 
 
-_FAILURE_LOG_SENTINEL = "SENTINEL_BUILD_FAILURE"
-_SUPPRESSED_XML_SENTINEL = "XML_SHOULD_BE_SUPPRESSED"
+_FAILURE_SENTINEL = "SENTINEL_BUILD_FAILURE"
+_WARNING_SENTINEL = "SENTINEL_BUILD_WARNING"
+_NON_XML_ESC = "[NON-XML-CHAR-0x1B]"
 
 
-def write_fake_failing_ctest(bin_dir: Path, binary_dir: Path) -> None:
-    """Fake ctest that reproduces CTest's own on-failure artifacts: a raw log
-    file with real ANSI escape bytes plus an XML report where CTest would
-    have escaped those same bytes as "[NON-XML-CHAR-0x1B]", then exits
-    non-zero like a failed build.
+def write_fake_build_xml_failure(bin_dir: Path, binary_dir: Path) -> None:
+    """Fake ctest reproducing a real CTEST_USE_LAUNCHERS build failure:
+    NO LastBuild*.log at all (verified against a live minimal repro — see
+    planning/bugfix-build-failure-colored-log-xml.md), only
+    Testing/<TAG>/Build.xml with the failing rule's output pre-escaped
+    exactly the way real CTest escapes it, then exits non-zero.
     """
-    temp_dir = binary_dir / "Testing" / "Temporary"
+    tag_dir = binary_dir / "Testing" / "20260101-0000"
     tool_path = bin_dir / "ctest"
+    xml_path = tag_dir / "Build.xml"
+    stdout_text = (
+        f"file.cpp:2: {_NON_XML_ESC}[01;31m{_NON_XML_ESC}[Kerror: "
+        f"{_NON_XML_ESC}[m{_NON_XML_ESC}[K{_FAILURE_SENTINEL}"
+    )
+    xml_content = (
+        "<Site><Build>"
+        '<Failure type="Error"><Result>'
+        f"<StdOut>{stdout_text}</StdOut><StdErr/>"
+        "<ExitCondition>1</ExitCondition>"
+        "</Result></Failure>"
+        "</Build></Site>\n"
+    )
     tool_path.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        f"mkdir -p {str(temp_dir)!r}\n"
-        f"printf '\\x1b[01m{_FAILURE_LOG_SENTINEL}\\x1b[0m\\n' > "
-        f"{str(temp_dir / 'LastBuild_20260101-0000.log')!r}\n"
-        f"printf '<Build>{_SUPPRESSED_XML_SENTINEL} "
-        "[NON-XML-CHAR-0x1B]</Build>\\n' > "
-        f"{str(binary_dir / 'Testing' / 'Build.xml')!r}\n"
+        f"mkdir -p {str(tag_dir)!r}\n"
+        f"cat > {str(xml_path)!r} <<'FAKE_BUILD_XML_EOF'\n"
+        f"{xml_content}"
+        "FAKE_BUILD_XML_EOF\n"
         "exit 1\n",
         encoding="utf-8",
     )
     tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
 
 
+def write_fake_build_success_log(bin_dir: Path, binary_dir: Path) -> None:
+    """Fake ctest reproducing a successful build that still emitted a
+    warning: LastBuild*.log is written (real behavior on success, unlike
+    failure), with real ANSI escape bytes exactly as gcc's
+    -fdiagnostics-color emits them.
+    """
+    temp_dir = binary_dir / "Testing" / "Temporary"
+    tool_path = bin_dir / "ctest"
+    log_path = temp_dir / "LastBuild_20260101-0000.log"
+    tool_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        f"mkdir -p {str(temp_dir)!r}\n"
+        "printf 'file.cpp:1: \\x1b[01;35m\\x1b[Kwarning: \\x1b[m\\x1b[K"
+        f"{_WARNING_SENTINEL}\\n' > {str(log_path)!r}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
+
+
 def check_run_ci_failure_colored_log(verbose: bool) -> None:
-    """run-ci.py must show the colored raw CTest log on stage failure instead
-    of the escaped-ANSI XML dump (see run-ci.py print_failure_log())."""
+    """A failed build stage must recover colored output from CTest's
+    launcher XML report (Testing/<TAG>/Build.xml) since no LastBuild*.log
+    exists on failure, and must annotate the correct error/warning counts
+    (see run-ci.py print_failure_log() / annotate_build_diagnostics())."""
     with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-fail-check-") as temp_dir:
         temp_path = Path(temp_dir)
         binary_dir = temp_path / "build"
@@ -757,7 +793,7 @@ def check_run_ci_failure_colored_log(verbose: bool) -> None:
 
         for tool in ("cmake", "git", "gcov"):
             write_fake_tool(fake_bin_dir, tool, fake_tool_log)
-        write_fake_failing_ctest(fake_bin_dir, binary_dir)
+        write_fake_build_xml_failure(fake_bin_dir, binary_dir)
 
         common_args = [
             "--name",
@@ -767,7 +803,9 @@ def check_run_ci_failure_colored_log(verbose: bool) -> None:
             "-B",
             str(binary_dir),
         ]
-        env = {"TERM": "dumb"}
+        # GITHUB_ACTIONS=true so run-ci.py's log() emits the real "::warning::"
+        # annotation format instead of the local "[WARNING]" fallback.
+        env = {"TERM": "dumb", "GITHUB_ACTIONS": "true"}
         run_ci_command(
             ["--stage", "generate", *common_args], binary_dir, fake_bin_dir, env
         )
@@ -784,18 +822,66 @@ def check_run_ci_failure_colored_log(verbose: bool) -> None:
             "fake failing ctest did not cause the run-ci.py build stage to fail",
         )
         require(
-            _FAILURE_LOG_SENTINEL in build.stdout,
-            "run-ci.py must print the raw LastBuild log on build stage failure",
+            _FAILURE_SENTINEL in build.stdout,
+            "run-ci.py must recover and print the build failure text from Build.xml",
         )
         require(
-            _SUPPRESSED_XML_SENTINEL not in build.stdout
-            and "[NON-XML-CHAR" not in build.stdout,
-            "run-ci.py must not print the escaped-ANSI XML dump on stage failure",
+            "NON-XML-CHAR" not in build.stdout,
+            "run-ci.py must un-escape CTest's [NON-XML-CHAR-...] tokens before printing",
+        )
+        require(
+            "::warning::Build: 1 error(s), 0 warning(s)" in build.stdout,
+            "run-ci.py must annotate the correct error/warning counts on build failure",
         )
 
         if verbose:
             print(build.stdout)
-    ok("run-ci.py prints the colored raw log instead of escaped XML on stage failure")
+    ok("run-ci.py recovers colored build-failure output and annotates counts correctly")
+
+
+def check_run_ci_build_success_annotation(verbose: bool) -> None:
+    """A successful build stage that still emitted a warning must annotate
+    it from LastBuild*.log (which does exist on success), and must not
+    print a failure-log color group since nothing failed."""
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-warn-check-") as temp_dir:
+        temp_path = Path(temp_dir)
+        binary_dir = temp_path / "build"
+        fake_bin_dir = temp_path / "bin"
+        fake_bin_dir.mkdir()
+        fake_tool_log = temp_path / "fake-tools.log"
+
+        for tool in ("cmake", "git", "gcov"):
+            write_fake_tool(fake_bin_dir, tool, fake_tool_log)
+        write_fake_build_success_log(fake_bin_dir, binary_dir)
+
+        common_args = [
+            "--name",
+            "local-ci-warn-check",
+            "--site",
+            "Local",
+            "-B",
+            str(binary_dir),
+        ]
+        env = {"TERM": "dumb", "GITHUB_ACTIONS": "true"}
+        run_ci_command(
+            ["--stage", "generate", *common_args], binary_dir, fake_bin_dir, env
+        )
+
+        build = run_ci_command(
+            ["--stage", "build", *common_args], binary_dir, fake_bin_dir, env
+        )
+        require(
+            "::warning::Build: 0 error(s), 1 warning(s)" in build.stdout,
+            "run-ci.py must annotate warning counts from LastBuild*.log on success",
+        )
+        require(
+            "build log:" not in build.stdout,
+            "run-ci.py must not print a failure-log color group on a successful build",
+        )
+
+        if verbose:
+            print(build.stdout)
+    ok("run-ci.py annotates build warnings correctly on a successful build")
 
 
 def run_checks(args: argparse.Namespace) -> None:
@@ -819,6 +905,7 @@ def run_checks(args: argparse.Namespace) -> None:
     )
     check_run_ci_split_stage_contract(args.verbose)
     check_run_ci_failure_colored_log(args.verbose)
+    check_run_ci_build_success_annotation(args.verbose)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

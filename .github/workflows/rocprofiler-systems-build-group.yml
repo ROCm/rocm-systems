@@ -227,21 +227,6 @@ jobs:
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             -B build
 
-      - &_step-annotate-build
-        name: Annotate build warnings and errors
-        if: always()
-        shell: bash
-        working-directory: projects/rocprofiler-systems/
-        run: |
-          shopt -s nullglob
-          logs=(build/Testing/Temporary/LastBuild*.log)
-          [ ${#logs[@]} -eq 0 ] && exit 0
-          WARNINGS=$(grep -h ' warning:' "${logs[@]}" 2>/dev/null | wc -l || true)
-          ERRORS=$(grep -h ' error:' "${logs[@]}" 2>/dev/null | wc -l || true)
-          if [ "$((WARNINGS + ERRORS))" -gt 0 ]; then
-            echo "::warning::Build: ${ERRORS} error(s), ${WARNINGS} warning(s) — expand step for details"
-          fi
-
       - &_step-cdash-link
         name: CDash link
         if: always()
@@ -548,8 +533,6 @@ jobs:
           python3 ./scripts/run-ci.py --stage build \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             -B build
-
-      - *_step-annotate-build
 
       - *_step-cdash-link
 

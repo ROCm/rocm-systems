@@ -11,6 +11,7 @@ import socket
 import shutil
 import argparse
 import multiprocessing
+import xml.etree.ElementTree as ET
 
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -572,13 +573,22 @@ def set_python_hints_from_cmake_args(cmake_args):
 
 # ---------------------------------------------------------------------------
 # Failure log surfacing
-# The raw Testing/Temporary/Last*.log files keep the real ESC bytes,
-# so printing those gives working color in the GitHub Actions step log.
+#
+# ctest_configure()/ctest_test() always write Testing/Temporary/Last*.log
+# with the real ESC bytes intact, regardless of outcome. ctest_build() does
+# NOT: under CTEST_USE_LAUNCHERS (set in dashboard_config.cmake), a failed
+# build writes no LastBuild*.log at all — the failing rule's stdout/stderr
+# lives only inline in Testing/<TAG>/Build.xml, where CTest's XML writer has
+# already replaced every non-XML-safe control byte (including the ESC byte
+# that starts each compiler color code) with the literal text
+# "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery instead
+# of a raw-log read; configure/test do not.
 # ---------------------------------------------------------------------------
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_NON_XML_CHAR_RE = re.compile(r"\[NON-XML-CHAR-0x([0-9A-Fa-f]{2})\]")
 
-_FAILURE_LOG_GLOBS = {
+_RAW_LOG_GLOBS = {
     "configure": "LastConfigure*.log",
     "build": "LastBuild*.log",
     "test": "LastTest*.log",
@@ -590,32 +600,112 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
-def print_failure_log(args, stage_label: str) -> None:
-    """Print the raw CTest log for a failed stage so its ANSI color renders.
+def _restore_non_xml_chars(text: str) -> str:
+    """Reverse CTest's XML-safe escaping of non-XML control bytes."""
+    return _NON_XML_CHAR_RE.sub(lambda m: chr(int(m.group(1), 16)), text)
 
-    Looks up Testing/Temporary/Last<Stage>*.log for the given stage, reads it
-    with the real ESC bytes intact, and prints it in a log group instead of
-    relying on the XML dump (which has already lost its color to CTest's
-    "[NON-XML-CHAR-0x1B]" escaping).
+
+def _newest_match(pattern: str):
+    matches = glob.glob(pattern)
+    return max(matches, key=os.path.getmtime) if matches else None
+
+
+def _read_raw_stage_log(args, stage_label: str):
+    """Read Testing/Temporary/Last<Stage>*.log, or None if it doesn't exist.
+
+    Written unconditionally (pass or fail) for configure/test. For build,
+    only written on success — see _read_build_xml_failures for the failure
+    case.
     """
-    pattern = _FAILURE_LOG_GLOBS.get(stage_label)
+    pattern = _RAW_LOG_GLOBS.get(stage_label)
     if pattern is None:
-        return
+        return None
+    path = _newest_match(os.path.join(args.binary_dir, "Testing", "Temporary", pattern))
+    if path is None:
+        return None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
 
-    matches = glob.glob(os.path.join(args.binary_dir, "Testing", "Temporary", pattern))
-    if not matches:
-        return
 
-    log_path = max(matches, key=os.path.getmtime)
-    with open(log_path, encoding="utf-8", errors="replace") as f:
-        content = f.read()
+def _read_build_xml_failures(args):
+    """Recover per-rule stdout/stderr for a failed build from CTest's
+    launcher XML report (Testing/<TAG>/Build.xml), un-escaping the
+    "[NON-XML-CHAR-0xNN]" tokens back to their original bytes. Returns a
+    list of text blocks, one per <Failure>/<Warning> entry; empty if
+    Build.xml doesn't exist (e.g. the build was never reached).
+    """
+    path = _newest_match(os.path.join(args.binary_dir, "Testing", "*", "Build.xml"))
+    if path is None:
+        return []
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError:
+        return []
+
+    blocks = []
+    for entry in root.findall(".//Failure") + root.findall(".//Warning"):
+        for tag in ("StdOut", "StdErr"):
+            element = entry.find(f"./Result/{tag}")
+            if element is not None and element.text:
+                blocks.append(_restore_non_xml_chars(element.text))
+    return blocks
+
+
+def print_failure_log(args, stage_label: str) -> None:
+    """Print the recovered CTest output for a failed stage so its ANSI
+    color renders in the GitHub Actions step log."""
+    if stage_label == "build":
+        blocks = _read_build_xml_failures(args)
+        if not blocks:
+            return
+        content = "\n".join(blocks)
+        source = "Build.xml (recovered)"
+    else:
+        content = _read_raw_stage_log(args, stage_label)
+        if content is None:
+            return
+        source = f"Last{stage_label.capitalize()}.log"
 
     if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
         content = _strip_ansi(content)
 
-    log_group_start(f"{stage_label} log: {os.path.basename(log_path)}")
+    log_group_start(f"{stage_label} log: {source}")
     print(content, flush=True)
     log_group_end()
+
+
+def _count_diagnostics(text: str):
+    """Count gcc/clang-style ' error:'/' warning:' markers in build text.
+
+    Callers must pass ANSI-stripped text: with CMAKE_COLOR_DIAGNOSTICS on,
+    gcc emits a literal space, then the color-start escape sequence, then
+    the bare word "error"/"warning" — so " error:"/" warning:" never occurs
+    as a contiguous substring in colored text, even though a human (or a
+    color-aware terminal) reads it as one marker.
+    """
+    return text.count(" error:"), text.count(" warning:")
+
+
+def annotate_build_diagnostics(args, failed: bool) -> None:
+    """Emit a "::warning::Build: N error(s), M warning(s)" GitHub Actions
+    annotation, replacing the identical shell step every calling workflow
+    used to duplicate. That step grepped Testing/Temporary/LastBuild*.log
+    directly, which is silently wrong on failure (see module docstring
+    above) — this covers both outcomes from a single place.
+    """
+    if failed:
+        text = "\n".join(_read_build_xml_failures(args))
+    else:
+        text = _read_raw_stage_log(args, "build") or ""
+    if not text:
+        return
+
+    errors, warnings = _count_diagnostics(_strip_ansi(text))
+    if errors + warnings > 0:
+        log(
+            f"Build: {errors} error(s), {warnings} warning(s) — expand step for details",
+            level="warning",
+        )
 
 
 def collect_test_artifacts(args, ctest_args, print_xml: bool = True):
@@ -722,6 +812,9 @@ def do_stage(args, script_name, stage_label, ctest_args=None):
             )
         elif stage_label == "test":
             collect_test_artifacts(args, ctest_args or [], print_xml=True)
+
+        if stage_label == "build":
+            annotate_build_diagnostics(args, failed)
 
 
 def do_all(args, ctest_args):
