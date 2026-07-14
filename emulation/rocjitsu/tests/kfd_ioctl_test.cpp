@@ -1173,4 +1173,48 @@ TEST(RemoteDriverDbgNotifierTest, EnableWithClosedNotifierFdPreservesEbadf) {
   ::close(sv[1]);
 }
 
+// A daemon-path ENABLE that the daemon fails (result != 0) must not copy the
+// response tail into the caller's runtime-info buffer, even though the daemon
+// returned inline bytes. Mirrors the GET_DEVICE_SNAPSHOT success gate: a
+// rejected notifier fd (-EBADF) leaves caller memory untouched, as local mode does.
+TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr size_t kRinfoSize = sizeof(kfd_runtime_info);
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kRinfoSize, kSentinel);
+
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_ioctl_reply(server_fd, -EBADF, arg_struct_size, kRinfoSize, kPoison);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // A valid notifier fd so the SCM_RIGHTS send succeeds and the request reaches
+  // the daemon, which then fails the op with -EBADF. Allocated after the driver
+  // so its fd number is not reused by the driver's internal eventfd.
+  int notifier_fd = ::eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier_fd, 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = 4242;
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(notifier_fd);
+  en.enable.rinfo_size = static_cast<uint32_t>(kRinfoSize);
+  en.enable.rinfo_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), -EBADF);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "failed ENABLE mutated caller runtime-info memory";
+
+  ::close(notifier_fd);
+  server.join();
+}
+
 } // namespace

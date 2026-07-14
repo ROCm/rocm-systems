@@ -542,9 +542,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         size_t copy_len = 0;
         switch (dbg->op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
-          dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
-          copy_len = std::min(static_cast<size_t>(saved_dbg_rinfo_size),
-                              std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
+          // Only propagate runtime-info bytes on success; a failed op (e.g.
+          // -EBADF from a rejected notifier fd) must not mutate caller memory
+          // or dereference the saved output pointer, matching local mode.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_rinfo_size),
+                                std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
+          }
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
           // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
