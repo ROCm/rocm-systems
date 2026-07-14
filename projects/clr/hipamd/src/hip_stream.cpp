@@ -53,7 +53,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 }
 
 // ================================================================================================
-hipError_t Stream::EndCapture() {
+hipError_t Stream::EndCapture(bool preserveInvalidated) {
   // Detach all captured events from this stream.
   {
     std::scoped_lock lock(lock_);
@@ -64,12 +64,14 @@ hipError_t Stream::EndCapture() {
   }
   // Recursively end capture on all parallel (forked) streams.
   for (auto stream : parallelCaptureStreams_) {
-    [[maybe_unused]] const auto err = reinterpret_cast<hip::Stream*>(stream)->EndCapture();
+    [[maybe_unused]] const auto err =
+        reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
     assert(err == hipSuccess);
   }
 
   // Reset all capture state to defaults.
-  captureStatus_ = hipStreamCaptureStatusNone;
+  captureStatus_ = preserveInvalidated ? hipStreamCaptureStatusInvalidated
+                                       : hipStreamCaptureStatusNone;
   pCaptureGraph_ = nullptr;
   originStream_ = false;
   parentStream_ = nullptr;
@@ -110,7 +112,9 @@ void Stream::Detach() {
       ReleaseCaptureGraph();
     }
 
-    (void)EndCapture();
+    // Keep the invalidated status visible on the detached origin and every
+    // fork while clearing all graph, event, and parent/child bookkeeping.
+    (void)EndCapture(/*preserveInvalidated=*/true);
   }
   detached_.store(true, std::memory_order_release);
 }

@@ -439,8 +439,8 @@ namespace hip {
     void SetCaptureID() { captureID_ = GenerateCaptureID(); }
     /// Inherit capture ID from the parent stream
     void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
-    /// Reset capture parameters
-    hipError_t EndCapture();
+    /// Reset capture parameters, optionally keeping an invalidated status observable.
+    hipError_t EndCapture(bool preserveInvalidated = false);
     /// Set capture status
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
