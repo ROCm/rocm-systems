@@ -688,109 +688,64 @@ extern "C" {
 //---
 // API-visible structures
 typedef struct ihipCtx_t* hipCtx_t;
-/** @brief Opaque handle to a HIP execution context (green context). */
 typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
-/** @brief Opaque descriptor aggregating resources for execution context creation. */
 typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
-
-/**
- * @brief Identifies the type of GPU resource described by @ref hipDevResource.
- */
 typedef enum hipDevResourceType {
-  hipDevResourceTypeInvalid = 0,            ///< Invalid or uninitialized resource.
-  hipDevResourceTypeSm = 1,                 ///< SM/CU compute resource.
-  hipDevResourceTypeWorkqueueConfig = 1000, ///< Workqueue configuration resource.
-  hipDevResourceTypeWorkqueue = 10000,      ///< Pre-existing workqueue resource.
+  hipDevResourceTypeInvalid = 0,
+  hipDevResourceTypeSm = 1,
+  hipDevResourceTypeWorkqueueConfig = 1000,
+  hipDevResourceTypeWorkqueue = 10000,
 } hipDevResourceType;
-
-/**
- * @brief Flags controlling the behavior of @ref hipDevSmResourceSplit.
- */
 typedef enum hipDevSmResourceGroup_flags {
-  hipDevSmResourceGroupDefault = 0,    ///< Default behavior; no special splitting rules.
-  hipDevSmResourceGroupBackfill = 0x1, ///< Distribute remaining CUs into the last group.
+  hipDevSmResourceGroupDefault = 0,
+  hipDevSmResourceGroupBackfill = 0x1,
 } hipDevSmResourceGroup_flags;
-
-/**
- * @brief Flags controlling the behavior of @ref hipDevSmResourceSplitByCount.
- */
 typedef enum hipDevSmResourceSplitByCount_flags {
-  /** Bypass WGP co-scheduling alignment, permitting odd CU counts per partition. */
   hipDevSmResourceSplitIgnoreSmCoscheduling = 0x1,
-  /** No-op on AMD hardware; present for CUDA API compatibility. */
   hipDevSmResourceSplitMaxPotentialClusterSize = 0x2,
 } hipDevSmResourceSplitByCount_flags;
-
-/**
- * @brief Workqueue sharing scope used in @ref hipDevWorkqueueConfigResource.
- */
 typedef enum hipDevWorkqueueConfigScope {
-  hipDevWorkqueueConfigScopeDeviceCtx = 0,        ///< Shared across all contexts on the device.
-  hipDevWorkqueueConfigScopeGreenCtxBalanced = 1,  ///< Non-overlapping across balanced execution contexts.
+  hipDevWorkqueueConfigScopeDeviceCtx = 0,
+  hipDevWorkqueueConfigScopeGreenCtxBalanced = 1,
 } hipDevWorkqueueConfigScope;
 
 #define HIP_RESOURCE_ABI_BYTES 40
 
-/**
- * @brief SM/CU resource data returned by resource query APIs.
- *
- * All fields are output-only. Do not write to this structure directly;
- * populate it only through @ref hipDeviceGetDevResource or
- * @ref hipExecutionCtxGetDevResource.
- *
- * On AMD hardware, @p minSmPartitionSize equals @p smCoscheduledAlignment.
- * In WGP mode (RDNA, CDNA2+), @p smCoscheduledAlignment is 2; in CU mode it is 1.
- */
 typedef struct hipDevSmResource {
-  unsigned int smCount;                ///< Number of CUs available in this resource.
-  unsigned int minSmPartitionSize;     ///< Minimum partition size; equals @p smCoscheduledAlignment on AMD.
-  unsigned int smCoscheduledAlignment; ///< Co-scheduling unit size: 2 (WGP mode) or 1 (CU mode).
-  unsigned int flags;                  ///< Reserved; must be 0.
+  unsigned int smCount;
+  unsigned int minSmPartitionSize;
+  unsigned int smCoscheduledAlignment;
+  unsigned int flags;
 } hipDevSmResource;
 
-/**
- * @brief Workqueue configuration resource data.
- */
 typedef struct hipDevWorkqueueConfigResource {
-  int device;                              ///< Device index this configuration applies to.
-  unsigned int wqConcurrencyLimit;         ///< Maximum number of concurrent workqueues.
-  hipDevWorkqueueConfigScope sharingScope; ///< Sharing scope for workqueue concurrency.
+  int device;
+  unsigned int wqConcurrencyLimit;
+  hipDevWorkqueueConfigScope sharingScope;
 } hipDevWorkqueueConfigResource;
 
-/**
- * @brief Handle to a pre-existing workqueue resource.
- */
 typedef struct hipDevWorkqueueResource {
-  unsigned char reserved[HIP_RESOURCE_ABI_BYTES]; ///< Reserved for internal use.
+  unsigned char reserved[HIP_RESOURCE_ABI_BYTES];
 } hipDevWorkqueueResource;
 
-/**
- * @brief Tagged union describing a single GPU device resource.
- *
- * The @p type field identifies which union member is active. Do not modify
- * this structure directly; use the resource query and split APIs to populate it.
- */
 typedef struct hipDevResource_st {
-  hipDevResourceType type;             ///< Resource type; determines which union member is valid.
-  unsigned char _internal_padding[92]; ///< Reserved for internal use.
+  hipDevResourceType type;
+  unsigned char _internal_padding[92];
   union {
-    hipDevSmResource sm;               ///< SM/CU resource; valid when @p type is @ref hipDevResourceTypeSm.
-    hipDevWorkqueueConfigResource wqConfig; ///< Workqueue config resource.
-    hipDevWorkqueueResource wq;        ///< Workqueue resource.
-    unsigned char _oversize[HIP_RESOURCE_ABI_BYTES]; ///< Reserved for future resource types.
+    hipDevSmResource sm;
+    hipDevWorkqueueConfigResource wqConfig;
+    hipDevWorkqueueResource wq;
+    unsigned char _oversize[HIP_RESOURCE_ABI_BYTES];
   };
-  struct hipDevResource_st* nextResource; ///< Reserved for internal use.
+  struct hipDevResource_st* nextResource;
 } hipDevResource;
 
-/**
- * @brief Per-group parameters for structured SM resource splitting via @ref hipDevSmResourceSplit.
- */
 typedef struct hipDevSmResourceGroupParams_st {
-  unsigned int smCount;                    ///< Number of CUs requested for this group.
-  unsigned int coscheduledSmCount;         ///< Number of co-scheduled CUs for this group.
-  unsigned int preferredCoscheduledSmCount; ///< Preferred co-scheduled CU count (advisory).
-  unsigned int flags;                      ///< Flags from @ref hipDevSmResourceGroup_flags.
-  unsigned int reserved[12];               ///< Reserved; must be 0.
+  unsigned int smCount;
+  unsigned int coscheduledSmCount;
+  unsigned int preferredCoscheduledSmCount;
+  unsigned int flags;
+  unsigned int reserved[12];
 } hipDevSmResourceGroupParams;
 
 // Note many APIs also use integer deviceIds as an alternative to the device pointer:
@@ -6326,222 +6281,32 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
  *  @defgroup ExecutionContext Execution Context Management
  *  @{
  *  This section describes execution context management functions of HIP runtime API.
- *
- *  Execution contexts (also called green contexts) allow applications to partition GPU compute
- *  resources into isolated subsets. Each execution context owns a slice of the device's
- *  streaming multiprocessors (SMs/CUs). Streams created from an execution context are restricted
- *  to that slice, which provides resource isolation for latency-sensitive or mixed workloads.
- *
- *  @note CU partitions are not enforced as mutually exclusive. True isolation requires the
- *  application to create disjoint partitions using @ref hipDevSmResourceSplitByCount or
- *  @ref hipDevSmResourceSplit.
- *
- *  @note On AMD hardware, SM co-scheduling alignment reflects the Workgroup Processor (WGP)
- *  granularity: 2 CUs per WGP on RDNA and CDNA2+ devices, 1 CU per unit on older CDNA.
- *  Use @ref hipDevResourceTypeSm resources and check @ref hipDevSmResource::smCoscheduledAlignment
- *  before splitting.
- */
-
-/**
- * @brief Returns the resource of the specified type available on a device.
- *
- * Populates @p resource with the total SM/CU resources available on @p device,
- * intersected with any global CU masks set by environment variables
- * (@c HSA_CU_MASK, @c ROC_GLOBAL_CU_MASK).
- *
- * @param[in]  device    Device to query.
- * @param[out] resource  Populated resource descriptor.
- * @param[in]  type      Resource type; currently only @ref hipDevResourceTypeSm is supported.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
  */
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);
-
-/**
- * @brief Splits an SM resource into equally-sized groups of at least @p minCount units.
- *
- * Divides the CUs described by @p input into as many groups as possible, each containing
- * at least @p minCount CUs. If @p *nbGroups is 0 or @p result is @c NULL, the function
- * runs in query mode and writes the maximum achievable group count to @p *nbGroups without
- * modifying @p result or @p remainder.
- *
- * @param[out]    result     Array of at least @p *nbGroups @ref hipDevResource structures to fill.
- * @param[in,out] nbGroups   On input, requested number of groups (0 for query mode).
- *                           On output, actual number of groups created.
- * @param[in]     input      Source SM resource to split.
- * @param[out]    remainder  Remaining CUs not assigned to any group; may be @c NULL.
- * @param[in]     flags      Bitfield of @ref hipDevSmResourceSplitByCount_flags values.
- * @param[in]     minCount   Minimum CUs per group.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
                                         const hipDevResource* input, hipDevResource* remainder,
                                         unsigned int flags, unsigned int minCount);
-
-/**
- * @brief Splits an SM resource into structured groups with per-group parameters.
- *
- * Like @ref hipDevSmResourceSplitByCount but accepts a @p groupParams array for
- * fine-grained control over each group's size and co-scheduling preferences.
- *
- * @param[out] result      Array of @p nbGroups @ref hipDevResource structures to fill.
- * @param[in]  nbGroups    Number of groups to create.
- * @param[in]  input       Source SM resource to split.
- * @param[out] remainder   Remaining CUs not assigned to any group; may be @c NULL.
- * @param[in]  flags       Bitfield of @ref hipDevSmResourceGroup_flags values.
- * @param[in]  groupParams Per-group configuration; array of @p nbGroups elements.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
                                  const hipDevResource* input, hipDevResource* remainder,
                                  unsigned int flags,
                                  hipDevSmResourceGroupParams* groupParams);
-
-/**
- * @brief Combines one or more resources into an opaque descriptor for execution context creation.
- *
- * All resources in @p resources must belong to the same device. Pass the resulting
- * @p phDesc to @ref hipGreenCtxCreate. At most one SM resource may be included.
- *
- * @param[out] phDesc      Populated resource descriptor handle.
- * @param[in]  resources   Array of resource structures to combine.
- * @param[in]  nbResources Number of elements in @p resources; must be at least 1.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
                                        unsigned int nbResources);
-
-/**
- * @brief Creates a HIP execution context with resources from a descriptor.
- *
- * The execution context restricts work to the CU partition encoded in @p desc.
- * Use @ref hipExecutionCtxStreamCreate to create streams bound to this context.
- *
- * @param[out] ctx    Handle to the newly created execution context.
- * @param[in]  desc   Resource descriptor obtained from @ref hipDevResourceGenerateDesc.
- * @param[in]  device Device on which to create the context; must match the device in @p desc.
- * @param[in]  flags  Creation flags; @c hipGreenCtxDefaultStream (0x1) is required.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- * @see hipExecutionCtxDestroy
- */
 hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-
-/**
- * @brief Destroys a HIP execution context.
- *
- * Streams previously created from this context become orphaned and return
- * @ref hipErrorContextIsDestroyed on subsequent operations (except @ref hipStreamDestroy).
- *
- * @param[in] ctx  Execution context to destroy.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- * @see hipGreenCtxCreate
- */
 hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
-
-/**
- * @brief Returns the primary execution context for a device.
- *
- * The primary context represents the full device resource set. It is distinct
- * from execution contexts created with @ref hipGreenCtxCreate.
- *
- * @param[out] ctx     Handle to the device's primary execution context.
- * @param[in]  device  Device index.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
-
-/**
- * @brief Creates a stream bound to an execution context's resource partition.
- *
- * Work launched on this stream is restricted to the CU mask of @p greenctx.
- * Streams created after a @ref hipExecutionCtxWaitEvent call automatically inherit
- * any pending event waits.
- *
- * @param[out] stream    Handle to the newly created stream.
- * @param[in]  greenctx  Execution context to bind the stream to.
- * @param[in]  flags     Stream creation flags (same as @ref hipStreamCreate).
- * @param[in]  priority  Stream priority; 0 for default priority.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
-
-/**
- * @brief Returns the resource of the specified type associated with an execution context.
- *
- * @param[in]  ctx      Execution context to query.
- * @param[out] resource Populated resource descriptor.
- * @param[in]  type     Resource type; currently only @ref hipDevResourceTypeSm is supported.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
-
-/**
- * @brief Returns the device associated with an execution context.
- *
- * @param[out] device  Device index of the execution context.
- * @param[in]  ctx     Execution context to query.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
-
-/**
- * @brief Returns a process-unique identifier for an execution context.
- *
- * @param[in]  ctx    Execution context to query.
- * @param[out] ctxId  Unique numeric identifier for this context.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
-
-/**
- * @brief Returns the resource of the specified type associated with a stream.
- *
- * For streams created with @ref hipExecutionCtxStreamCreate, returns the execution
- * context's CU partition. For streams created with @ref hipExtStreamCreateWithCUMask,
- * returns the explicit CU mask. For all other streams, returns the full device resource.
- *
- * @param[in]  hStream  Stream to query.
- * @param[out] resource Populated resource descriptor.
- * @param[in]  type     Resource type; currently only @ref hipDevResourceTypeSm is supported.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
-
-/**
- * @brief Records an event capturing the completion of all current streams in an execution context.
- *
- * Streams added to the context after this call is made are not included. The event
- * signals when all work submitted to the context's streams at call time has completed.
- *
- * @param[in] ctx    Execution context whose streams to capture.
- * @param[in] event  Event to record completion into.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- * @see hipExecutionCtxWaitEvent
- */
 hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
-
-/**
- * @brief Blocks the host until all work in an execution context's streams completes.
- *
- * @param[in] ctx  Execution context to synchronize.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- */
 hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
-
-/**
- * @brief Makes all future work in an execution context wait for an event.
- *
- * Applies to all existing streams and to streams created while the event is pending.
- *
- * @param[in] ctx    Execution context to apply the wait to.
- * @param[in] event  Event to wait on before proceeding.
- * @returns @ref hipSuccess on success, or a non-zero error code on failure.
- * @see hipExecutionCtxRecordEvent
- */
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
