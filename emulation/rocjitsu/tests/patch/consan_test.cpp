@@ -878,7 +878,8 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u, 0x00980000u,
+      0xEE158004u,
+      0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -892,7 +893,9 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);
@@ -5720,6 +5723,38 @@ TEST(ConSanMoi, Gfx950AccumFallbackUsesGloballyUnreferencedInAllocationWindow) {
   EXPECT_TRUE(result.moi_scalar_identity_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("globally unreferenced in-allocation five-SGPR identity window") !=
+           std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950AccumFallbackRejectsUnselectedSitesWithoutGlobalScalarProof) {
+  const std::array<uint32_t, 5> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_scalar_window_unselected", /*vgpr_granulated=*/3,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::RecordReplay;
+  options.scratch_vgpr = 4;
+  options.max_patches = 1;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      sizeof(ConSanMoiReportHeader) + 4u * sizeof(ConSanMoiAccessRecord);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("cannot prove a five-SGPR identity window across unselected access sites") !=
            std::string::npos;
   }));
 }

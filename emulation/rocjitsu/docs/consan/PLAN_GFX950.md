@@ -533,6 +533,14 @@ Full gfx950 support means:
   then executes and waits for the original load. The new synthetic regression
   and focused gate pass 263/263; isolated f32 matmul and configured scan pass,
   and the guarded selected IREE gate passes 10/10 in 5.99 seconds.
+- 2026-07-13: `T4RRA` and `T4RRB` are `DONE`; `T4RRC` is active. Broad
+  record/replay failures reduced to CDNA4 accumulator-boundary kernels whose
+  many unselected access sites prevent a kernel-lifetime five-SGPR proof.
+  Scalar state aperture-faulted while forced private state could silently
+  perturb a large MXFP4 result, so the standard record/sampled path now emits
+  a typed resource error and returns the original object instead of guessing.
+  A synthetic two-site regression covers this containment, the focused gate
+  passes 264/264, and isolated IREE tests 1663, 1809, 1840, and 1853 all pass.
 
 ## DAG Overview
 
@@ -765,7 +773,10 @@ flowchart LR
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
   T4SC["T4SC: SuperCollider Broad IREE"]:::done
-  T4RR["T4RR: Record/Replay Broad IREE"]:::active
+  T4RRA["T4RRA: Record/Replay Failure Inventory"]:::done
+  T4RRB["T4RRB: Persistent Identity Containment"]:::done
+  T4RRC["T4RRC: Clean Record/Replay Rerun"]:::active
+  T4RR{"T4RR: Record/Replay Broad IREE"}:::target
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
   T4G{"T4G: Broad Compatibility Accepted"}:::target
@@ -812,13 +823,14 @@ flowchart LR
   T3IW --> T3IL
   T3IA --> T3IL --> T3G
   T3SC --> T4SV --> T4SC
-  T3RR --> T4RR
+  T3RR --> T4RRA
   T3SA --> T4SA
-  T3IR --> T4RR
+  T3IR --> T4RRA
   T3IR --> T4SA
-  T3IW --> T4RR
+  T3IW --> T4RRA
   T3IW --> T4SA
   T3IL --> T4IS
+  T4RRA --> T4RRB --> T4RRC --> T4RR
   T4SC --> T4G
   T4RR --> T4G
   T4SA --> T4G
@@ -2362,12 +2374,31 @@ simultaneous GPU exception can contaminate other subprocesses, so these are
 being rerun individually before attribution. This broad profile deliberately
 does not require a patch or record from every object.
 
-An isolated logged MXFP4 row reproduces the memory-aperture exception after
-record/replay assigns persistent CDNA4 identity at `v135:v139` in a 136-VGPR
-MFMA kernel. This extends `T3IO`: accumulator-safe private owner/epoch state is
-required by record/replay and sampled access records too, not only inline
-shadow. The private representation and `ACCUM_OFFSET` boundary tests must
-therefore be engine-independent.
+This aggregate now has three bounded subnodes:
+
+- `T4RRA: Record/Replay Failure Inventory - DONE`. Two clean broad sweeps and
+  isolated reruns reduced the failures to reproducible accumulator-boundary
+  kernels. The original persistent `v135:v139` assignment in a 136-VGPR MFMA
+  kernel crossed `ACCUM_OFFSET`. After scalar fallback was enabled, test 1840
+  required a low decoded-dead scalar window, while tests 1663, 1809, and 1853
+  exposed that neither descriptor growth nor instruction-local SGPR scans are
+  sufficient proof for five kernel-lifetime scalar registers. Concurrent GPU
+  exceptions also explained the three secondary loader failures.
+- `T4RRB: Persistent Identity Containment - DONE`. Establish a conservative
+  CDNA4 representation or typed exclusion for accumulator-boundary kernels.
+  Forced private state makes isolated test 1663 pass, but test 1853 then
+  produces incorrect matmul values; the same test passes uninstrumented and
+  aperture-faults with scalar state. Therefore a blanket scalar/private
+  heuristic is rejected. Acceptance requires either private storage for the
+  complete owner/epoch/workgroup tuple or a fail-open typed resource outcome
+  before guest execution when no register representation is proven. The
+  implemented standard-path rule requires all owned access sites to fit the
+  selected patch budget before automatic scalar identity is allowed; otherwise
+  patching stops with the typed global-proof error. Explicit diagnostic modes
+  and the single-site scalar proof remain available.
+- `T4RRC: Clean Record/Replay Rerun - ACTIVE`. Run the full inventory from a
+  clean process after `T4RRB`, then isolate every residual and record exact
+  pass/typed-outcome counts. No sampled or inline IREE CTest may overlap it.
 
 ### T4SA: Sampled Broad IREE - TODO
 

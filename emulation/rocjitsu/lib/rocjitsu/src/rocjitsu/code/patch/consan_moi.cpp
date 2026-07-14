@@ -2862,6 +2862,19 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   }
   if (needs_cdna4_scalar_fallback) {
     options.moi_init_owner_epoch = true;
+    const size_t owned_access_plan_count = static_cast<size_t>(std::count_if(
+        result.resource_plans.begin(), result.resource_plans.end(), [](const auto &plan) {
+          return plan.site_kind == ConSanResourceSiteKind::Access &&
+                 !plan.owner_descriptor_file_offsets.empty() &&
+                 plan.source != ConSanRegisterAllocationSource::Unsupported;
+        }));
+    if (options.moi_engine != ConSanMoiEngine::InlineShadow &&
+        owned_access_plan_count > options.max_patches) {
+      result.errors.emplace_back(
+          "ConSan MOI CDNA4 accumulator fallback cannot prove a five-SGPR identity window "
+          "across unselected access sites");
+      return false;
+    }
     uint32_t referenced_scalar_base = 0;
     uint32_t fresh_scalar_base = 0;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
