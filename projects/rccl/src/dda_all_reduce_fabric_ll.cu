@@ -42,15 +42,6 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet
-  const size_t bankStridePkts = (size_t)nRanks * kDdaLLArSlotStridePkts;
-
-  // Epoch is uniform across ranks and blocks; never 0 (0 == cleared scratch).
-  uint32_t epoch = ++comm->ddaLLEpoch;
-  if (epoch == 0) {
-    epoch = comm->ddaLLEpoch = 1;
-  }
-  const uint32_t flag = epoch;
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * bankStridePkts;
 
   const unsigned threads = 256;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
@@ -66,11 +57,13 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
   dim3 grid(blocks);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
 
   INFO(
       NCCL_COLL,
-      "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u epoch=%u",
-      nRanks, bytes, nPk, grid.x, block.x, flag);
+      "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u",
+      nRanks, bytes, nPk, grid.x, block.x);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
   // kDdaMaxNranks).
@@ -78,17 +71,17 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
   case 4:
     meta::comms::ddaAllReduceFlatLL<T, 4><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, flag, bankOffsetPkts);
+        count, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
     meta::comms::ddaAllReduceFlatLL<T, 8><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, flag, bankOffsetPkts);
+        count, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
     meta::comms::ddaAllReduceFlatLL<T, 0><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, flag, bankOffsetPkts);
+        count, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 

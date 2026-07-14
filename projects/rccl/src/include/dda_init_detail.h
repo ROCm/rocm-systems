@@ -61,4 +61,14 @@ inline int ddaFabricMaxNBlocksForScratch() {
   return maxBlocks;
 }
 
+constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
+
+// Number of device epoch cells for the LL collectives. it is sized for the larger of the two
+// max(AG total blocks, AR total blocks).
+inline size_t ddaLLEpochCount(int nRanks, int arMaxBlocks) {
+  const size_t ag = (size_t)nRanks * (size_t)kDdaLLAgMaxBlocksPerPeer;
+  const size_t ar = (size_t)arMaxBlocks;
+  return ag > ar ? ag : ar;
+}
+
 } // namespace nccl_dda_detail

@@ -22,6 +22,7 @@
 
 using meta::comms::kDdaMaxNranks;
 using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
+using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
@@ -67,8 +68,10 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   ncclFabricMemHandler* handler = nullptr;
   void* peerDev = nullptr;
   DdaFabricBarrierState* barrierState = nullptr;
+  uint32_t* epochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
+  const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
 
   res = ncclCuMemAlloc(
@@ -131,6 +134,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // 2-bank layout rather than re-zeroing.
   CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
 
+  // Device epoch cells for the LL collectives: zero-initialised
+  // so the first device-derived flag is 1. Bumped on the device every LL launch.
+  CUDACHECKGOTO(
+      cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
+  CUDACHECKGOTO(
+      cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
+
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
   comm->ddaScratch = scratch;
@@ -139,7 +149,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
-  comm->ddaLLEpoch = 0;
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = (int)epochLen;
   INFO(
       NCCL_INIT,
       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
@@ -151,6 +162,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 fail:
   if (barrierState != nullptr) {
     delete barrierState;
+  }
+  if (epochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
   }
   if (peerDev != nullptr) {
     CUDACHECKIGNORE(cudaFree(peerDev));
@@ -174,6 +188,9 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
   // Destroying the fabric handler unmaps/frees the imported peer scratch buffers.
   if (comm->ddaFabricMemHandler != nullptr) {
     delete static_cast<ncclFabricMemHandler*>(comm->ddaFabricMemHandler);

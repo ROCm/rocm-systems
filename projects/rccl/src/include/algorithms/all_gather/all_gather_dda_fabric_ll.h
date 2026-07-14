@@ -52,8 +52,8 @@ __global__ void ddaAllGatherFabricLL(
     size_t perRankBytes,                   // per-rank payload; multiple of 16
     int selfRank,
     int nRanksRt,
-    uint32_t flag,                         // == epoch; never 0
-    size_t bankOffsetPkts) {               // (epoch & 1) * nRanks * slotStride
+    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
+    int epochLen) {                        // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -65,14 +65,29 @@ __global__ void ddaAllGatherFabricLL(
   const size_t nPk = perRankBytes >> 3;    // 8 payload bytes per packet
   const size_t slot = kDdaLLAgSlotStridePkts;
 
+  // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
+  // cells hold the same value) and derives this launch's flag on the device, so
+  // nothing is baked into a HIP graph capture. bank = flag & 1.
+  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
+  const int total = gridDim.x * gridDim.y;
+  __shared__ uint32_t s_flag;
+  if (tid == 0) {
+    uint32_t f = epochDev[flatBlockId] + 1u;
+    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
+    s_flag = f;
+  }
+  __syncthreads();
+  const uint32_t flag = s_flag;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
   const size_t pkPerChunk = (nPk + (size_t)nChunks - 1) / (size_t)nChunks;
   const size_t pkBegin = (size_t)chunk * pkPerChunk;
   size_t pkEnd = pkBegin + pkPerChunk;
   if (pkEnd > nPk) pkEnd = nPk;
 
-  // self column: local copy sendbuff -> recvbuff[self].
   if (peer == selfRank) {
+    // self column: local copy sendbuff -> recvbuff[self].
     const uint4* s4 = reinterpret_cast<const uint4*>(sendbuff);
     uint4* d4 = reinterpret_cast<uint4*>(
         reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
@@ -95,34 +110,39 @@ __global__ void ddaAllGatherFabricLL(
       __builtin_nontemporal_store(v.z, &q->z);
       __builtin_nontemporal_store(v.w, &q->w);
     }
-    return;
+  } else {
+    // scatter: write my payload into peer's slot (== selfRank).
+    const uint32_t* sw = reinterpret_cast<const uint32_t*>(sendbuff);
+    LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
+        (size_t)selfRank * slot + bankOffsetPkts;
+    for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
+      ddaLLStoreLineB128(
+          reinterpret_cast<uint32_t*>(&dst[pk]),
+          sw[2 * pk], flag, sw[2 * pk + 1], flag);
+    }
+
+    // gather: poll my slot for peer, unpack into recvbuff[peer].
+    volatile LLPacket16* src =
+        reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts +
+        (size_t)peer * slot;
+    uint32_t* out = reinterpret_cast<uint32_t*>(
+        reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
+    for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
+      uint32_t d0, f0, d1, f1;
+      do {
+        ddaLLLoadLineB128(
+            reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
+            d0, f0, d1, f1);
+      } while (f0 != flag || f1 != flag);
+      out[2 * pk] = d0;
+      out[2 * pk + 1] = d1;
+    }
   }
 
-  // scatter: write my payload into peer's slot (== selfRank).
-  const uint32_t* sw = reinterpret_cast<const uint32_t*>(sendbuff);
-  LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) +
-      (size_t)selfRank * slot + bankOffsetPkts;
-  for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
-    ddaLLStoreLineB128(
-        reinterpret_cast<uint32_t*>(&dst[pk]),
-        sw[2 * pk], flag, sw[2 * pk + 1], flag);
-  }
-
-  // gather: poll my slot for peer, unpack into recvbuff[peer].
-  volatile LLPacket16* src =
-      reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts +
-      (size_t)peer * slot;
-  uint32_t* out = reinterpret_cast<uint32_t*>(
-      reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
-  for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
-    uint32_t d0, f0, d1, f1;
-    do {
-      ddaLLLoadLineB128(
-          reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])),
-          d0, f0, d1, f1);
-    } while (f0 != flag || f1 != flag);
-    out[2 * pk] = d0;
-    out[2 * pk + 1] = d1;
+  if (tid == 0) {
+    for (int e = flatBlockId; e < epochLen; e += total) {
+      epochDev[e] = flag;
+    }
   }
 }
 
