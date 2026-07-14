@@ -915,32 +915,19 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 
-set(RJ_EARLY_MMAP_ASAN_PRELOAD "")
-if(RJ_ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
-        OUTPUT_VARIABLE RJ_GCC_ASAN_RUNTIME
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(RJ_GCC_ASAN_RUNTIME AND IS_ABSOLUTE "${RJ_GCC_ASAN_RUNTIME}")
-        set(RJ_EARLY_MMAP_ASAN_PRELOAD "${RJ_GCC_ASAN_RUNTIME}:")
-    endif()
-endif()
-
-# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after the optional ASan
-# runtime). The loader maps rocjitsu first, but runs early_mmap_preload's
-# constructor before init_interposer(). That constructor calls mmap/munmap early
-# enough to exercise the pre-init fallback; verifying the exact path directly
-# would require adding observable test state to the interposer.
+# Keep rocjitsu first in LD_PRELOAD. The loader maps it before
+# early_mmap_preload, but runs early_mmap_preload's constructor before
+# init_interposer(). That constructor calls mmap/munmap early enough to exercise
+# the pre-init fallback; verifying the exact path directly would require adding
+# observable test state to the interposer.
 rj_add_test(
     NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     COMMAND $<TARGET_FILE:early_mmap_driver>
     ENVIRONMENT
-        "LD_PRELOAD=${RJ_EARLY_MMAP_ASAN_PRELOAD}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
+        "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
     INSTALL_COMMAND "bin/early_mmap_driver"
     INSTALL_ENVIRONMENT
-        "LD_PRELOAD=${RJ_EARLY_MMAP_ASAN_PRELOAD}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "LD_PRELOAD=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
 # --- interposer dup/backend bookkeeping test (CLI launcher) ---

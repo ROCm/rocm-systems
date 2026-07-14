@@ -150,8 +150,6 @@ int connect_to_daemon(const std::string &runtime_dir) {
   return -1;
 }
 
-void shutdown_local_vm_at_exit();
-
 /// @brief Convert a kernel-style driver ioctl result into the libc ioctl(2)
 /// return/`errno` contract.
 ///
@@ -602,20 +600,10 @@ public:
   /// @details Local dups release the local process refcount; remote dups release
   /// the daemon connection refcount. release_remote_open() is a no-op when no
   /// remote reference is live, so a release that races a teardown is harmless.
-  void release_local_open(LinuxKfd *driver) {
-    if (!driver)
-      return;
-    driver->close();
-    auto *local = dynamic_cast<SimulatedKfd *>(driver);
-    bool last_local_ref = local && local->local_open_ref_count() == 0;
-    if (last_local_ref)
-      shutdown_local_vm();
-  }
-
   void release_backend(DupBackend backend) {
     if (backend == DupBackend::Local) {
       if (auto *d = driver())
-        release_local_open(d);
+        d->close();
     } else {
       release_remote_open();
     }
@@ -716,7 +704,7 @@ public:
     if (auto *d = driver()) {
       switch (d->invalidate_primary_fd(fd)) {
       case LinuxKfd::PrimaryInvalidation::kClearedDropRef:
-        release_local_open(d); // drop the primary open reference
+        d->close(); // drop the primary open reference
         return;
       case LinuxKfd::PrimaryInvalidation::kClearedKeepRefs:
         return; // classification cleared; no counted reference to drop
@@ -1270,8 +1258,6 @@ public:
         in_construction = false;
         return nullptr;
       }
-      register_local_vm_atexit_shutdown();
-
       // Publish the fully-constructed, not-yet-running driver BEFORE starting the
       // engine thread: the release-store of active_driver_ pairs with acquire
       // loads in driver()/initialized(), so any reader that observes the driver
@@ -1302,25 +1288,14 @@ public:
     rj_vm_t *vm = rj_vm_;
     if (!vm)
       return;
-    rj_vm_ = nullptr;
-    active_driver_.store(nullptr, std::memory_order_release);
     rj_vm_request_exit(vm, "interposer shutdown");
     if (local_vm_thread_.joinable())
       local_vm_thread_.join();
-    rj_vm_destroy(vm);
-  }
-
-  void register_local_vm_atexit_shutdown() {
-    bool already_registered = local_vm_atexit_registered_.exchange(true, std::memory_order_acq_rel);
-    if (already_registered)
-      return;
-    std::atexit(shutdown_local_vm_at_exit);
   }
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
   std::thread local_vm_thread_;
-  std::atomic<bool> local_vm_atexit_registered_{false};
   std::unique_ptr<GuestKfd> guest_driver_;
   std::atomic<LinuxKfd *> active_driver_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
@@ -1453,8 +1428,6 @@ private:
 alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
-
-void shutdown_local_vm_at_exit() { InterposerContext::ctx.shutdown_local_vm(); }
 
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
 
@@ -1716,7 +1689,7 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     return static_cast<int>(InterposerContext::real().close(fd));
   }
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
-    InterposerContext::ctx.release_local_open(drv);
+    drv->close();
     return 0;
   }
   if (InterposerContext::ctx.owns_fd(fd))
