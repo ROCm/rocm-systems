@@ -16,7 +16,6 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <optional>
@@ -49,25 +48,6 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
-
-  //----------------------------------------------------------------------------
-  // Probe-call resources (filled by plan_probe_call(); left at defaults for the
-  // inlined nop).
-  //
-  // These are the call-envelope resource decisions made BEFORE layout is known:
-  // which registers the envelope uses and how many words it spans. Emission
-  // materializes `before_items` from these decisions plus the assigned layout,
-  // so it must not re-pick registers or recount words. Folded into
-  // TrampolinePlan for now since this is the builder's one input;
-  // lift back out into a dedicated resource-plan type if it grows unwieldy.
-  //----------------------------------------------------------------------------
-  bool is_probe_call = false;     ///< True once plan_probe_call() populated these.
-  uint16_t link_pair_base = 30;   ///< s[30:31] return-link pair
-  uint16_t target_pair_base = 0;  ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;       ///< v0 preserves SCC across target materialization.
-  uint16_t scc_temp = 0;          ///< Dead SGPR holding saved SCC across the call.
-  RegisterSet builder_clobbers;   ///< {link} | {target pair} | {scc_temp}; feeds the spill formula.
-  uint32_t before_word_count = 0; ///< Envelope words emitted before the relocated original.
 };
 
 /// @brief Output bytes for one trampoline.
@@ -92,34 +72,6 @@ public:
   /// validate_inline_nop_plan (in instrumentor.h) when appropriate.
   [[nodiscard]] static std::optional<TrampolineBytes> build(const TrampolinePlan &plan,
                                                             std::string *error_out = nullptr);
-
-  /// @brief Select the probe-call envelope resources and record them on @p plan.
-  ///
-  /// Picks the call-envelope registers and computes the envelope word count
-  /// without choosing layout or emitting bytes. On success, fills
-  /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `preserve_scc`,
-  /// `scc_temp`, `builder_clobbers`, and `before_word_count`, then returns true.
-  ///
-  /// Policy:
-  ///   - Link pair is the fixed ABI pair s[30:31]. If either lane is live at the
-  ///     anchor, fail. Extending this is deferred.
-  ///   - Target-address pair is a dead, even-aligned SGPR pair (excluding the
-  ///     link pair). It is consumed by s_swappc before the probe body runs, so it
-  ///     may overlap @p probe_body_clobbers.
-  ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
-  ///     (saved before materialization, restored after), so it must avoid both
-  ///     the live set and @p probe_body_clobbers. Extending this is deferred.
-  ///
-  /// Returns false and writes a diagnostic naming the unavailable resource to
-  /// @p error_out (if non-null) when the link pair is live or no dead
-  /// target pair / SCC temp can be found. The plan is left unmodified on failure.
-  ///
-  /// @param plan                Trampoline plan whose resource fields are filled.
-  /// @param live_at_anchor      Registers live immediately before the anchor.
-  /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
-  [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const RegisterSet &live_at_anchor,
-                                            const RegisterSet &probe_body_clobbers,
-                                            std::string *error_out = nullptr);
 };
 
 } // namespace rocjitsu
