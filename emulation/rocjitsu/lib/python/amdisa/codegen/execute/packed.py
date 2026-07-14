@@ -515,7 +515,7 @@ def gen_pk_mov_b32(
     s1_lo = _pk_f32_word_expr('s1', 'lo', use_gfx1250_helpers)
     s1_hi = _pk_f32_word_expr('s1', 'hi', use_gfx1250_helpers)
     L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel_hi} & 2) ? {s1_hi} : {s1_lo};')
+    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
     L.append(
         f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
     )

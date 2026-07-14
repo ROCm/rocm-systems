@@ -14,7 +14,11 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -115,6 +119,39 @@ struct Fixture {
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
     cu->execute_instruction(inst, *wf);
+    return read_output();
+  }
+
+  template <typename Inst>
+  std::array<uint64_t, WF_SIZE> run_simd_probe_impl(Instruction *inst, const ArchCase &arch,
+                                                    uint32_t rot, uint64_t exec, uint32_t op_sel) {
+    auto *typed_inst = dynamic_cast<Inst *>(inst);
+    EXPECT_NE(typed_inst, nullptr) << arch.name << " decoded unexpected instruction type";
+    if (typed_inst == nullptr)
+      return {};
+    seed_inputs(rot, exec);
+    EXPECT_TRUE(amdgpu::try_execute_vop3p_mov_b32_simd(*typed_inst, *wf))
+        << arch.name << " v_pk_mov_b32_vop3p op_sel=" << op_sel
+        << " did not take the SIMD fast path";
+    return read_output();
+  }
+
+  std::array<uint64_t, WF_SIZE> run_simd_probe(Instruction *inst, const ArchCase &arch,
+                                               uint32_t rot, uint64_t exec, uint32_t op_sel) {
+    switch (arch.arch) {
+    case ROCJITSU_CODE_ARCH_CDNA2:
+      return run_simd_probe_impl<cdna2::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      return run_simd_probe_impl<cdna3::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      return run_simd_probe_impl<cdna4::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
+    default:
+      ADD_FAILURE() << "unsupported arch case " << arch.name;
+      return {};
+    }
+  }
+
+  std::array<uint64_t, WF_SIZE> read_output() {
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -168,7 +205,8 @@ void check(uint64_t exec) {
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, op_sel, words);
     Instruction *inst = fx.decoder->decode(words);
     EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
-    auto out = fx.run(inst, rot, exec);
+    auto out =
+        force_scalar ? fx.run(inst, rot, exec) : fx.run_simd_probe(inst, arch, rot, exec, op_sel);
     delete inst;
     return out;
   };
@@ -191,12 +229,12 @@ void check(uint64_t exec) {
           const bool active = (exec >> lane) & 1ULL;
           if (!active) {
             const uint64_t sentinel = uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32);
-            EXPECT_EQ(simd_out[lane], sentinel) << arch.name << " rot=" << rot
-                                                << " op_sel=" << op_sel
-                                                << ": clobbered inactive lane " << lane;
-            EXPECT_EQ(scalar_out[lane], sentinel) << arch.name << " rot=" << rot
-                                                  << " op_sel=" << op_sel
-                                                  << ": clobbered inactive lane " << lane;
+            EXPECT_EQ(simd_out[lane], sentinel)
+                << arch.name << " rot=" << rot << " op_sel=" << op_sel
+                << ": clobbered inactive lane " << lane;
+            EXPECT_EQ(scalar_out[lane], sentinel)
+                << arch.name << " rot=" << rot << " op_sel=" << op_sel
+                << ": clobbered inactive lane " << lane;
           }
         }
       }

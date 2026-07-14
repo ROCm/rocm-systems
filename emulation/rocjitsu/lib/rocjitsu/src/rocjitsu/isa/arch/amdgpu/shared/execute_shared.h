@@ -16621,7 +16621,7 @@ inline void execute_v_pk_mov_b32_vop3p([[maybe_unused]] Inst &inst,
       s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
     }
     uint32_t lo = (inst.inst_.op_sel & 1) ? s0_hi_w : s0_lo_w;
-    uint32_t hi = (inst.inst_.op_sel_hi & 2) ? s1_hi_w : s1_lo_w;
+    uint32_t hi = (inst.inst_.op_sel & 2) ? s1_hi_w : s1_lo_w;
     inst.vdst.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));
   }
 }
