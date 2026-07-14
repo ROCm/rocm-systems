@@ -3,8 +3,8 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#include comm.h
-#include gtest/gtest.h
+#include "comm.h"
+#include "gtest/gtest.h"
 
 namespace RcclUnitTesting
 {
