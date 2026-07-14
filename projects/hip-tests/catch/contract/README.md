@@ -57,6 +57,7 @@ The first domains are:
 - `graph_mem_nodes`: graph memory allocation/free node and graph memory attribute contracts
 - `graph_generic_node`: unified generic graph node add and pre/post-instantiation parameter setter contracts
 - `graph_memcpy3d_node`: struct-based 3D memcpy graph node add, parameter round-trip, and pre/post-instantiation setter contracts
+- `graph_batch_mem_op`: batch memory operation graph node add, write-value launch, parameter round-trip, and executable setter contracts
 - `driver_graph_node`: AMD-gated driver-style context-bound 3D memcpy and memset graph node add, parameter round-trip, and executable setter contracts
 - `graph_instantiate_params`: params-struct graph instantiation result and upload-stream launch contracts
 - `graph_debug`: graph dot-export file-output contracts

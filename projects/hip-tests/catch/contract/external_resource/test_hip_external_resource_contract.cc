@@ -101,3 +101,18 @@ HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
 
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+HIP_TEST_CASE(Contract_ExternalResource_GetMappedMipmappedArray_NullHandle_IsRejected) {
+  // Mapping a mipmapped array from a null external-memory handle is invalid
+  // input and must be rejected rather than returning a mipmapped array.
+  hipExternalMemoryMipmappedArrayDesc desc{};
+  desc.formatDesc = hipCreateChannelDesc(8, 0, 0, 0, hipChannelFormatKindUnsigned);
+  desc.extent = make_hipExtent(16, 16, 0);
+  desc.numLevels = 1;
+
+  hipMipmappedArray_t mipmap = nullptr;
+  const hipError_t status =
+      hipExternalMemoryGetMappedMipmappedArray(&mipmap, nullptr, &desc);
+  RequireRejected(status);
+  REQUIRE(mipmap == nullptr);
+}

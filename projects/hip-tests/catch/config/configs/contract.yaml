@@ -783,6 +783,18 @@ contract:
   Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
     tags: [graph_memcpy3d_node]
+  Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue:
+    <<: *level_0
+    tags: [graph_batch_mem_op]
+  Contract_GraphBatchMemOp_GetParams_RoundTripsCount:
+    <<: *level_0
+    tags: [graph_batch_mem_op]
+  Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstantiate:
+    <<: *level_0
+    tags: [graph_batch_mem_op]
+  Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInstantiate:
+    <<: *level_0
+    tags: [graph_batch_mem_op]
   Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph:
     <<: *level_0
     tags: [driver_graph_node]
@@ -991,6 +1003,9 @@ contract:
     <<: *level_0
     tags: [array_copy]
   Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_MemcpyAtoA_RoundTripsBytes:
     <<: *level_0
     tags: [array_copy_ext]
   Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes:
@@ -1242,6 +1257,9 @@ contract:
   Contract_Surface_GetChannelDesc_RoundTripsArrayResource:
     <<: *level_0
     tags: [texture]
+  Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource:
+    <<: *level_0
+    tags: [texture]
   Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds:
     <<: *level_0
     tags: [driver_texture_object]
@@ -1480,6 +1498,9 @@ contract:
     <<: *level_0
     tags: [external_resource]
   Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected:
+    <<: *level_0
+    tags: [external_resource]
+  Contract_ExternalResource_GetMappedMipmappedArray_NullHandle_IsRejected:
     <<: *level_0
     tags: [external_resource]
   Contract_Module_LoadData_FromRtc_Succeeds:

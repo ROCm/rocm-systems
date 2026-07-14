@@ -49,6 +49,30 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes) {
   HIP_CHECK(hipFree(device_ptr));
 }
 
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoA_RoundTripsBytes) {
+  CHECK_IMAGE_SUPPORT;
+
+  const auto src = MakePattern(0x51);
+  std::array<uint8_t, kByteCount> dst{};
+  hipArray_t src_array = nullptr;
+  hipArray_t dst_array = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kByteCount, 1));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kByteCount, 1));
+
+  // Seed the source array, copy array-to-array, then read the destination back:
+  // hipMemcpyAtoA must preserve the bytes it transfers between two HIP arrays.
+  HIP_CHECK(hipMemcpyHtoA(src_array, 0, src.data(), src.size()));
+  HIP_CHECK(hipMemcpyAtoA(dst_array, 0, src_array, 0, src.size()));
+  HIP_CHECK(hipMemcpyAtoH(dst.data(), dst_array, 0, dst.size()));
+
+  REQUIRE(dst == src);
+
+  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipFreeArray(src_array));
+}
+
 HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 

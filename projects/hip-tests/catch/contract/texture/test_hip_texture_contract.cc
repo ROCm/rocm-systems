@@ -222,3 +222,61 @@ HIP_TEST_CASE(Contract_Surface_GetChannelDesc_RoundTripsArrayResource) {
   HIP_CHECK(hipDestroySurfaceObject(surf_obj));
   HIP_CHECK(hipFreeArray(array));
 }
+
+HIP_TEST_CASE(Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  const hipChannelFormatDesc channel = ByteChannelDesc();
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+
+  const hipResourceDesc res = MakeArrayResourceDesc(array);
+  const hipTextureDesc tex = MakeTextureDesc();
+
+  // Create the texture object with a fully specified resource view so the
+  // runtime resource-view query has every field defined to return. A single
+  // non-mipmapped, single-layer array view is used, so the mipmap-level and
+  // layer bounds are all zero.
+  hipResourceViewDesc view{};
+  view.format = hipResViewFormatUnsignedChar1;
+  view.width = kArrayWidth;
+  view.height = kArrayHeight;
+  view.depth = 0;
+  view.firstMipmapLevel = 0;
+  view.lastMipmapLevel = 0;
+  view.firstLayer = 0;
+  view.lastLayer = 0;
+
+  hipTextureObject_t tex_obj = 0;
+  const hipError_t create_status = hipCreateTextureObject(&tex_obj, &res, &tex, &view);
+  if (create_status == hipErrorNotSupported) {
+    HIP_CHECK(hipFreeArray(array));
+    HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
+  }
+  HIP_CHECK(create_status);
+
+  // The runtime resource-view query must return the view the object was created
+  // with (or report the query unsupported on this runtime path). Every field the
+  // descriptor carries is asserted so a dropped or corrupted field is caught,
+  // not just format and width.
+  hipResourceViewDesc returned{};
+  const hipError_t status = hipGetTextureObjectResourceViewDesc(&returned, tex_obj);
+  if (status == hipErrorNotSupported) {
+    HIP_CHECK(hipDestroyTextureObject(tex_obj));
+    HIP_CHECK(hipFreeArray(array));
+    HIP_SKIP_TEST("hipGetTextureObjectResourceViewDesc is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  REQUIRE(returned.format == view.format);
+  REQUIRE(returned.width == view.width);
+  REQUIRE(returned.height == view.height);
+  REQUIRE(returned.depth == view.depth);
+  REQUIRE(returned.firstMipmapLevel == view.firstMipmapLevel);
+  REQUIRE(returned.lastMipmapLevel == view.lastMipmapLevel);
+  REQUIRE(returned.firstLayer == view.firstLayer);
+  REQUIRE(returned.lastLayer == view.lastLayer);
+
+  HIP_CHECK(hipDestroyTextureObject(tex_obj));
+  HIP_CHECK(hipFreeArray(array));
+}
