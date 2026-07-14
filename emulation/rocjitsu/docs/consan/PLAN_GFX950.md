@@ -553,6 +553,16 @@ Full gfx950 support means:
   completing `T4RRC` and aggregate `T4RR`; `T4SA` is now active.
 - 2026-07-14: `T4SA` is `DONE`: the standard sampled broad IREE profile passes
   259/259. `T4IS` is now active; no other IREE CTest overlaps it.
+- 2026-07-14: the first `T4IS` sweep passed 257/259 and reduced both failures
+  to live-VGPR spills in saturated CDNA4 MFMA kernels. Spill snapshots now
+  drain outstanding guest vector/FLAT and LDS producers before saving; this
+  fixed the large tensor-ukernel reproducer. Moving the medium reproducer's
+  borrowed window from `v2:v8` to `v128:v134`, beyond every decoded MFMA
+  destination, still corrupted the result. Until injected scratch reads have
+  explicit MFMA pipeline-hazard scheduling, CDNA4 MFMA owners that require a
+  live spill now receive typed `NoLegalWindow` containment. The synthetic
+  regression and both isolated IREE tests 1837/1838 pass; `T4IS` remains
+  active pending the clean broad rerun.
 
 ## DAG Overview
 
@@ -2425,6 +2435,10 @@ Result: 259/259 pass with the workspace TheRock runtime.
 ### T4IS: Inline-Shadow Broad IREE - ACTIVE
 
 Goal: run the same inventory under standard inline shadow.
+
+Current result: the initial sweep passed 257/259. Both isolated failures are
+green after pre-save guest-load quiescence and typed containment of unscheduled
+live spills in CDNA4 MFMA owners. A clean 259-test rerun is pending.
 
 For each T4 profile node:
 

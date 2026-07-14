@@ -7938,6 +7938,34 @@ TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUseScalarOwnerEpochState) {
   EXPECT_EQ(atomic_patch_count, 2u);
 }
 
+TEST(ConSanMoi, Gfx950MfmaOwnerExcludesUnscheduledLiveVgprSpill) {
+  const std::array<uint32_t, 5> text_words = {
+      0xD3F3007Cu,
+      0x05F3A1CCu, // v_mfma_f32_16x16x32_fp8_fp8
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_mfma_spill_exclusion", /*vgpr_granulated=*/31, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::NoLegalWindow);
+  EXPECT_FALSE(result.resource_plans.front().scratch_vgpr);
+}
+
 TEST(ConSanMoi, Gfx950PrivateInlineAtomicSpillsStayBeyondPersistentState) {
   std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());

@@ -2123,9 +2123,21 @@ struct MoiKernelResourceContext {
   uint16_t max_referenced_vgpr_count = 0;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
+  bool has_mfma = false;
   uint32_t original_private_segment_size = 0;
   bool descriptor_valid = false;
 };
+
+[[nodiscard]] bool has_mfma(const KernelCfgScope &scope) {
+  for (BasicBlock *block : scope.blocks) {
+    if (block == nullptr)
+      continue;
+    if (std::ranges::any_of(block->instructions(),
+                            [](const Instruction &inst) { return inst.is_mfma(); }))
+      return true;
+  }
+  return false;
+}
 
 [[nodiscard]] uint16_t max_referenced_vgpr_count(const KernelCfgScope &scope) {
   uint32_t max_count = 0;
@@ -2184,6 +2196,7 @@ struct MoiKernelResourceContext {
 }
 
 struct MoiResourcePlanningState {
+  rj_code_arch_t arch;
   std::span<const uint8_t> bytes;
   AmdGpuCodeObject code_object;
   std::unique_ptr<Decoder> decoder;
@@ -2195,7 +2208,8 @@ struct MoiResourcePlanningState {
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
                            const ConSanResult &result)
-      : bytes(input), code_object(input.data(), input.size()), decoder(Decoder::create(arch)),
+      : arch(arch), bytes(input), code_object(input.data(), input.size()),
+        decoder(Decoder::create(arch)),
         max_sgpr_count(static_cast<uint16_t>(moi_max_ordinary_sgprs(arch))) {
     if (!code_object.is_valid() || !decoder)
       return;
@@ -2259,6 +2273,7 @@ struct MoiResourcePlanningState {
                                                            stored.scope.liveness_edges);
       stored.max_referenced_vgpr_count = max_referenced_vgpr_count(stored.scope);
       stored.max_referenced_sgpr_count = max_referenced_sgpr_count(stored.scope, arch);
+      stored.has_mfma = has_mfma(stored.scope);
 
       if (kernel.descriptor_file_offset > bytes.size() ||
           sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
@@ -2334,6 +2349,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   plan.current_sgpr_count = state.max_sgpr_count;
   uint16_t ordinary_vgpr_limit = kMaxVgprs;
   RegisterSet live_before_all_owners;
+  bool any_owner_has_mfma = false;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
     plan.current_vgpr_count = std::min(plan.current_vgpr_count, owner->current_vgpr_count);
@@ -2346,6 +2362,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     plan.original_private_segment_size =
         std::max(plan.original_private_segment_size, owner->original_private_segment_size);
     live_before_all_owners |= owner->liveness->live_before(*anchor);
+    any_owner_has_mfma |= owner->has_mfma;
     descriptors_valid &= owner->descriptor_valid;
   }
   plan.required_vgpr_count = plan.current_vgpr_count;
@@ -2377,6 +2394,17 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   }
 
   const ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
+  // Injected scratch reads do not yet participate in CDNA4 MFMA pipeline
+  // hazard scheduling. Hardware qualification showed that even moving the
+  // borrowed window outside all decoded MFMA destinations can restore stale
+  // values in a saturated matrix kernel. Preserve native spilling elsewhere,
+  // but fail open before emission when an MFMA owner would require it.
+  if (state.arch == ROCJITSU_CODE_ARCH_CDNA4 && any_owner_has_mfma &&
+      register_plan.source == ConSanRegisterAllocationSource::SpillRequired) {
+    plan.source = ConSanRegisterAllocationSource::Unsupported;
+    plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+    return plan;
+  }
   plan.source = register_plan.source;
   plan.reason = register_plan.reason;
   plan.scratch_vgpr = register_plan.base;
