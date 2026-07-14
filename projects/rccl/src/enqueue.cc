@@ -3355,6 +3355,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // enqueue to peer's bcast queue instead of collSorter
     ncclIntruQueueEnqueue(&planner->peers[info->root].bcastQueue, t);
     planner->nTasksBcast += 1;
+    comm->opCount++;
   }
   else {
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
