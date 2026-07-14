@@ -14,9 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default. Only the schedule-only notify job below opts into
+# issues: write, so the sync-check job -- which checks out and runs repo/PR
+# code -- never holds a write-capable token.
 permissions:
   contents: read
-  issues: write
 
 jobs:
   sync-check:
@@ -26,6 +28,7 @@ jobs:
       - name: Checkout rocm-systems
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           sparse-checkout: |
             projects/rdc/include/rdc/rdc.h
             projects/rdc/tools/
@@ -34,6 +37,7 @@ jobs:
       - name: Checkout device-metrics-exporter
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           repository: ROCm/device-metrics-exporter
           path: dme-upstream
           sparse-checkout: |
@@ -62,8 +66,24 @@ jobs:
           name: dme-rdc-sync-report
           path: sync-report.json
 
-      - name: Create or update issue on failure
-        if: failure() && github.event_name == 'schedule'
+  # Isolated schedule-only job that files/refreshes the tracking issue. Kept
+  # separate from sync-check so the step that runs repo/PR code never executes
+  # with issues: write.
+  notify:
+    needs: sync-check
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Download report
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dme-rdc-sync-report
+
+      - name: Create or update issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -112,16 +132,17 @@ jobs:
               (i.body || '').includes(MARKER)
             );
             if (match) {
-              // Body holds the latest snapshot; a comment is what actually notifies
-              // subscribers/assignees (issue body edits send no notification).
+              // Update only the body (latest snapshot). Labels/assignees are set
+              // once at creation and intentionally NOT resent here, so that human
+              // triage (extra labels/assignees) on the open issue is preserved.
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: match.number,
                 body: body,
-                labels: labels,
-                assignees: assignees,
               });
+              // A comment is what actually notifies subscribers/assignees; issue
+              // body edits send no notification.
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
