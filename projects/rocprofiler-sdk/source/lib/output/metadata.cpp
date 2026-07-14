@@ -254,9 +254,11 @@ metadata::metadata(inprocess)
 void
 metadata::refresh_agent_info()
 {
-    // Re-query the canonical SDK agent records. On WSL these are refined from the HSA
-    // runtime in agent::construct_agent_cache() after this metadata's constructor took its
-    // snapshot at tool load; re-querying here picks up the refined topology.
+    // Re-query the canonical SDK agent records. On the WSL fallback path these are refined
+    // from the HSA runtime in agent::construct_agent_cache() after this metadata's
+    // constructor took its snapshot at tool load; re-querying here picks up the refined
+    // topology. Idempotent when the snapshot already matches (WSL shim-success and
+    // bare-metal KFD).
     auto _fresh_agents = std::vector<rocprofiler_agent_v0_t>{};
     rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0,

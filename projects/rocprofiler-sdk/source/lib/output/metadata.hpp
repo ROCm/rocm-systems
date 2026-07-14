@@ -233,15 +233,15 @@ struct metadata
                         pid_t                           _ppid         = 0,
                         const std::vector<std::string>& _command_line = {});
 
-    // Refresh the cached agent records from the canonical SDK agent cache. metadata
-    // snapshots agents in its constructor (at tool-library load, before the HSA runtime is
-    // up). On WSL the GPU topology (cu_count, wave_front_size, simd_count, name, ...) is
-    // seeded with placeholders at enumerate time and only refined from the HSA runtime in
-    // agent::construct_agent_cache(). Calling this after that refinement updates the
-    // snapshot so every consumer (Perfetto/OTF2/correlation/out_agent_info.csv) observes
-    // the refined values. Only the rocprofiler_agent_v0_t base is copied, so the
-    // tool-assigned agent_info::gpu_index is preserved. No-op on bare-metal KFD, where the
-    // canonical records already match the snapshot.
+    // Re-sync the cached agent snapshot from the canonical SDK agent records. metadata
+    // snapshots agents in its constructor (at tool-library load). On the WSL shim-success
+    // path the enumerator already produces correct topology up front, so this is an
+    // idempotent no-op. On the shim-unavailable fallback path the topology is only refined
+    // from the HSA runtime later in agent::construct_agent_cache(); calling this once from
+    // the HSA runtime-initialization callback (a defined point, not inline before emit)
+    // re-syncs the snapshot so every consumer (Perfetto/OTF2/correlation/out_agent_info.csv)
+    // observes the refined values. Only the rocprofiler_agent_v0_t base is copied, so the
+    // tool-assigned agent_info::gpu_index is preserved.
     void refresh_agent_info();
 
     std::string_view   get_marker_message(uint64_t corr_id) const;

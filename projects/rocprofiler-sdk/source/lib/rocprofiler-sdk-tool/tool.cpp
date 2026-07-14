@@ -810,13 +810,15 @@ runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
         tool_metadata->add_runtime_initialization(
             static_cast<rocprofiler_runtime_initialization_operation_t>(record.operation));
 
-        // Refresh the agent-topology snapshot once, right after the HSA runtime is up.
-        // agent::construct_agent_cache() -- which refines the WSL GPU topology (cu_count,
-        // wave_front_size, simd_count, name, ...) from the HSA runtime -- runs immediately
-        // before the HSA runtime-initialization record is emitted, so re-querying here
-        // gives every downstream consumer (Perfetto/OTF2/correlation/out_agent_info.csv)
-        // the refined records. Gated to the HSA operation because HIP initialization is
-        // reported earlier, before construct_agent_cache() has run.
+        // Re-sync the agent-topology snapshot once, right after the HSA runtime is up.
+        // On the WSL shim-success path enumerate() already produced correct topology, so
+        // this is an idempotent no-op; on the WSL fallback path (shim unavailable),
+        // agent::construct_agent_cache() refines the records from HSA just before this
+        // record is emitted, so re-syncing here gives every downstream consumer
+        // (Perfetto/OTF2/correlation/out_agent_info.csv) the refined values. Gated to the
+        // HSA operation because HIP initialization is reported earlier, before
+        // construct_agent_cache() has run. Named helper at a defined point (not inline in
+        // generate_output).
         if(record.operation == ROCPROFILER_RUNTIME_INITIALIZATION_HSA)
         {
             static std::once_flag _agent_topology_refresh_once{};
