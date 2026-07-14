@@ -6,23 +6,11 @@
 
 <!-- Explain the changes along with any relevant GitHub links. -->
 
-## Ticket ID
+## Issue Tracking
 
-<!--
-Include a JIRA ID or GitHub Issue ID. The separator may be : or - (or omitted),
-and the value can be a JIRA key, a number (with or without #), or a GitHub Issue
-link.
-Do not include a link to internal JIRAs.
-
-Accepted examples:
-- JIRA ID : TESTAUTO-6039
-- JIRA ID - #330
-- JIRA ID #330
-- ISSUE ID : TESTUTO-3334
-- ISSUE ID #3334
-- ISSUE ID - TESTAUTO-3433
-- ISSUE ID : https://github.com/<org_name>/<repo_name>/issues/1234
--->
+<!-- Include a GitHub Issue and/or JIRA ID. Do not post any full JIRA links here. -->
+<!-- GitHub issue: https://github.com/ROCm/rocm-systems/issues/1234 -->
+<!-- JIRA ID: EXAMPLECOMPONENT-1234 -->
 
 ## Test Plan
 
@@ -34,4 +22,4 @@ Accepted examples:
 
 ## Submission Checklist
 
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [x] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
