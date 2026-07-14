@@ -38,3 +38,7 @@ rj_configure_target(rocjitsu_tooling TOOL)
 add_executable(rj_dbt_translate dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_tooling)
 rj_configure_target(rj_dbt_translate TOOL)
+
+add_executable(rj_instrument rj_instrument_main.cpp)
+target_link_libraries(rj_instrument PRIVATE rocjitsu_tooling)
+rj_configure_target(rj_instrument TOOL)
