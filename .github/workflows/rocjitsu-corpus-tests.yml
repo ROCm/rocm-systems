@@ -231,9 +231,9 @@ jobs:
             corpus_results+="${name}: $([[ "${target_status}" -eq 0 ]] && echo PASS || echo FAIL)"$'\n'
             echo "::endgroup::"
           }
-          SHORT_TIMEOUT=15
-          LONG_TIMEOUT=30
-          MAX_TIMEOUT_FAILURES=5
+          SOFT_TIMEOUT_SECONDS=15
+          HARD_TIMEOUT_SECONDS=30
+          MAX_SOFT_TIMEOUT_RETRIES=5
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config skip_tests_config <<< "${target}"
             echo "::group::pytest (${name})"
