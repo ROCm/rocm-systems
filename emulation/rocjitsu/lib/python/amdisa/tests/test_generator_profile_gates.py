@@ -1617,6 +1617,10 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert '(word0 >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
+    assert 'bool literal_uses_f64_high_bits' in cpp
+    assert '(static_cast<uint64_t>(literal) << 32), true' in cpp
+    assert 'is_float64_op(opx_), literal_, srcx0' in cpp
+    assert 'is_float64_op(opy_), literal_, srcy0' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
     src_neg_start = cpp.index('bool Vopd::uses_src_neg_modifier')
@@ -1667,6 +1671,10 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
     assert '(word0 >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
+    assert 'literal_uses_f64_high_bits' in cpp
+    assert 'is_float64_op' not in cpp
+    assert 'false, literal_, srcx0' in cpp
+    assert 'false, literal_, srcy0' in cpp
     assert 'kVopdAddF64' not in cpp
     assert 'execute_slot64' not in cpp
     assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in cpp

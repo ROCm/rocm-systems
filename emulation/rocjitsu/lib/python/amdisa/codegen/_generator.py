@@ -605,17 +605,45 @@ class CodeGenerator:
 
     @staticmethod
     def _literal_operand_fixup_stmt(
-        opnd: Operand, lit_struct: str, size_expr: str | None = None
+        opnd: Operand,
+        lit_struct: str,
+        size_expr: str | None = None,
+        inst_sem: InstructionSemantics | None = None,
+        literal_operand_type: str | None = None,
     ) -> str | None:
-        if opnd.operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
+        operand_type = literal_operand_type or opnd.operand_type
+        if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
         literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
-        if opnd.operand_type == 'OPR_SIMM16' or opnd.size == 16:
+        if operand_type == 'OPR_SIMM16' or opnd.size == 16:
             literal_expr = f'({literal_expr} & 0xFFFFu)'
+        operand_size = size_expr or opnd.size
+        if CodeGenerator._literal_operand_uses_f64_high_bits(
+            opnd, inst_sem, operand_type
+        ):
+            return (
+                f'{opnd.name} = Operand({operand_size}, '
+                f'OperandType::{operand_type}, '
+                f'(static_cast<uint64_t>({literal_expr}) << 32), true);'
+            )
         return (
-            f'{opnd.name} = Operand({size_expr or opnd.size}, '
-            f'OperandType::{opnd.operand_type}, static_cast<int>({literal_expr}));'
+            f'{opnd.name} = Operand({operand_size}, '
+            f'OperandType::{operand_type}, static_cast<int>({literal_expr}));'
         )
+
+    @staticmethod
+    def _literal_operand_uses_f64_high_bits(
+        opnd: Operand, inst_sem: InstructionSemantics | None, operand_type: str
+    ) -> bool:
+        if (
+            operand_type != 'OPR_SIMM32'
+            or not opnd.is_input
+            or opnd.size != 64
+            or not inst_sem
+            or not inst_sem.data_type
+        ):
+            return False
+        return 'f64' in inst_sem.data_type.split('_')
 
     @staticmethod
     def _has_inline_literal_operand(inst: Instruction) -> bool:
@@ -1176,6 +1204,8 @@ class CodeGenerator:
         vopd3_constructor_close = ''
         vopd3_init_operands_prefix = ''
         vopd3_init_operands_suffix = ''
+        vopd_x_literal_uses_f64_high_bits = 'false'
+        vopd_y_literal_uses_f64_high_bits = 'false'
         vopdxy_bits_decl = cpp_block('''
                 constexpr uint32_t x_bits = 32;
                 constexpr uint32_t y_bits = 32;
@@ -1284,8 +1314,8 @@ class CodeGenerator:
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-                srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
-                srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
+                srcx0_ = make_src0(x_bits, true, false, false, 0, srcx0);
+                srcy0_ = make_src0(y_bits, true, false, false, 0, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
                 srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
@@ -1320,6 +1350,8 @@ class CodeGenerator:
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
             ''')
+            vopd_x_literal_uses_f64_high_bits = 'is_float64_op(opx_)'
+            vopd_y_literal_uses_f64_high_bits = 'is_float64_op(opy_)'
             execute_impl_body = cpp_block('''
               uint64_t exec = wf.exec();
               for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1461,9 +1493,14 @@ class CodeGenerator:
             @VOPD_SLOT_CONSTANTS@
 
             Operand make_src0(uint32_t bits, @VOPD3_UNUSED_ATTR@bool vopd3, bool use_literal,
-                              uint32_t literal, uint16_t encoded) {
-              if (use_literal && encoded == 255)
+                              bool literal_uses_f64_high_bits, uint32_t literal,
+                              uint16_t encoded) {
+              if (use_literal && encoded == 255) {
+                if (literal_uses_f64_high_bits)
+                  return Operand(bits, OperandType::OPR_SIMM32,
+                                 (static_cast<uint64_t>(literal) << 32), true);
                 return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+              }
               return Operand(bits, @VOPD_SRC0_TYPE_EXPR@, encoded);
             }
 
@@ -1569,8 +1606,10 @@ class CodeGenerator:
             @VOPDXY_BITS_DECL@
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-                srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
-                srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+                srcx0_ = make_src0(x_bits, false, has_literal_,
+                                   @VOPD_X_LITERAL_USES_F64_HIGH_BITS@, literal_, srcx0);
+                srcy0_ = make_src0(y_bits, false, has_literal_,
+                                   @VOPD_Y_LITERAL_USES_F64_HIGH_BITS@, literal_, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
             @VOPD3_CONSTRUCTOR_CLOSE@
@@ -1675,6 +1714,14 @@ class CodeGenerator:
             .replace('@VOPD_FORMAT_SLOT_CASES@', vopd_format_slot_cases)
             .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
             .replace('@VOPDXY_BITS_DECL@', vopdxy_bits_decl)
+            .replace(
+                '@VOPD_X_LITERAL_USES_F64_HIGH_BITS@',
+                vopd_x_literal_uses_f64_high_bits,
+            )
+            .replace(
+                '@VOPD_Y_LITERAL_USES_F64_HIGH_BITS@',
+                vopd_y_literal_uses_f64_high_bits,
+            )
         )
 
         with open(os.path.join(out_dir, 'vopd.h'), 'w') as f:
@@ -5996,10 +6043,17 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                fixup = self._literal_operand_fixup_stmt(
+                                    opnd,
+                                    _lit_struct,
+                                    operand_size_exprs[opnd.name],
+                                    inst_sem,
+                                    'OPR_SIMM32',
+                                )
+                                assert fixup is not None
                                 ctor_body_parts.append(
                                     f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
-                                    f'{opnd.name} = Operand({operand_size_exprs[opnd.name]}, OperandType::OPR_SIMM32, '
-                                    f'static_cast<int>(reinterpret_cast<const {_lit_struct}*>(inst)->simm32));'
+                                    f'{fixup}'
                                 )
                                 if _supports_simm64_literals:
                                     ctor_body_parts.append(
@@ -6014,6 +6068,7 @@ class CodeGenerator:
                                     opnd,
                                     _lit_struct,
                                     operand_size_exprs.get(opnd.name),
+                                    inst_sem,
                                 )
                                 if fixup:
                                     ctor_body_parts.append(fixup)
