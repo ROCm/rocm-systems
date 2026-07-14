@@ -13,7 +13,6 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
-#include "../test_paths.h"
 #include "hsa_dispatch_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
