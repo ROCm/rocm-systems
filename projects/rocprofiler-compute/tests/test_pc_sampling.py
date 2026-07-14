@@ -22,26 +22,33 @@ num_devices = 1
 
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_results.json",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_results.json",
     "sysinfo.csv",
 ])
 
 
 def _assert_pc_sampling_files(file_dict, expected):
-    """Assert the PC sampling output file-set, matching the native collector's
-    ``<pid>_code_obj_info.json``.
-    """
+    """Assert PID-prefixed PC sampling and code-object output files."""
     keys = list(file_dict.keys())
     code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
     assert len(code_obj) == 1, (
         f"expected exactly one *_code_obj_info.json, got {code_obj}"
     )
-    remaining = sorted(k for k in keys if k not in code_obj)
+    pc_sampling_results = [k for k in keys if k.endswith("_ps_file_results.json")]
+    assert len(pc_sampling_results) == 1, (
+        f"expected exactly one *_ps_file_results.json, got {pc_sampling_results}"
+    )
+
+    code_obj_pid = code_obj[0].split("_", maxsplit=1)[0]
+    pc_sampling_pid = pc_sampling_results[0].split("_", maxsplit=1)[0]
+    assert pc_sampling_pid.isdigit()
+    assert pc_sampling_pid == code_obj_pid
+
+    dynamic_files = {*code_obj, *pc_sampling_results}
+    remaining = sorted(k for k in keys if k not in dynamic_files)
     assert remaining == sorted(expected)
 
 
