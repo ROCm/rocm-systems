@@ -97,6 +97,7 @@ The first domains are:
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
 - `mem_location_pool`: location-based memory pool set/get and access-query contracts
+- `mempool_shareable_handle`: shareable memory-pool handle export/import and pointer export/import contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 - `logging`: AMD-gated extended logging enable/disable and parameter-configuration contracts
 - `profiler`: deprecated profiler start/stop accepted-or-unsupported contracts

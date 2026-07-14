@@ -1356,6 +1356,15 @@ contract:
   Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation:
     <<: *level_0
     tags: [mem_location_pool]
+  Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips:
+    <<: *level_0
+    tags: [mempool_shareable_handle]
+  Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips:
+    <<: *level_0
+    tags: [mempool_shareable_handle]
+  Contract_MemPoolShareableHandle_NullArgs_IsRejected:
+    <<: *level_0
+    tags: [mempool_shareable_handle]
   Contract_Extension_GetProcAddress_ResolvesKnownSymbol:
     <<: *level_0
     tags: [extension]
