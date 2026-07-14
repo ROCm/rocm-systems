@@ -2546,6 +2546,9 @@ External completion requirement:
 
 - Run the focused and agreed broad gfx1201 hardware tiers on the gfx1201
   machine after the shared changes are integrated.
+- Use the revision-qualified, clean-checkout evidence command in
+  `LOCAL_TESTING.md`; retain the detected `gfx1201` agent, per-tier totals, and
+  final fail-fast success line in the result.
 
 Done criteria:
 

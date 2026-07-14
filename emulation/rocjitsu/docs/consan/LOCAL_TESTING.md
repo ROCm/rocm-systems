@@ -399,6 +399,31 @@ It requires `ROCJITSU_BUILD_DIR`, `IREE_BUILD_DIR`, `HIP_MOI_BUILD_DIR`, and
 `ROCM_DIST_DIR`; pass `tier0`, `tier1`, `tier2`, or `all`. See `USAGE.md` for
 the exact invocation and the meaning of each tier.
 
+To close the cross-workspace gfx1201 regression gate after integrating the
+shared gfx950 changes, run the complete matrix from a clean gfx1201 checkout
+and retain revision-qualified evidence:
+
+```sh
+test -z "$(git status --porcelain)" || {
+  echo "Refusing to qualify a dirty checkout" >&2
+  return 1 2>/dev/null || exit 1
+}
+revision="$(git rev-parse HEAD)"
+evidence="$WORKSPACE_ROOT/consan-gfx1201-$revision.log"
+set -o pipefail
+{
+  printf 'revision=%s\n' "$revision"
+  "$ROCM_DIST_DIR/bin/rocm_agent_enumerator"
+  CONSAN_GPU_ARCH=gfx1201 CTEST_PARALLEL_LEVEL=8 \
+    "$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" all
+} 2>&1 | tee "$evidence"
+```
+
+The final line must be `ConSan all matrix passed.` and the recorded agent list
+must contain `gfx1201`. Attach the log's revision and per-tier totals to the
+`X1B` result in `PLAN_GFX950.md`; do not reuse the older baseline as evidence
+for a revision containing newer shared policy or emitter changes.
+
 Recorded architecture evidence across the development workspaces:
 
 | Target | Workspace hardware | Tier evidence | Status |
