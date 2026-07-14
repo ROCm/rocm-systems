@@ -41,7 +41,8 @@
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 
-namespace anvil {
+namespace gin_anvil {
+namespace sdma {
 
 class SdmaQueue {
  public:
@@ -138,7 +139,7 @@ inline void checkHipError(hipError_t err, const char* msg, const char* file, int
   }
 }
 
-#define ANVIL_CHECK_HIP_ERROR(cmd) anvil::checkHipError((cmd), #cmd, __FILE__, __LINE__)
+#define ANVIL_CHECK_HIP_ERROR(cmd) gin_anvil::sdma::checkHipError((cmd), #cmd, __FILE__, __LINE__)
 
 // Allow access to peerDeviceId from deviceId
 inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
@@ -157,6 +158,7 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
   }
 }
 
-}  // namespace anvil
+}  // namespace sdma
+}  // namespace gin_anvil
 
 #endif  // LIBRARY_SRC_SDMA_ANVIL_HPP_

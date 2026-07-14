@@ -34,7 +34,8 @@
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
-namespace anvil {
+namespace gin_anvil {
+namespace sdma {
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
   if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
@@ -543,4 +544,5 @@ void shutdownEndpoint() {
   // no-op: HSA/KFD teardown happens in AnvilLib::~AnvilLib at process exit.
 }
 
-}  // namespace anvil
+}  // namespace sdma
+}  // namespace gin_anvil

@@ -7,7 +7,6 @@
 #include <gin_anvil/sdma_factory.h>
 
 #include "anvil.hpp"
-#include "util.hpp"
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <vector>
@@ -22,14 +21,14 @@ struct gin_anvil_sdma_opaque {
   int myRank;
   int myDeviceId;
   int sdmaChannelStride;
-  anvil::SdmaQueueDeviceHandle** deviceHandles_d;
+  gin_anvil::sdma::SdmaQueueDeviceHandle** deviceHandles_d;
   uint64_t* sdmaDirty_d;
 };
 
 extern "C" int gin_anvil_sdma_probe(void) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 1) return 0;
-  return anvil::initEndpoint() ? 1 : 0;
+  return gin_anvil::sdma::initEndpoint() ? 1 : 0;
 }
 
 static int checkHip(hipError_t e, const char* what) {
@@ -74,7 +73,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 
   const int myDev = devs[static_cast<size_t>(myRank)];
 
-  if (!anvil::initEndpoint()) {
+  if (!gin_anvil::sdma::initEndpoint()) {
     LOG_ERROR("gin_anvil_sdma: Anvil SDMA init failed");
     return -1;
   }
@@ -82,9 +81,9 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   try {
     for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
       const int remoteDev = devs[static_cast<size_t>(local_pe)];
-      if (anvil::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
-      if (myDev != remoteDev) anvil::EnablePeerAccess(myDev, remoteDev);
-      if (!anvil::anvil.connect(myDev, remoteDev, numChannels)) {
+      if (gin_anvil::sdma::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
+      if (myDev != remoteDev) gin_anvil::sdma::EnablePeerAccess(myDev, remoteDev);
+      if (!gin_anvil::sdma::anvil.connect(myDev, remoteDev, numChannels)) {
         LOG_ERROR("gin_anvil_sdma: connect(%d -> %d) failed", myDev, remoteDev);
         return -1;
       }
@@ -95,13 +94,14 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
 
   const int total = nRanks * numChannels;
-  std::vector<anvil::SdmaQueueDeviceHandle*> host_handles(static_cast<size_t>(total), nullptr);
+  std::vector<gin_anvil::sdma::SdmaQueueDeviceHandle*> host_handles(
+      static_cast<size_t>(total), nullptr);
   int validHandles = 0;
   for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
     const int remoteDev = devs[static_cast<size_t>(local_pe)];
     for (int c = 0; c < numChannels; ++c) {
-      anvil::SdmaQueue* q = anvil::anvil.getSdmaQueue(myDev, remoteDev, c);
-      auto* h = q ? reinterpret_cast<anvil::SdmaQueueDeviceHandle*>(q->deviceHandle()) : nullptr;
+      gin_anvil::sdma::SdmaQueue* q = gin_anvil::sdma::anvil.getSdmaQueue(myDev, remoteDev, c);
+      auto* h = q ? q->deviceHandle() : nullptr;
       host_handles[static_cast<size_t>(local_pe * numChannels + c)] = h;
       if (h != nullptr) validHandles++;
     }
@@ -111,25 +111,25 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
     return -1;
   }
 
-  anvil::SdmaQueueDeviceHandle** dev_row = nullptr;
+  gin_anvil::sdma::SdmaQueueDeviceHandle** dev_row = nullptr;
   if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(void*)), "hipMalloc handles") != 0)
     return -1;
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
-    CHECK_HIP(hipFree(dev_row));
+    hipFree(dev_row);
     return -1;
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
-    CHECK_HIP(hipFree(dev_row));
+    hipFree(dev_row);
     return -1;
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
-    CHECK_HIP(hipFree(dev_row));
-    CHECK_HIP(hipFree(dirty));
+    hipFree(dev_row);
+    hipFree(dirty);
     return -1;
   }
 
@@ -151,8 +151,8 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = handle;
-  if (impl->deviceHandles_d) CHECK_HIP(hipFree(impl->deviceHandles_d));
-  if (impl->sdmaDirty_d) CHECK_HIP(hipFree(impl->sdmaDirty_d));
+  if (impl->deviceHandles_d) hipFree(impl->deviceHandles_d);
+  if (impl->sdmaDirty_d) hipFree(impl->sdmaDirty_d);
   delete impl;
 }
 
