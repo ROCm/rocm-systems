@@ -296,8 +296,11 @@ hipError_t Device::GetAndClearBlockingStreamsAsyncError() {
   bool saw_null_stream = false;
 
   auto update_async_error = [&async_error](hip::Stream* stream) {
+    // Always drain each stream's error so a later one isn't stranded because an
+    // earlier stream in this scan already reported one.
+    hipError_t err = stream->GetAndClearAsyncError();
     if (async_error == hipSuccess) {
-      async_error = stream->GetAndClearAsyncError();
+      async_error = err;
     }
   };
 

@@ -1327,6 +1327,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   void EnqueueCommands(hip::Stream* stream) override {
     // Note: For segmented graphs, EnqueueSegment now calls EnqueueSegmentedGraph recursively
     // This method is kept as a fallback for non-segmented execution or legacy paths
+    enqueue_status_ = hipSuccess;
 
     if (graphCaptureStatus_ || !segments_.empty()) {
       // Use hierarchical segment-based enqueue via EnqueueSegmentedGraph
@@ -1339,6 +1340,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
         last_cmd->release();
       }
 
+      enqueue_status_ = status;
       if (status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
                 "[hipGraph] ChildGraphNode::EnqueueCommands failed with status=%d", status);
@@ -1351,11 +1353,21 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
       }
       for (auto* node : topoOrder_) {
         node->SetStream(stream);
-        [[maybe_unused]] hipError_t s = node->CreateCommand(node->GetQueue());
+        hipError_t status = node->CreateCommand(node->GetQueue());
+        if (status != hipSuccess) {
+          enqueue_status_ = status;
+          return;
+        }
         node->EnqueueCommands(stream);
+        status = node->GetEnqueueStatus();
+        if (status != hipSuccess) {
+          enqueue_status_ = status;
+          return;
+        }
       }
     }
   }
+  hipError_t GetEnqueueStatus() const override { return enqueue_status_; }
 
   hipError_t SetParams(const Graph* childGraph) {
     const std::vector<Node>& newNodes = childGraph->GetNodes();
@@ -1384,6 +1396,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
  private:
   bool graphCaptureStatus_;
+  hipError_t enqueue_status_ = hipSuccess;  // Status of the last EnqueueCommands()
 };
 
 class GraphKernelNode : public GraphNode {
