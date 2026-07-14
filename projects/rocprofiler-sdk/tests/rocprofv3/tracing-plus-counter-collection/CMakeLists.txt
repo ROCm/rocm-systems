@@ -13,6 +13,18 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these transpose+counter workloads run slower in practice and need more timeout headroom
+# (root cause TBD), so scale the command-line pmc timeouts only there. Non-WSL keeps the
+# develop baseline (45); WSL scales it up.
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
+    set(_WSL_TIMEOUT_SCALE 4)
+else()
+    set(_WSL_TIMEOUT_SCALE 1)
+endif()
+math(EXPR _CMDL_COUNTER_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 # pmc
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-tracing-plus-counter-collection
@@ -61,7 +73,7 @@ foreach(_GROUP "single" "multiple")
             -o cmdl/${_GROUP} --output-format JSON PFTRACE CSV -- $<TARGET_FILE:transpose>
             2 50 5
         DEPENDS transpose
-        TIMEOUT 45
+        TIMEOUT ${_CMDL_COUNTER_TIMEOUT}
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 
