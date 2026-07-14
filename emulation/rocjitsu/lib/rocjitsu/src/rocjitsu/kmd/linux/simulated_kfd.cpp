@@ -1753,11 +1753,13 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   // fresh session has debugger_pid == 0, it structurally rejects the *first*
   // cross-process ENABLE with EPERM: cross-process attach is intentionally
   // closed until it is implemented (#8364). Self-debug (local mode, the only
-  // supported path today) and DISABLE are exempt. The real kernel instead gates
-  // the first attach on a live ptrace relationship, which is deferred with the
-  // rest of cross-process support.
-  if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
-      sess.debugger_pid != caller.client_pid())
+  // supported path today) is exempt. DISABLE is NOT exempt: letting an untrusted
+  // caller tear down a session it does not own would allow any client to detach
+  // another process's debugger — and, in daemon mode, close the SCM_RIGHTS
+  // notifier fd the session owns — purely by naming the target's pid. The real
+  // kernel instead gates the first attach on a live ptrace relationship, which
+  // is deferred with the rest of cross-process support.
+  if (!self_debug && sess.debugger_pid != caller.client_pid())
     return -EPERM;
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
