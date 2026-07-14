@@ -41,7 +41,7 @@ struct StackEntry
 };
 
 // Records what start_cb pushed so end_cb can unwind exactly that.
-struct RoctxObsCtx : public at::ObserverContext
+struct RoctxObserverContext : public at::ObserverContext
 {
     bool        pushed_roctx_range     = false;
     bool        pushed_leaf            = false;
@@ -81,7 +81,7 @@ constexpr std::size_t NUM_SHARDS = 64;
 
 struct Shard
 {
-    std::mutex                                                          mu;
+    std::mutex                                                          mutex;
     std::unordered_map<std::int64_t, std::vector<StackEntry>>           snapshots;
     std::list<std::int64_t>                                             lru_order;
     std::unordered_map<std::int64_t, std::list<std::int64_t>::iterator> lru_idx;
@@ -94,7 +94,7 @@ constexpr std::size_t SHARD_SOFT_CAP = 10000;
 
 std::atomic<at::CallbackHandle> g_handle{at::INVALID_CALLBACK_HANDLE};
 std::atomic<bool>               g_installed{false};
-std::mutex                      g_install_mu;
+std::mutex                      g_install_mutex;
 
 std::atomic<std::uint64_t> g_n_pushes{0};
 std::atomic<std::uint64_t> g_n_pops{0};
@@ -104,25 +104,25 @@ std::atomic<std::uint64_t> g_n_snapshots_dropped{0};
 std::atomic<std::uint64_t> g_n_callback_errors{0};
 std::atomic<std::uint64_t> g_n_user_scope_pushes{0};
 std::atomic<std::uint64_t> g_n_user_scope_pops{0};
-std::atomic<std::uint64_t> g_n_userscope_inherits{0};
+std::atomic<std::uint64_t> g_n_user_scope_inherits{0};
 
 // Opt-in capture buffer used by the test hook.
 std::atomic<bool>        g_capturing{false};
-std::mutex               g_capture_mu;
+std::mutex               g_capture_mutex;
 std::vector<std::string> g_captured;
 constexpr std::size_t    CAPTURE_CAP = 4096;
 
 // The RecordFunction tier instruments PyTorch ATen operators.
 constexpr const char* kRecordFnBackend = "torch";
 
-void maybe_capture(const std::string& s)
+void maybe_capture(const std::string& wire_string)
 {
     if (!g_capturing.load(std::memory_order_relaxed))
         return;
-    std::lock_guard<std::mutex> guard(g_capture_mu);
+    std::lock_guard<std::mutex> guard(g_capture_mutex);
     if (g_captured.size() < CAPTURE_CAP)
     {
-        g_captured.push_back(s);
+        g_captured.push_back(wire_string);
     }
 }
 
@@ -155,54 +155,54 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
 {
     std::size_t marker_len = 0;
     std::size_t ctx_len    = 0;
-    for (const auto& e : stack)
+    for (const auto& entry : stack)
     {
-        marker_len += e.marker.size() + 1;
+        marker_len += entry.marker.size() + 1;
         // Each '%' or '/' expands from one char to three when encoded.
-        for (char c : e.marker)
+        for (char c : entry.marker)
             if (c == '%' || c == '/')
                 marker_len += 2;
-        ctx_len += e.context.size() + 1;
+        ctx_len += entry.context.size() + 1;
     }
     std::string out;
     out.reserve(marker_len + ctx_len + 1);
 
     bool first = true;
-    for (const auto& e : stack)
+    for (const auto& entry : stack)
     {
         if (!first)
             out += '/';
-        encode_marker_segment(e.marker, out);
+        encode_marker_segment(entry.marker, out);
         first = false;
     }
     out += ':';
     first = true;
-    for (const auto& e : stack)
+    for (const auto& entry : stack)
     {
         if (!first)
             out += '/';
-        out += e.context;
+        out += entry.context;
         first = false;
     }
     return out;
 }
 
-void lru_remove(Shard& shard, std::int64_t seq)
+void lru_remove(Shard& shard, std::int64_t seq_nr)
 {
-    auto it = shard.lru_idx.find(seq);
+    auto it = shard.lru_idx.find(seq_nr);
     if (it == shard.lru_idx.end())
         return;
     shard.lru_order.erase(it->second);
     shard.lru_idx.erase(it);
 }
 
-void lru_touch(Shard& shard, std::int64_t seq)
+void lru_touch(Shard& shard, std::int64_t seq_nr)
 {
-    lru_remove(shard, seq);
-    shard.lru_order.push_back(seq);
+    lru_remove(shard, seq_nr);
+    shard.lru_order.push_back(seq_nr);
     auto tail = shard.lru_order.end();
     --tail;
-    shard.lru_idx.emplace(seq, tail);
+    shard.lru_idx.emplace(seq_nr, tail);
 }
 
 void evict_oldest_snapshot(Shard& shard)
@@ -216,15 +216,15 @@ void evict_oldest_snapshot(Shard& shard)
     g_n_snapshots_dropped.fetch_add(1, std::memory_order_relaxed);
 }
 
-void save_snapshot(std::int64_t seq, const std::vector<StackEntry>& stack)
+void save_snapshot(std::int64_t seq_nr, const std::vector<StackEntry>& stack)
 {
-    auto&                       shard = g_shards[static_cast<std::size_t>(seq) % NUM_SHARDS];
-    std::lock_guard<std::mutex> guard(shard.mu);
-    auto                        it = shard.snapshots.find(seq);
+    auto&                       shard = g_shards[static_cast<std::size_t>(seq_nr) % NUM_SHARDS];
+    std::lock_guard<std::mutex> guard(shard.mutex);
+    auto                        it = shard.snapshots.find(seq_nr);
     if (it != shard.snapshots.end())
     {
         it->second = stack;
-        lru_touch(shard, seq);
+        lru_touch(shard, seq_nr);
         g_n_snapshots_saved.fetch_add(1, std::memory_order_relaxed);
         return;
     }
@@ -232,21 +232,21 @@ void save_snapshot(std::int64_t seq, const std::vector<StackEntry>& stack)
     {
         evict_oldest_snapshot(shard);
     }
-    shard.snapshots.emplace(seq, stack);
-    lru_touch(shard, seq);
+    shard.snapshots.emplace(seq_nr, stack);
+    lru_touch(shard, seq_nr);
     g_n_snapshots_saved.fetch_add(1, std::memory_order_relaxed);
 }
 
-bool consume_snapshot(std::int64_t seq, std::vector<StackEntry>* out)
+bool consume_snapshot(std::int64_t seq_nr, std::vector<StackEntry>* out_stack)
 {
-    auto&                       shard = g_shards[static_cast<std::size_t>(seq) % NUM_SHARDS];
-    std::lock_guard<std::mutex> guard(shard.mu);
-    auto                        it = shard.snapshots.find(seq);
+    auto&                       shard = g_shards[static_cast<std::size_t>(seq_nr) % NUM_SHARDS];
+    std::lock_guard<std::mutex> guard(shard.mutex);
+    auto                        it = shard.snapshots.find(seq_nr);
     if (it == shard.snapshots.end())
         return false;
-    *out = std::move(it->second);
+    *out_stack = std::move(it->second);
     shard.snapshots.erase(it);
-    lru_remove(shard, seq);
+    lru_remove(shard, seq_nr);
     g_n_snapshots_consumed.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
@@ -287,21 +287,21 @@ std::size_t apply_userscope_overlay()
     const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
     if (pushed > 0)
     {
-        g_n_userscope_inherits.fetch_add(1, std::memory_order_relaxed);
+        g_n_user_scope_inherits.fetch_add(1, std::memory_order_relaxed);
     }
     return pushed;
 }
 
-std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
+std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
 {
-    std::unique_ptr<RoctxObsCtx> ctx;
+    std::unique_ptr<RoctxObserverContext> observer_ctx;
     try
     {
-        ctx = std::make_unique<RoctxObsCtx>();
+        observer_ctx = std::make_unique<RoctxObserverContext>();
 
-        const at::RecordScope scope = fn.scope();
-        const std::int64_t    seq   = fn.seqNr();
-        const char*           name  = fn.name();
+        const at::RecordScope scope  = record_fn.scope();
+        const std::int64_t    seq_nr = record_fn.seqNr();
+        const char*           name   = record_fn.name();
         if (name == nullptr || name[0] == '\0')
         {
             name = "<anonymous>";
@@ -316,60 +316,62 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
         if (stack_was_empty)
         {
             const std::size_t overlay_frames = apply_userscope_overlay();
-            ctx->pushed_snapshot_frames += overlay_frames;
+            observer_ctx->pushed_snapshot_frames += overlay_frames;
             if (overlay_frames > 0)
             {
                 stack_was_empty_for_leaf = false;
             }
         }
 
-        if (scope == at::RecordScope::BACKWARD_FUNCTION && seq >= 0)
+        if (scope == at::RecordScope::BACKWARD_FUNCTION && seq_nr >= 0)
         {
             std::vector<StackEntry> snapshot;
-            if (consume_snapshot(seq, &snapshot))
+            if (consume_snapshot(seq_nr, &snapshot))
             {
-                ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
+                observer_ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
             }
         }
 
         StackEntry leaf;
         leaf.marker                  = name;
         const bool is_backward_scope = (scope == at::RecordScope::BACKWARD_FUNCTION);
-        leaf.context = roctx_recordfn::default_leaf_context(is_backward_scope, seq, stack_was_empty_for_leaf);
+        leaf.context = roctx_recordfn::default_leaf_context(is_backward_scope,
+                                                            seq_nr,
+                                                            stack_was_empty_for_leaf);
         g_stack.push_back(std::move(leaf));
-        ctx->pushed_leaf = true;
+        observer_ctx->pushed_leaf = true;
 
-        if (scope == at::RecordScope::FUNCTION && seq >= 0)
+        if (scope == at::RecordScope::FUNCTION && seq_nr >= 0)
         {
-            save_snapshot(seq, g_stack);
+            save_snapshot(seq_nr, g_stack);
         }
 
         // Emit the ROCTX range last. RecordFunction ops are torch-backed.
-        std::string full = build_marker_string(g_stack);
-        full += '|';
-        full += kRecordFnBackend;
-        roctxRangePushA(full.c_str());
-        ctx->pushed_roctx_range = true;
-        maybe_capture(full);
+        std::string wire_string = build_marker_string(g_stack);
+        wire_string += '|';
+        wire_string += kRecordFnBackend;
+        roctxRangePushA(wire_string.c_str());
+        observer_ctx->pushed_roctx_range = true;
+        maybe_capture(wire_string);
         g_n_pushes.fetch_add(1, std::memory_order_relaxed);
-        return ctx;
+        return observer_ctx;
     }
     catch (...)
     {
         g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
         try
         {
-            if (ctx)
+            if (observer_ctx)
             {
-                if (ctx->pushed_roctx_range)
+                if (observer_ctx->pushed_roctx_range)
                 {
                     roctxRangePop();
                 }
-                if (ctx->pushed_leaf && !g_stack.empty())
+                if (observer_ctx->pushed_leaf && !g_stack.empty())
                 {
                     g_stack.pop_back();
                 }
-                for (std::size_t i = 0; i < ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
+                for (std::size_t i = 0; i < observer_ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
                 {
                     g_stack.pop_back();
                 }
@@ -383,25 +385,25 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
     }
 }
 
-void end_cb(const at::RecordFunction& /*fn*/, at::ObserverContext* obs_ctx)
+void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ctx)
 {
     if (obs_ctx == nullptr)
     {
         return;
     }
-    auto* ctx = static_cast<RoctxObsCtx*>(obs_ctx);
+    auto* observer_ctx = static_cast<RoctxObserverContext*>(obs_ctx);
     try
     {
-        if (ctx->pushed_roctx_range)
+        if (observer_ctx->pushed_roctx_range)
         {
             roctxRangePop();
             g_n_pops.fetch_add(1, std::memory_order_relaxed);
         }
-        if (ctx->pushed_leaf && !g_stack.empty())
+        if (observer_ctx->pushed_leaf && !g_stack.empty())
         {
             g_stack.pop_back();
         }
-        for (std::size_t i = 0; i < ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
+        for (std::size_t i = 0; i < observer_ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
         {
             g_stack.pop_back();
         }
@@ -421,10 +423,10 @@ void push_user_scope(const std::string& marker, const std::string& context, cons
     bool pushed_roctx     = false;
     try
     {
-        StackEntry e;
-        e.marker  = marker;
-        e.context = context;
-        g_stack.push_back(std::move(e));
+        StackEntry entry;
+        entry.marker  = marker;
+        entry.context = context;
+        g_stack.push_back(std::move(entry));
         pushed_to_stack = true;
 
         // Always push a guard slot (real or null) to keep g_dbg_guards
@@ -441,16 +443,16 @@ void push_user_scope(const std::string& marker, const std::string& context, cons
         g_dbg_guards.push_back(std::move(guard));
         pushed_to_guards = true;
 
-        std::string full = build_marker_string(g_stack);
+        std::string wire_string = build_marker_string(g_stack);
         if (!backend.empty())
         {
-            full += '|';
-            full += backend;
+            wire_string += '|';
+            wire_string += backend;
         }
-        roctxRangePushA(full.c_str());
+        roctxRangePushA(wire_string.c_str());
         pushed_roctx = true;
 
-        maybe_capture(full);
+        maybe_capture(wire_string);
         g_n_user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
         g_n_pushes.fetch_add(1, std::memory_order_relaxed);
     }
@@ -503,7 +505,7 @@ void pop_user_scope()
 
 std::int64_t install()
 {
-    std::lock_guard<std::mutex> lock(g_install_mu);
+    std::lock_guard<std::mutex> lock(g_install_mutex);
     const auto                  existing = g_handle.load();
     if (existing != at::INVALID_CALLBACK_HANDLE)
     {
@@ -519,7 +521,7 @@ std::int64_t install()
 
 void uninstall()
 {
-    std::lock_guard<std::mutex> lock(g_install_mu);
+    std::lock_guard<std::mutex> lock(g_install_mutex);
     const auto                  handle = g_handle.exchange(at::INVALID_CALLBACK_HANDLE);
     g_installed.store(false);
     if (handle != at::INVALID_CALLBACK_HANDLE)
@@ -535,31 +537,31 @@ bool is_installed()
 
 pybind11::dict dump_stats()
 {
-    pybind11::dict d;
-    d["installed"]           = g_installed.load();
-    d["pushes"]              = g_n_pushes.load();
-    d["pops"]                = g_n_pops.load();
-    d["user_scope_pushes"]   = g_n_user_scope_pushes.load();
-    d["user_scope_pops"]     = g_n_user_scope_pops.load();
-    d["user_scope_inherits"] = g_n_userscope_inherits.load();
-    d["snapshots_saved"]     = g_n_snapshots_saved.load();
-    d["snapshots_consumed"]  = g_n_snapshots_consumed.load();
-    d["snapshots_dropped"]   = g_n_snapshots_dropped.load();
-    d["callback_errors"]     = g_n_callback_errors.load();
+    pybind11::dict stats_dict;
+    stats_dict["installed"]           = g_installed.load();
+    stats_dict["pushes"]              = g_n_pushes.load();
+    stats_dict["pops"]                = g_n_pops.load();
+    stats_dict["user_scope_pushes"]   = g_n_user_scope_pushes.load();
+    stats_dict["user_scope_pops"]     = g_n_user_scope_pops.load();
+    stats_dict["user_scope_inherits"] = g_n_user_scope_inherits.load();
+    stats_dict["snapshots_saved"]     = g_n_snapshots_saved.load();
+    stats_dict["snapshots_consumed"]  = g_n_snapshots_consumed.load();
+    stats_dict["snapshots_dropped"]   = g_n_snapshots_dropped.load();
+    stats_dict["callback_errors"]     = g_n_callback_errors.load();
 
     std::size_t pending = 0;
     for (auto& shard : g_shards)
     {
-        std::lock_guard<std::mutex> guard(shard.mu);
+        std::lock_guard<std::mutex> guard(shard.mutex);
         pending += shard.snapshots.size();
     }
-    d["snapshots_pending"] = pending;
-    return d;
+    stats_dict["snapshots_pending"] = pending;
+    return stats_dict;
 }
 
 void start_capture()
 {
-    std::lock_guard<std::mutex> guard(g_capture_mu);
+    std::lock_guard<std::mutex> guard(g_capture_mutex);
     g_captured.clear();
     g_capturing.store(true, std::memory_order_release);
 }
@@ -567,7 +569,7 @@ void start_capture()
 std::vector<std::string> stop_capture()
 {
     g_capturing.store(false, std::memory_order_release);
-    std::lock_guard<std::mutex> guard(g_capture_mu);
+    std::lock_guard<std::mutex> guard(g_capture_mutex);
     auto                        out = g_captured;
     g_captured.clear();
     return out;
