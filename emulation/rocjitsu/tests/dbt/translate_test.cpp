@@ -2921,6 +2921,43 @@ TEST(BinaryTranslator, Gfx1250ScaledNarrowSmemScalesImmediateAndRegisterOffsets)
   EXPECT_TRUE(found_load);
 }
 
+TEST(BinaryTranslator, Gfx1250PrefetchHintsLowerToNoops) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr std::array<uint32_t, 17> text_words{
+      0xF4048086u, 0x08000010u, // s_prefetch_inst
+      0xF404A1C0u, 0x14000064u, // s_prefetch_inst_pc_rel
+      0xF404C1C9u, 0x14000064u, // s_prefetch_data
+      0xF404E1CAu, 0xF8000064u, // s_buffer_prefetch_data
+      0xF40501C0u, 0x14000064u, // s_prefetch_data_pc_rel
+      0xEC17407Cu, 0u,          // flat_prefetch_b8
+      2u,          0xEE17407Cu,
+      0u, // global_prefetch_b8
+      2u,          kGfx1250SEndpgm,
+  };
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *text = translated.text_sections()[0];
+  ASSERT_EQ(text->size(), text_words.size() * sizeof(uint32_t));
+  std::array<uint32_t, text_words.size()> patched{};
+  std::memcpy(patched.data(), text->data(), text->size());
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  for (size_t i = 0; i + 1 < patched.size(); ++i)
+    EXPECT_EQ(patched[i], nop) << "word " << i;
+  EXPECT_EQ(patched.back(), kGfx1250SEndpgm);
+}
+
 TEST(BinaryTranslator, Gfx1250DirectVglobalWaitsOnValuVgprBeforeMemory) {
   constexpr uint32_t kGfx1250GlobalLoadB32W0 = 0xEE050004u;
   constexpr uint32_t kGfx1250GlobalLoadB32W1 = 0x00000001u;

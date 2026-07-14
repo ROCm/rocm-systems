@@ -26,7 +26,6 @@ EXPECTED_XFAILS = {
     "cos_bf16_ops": "EXPAND not yet implemented for v_cos_bf16_e32",
     "ds_special_ops": "EXPAND not yet implemented for ds_atomic_async_barrier_arrive_b64",
     "monitor_load_ops": "EXPAND not yet implemented for global_load_monitor_b32",
-    "noop_prefetch_ops": "EXPAND not yet implemented for flat_prefetch_b8",
     "pk_bf16_ops": "EXPAND not yet implemented for v_pk_mul_bf16",
     "pk_min3_max3_ops": "EXPAND not yet implemented for v_pk_min3_i16",
     "scalar_call_ops": "EXPAND not yet implemented for s_call_i64",

@@ -10,6 +10,7 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
@@ -1917,7 +1918,7 @@ ExpandResult expand_narrow_smem(const Instruction &inst, const gfx1250::SmemMach
   return ExpandResult::success(std::move(words));
 }
 
-ExpandResult expand_smem_semantics(const Instruction &inst, uint32_t, uint64_t,
+ExpandResult expand_smem_semantics(const Instruction &inst, uint32_t host_arch, uint64_t,
                                    std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                    TranslationContext &context, const LaneLayout *,
                                    const LaneLayout *) {
@@ -1927,6 +1928,13 @@ ExpandResult expand_smem_semantics(const Instruction &inst, uint32_t, uint64_t,
 
   gfx1250::SmemMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
+  if (src.op >= gfx1250::kSPrefetchInstSmem && src.op <= gfx1250::kSPrefetchDataPcRelSmem) {
+    // RocJITsu's gfx1250 executable semantics define prefetches as
+    // non-faulting hints with no architectural effects. Native RDNA4
+    // prefetches can fault on the otherwise-unused source address, so elide
+    // them to preserve that guest-visible contract.
+    return ExpandResult::success({build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))});
+  }
   if (const auto narrow = narrow_smem_spec(src.op))
     return expand_narrow_smem(inst, src, *narrow, liveness, context);
   if (src.scale_offset == 0)
@@ -2803,6 +2811,16 @@ std::vector<uint32_t> expand_native_global_transpose_load(const Instruction &ins
 std::vector<uint32_t> lower_s_clause_to_nop(const Instruction &, uint32_t host_arch, uint64_t,
                                             std::span<const uint8_t>, const LivenessAnalysis &,
                                             const LaneLayout *, const LaneLayout *) {
+  return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
+}
+
+std::vector<uint32_t> lower_vector_prefetch_to_nop(const Instruction &, uint32_t host_arch,
+                                                   uint64_t, std::span<const uint8_t>,
+                                                   const LivenessAnalysis &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  // RocJITsu's gfx1250 executable semantics define these as non-faulting
+  // hints with no architectural address, memory, or counter side effects.
+  // RDNA4 has no corresponding vector hint.
   return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
 }
 
@@ -11983,6 +12001,8 @@ constexpr uint16_t kEncVop3_6 = 0x1AE;
 constexpr uint16_t kEncVop3_7 = 0x1AF;
 constexpr uint16_t kEncVdsStore2AddrB64 = 0x1B2;
 constexpr uint16_t kEncVdsTranspose = 0x1B7;
+constexpr uint16_t kEncVflat = 0x1D8;
+constexpr uint16_t kEncVflat1 = 0x1D9;
 constexpr uint16_t kEncVglobal = 0x1DC;
 constexpr uint16_t kEncVglobal1 = 0x1DD;
 constexpr uint16_t kEncVscratch = 0x1DA;
@@ -12123,6 +12143,7 @@ constexpr uint16_t kOpGlobalLoadTr16B128 = 87;
 constexpr uint16_t kOpGlobalLoadTr8B64 = 88;
 constexpr uint16_t kOpGlobalLoadTr4B64 = 115;
 constexpr uint16_t kOpGlobalLoadTr6B96 = 116;
+constexpr uint16_t kOpVectorPrefetchB8 = 93;
 constexpr uint16_t kOpTensorLoadToLds = 196;
 constexpr uint16_t kOpTensorStoreFromLds = 197;
 constexpr uint16_t kOpDsStore2AddrB64 = 0x4E;
@@ -12928,6 +12949,10 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_ds_transpose_load), nullptr, nullptr},
     {kEncVdsTranspose, kOpDsLoadTr8B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_ds_transpose_load), nullptr, nullptr},
+    {kEncVflat, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
+    {kEncVflat1, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
     {kEncVscratch, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vscratch,
      nullptr, nullptr},
     {kEncVscratch1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr,
@@ -12938,6 +12963,8 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr8B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
+    {kEncVglobal, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr4B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_global_load_tr4_b64), nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr6B96, RuleAction::Expand, 0, 0, nullptr,
@@ -12948,6 +12975,8 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal1, kOpGlobalLoadTr8B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
+    {kEncVglobal1, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
     {kEncVglobal1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vglobal,
      nullptr, nullptr},
     {kEncSmem0, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
