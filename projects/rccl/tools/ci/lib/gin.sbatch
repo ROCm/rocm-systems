@@ -52,8 +52,10 @@ fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
 
-# --- build phase -> build-%j.{out,err} ---
-{
+# --- build phase -> build-%j.{out,err}. Runs in a subshell so any failure (a
+# hard `exit` or a set -e abort) is caught below and skips the test phase. ---
+build_rc=0
+(
 # 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
 echo "==> [1/6] use ROCm (provisioned on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
@@ -171,8 +173,17 @@ fi
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
 } > "${workdir}/.ci-out/rccl.env"
-} > "${build_out}" 2> "${build_err}"
+) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
+
+# Abort before the test phase if the build failed -- running tests against a
+# broken/partial build is pointless and only muddies the logs.
+if [[ "${build_rc}" -ne 0 ]]; then
+  echo "ERROR: build phase failed (rc=${build_rc}); skipping GIN tests." >&2
+  echo "----- last 60 lines of ${build_err} -----" >&2
+  tail -n 60 "${build_err}" >&2 || true
+  exit "${build_rc}"
+fi
 
 # --- test phase -> test-%j.{out,err} ---
 {

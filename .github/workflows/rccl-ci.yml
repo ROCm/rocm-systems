@@ -86,7 +86,8 @@ jobs:
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
-  # GIN suite (non-gating).
+  # GIN suite: build/link/infra failures show red (no continue-on-error); GIN
+  # benches stay non-gating (WIP) until GIN_GATE_TESTS=1. Jira: AICOMRCCL-1478.
   gin:
     name: GIN
     needs: provision-tw
@@ -98,7 +99,6 @@ jobs:
       partition: amd-tw
       # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
       reservation: rccl_ci
-      non_gating: true
       timeout_minutes: 300
       rocm_release: ${{ needs.provision-tw.outputs.rocm_release }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}

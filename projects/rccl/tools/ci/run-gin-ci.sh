@@ -6,9 +6,8 @@
 # MPI_HOME, ROCSHMEM_INSTALL_DIR, RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR) or the
 # same values from the environment (gin.sbatch exports them).
 #
-# Tests are NON-GATING: every run is attempted and timed out individually, and a
-# summary is printed, but the script still exits 0 (GIN is WIP). Set
-# GIN_GATE_TESTS=1 to make any test failure fail the job.
+# GIN benches are NON-GATING (WIP): each run is timed and summarized, but the
+# script still exits 0. Set GIN_GATE_TESTS=1 to gate. Jira: AICOMRCCL-1478.
 #
 # Environment overrides:
 #   NP             MPI ranks per run         (default: 8)
@@ -16,7 +15,7 @@
 #   BENCH_TIMEOUT  Per-test wall-clock cap   (default: 600s)
 #   BENCH_KILL_AFTER  SIGKILL grace          (default: 30s)
 #   CONFIG         Test-matrix JSON          (default: lib/gin-tests.json)
-#   GIN_GATE_TESTS Set to 1 to fail the job on any test failure
+#   GIN_GATE_TESTS Set to 1 to fail the job on any bench failure (default: off)
 #   RCCL_CI_DEBUG  Set to 1 to add the config's debug_env to every run
 #   RCCL_CI_DEBUG_DIR  Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
 #                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
@@ -141,12 +140,13 @@ done
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
   echo "=== FAILED / SKIPPED RUNS (${#FAILED_RUNS[@]} of ${#TEST_NAMES[@]}) ==="
   printf '  %s\n' "${FAILED_RUNS[@]}"
+  # GIN benches are WIP: report failures but stay green. Flip GIN_GATE_TESTS=1
+  # to gate the job on bench failures once GIN is validated. Jira AICOMRCCL-1478.
   if [[ "${GIN_GATE_TESTS:-}" == "1" ]]; then
     echo "GIN_GATE_TESTS=1: failing the job."
     exit 1
   fi
-  echo "Tests are non-gating (GIN WIP); not failing the job."
-  echo "Jira ID: AICOMRCCL-1478 Enable GIN test gating."
+  echo "GIN benches non-gating (WIP); not failing the job. Jira: AICOMRCCL-1478."
   exit 0
 fi
 
