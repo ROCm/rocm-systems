@@ -293,7 +293,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
 
   # Build additional variants
   for spec in "${VARIANT_SPECS[@]}"; do
-    IFS=':' read -r vname _venv vcmake <<< "$spec"
+    IFS=':' read -r vname venv vcmake <<< "$spec"
     vdir="$PROJECTS_DIR/build-${BRANCH_SAFE}-${vname}"
     echo "--- Building variant: $vname ---"
     mkdir -p "$vdir"
@@ -351,7 +351,7 @@ else
 fi
 
 for spec in "${VARIANT_SPECS[@]}"; do
-  IFS=':' read -r vname venv _vcmake <<< "$spec"
+  IFS=':' read -r vname venv vcmake <<< "$spec"
   vdir="$PROJECTS_DIR/build-${BRANCH_SAFE}-${vname}"
   env_prefix=""
   IFS=',' read -ra pairs <<< "$venv"
