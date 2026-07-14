@@ -1913,7 +1913,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D10 device binding
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
     void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
-    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device))) {
+    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device), gfxContext, validateOnly)) {
       LogError("Failed D3D10Interop::associateD3D10Device()");
       success = false;
     }
@@ -1922,7 +1922,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D11 device binding
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
-    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device))) {
+    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device), gfxContext, validateOnly)) {
       LogError("Failed D3D11Interop::associateD3D11Device()");
       success = false;
     }
@@ -1949,12 +1949,12 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
 #ifdef _WIN32
   // Handle D3D10 device cleanup
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
-    D3D10Interop::dissociateD3D10Device(this);
+    D3D10Interop::dissociateD3D10Device(this, gfxDevice, gfxContext);
   }
 
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
-    D3D11Interop::dissociateD3D11Device(this);
+    D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
@@ -3145,20 +3145,24 @@ void Device::svmFree(void* ptr) const {
 
 // ================================================================================================
 VirtualGPU* Device::xferQueue() const {
-  if (!xferQueue_) {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    Device* thisDevice = const_cast<Device*>(this);
     thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
-    if (!xferQueue_) {
+    if (!thisDevice->xferQueue_) {
       LogError("Couldn't create the device transfer manager!");
-      return nullptr;
+      return;
     }
-    if (xferQueue_->gpu_queue() == nullptr) {
+    if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
       void* md_rb = nullptr;
       auto* queue = thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
                                                    nullptr, nullptr, &md_rb);
-      xferQueue_->SetGpuQueue(queue, md_rb);
+      thisDevice->xferQueue_->SetGpuQueue(queue, md_rb);
     }
+  });
+  if (!xferQueue_) {
+    LogError("Couldn't create the device transfer manager!");
+    return nullptr;
   }
   xferQueue_->enableSyncBlit();
   return xferQueue_;
