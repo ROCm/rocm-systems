@@ -399,6 +399,19 @@ const ResourceMeta* Device::lookupResource(uint32_t resId) {
 }
 
 Device::~Device() {
+  // Drain the ROCr async-events thread before tearing down any HIP-layer state.
+  // Graph completion callbacks run on that thread and can cascade into graph
+  // node destruction that touches this device's memory pools (e.g.
+  // GraphMemAllocNode -> MemoryPool/Heap::DecrementRefCount). At process exit the
+  // hip::Device is released (via RuntimeTearDown's external-object loop) *before*
+  // the backend amd::roc::Device is destroyed, so the drain that lives in
+  // amd::roc::Device::~Device() runs too late to protect graph_mem_pool_ below.
+  // Draining here guarantees the async thread is idle before we free those pools.
+  const auto& backendDevices = devices();
+  if (!backendDevices.empty() && backendDevices[0] != nullptr) {
+    backendDevices[0]->WaitForHsaAsyncHandlersIdle();
+  }
+
   // Free any IPC signals still queued for deferred cleanup (e.g. events destroyed without a
   // subsequent device sync) so they don't leak when the device goes away.
   DrainDeferredIpcSignals();
