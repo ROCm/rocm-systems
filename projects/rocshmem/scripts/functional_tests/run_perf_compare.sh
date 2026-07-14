@@ -9,25 +9,25 @@
 #   ./scripts/functional_tests/run_perf_compare.sh [OPTIONS]
 #
 # Options:
-#   --iterations N        Number of test iterations per config (default: 10)
-#   --suite SUITE         Test suite: "heatmap", "all", "rma", etc (default: heatmap)
+#   --iterations   N      Number of test iterations per config (default: 10)
+#   --suite        SUITE  Test suite: "heatmap", "all", "rma", etc (default: heatmap)
 #   --build-config CFG    Build config script name under scripts/build_configs/
 #                         (default: all_backends)
-#   --cmake-args ARGS     Extra cmake args for all builds (quoted string)
-#   --branch-args ARGS    Extra cmake args for the branch build only (quoted string)
+#   --cmake-args   ARGS   Extra cmake args for all builds (quoted string)
+#   --branch-args  ARGS   Extra cmake args for the branch build only (quoted string)
 #   --variant-args SPEC   Additional named variant: NAME:ENV1=V1,...:cmake-args
-#                         NAME      - label used in plots and directory name
-#                         ENV1=V1,… - comma-separated env vars set at runtime
+#                         NAME       - label used in plots and directory name
+#                         ENV1=V1,…  - comma-separated env vars set at runtime
 #                         cmake-args - extra cmake args for this variant's build
 #                         May be repeated for multiple variants.
 #                         Example: --variant-args "sdma-on:ROCSHMEM_SDMA_ENABLED=1:-DUSE_SDMA=ON"
-#   --pr NUM              Compare GitHub PR NUM against origin/develop baseline.
+#   --pr           NUM    Compare GitHub PR NUM against origin/develop baseline.
 #                         Fetches the PR branch, builds it, and names it "pr<NUM>".
-#   --base-branch NAME    Base branch to compare against (default: origin/develop)
+#   --base-branch  NAME   Base branch to compare against (default: origin/develop)
 #   --baseline-dir PATH   Use PATH as pre-built baseline (skips baseline build).
 #                         Use with --skip-baseline to also skip baseline test runs.
-#   --branch-dir PATH     Use PATH as pre-built branch build (skips branch build).
-#   --variant-dir SPEC    Additional named variant: NAME:ENV1=V1,...:PATH
+#   --branch-dir   PATH   Use PATH as pre-built branch build (skips branch build).
+#   --variant-dir  SPEC   Additional named variant: NAME:ENV1=V1,...:PATH
 #                         NAME       - label used in plots and directory name
 #                         ENV1=V1,…  - comma-separated env vars set at runtime
 #                         PATH       - PATH to use as pre-build variant build (skips variant build)
@@ -37,7 +37,7 @@
 #   --skip-baseline       Skip baseline build and test runs (reuse existing logs)
 #   --skip-develop        Alias for --skip-baseline
 #   --skip-branch         Skip branch/PR build and test runs (reuse existing logs)
-#   --outdir DIR          Output directory for plots (default: auto-generated)
+#   --outdir       DIR    Output directory for plots (default: auto-generated)
 #
 # Prerequisites:
 #   - Open MPI in PATH (or set OMPI_HOME)
@@ -60,7 +60,7 @@ SUITE=heatmap
 BUILD_CONFIG=all_backends
 CMAKE_ARGS=""
 BRANCH_ARGS=""
-VARIANT_SPECS=()   # array of "name:env1=v1,...:cmake-args"
+VARIANT_SPECS=()     # array of "name:env1=v1,...:cmake-args"
 PR_NUM=""
 VARIANT_DIR_SPECS=() # array of "name:env1=v1,...:build-dir"
 SKIP_BUILD=0
