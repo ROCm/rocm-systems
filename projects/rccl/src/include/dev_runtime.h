@@ -125,6 +125,7 @@ ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
 
+
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr);
 

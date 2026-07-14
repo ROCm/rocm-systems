@@ -15,11 +15,11 @@
 #if NCCL_GIN_PROXY_ENABLE
 #include "proxy/gin_proxy.h"
 #endif
-#if NCCL_GIN_ROCSHMEM_API_ENABLE
-#include "rocshmem_api/gin_rocshmem_api.h"
-#endif
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
 #include "rocshmem_gda/gin_rocshmem_gda.h"
+#endif
+#if NCCL_GIN_ROCSHMEM_API_ENABLE
+#include "rocshmem_api/gin_rocshmem_api.h"
 #endif
 
 #endif

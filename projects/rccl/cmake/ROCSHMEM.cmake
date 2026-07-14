@@ -108,12 +108,10 @@ function(add_rocshmem_targets)
     endif()
 
     # -----------------------------------------------------------------
-    # Path 2: Build from source when no pre-built install is available.
-    # Both ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN need the built headers
-    # (rocshmem_config.h) and device bitcode; ENABLE_ROCSHMEM additionally
-    # links librocshmem.a into librccl.so.
+    # Path 2: Build from source (ENABLE_ROCSHMEM only).
+    # ENABLE_ROCSHMEM_GIN uses the standalone QP copy mechanism instead.
     # -----------------------------------------------------------------
-    if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+    if(ENABLE_ROCSHMEM)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")

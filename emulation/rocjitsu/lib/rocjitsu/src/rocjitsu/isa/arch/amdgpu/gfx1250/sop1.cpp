@@ -2169,6 +2169,12 @@ SCvtF16F32Sop1::SCvtF16F32Sop1(const MachineInst *inst)
   }
 }
 
+void SCvtF16F32Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cvt_f16_f32_sop1(*this, wf);
 }
@@ -2246,6 +2252,12 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
   }
 }
 
+void SCeilF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_ceil_f16_sop1(*this, wf);
 }
@@ -2270,6 +2282,12 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SFloorF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2298,6 +2316,12 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
   }
 }
 
+void STruncF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_trunc_f16_sop1(*this, wf);
 }
@@ -2322,6 +2346,12 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SRndneF16Sop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {

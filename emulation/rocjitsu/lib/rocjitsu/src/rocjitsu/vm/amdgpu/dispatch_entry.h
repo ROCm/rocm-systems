@@ -61,6 +61,9 @@ struct DispatchEntry {
   uint32_t cluster_size_x = 1;
   uint32_t cluster_size_y = 1;
   uint32_t cluster_size_z = 1;
+  /// RDNA COMPUTE_PGM_RSRC1.WGP_MODE. When set, the workgroup is placed on
+  /// one of a sibling CU pair and uses their shared WGP LDS backing.
+  bool wgp_mode = false;
   bool enable_wg_id_x = true;
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
@@ -77,6 +80,14 @@ struct DispatchEntry {
   uint32_t completed_wgs = 0;
 
   uint64_t completion_signal = 0;
+  /// @brief HSA-system-clock tick captured when the CP accepted this dispatch.
+  ///
+  /// @details ROCR's `hsa_amd_profiling_get_dispatch_time` reads dispatch
+  /// timestamps from the completion signal after the packet retires. Real CP
+  /// firmware writes those fields only for profiled queues; rocjitsu records the
+  /// timestamp on every kernel dispatch because non-profiled signals ignore the
+  /// fields, and this keeps HIP/MIOpen event timing consistent for guest queues.
+  uint64_t profiling_start_timestamp = 0;
   bool host_signal = false;
   bool barrier_bit = false;
 

@@ -1251,6 +1251,17 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_FROZEN_EXECUTABLE;
   }
 
+  if (code_object_size == 0) {
+    const void* elf_data = reinterpret_cast<const void*>(code_object.handle);
+    if (!elf_data) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    code_object_size = amd::elf::ElfSize(elf_data, 0);
+    if (code_object_size == 0) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+  }
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1297,7 +1308,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
   std::vector<char> buffer;
   if (substituteFileName.empty()) {
-   if (!code->InitAsHandle(code_object)) {
+    if (!code->InitAsBuffer(reinterpret_cast<const void*>(code_object.handle),
+                            code_object_size)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
   } else {
@@ -1486,8 +1498,10 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     if (s->imageSize() > s->memSize()) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    // Reject a segment whose file contents cannot be sourced from within the
+    // backing image (crafted p_offset). See ROCM-26177 finding #1.
     const char* segment_data = s->data();
-    if (!segment_data) {
+    if (s->imageSize() > 0 && segment_data == nullptr) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
@@ -1511,10 +1525,32 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   if (data_segment->imageSize() > data_segment->memSize()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  const char* segment_data = data_segment->data();
-  if (!segment_data) {
+  // The combined code segment allocation is sized from the last data segment
+  // only (see LoadSegmentsV2). A crafted code object with non-monotonic,
+  // overlapping, or out-of-range p_vaddr values could otherwise drive the copy
+  // below past the end of that allocation (heap OOB write). Bound the copy
+  // destination [offset, offset + imageSize) against the allocation explicitly,
+  // since Segment::Offset() only asserts the start address and compiles out
+  // under NDEBUG. See ROCM-26177 finding #1.
+  const uint64_t seg_vaddr = data_segment->vaddr();
+  const uint64_t base_vaddr = load_segment->VAddr();
+  const size_t alloc_size = load_segment->Size();
+  if (seg_vaddr < base_vaddr) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
+  const uint64_t offset = seg_vaddr - base_vaddr;
+  if (offset > alloc_size ||
+      data_segment->imageSize() > alloc_size - offset) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // Reject a segment whose file contents cannot be sourced from within the
+  // backing image (crafted p_offset). See ROCM-26177 finding #1.
+  const char* segment_data = data_segment->data();
+  if (data_segment->imageSize() > 0 && segment_data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
   load_segment->Copy(data_segment->vaddr(), segment_data,
                      data_segment->imageSize());
 
