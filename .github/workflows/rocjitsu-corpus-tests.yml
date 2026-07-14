@@ -221,9 +221,7 @@ jobs:
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config skip_tests_config <<< "${target}"
             echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
+            if ! pytest --run-wrapper "rocjitsu --config ${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config} --" \
               tests/test_corpus.py -vv \
               --target "${name}" \
               --suite cts \
