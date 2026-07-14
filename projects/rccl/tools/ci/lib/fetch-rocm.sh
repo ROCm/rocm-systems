@@ -118,6 +118,23 @@ _resolve_one() {
   esac
 }
 
+# Workaround for a ROCm packaging bug: some exported CMake target files (e.g.
+# lib/cmake/hsakmt/hsakmtTargets.cmake) hardcode RHEL-layout absolute library
+# paths like /usr/lib64/libc.so in their link interface. That path is absent on
+# non-RHEL (e.g. Ubuntu) nodes, so any consumer that links the target fails at
+# `make` with "No rule to make target '/usr/lib64/libc.so'". Rewrite each
+# /usr/lib64/lib<name>.so -> <name> so CMake emits a portable -l<name> instead.
+# Idempotent (guarded), safe on RHEL too (-lc still resolves), and applied to the
+# resolved tree so every downstream build (rocSHMEM/RCCL/rccl-tests) is fixed once.
+_patch_rocm_abs_libpaths() {
+  local root="$1" cmake_dir="$1/lib/cmake" f
+  [[ -d "${cmake_dir}" ]] || return 0
+  while IFS= read -r -d '' f; do
+    sed -i -E 's#/usr/lib64/lib([A-Za-z0-9_.+-]+)\.so#\1#g' "${f}"
+    echo "    patched RHEL absolute lib path(s) in ${f}"
+  done < <(grep -rlZ '/usr/lib64/lib[^";[:space:]]*\.so' "${cmake_dir}" 2>/dev/null)
+}
+
 # --- ROCM_PATH_OVERRIDE: explicit tree, no resolve/download -----------------
 
 mkdir -p "${WORKDIR}/.ci-out"
@@ -233,6 +250,9 @@ else
   fi
   flock -u "${lock_fd}"
 fi
+
+# Sanitize RHEL-baked absolute lib paths in the resolved tree (see helper above).
+_patch_rocm_abs_libpaths "${ROCM_PATH}"
 
 {
   printf 'export ROCM_RELEASE=%q\n' "${ROCM_RELEASE}"
