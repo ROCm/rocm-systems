@@ -364,11 +364,13 @@ def summarize_skipped_tests(binary_dir):
         return raw.decode("utf-8", errors="replace")
 
     # Prefer pytest's "short test summary info" line, which carries the full
-    # reason ("SKIPPED [1] file:line: reason"), over the verbose progress line
-    # ("foo SKIPPED (reason)") which pytest truncates with "..." to fit the
-    # terminal width.
+    # reason, over the verbose progress line ("foo SKIPPED (reason)") which
+    # pytest truncates with "..." to fit the terminal width. The summary line
+    # is "SKIPPED [1] file:line: reason" for skips raised inside a test, but
+    # "SKIPPED [1] file: reason" (no line number) for skips added as markers
+    # during collection, so the line number is optional.
     skip_res = (
-        re.compile(r"SKIPPED \[\d+\][^:]*:\d+:\s*(.+)"),
+        re.compile(r"SKIPPED \[\d+\][^:\n]+:(?:\d+:)?\s*(.+)"),
         re.compile(r"SKIPPED \(([^)]*)\)"),
     )
     reasons = {}  # test name -> reason (last occurrence wins)
