@@ -199,7 +199,7 @@ namespace code {
 
       void AddAmdNote(uint32_t type, const void* desc, uint32_t desc_size);
       template <typename S>
-      bool GetAmdNote(uint32_t type, S** desc)
+      bool GetAmdNote(uint32_t type, S** desc, uint32_t* desc_size_out = nullptr)
       {
         uint32_t desc_size;
         if (!img->note()->getNote("AMD", type, (void**) desc, &desc_size)) {
@@ -210,6 +210,9 @@ namespace code {
           out << "Note size mismatch, type: " << type << " size: " << desc_size << " expected at least " << sizeof(S) << std::endl;
           return false;
         }
+        // Callers that read variable-length fields trailing the fixed struct
+        // must bound those reads against the actual descriptor size; expose it.
+        if (desc_size_out) { *desc_size_out = desc_size; }
         return true;
       }
 
