@@ -35,6 +35,10 @@ RocJpegDecoder::~RocJpegDecoder() {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(state.surface_id);
     }
     pending_decodes_.clear();
+    if (nv12_rgb_batch_params_dev_) {
+        (void)hipFree(nv12_rgb_batch_params_dev_);
+        nv12_rgb_batch_params_dev_ = nullptr;
+    }
     if (hip_stream_) {
         hipError_t hip_status = hipStreamDestroy(hip_stream_);
         if (hip_status != hipSuccess) {
@@ -323,11 +327,24 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
         int sub_batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
         int current_sub_batch_size = sub_batch_end - i;
 
+        // Pass 1: sync all VA surfaces and collect HIP interop device memory for this group.
+        // Separating sync from kernel launch allows us to build a stable vector of all
+        // interop structs before filling the batch params — no struct lifetime ambiguity.
+        std::vector<HipInteropDeviceMem> interop_mems(current_sub_batch_size);
+        for (int k = 0; k < current_sub_batch_size; k++) {
+            CHECK_ROCJPEG(jpeg_vaapi_decoder_.SyncSurface(surface_ids[i + k]));
+            CHECK_ROCJPEG(jpeg_vaapi_decoder_.GetHipInteropMem(surface_ids[i + k], interop_mems[k]));
+        }
+
+        // Pass 2: for NV12→RGB images accumulate batch params; all other formats use
+        // existing per-image functions unchanged.
+        nv12_rgb_batch_params_host_.clear();
+        uint32_t nv12_max_width_comp  = 0;
+        uint32_t nv12_max_height_comp = 0;
+
         for (int k = 0; k < current_sub_batch_size; k++) {
             int idx = i + k;
-            HipInteropDeviceMem hip_interop_dev_mem = {};
-            CHECK_ROCJPEG(jpeg_vaapi_decoder_.SyncSurface(surface_ids[idx]));
-            CHECK_ROCJPEG(jpeg_vaapi_decoder_.GetHipInteropMem(surface_ids[idx], hip_interop_dev_mem));
+            const HipInteropDeviceMem &mem = interop_mems[k];
 
             uint16_t chroma_height = 0;
             uint16_t picture_width = 0;
@@ -349,39 +366,80 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
                 is_roi_valid = false;
             }
 
-            switch (decode_params[idx].output_format) {
-                case ROCJPEG_OUTPUT_NATIVE:
-                    CHECK_ROCJPEG(GetChromaHeight(hip_interop_dev_mem.surface_format, picture_height, chroma_height));
-                    CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, picture_height, 0, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    if (hip_interop_dev_mem.surface_format == VA_FOURCC_NV12) {
-                        CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 1, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    } else if (hip_interop_dev_mem.surface_format == VA_FOURCC_444P ||
-                               hip_interop_dev_mem.surface_format == VA_FOURCC_422V) {
-                        CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 1, &destinations[idx], &decode_params[idx], is_roi_valid));
-                        CHECK_ROCJPEG(CopyChannel(hip_interop_dev_mem, picture_width, chroma_height, 2, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    }
-                    break;
-                case ROCJPEG_OUTPUT_YUV_PLANAR:
-                    CHECK_ROCJPEG(GetChromaHeight(hip_interop_dev_mem.surface_format, picture_height, chroma_height));
-                    CHECK_ROCJPEG(GetPlanarYUVOutputFormat(hip_interop_dev_mem, picture_width,
-                                                           picture_height, chroma_height, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    break;
-                case ROCJPEG_OUTPUT_Y:
-                    CHECK_ROCJPEG(GetYOutputFormat(hip_interop_dev_mem, picture_width,
-                                                   picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    break;
-                case ROCJPEG_OUTPUT_RGB:
-                    CHECK_ROCJPEG(ColorConvertToRGB(hip_interop_dev_mem, picture_width,
-                                                    picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    break;
-                case ROCJPEG_OUTPUT_RGB_PLANAR:
-                    CHECK_ROCJPEG(ColorConvertToRGBPlanar(hip_interop_dev_mem, picture_width,
-                                                          picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
-                    break;
-                default:
-                    break;
+            if (decode_params[idx].output_format == ROCJPEG_OUTPUT_RGB
+                    && mem.surface_format == VA_FOURCC_NV12) {
+                // Accumulate NV12→RGB images for the single batched kernel launch below.
+                uint32_t roi_offset    = 0;
+                uint32_t roi_uv_offset = 0;
+                if (is_roi_valid) {
+                    roi_uv_offset = (decode_params[idx].crop_rectangle.top >> 1) * mem.pitch[1] + decode_params[idx].crop_rectangle.left;
+                    roi_offset    =  decode_params[idx].crop_rectangle.top        * mem.pitch[0] + decode_params[idx].crop_rectangle.left;
+                }
+                NV12ToRGBBatchParams bp;
+                bp.dst_image                           = destinations[idx].channel[0];
+                bp.dst_image_stride_in_bytes           = destinations[idx].pitch[0];
+                bp.dst_image_stride_in_bytes_comp      = destinations[idx].pitch[0] * 2;
+                bp.src_luma_image                      = mem.hip_mapped_device_mem + roi_offset;
+                bp.src_luma_image_stride_in_bytes      = mem.pitch[0];
+                bp.src_luma_image_stride_in_bytes_comp = mem.pitch[0] * 2;
+                bp.src_chroma_image                    = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
+                bp.src_chroma_image_stride_in_bytes    = mem.pitch[1];
+                bp.dst_width_comp                      = (picture_width  + 7) / 8;
+                bp.dst_height_comp                     = (picture_height + 1) / 2;
+                nv12_rgb_batch_params_host_.push_back(bp);
+                if (bp.dst_width_comp  > nv12_max_width_comp)  nv12_max_width_comp  = bp.dst_width_comp;
+                if (bp.dst_height_comp > nv12_max_height_comp) nv12_max_height_comp = bp.dst_height_comp;
+            } else {
+                switch (decode_params[idx].output_format) {
+                    case ROCJPEG_OUTPUT_NATIVE:
+                        CHECK_ROCJPEG(GetChromaHeight(mem.surface_format, picture_height, chroma_height));
+                        CHECK_ROCJPEG(CopyChannel(const_cast<HipInteropDeviceMem&>(mem), picture_width, picture_height, 0, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        if (mem.surface_format == VA_FOURCC_NV12) {
+                            CHECK_ROCJPEG(CopyChannel(const_cast<HipInteropDeviceMem&>(mem), picture_width, chroma_height, 1, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        } else if (mem.surface_format == VA_FOURCC_444P ||
+                                   mem.surface_format == VA_FOURCC_422V) {
+                            CHECK_ROCJPEG(CopyChannel(const_cast<HipInteropDeviceMem&>(mem), picture_width, chroma_height, 1, &destinations[idx], &decode_params[idx], is_roi_valid));
+                            CHECK_ROCJPEG(CopyChannel(const_cast<HipInteropDeviceMem&>(mem), picture_width, chroma_height, 2, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        }
+                        break;
+                    case ROCJPEG_OUTPUT_YUV_PLANAR:
+                        CHECK_ROCJPEG(GetChromaHeight(mem.surface_format, picture_height, chroma_height));
+                        CHECK_ROCJPEG(GetPlanarYUVOutputFormat(const_cast<HipInteropDeviceMem&>(mem), picture_width,
+                                                               picture_height, chroma_height, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        break;
+                    case ROCJPEG_OUTPUT_Y:
+                        CHECK_ROCJPEG(GetYOutputFormat(const_cast<HipInteropDeviceMem&>(mem), picture_width,
+                                                       picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        break;
+                    case ROCJPEG_OUTPUT_RGB:
+                        CHECK_ROCJPEG(ColorConvertToRGB(const_cast<HipInteropDeviceMem&>(mem), picture_width,
+                                                        picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        break;
+                    case ROCJPEG_OUTPUT_RGB_PLANAR:
+                        CHECK_ROCJPEG(ColorConvertToRGBPlanar(const_cast<HipInteropDeviceMem&>(mem), picture_width,
+                                                              picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
+                        break;
+                    default:
+                        break;
+                }
             }
         }
+
+        // Launch one batched NV12→RGB kernel for all NV12 images collected in this group.
+        if (!nv12_rgb_batch_params_host_.empty()) {
+            size_t n     = nv12_rgb_batch_params_host_.size();
+            size_t bytes = n * sizeof(NV12ToRGBBatchParams);
+            if (n > nv12_rgb_batch_params_dev_capacity_) {
+                if (nv12_rgb_batch_params_dev_) (void)hipFree(nv12_rgb_batch_params_dev_);
+                CHECK_HIP(hipMalloc(&nv12_rgb_batch_params_dev_, bytes));
+                nv12_rgb_batch_params_dev_capacity_ = n;
+            }
+            CHECK_HIP(hipMemcpy(nv12_rgb_batch_params_dev_, nv12_rgb_batch_params_host_.data(),
+                                bytes, hipMemcpyHostToDevice));
+            ColorConvertNV12ToRGBBatched(hip_stream_, nv12_max_width_comp, nv12_max_height_comp,
+                                         nv12_rgb_batch_params_dev_, static_cast<uint32_t>(n));
+        }
+
         CHECK_HIP(hipStreamSynchronize(hip_stream_));
         for (int k = 0; k < current_sub_batch_size; k++) {
             jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[i + k]);
@@ -452,6 +510,7 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
     FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
+
 /**
  * @brief Submits a batch of JPEG decode operations and stores pending state for all images.
  */
