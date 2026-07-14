@@ -1140,20 +1140,20 @@ filter_modules(std::vector<module_t*>* app_modules)
 //======================================================================================//
 //
 //  Fetches procedures/modules from the given modules/objects. Assumes modules have
-//  already been filtered by the respective filter functions
+//  already been filtered by the respective filter functions. Both functions always
+//  return a valid (possibly empty) pointer, never nullptr; callers check ->empty().
 //
 
 std::unique_ptr<std::vector<module_t*>>
 get_modules(std::vector<object_t*>* app_objects)
 {
-    if(!app_objects || app_objects->empty()) return nullptr;
+    auto modlist = std::make_unique<std::vector<module_t*>>();
+    if(!app_objects || app_objects->empty()) return modlist;
 
     auto _wc = tim::component::wall_clock{};
     auto _pr = tim::component::peak_rss{};
     _wc.start();
     _pr.start();
-
-    auto modlist = std::make_unique<std::vector<module_t*>>();
 
     // BPatch_object exposes modules() as an out-param API, not a getter
     auto _scratch = std::vector<module_t*>{};
@@ -1174,26 +1174,23 @@ get_modules(std::vector<object_t*>* app_objects)
                app_objects->size(), modlist->size(), _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
 
-    if(modlist->empty()) return nullptr;
-
     return modlist;
 }
 
 std::unique_ptr<std::vector<procedure_t*>>
 get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable)
 {
+    auto proclist = std::make_unique<std::vector<procedure_t*>>();
     if(!app_modules || app_modules->empty())
     {
         verbprintf(0, "No modules found\n");
-        return nullptr;
+        return proclist;
     }
 
     auto _wc = tim::component::wall_clock{};
     auto _pr = tim::component::peak_rss{};
     _wc.start();
     _pr.start();
-
-    auto proclist = std::make_unique<std::vector<procedure_t*>>();
 
     for(auto* mod : *app_modules)
     {
