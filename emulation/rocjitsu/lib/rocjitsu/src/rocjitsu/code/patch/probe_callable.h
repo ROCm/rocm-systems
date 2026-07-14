@@ -29,17 +29,6 @@ enum class ProbeCallingConvention {
   AmdGpuFuncNoArgsReturnS30S31, ///< void(void), returns via s_setpc_b64 s[30:31].
 };
 
-/// @brief The return-link SGPR pair base for a verified calling convention.
-[[nodiscard]] inline constexpr std::optional<uint16_t> link_pair_for(ProbeCallingConvention cc) {
-  switch (cc) {
-  case ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31:
-    return 30;
-  case ProbeCallingConvention::Unknown:
-  default:
-    return std::nullopt;
-  }
-}
-
 /// @brief A probe body extracted from a code object and verified to be safe to
 ///        relocate verbatim into the instrumented code object.
 struct ProbeCallable {
