@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
@@ -20,7 +21,7 @@
 
 #include "rocjitsu/code/dbt/generated/matrix_conversions.h"
 
-#include <bit>
+#include <array>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -31,68 +32,53 @@ namespace rocjitsu {
 namespace {
 
 [[nodiscard]] uint32_t make_gfx12_sopp(uint16_t op, uint16_t simm16) {
-  rdna4::SoppMachineInst s{};
-  s.encoding = rdna4::encoding::kSopp;
-  s.op = op & 0x7F;
-  s.simm16 = simm16;
-  return std::bit_cast<uint32_t>(s);
+  return rdna4::build_sopp(op, {.simm16 = simm16})[0];
 }
 
 /// @brief Build VOP3P instruction word pair (packed math: WMMA, dot products).
-[[nodiscard]] constexpr std::pair<uint32_t, uint32_t>
+[[nodiscard]] constexpr std::array<uint32_t, 2>
 build_vop3p(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2) {
-  const uint32_t w0 = static_cast<uint32_t>(vdst) | (1u << 14) |
-                      (static_cast<uint32_t>(op & 0x7F) << 16) | (0xCCu << 24);
-  const uint32_t w1 = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18) | (3u << 27);
-  return {w0, w1};
+  // The WMMA form selects high halves for src2 through opsel_hi_2 and for
+  // src0/src1 through opsel_hi, matching the former literal bit packing.
+  return rdna4::build_vop3p(
+      op, {.vdst = vdst, .opsel_hi_2 = 1, .src0 = src0, .src1 = src1, .src2 = src2, .opsel_hi = 3});
 }
 
 /// @brief Build VOP3 instruction word pair for RDNA4 VALU instructions.
-[[nodiscard]] constexpr std::pair<uint32_t, uint32_t>
-build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t src2 = 0) {
-  const uint32_t w0 = (vdst & 0xFFu) | ((op & 0x3FFu) << 16) | (0x35u << 26);
-  const uint32_t w1 = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18);
-  return {w0, w1};
+[[nodiscard]] constexpr std::array<uint32_t, 2> build_vop3(uint16_t op, uint8_t vdst, uint16_t src0,
+                                                           uint16_t src1 = 0, uint16_t src2 = 0) {
+  return rdna4::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
 }
 
 /// @brief Build VOP2 instruction word (xor, lshlrev, add_nc, etc.).
 [[nodiscard]] constexpr uint32_t build_vop2(uint16_t op, uint8_t vdst, uint16_t src0,
                                             uint8_t vsrc1) {
-  return (src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25);
+  return rdna4::build_vop2(op, {.src0 = src0, .vsrc1 = vsrc1, .vdst = vdst})[0];
 }
 
 /// @brief Build s_mov_b64 sdst, ssrc0.
 [[nodiscard]] constexpr uint32_t build_s_mov_b64(uint8_t sdst, uint16_t ssrc0) {
-  rdna4::Sop1MachineInst s{};
-  s.encoding = rdna4::encoding::kSop1;
-  s.op = rdna4::kSMovB64;
-  s.sdst = sdst & 0x7F;
-  s.ssrc0 = ssrc0 & 0xFF;
-  return std::bit_cast<uint32_t>(s);
+  return rdna4::build_sop1(rdna4::kSMovB64,
+                           {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = sdst})[0];
 }
 
 /// @brief Build s_mov_b32 sdst, literal (two-word instruction).
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
-  rdna4::Sop1MachineInst s{};
-  s.encoding = rdna4::encoding::kSop1;
-  s.op = rdna4::kSMovB32;
-  s.sdst = sdst & 0x7F;
-  s.ssrc0 = 0xFF;
-  return {std::bit_cast<uint32_t>(s), literal};
+  return {rdna4::build_sop1(rdna4::kSMovB32, {.ssrc0 = 0xFF, .sdst = sdst})[0], literal};
 }
 
 /// @brief Build ds_bpermute_b32 vdst, vaddr, vdata.
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_ds_bpermute(uint8_t vdst, uint8_t vaddr,
                                                                         uint8_t vdata) {
-  constexpr uint32_t kDsW0 = (0xB3u << 18) | (0x36u << 26);
-  return {kDsW0, static_cast<uint32_t>(vaddr) | (static_cast<uint32_t>(vdata) << 8) |
-                     (static_cast<uint32_t>(vdst) << 24)};
+  const auto inst =
+      rdna4::build_vds(rdna4::kDsBpermuteB32, {.addr = vaddr, .data0 = vdata, .vdst = vdst});
+  return {inst[0], inst[1]};
 }
 
 /// @brief Build a VOP1 v_mov_b32 instruction for RDNA4.
 [[nodiscard]] constexpr uint32_t build_v_mov_b32(uint8_t vdst, uint16_t src0) {
-  return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FF);
+  return rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = src0, .vdst = vdst})[0];
 }
 
 /// @brief Lower v_accvgpr_read_b32 to v_mov_b32 or NOP on RDNA4.
@@ -249,14 +235,14 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   }
 
   // Drain WMMA before ds_bpermute reads its VGPR outputs.
-  words.push_back(pack_sopp(rdna4::kSWaitIdle, 0));
+  words.push_back(rdna4::build_sopp(rdna4::kSWaitIdle)[0]);
 
   for (int r = 0; r < 4; ++r) {
     auto [w0, w1] = build_ds_bpermute(vdst + r, vaddr, vdst + r);
     words.push_back(w0);
     words.push_back(w1);
   }
-  words.push_back(pack_sopp(rdna4::kSWaitDscnt, 0));
+  words.push_back(rdna4::build_sopp(rdna4::kSWaitDscnt)[0]);
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 

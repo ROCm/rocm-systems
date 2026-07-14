@@ -88,6 +88,12 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
+  Vinterp::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
@@ -124,6 +130,12 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+}
+
+void VInterpP2RtzF16F32Vinterp::implicit_uses(RegisterSet &uses) const {
+  Vinterp::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {

@@ -1119,6 +1119,12 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtF16F32Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtF16F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -6885,6 +6891,12 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtF16U16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -7004,6 +7016,12 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VCvtF16I16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -7127,6 +7145,12 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtU16F16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -7248,6 +7272,12 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtI16F16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -7367,6 +7397,12 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VRcpF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VRcpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -7502,6 +7538,12 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
   }
 }
 
+void VSqrtF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VSqrtF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -7633,6 +7675,12 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VRsqF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -7768,6 +7816,12 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
   }
 }
 
+void VLogF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VLogF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -7899,6 +7953,12 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VExpF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VExpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -8034,6 +8094,12 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
   }
 }
 
+void VFrexpMantF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -8165,6 +8231,12 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VFrexpExpI16F16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -8300,6 +8372,12 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
   }
 }
 
+void VFloorF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -8431,6 +8509,12 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VCeilF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -8566,6 +8650,12 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
   }
 }
 
+void VTruncF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -8697,6 +8787,12 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VRndneF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -8832,6 +8928,12 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
   }
 }
 
+void VFractF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -8965,6 +9067,12 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
   }
 }
 
+void VSinF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VSinF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -9096,6 +9204,12 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VCosF16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -9511,6 +9625,12 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtNormI16F16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -9644,6 +9764,12 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
   }
 }
 
+void VCvtNormU16F16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD || inst_.src0 == amdgpu::SRC_DPP) {
@@ -9775,6 +9901,12 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+}
+
+void VSatPkU8I16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) {

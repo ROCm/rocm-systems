@@ -333,6 +333,12 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
+  Sopk::implicit_uses(uses);
+  if (auto r = simm16.to_register_ref())
+    uses.expand(*r);
+}
+
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t reg_id = hwreg & 0x3Fu;
@@ -362,6 +368,12 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   dst_operands_[0] = &simm16;
   num_src_ = 0;
   num_dst_ = 1;
+}
+
+void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
+  Sopk::implicit_uses(uses);
+  if (auto r = simm16.to_register_ref())
+    uses.expand(*r);
 }
 
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
