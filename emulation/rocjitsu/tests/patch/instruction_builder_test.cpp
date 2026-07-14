@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -119,6 +121,60 @@ TEST(InstructionBuilder, BuildSEndpgm) {
   // calculate with SOPP prefix (0x17F) << 23 | opcode 0x30 << 16
   constexpr uint32_t SOPP_S_ENDPGM_RDNA4 = 0xBFB00000u;
   EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
+}
+
+TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
+  constexpr uint16_t kDst = 4;
+  constexpr uint16_t kSrc = 8;
+
+  const uint32_t rdna1_word = build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA1);
+  const uint32_t rdna2_word = build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA2);
+
+  // RDNA1/2 assign s_mov_b32 opcode 3 rather than the opcode 0 used by CDNA
+  // and newer RDNA targets. This is an intentional correctness fix over the
+  // old architecture-agnostic builder and must not be treated as NFC.
+  EXPECT_EQ((rdna1_word >> 8) & 0xFFu, rdna1::kSMovB32Sop1);
+  EXPECT_EQ((rdna2_word >> 8) & 0xFFu, rdna2::kSMovB32Sop1);
+  EXPECT_EQ(rdna1::kSMovB32Sop1, 3u);
+  EXPECT_EQ(rdna2::kSMovB32Sop1, 3u);
+}
+
+TEST(GeneratedInstructionBuilder, PacksCdna3FormatsFromXmlLayouts) {
+  // Pin both a one-word scalar format and representative two-word VALU/LDS
+  // formats. These exact words were previously produced by local MachineInst
+  // bitfield initialization in the CDNA4-to-CDNA3 semantic rules.
+  constexpr auto sopp = cdna3::build_sopp(/*op=*/12, {.simm16 = 0xC07F});
+  EXPECT_EQ(sopp, (std::array<uint32_t, 1>{0xBF8CC07Fu}));
+
+  constexpr auto vop3 = cdna3::build_vop3(
+      /*op=*/321, {.vdst = 7, .src0 = 256 + 8, .src1 = 256 + 9, .src2 = 128});
+  EXPECT_EQ(vop3, (std::array<uint32_t, 2>{0xD1410007u, 0x02021308u}));
+
+  constexpr auto ds = cdna3::build_ds(
+      /*op=*/54, {.offset0 = 3, .offset1 = 5, .addr = 10, .data0 = 11, .data1 = 12, .vdst = 13});
+  EXPECT_EQ(ds, (std::array<uint32_t, 2>{0xD86C0503u, 0x0D0C0B0Au}));
+}
+
+TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
+  constexpr uint16_t kSimm16 = 0xC07F;
+  constexpr uint16_t kSdst = 7;
+  constexpr uint16_t kSsrc0 = 8;
+  constexpr uint16_t kSsrc1 = 9;
+
+  constexpr auto sopp = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = kSimm16});
+  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSBranchSopp, kSimm16),
+            sopp[0]);
+
+  constexpr auto sop1 =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
+  EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSMovB32Sop1, kSdst, kSsrc0),
+            sop1[0]);
+
+  constexpr auto sop2 = gfx1250::build_sop2(gfx1250::kSLshlB32Sop2,
+                                            {.ssrc0 = kSsrc0, .ssrc1 = kSsrc1, .sdst = kSdst});
+  EXPECT_EQ(build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSLshlB32Sop2, kSdst, kSsrc0,
+                                kSsrc1),
+            sop2[0]);
 }
 
 } // namespace

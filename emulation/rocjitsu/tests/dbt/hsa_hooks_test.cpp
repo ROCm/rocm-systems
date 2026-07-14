@@ -7,11 +7,13 @@
 /// @details This test intentionally creates an HSA code-object reader from the
 /// original gfx950 ELF bytes. It does not call BinaryTranslator directly. The
 /// expected execution path is:
-///   1. ROCR loads librocjitsu_hooks.so from HSA_TOOLS_LIB during hsa_init().
-///   2. The hook records the gfx950 reader bytes.
-///   3. hsa_executable_load_agent_code_object() is intercepted and translated
-///      to the RJ_DBT_TARGET_ISA selected by the test environment.
-///   4. The translated object is loaded and dispatched on the local GPU.
+///   1. The rocjitsu launcher enables DBT guest mode from the runtime config.
+///   2. ROCR loads librocjitsu_hooks.so from HSA_TOOLS_LIB during hsa_init().
+///   3. The public GPU agent is the synthetic gfx950 guest.
+///   4. The hook records the gfx950 reader bytes.
+///   5. hsa_executable_load_agent_code_object() is intercepted, translated to
+///      the host ISA configured in the runtime config, and loaded on the host agent.
+///   6. The translated object is dispatched through the host queue.
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -147,15 +149,14 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
-  const char *target_isa = std::getenv("RJ_DBT_TARGET_ISA");
-  ASSERT_NE(target_isa, nullptr) << "HSA hook test requires RJ_DBT_TARGET_ISA";
-  // The hook target and dispatch agent must agree exactly. On multi-GPU hosts,
-  // the first HSA GPU can be a different gfx stepping from the CTest-selected
-  // RJ_DBT_TARGET_ISA, which makes ROCR reject the translated code object.
-  GpuTarget gpu_target = find_gpu_agent_for_isa(target_isa);
+  // The test runs under rocjitsu DBT guest mode, so public HSA iteration should
+  // expose the synthetic gfx950 guest in place of the selected host GPU. The
+  // hook maps execution-facing calls for this agent to the host from the runtime config.
+  constexpr const char *kGuestIsa = "gfx950";
+  GpuTarget gpu_target = find_gpu_agent_for_isa(kGuestIsa);
   hsa_agent_t gpu = gpu_target.agent;
   hsa_agent_t cpu = find_cpu_agent();
-  ASSERT_NE(gpu.handle, 0u) << "No GPU agent matched RJ_DBT_TARGET_ISA=" << target_isa
+  ASSERT_NE(gpu.handle, 0u) << "No public GPU agent matched guest ISA " << kGuestIsa
                             << "; seen GPU ISAs: " << join_seen_isas(gpu_target.seen_gpu_isas);
   ASSERT_NE(cpu.handle, 0u);
 
