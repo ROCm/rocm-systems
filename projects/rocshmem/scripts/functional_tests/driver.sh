@@ -756,7 +756,7 @@ TestColl() {
 
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-409: wave tests not supported on RO
     ExecTest  "broadcast_wave"   2       1            64        32768
-    ExecTest  "alltoall_wave"    2       1            64        512
+    ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
   else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
@@ -920,15 +920,6 @@ TestTiles() {
   ##############################################################################
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-
-  # Detect wavefront size based on GPU architecture
-  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
-  WAVE_SIZE=64
-  if command -v rocminfo >/dev/null 2>&1; then
-    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
-      WAVE_SIZE=32
-    fi
-  fi
 
   ExecTest  "tile_put_contiguous"       2       1            1
   ExecTest  "tile_put_rowmajor"         2       1            1
