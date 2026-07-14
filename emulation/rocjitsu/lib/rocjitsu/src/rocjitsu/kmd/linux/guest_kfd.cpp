@@ -575,9 +575,19 @@ bool GuestKfd::ensure_real_kfd_locked() {
   if (execution_driver_) {
     int fd = execution_driver_->fd();
     if (fd < 0) {
+      const bool already_owns_open = owns_execution_driver_open_;
       fd = execution_driver_->open();
-      if (fd >= 0)
-        owns_execution_driver_open_ = true;
+      if (fd >= 0) {
+        if (already_owns_open) {
+          // Re-minting an overwritten simulator primary retains the existing
+          // process once. GuestKfd already pins that process for the lifetime
+          // of its app-facing opens, so balance the temporary retain and keep
+          // the original owned reference for final teardown.
+          execution_driver_->close();
+        } else {
+          owns_execution_driver_open_ = true;
+        }
+      }
     }
     if (fd < 0) {
       errno = ENODEV;
@@ -684,10 +694,13 @@ LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
   int expected = fd;
   if (!real_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
     return PrimaryInvalidation::kNotPrimary;
-  if (execution_driver_) {
-    if (execution_driver_->invalidate_primary_fd(fd) == PrimaryInvalidation::kClearedDropRef)
-      execution_driver_->close();
-  }
+  if (execution_driver_)
+    // Clear the simulator's stale primary-fd classification, but do not honor
+    // kClearedDropRef here. That counted reference is the execution-backend
+    // open GuestKfd owns and must keep pinned while app-facing dups are live.
+    // ensure_real_kfd_locked() balances the extra retain if a later open has to
+    // re-mint the simulator primary.
+    (void)execution_driver_->invalidate_primary_fd(fd);
   // Also drop out of the ready state (mirroring close()'s teardown, minus the
   // fd close / overlay cleanup / ref decrement). This matters because GuestKfd
   // forwards every ioctl/mmap through real_kfd_fd_: with the number now cleared,

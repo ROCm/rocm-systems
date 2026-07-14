@@ -104,8 +104,10 @@ public:
   /// close are not routed to whatever now occupies the number. The real fd is NOT
   /// counted in open_refs_ (only app-facing dups are), so a match returns
   /// kClearedKeepRefs — the interposer must clear the classification WITHOUT
-  /// dropping an open reference. Returns kNotPrimary if @p fd is not the current
-  /// hidden real fd.
+  /// dropping an open reference. For simulator execution, the separately owned
+  /// backend open also stays pinned until the final app-facing close; a later
+  /// primary-fd re-mint is balanced so it does not add another backend reference.
+  /// Returns kNotPrimary if @p fd is not the current hidden real fd.
   [[nodiscard]] PrimaryInvalidation invalidate_primary_fd(int fd) override;
 
 private:
