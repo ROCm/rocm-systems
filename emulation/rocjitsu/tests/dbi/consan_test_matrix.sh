@@ -215,8 +215,16 @@ run_tier1() {
   validate_selection_count "${iree_build}" "${guarded_regex}" "${guarded_count}" \
     "tier1 guarded ${gpu_arch} IREE"
   printf '\n=== tier1 architecture: %s ===\n' "${gpu_arch}"
-  printf '\n=== tier1: independent hip-moi semantic controls ===\n'
-  run_ctest "${hip_moi_build}" '.*' 120
+  printf '\n=== tier1: independent hip-moi semantic baseline ===\n'
+  run_ctest "${hip_moi_build}" '.*' 120 "HSA_TOOLS_LIB="
+  printf '\n=== tier1: hip-moi SuperCollider compatibility ===\n'
+  run_ctest "${hip_moi_build}" '.*' 120 \
+    "HSA_TOOLS_LIB=${hook}" \
+    "ROCM_PATH=${rocm_dist}" \
+    "HIP_PATH=${rocm_dist}" \
+    "LD_LIBRARY_PATH=${rocm_dist}/lib" \
+    "RJ_CONSAN_FLAVOR=supercollider" \
+    "RJ_CONSAN_CHECK_TRAP_MODE=lds"
   run_iree_profile supercollider '' "${guarded_regex}" 60 1
   run_iree_profile moi record_replay "${guarded_regex}" 60 1
   run_iree_profile moi sampled "${guarded_regex}" 60 1
