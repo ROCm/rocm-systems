@@ -36,7 +36,17 @@ TIER_JIT = "jit"
 
 C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
 
-_FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
+
+def _fingerprint_input_paths() -> tuple[Path, ...]:
+    """All C++ sources and headers plus the build file, sorted for a
+    deterministic fingerprint independent of filesystem enumeration order.
+    """
+    inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
+    inputs.add(_SO_BUILDFILE)
+    return tuple(sorted(inputs))
+
+
+_FINGERPRINT_INPUTS = _fingerprint_input_paths()
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
 
