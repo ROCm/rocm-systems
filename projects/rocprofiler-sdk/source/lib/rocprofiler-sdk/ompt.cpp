@@ -268,9 +268,8 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 {
     ::rocprofiler::registration::init_logging();
     {
-        // libomp holds its non-recursive init lock across this call; mark the OMPT path so
-        // find_clients() avoids dlopen (which would re-enter libomp and deadlock). scope_destructor
-        // runs the second (init) lambda on construct and the first (fini) lambda on destruct.
+        // mark the OMPT path (init lock held) so find_clients() avoids dlopen; scope_destructor
+        // sets the flag on construct and clears it on destruct
         auto _ompt_init_guard = ::rocprofiler::common::scope_destructor{
             []() { ::rocprofiler::registration::ompt_init_active() = false; },
             []() { ::rocprofiler::registration::ompt_init_active() = true; }};
