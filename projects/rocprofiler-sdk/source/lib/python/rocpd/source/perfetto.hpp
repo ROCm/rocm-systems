@@ -35,6 +35,8 @@
 
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocpd
@@ -45,8 +47,14 @@ namespace tool = ::rocprofiler::tool;
 
 struct PerfettoSession
 {
+private:
+    mutable std::unordered_set<std::string> static_event_names = {};
+
+public:
     PerfettoSession(const tool::output_config&, sqlite3* connection);
     ~PerfettoSession();
+
+    ::perfetto::StaticString get_static_event_name(const std::string& value) const;
 
     std::unique_ptr<::perfetto::TracingSession> tracing_session = {};
     const tool::output_config&                  config;
