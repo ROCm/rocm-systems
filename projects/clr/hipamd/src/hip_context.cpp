@@ -63,6 +63,22 @@ void init(bool* status) {
     amd::RuntimeTearDown::RegisterObject(device);
   }
 
+  // Drain the ROCr async-events thread before any hip::Device is released.
+  // Graph completion callbacks run on that thread and can cascade into graph
+  // node destruction that touches hip::Device memory pools (e.g.
+  // GraphMemAllocNode -> MemoryPool/Heap::DecrementRefCount). This callback
+  // fires before the external_ release loop, while roc::Device is still alive,
+  // guaranteeing the async thread is idle before hip::Device teardown begins.
+  amd::RuntimeTearDown::RegisterTearDownCallback(
+      "drain ROCr async thread before hip::Device teardown", []() {
+        for (auto* dev : g_devices) {
+          const auto& backendDevices = dev->devices();
+          if (!backendDevices.empty() && backendDevices[0] != nullptr) {
+            backendDevices[0]->WaitForHsaAsyncHandlersIdle();
+          }
+        }
+      });
+
   // Register tool dispatch table to profiler v3.
   // If app is attached by profiler, __hipTriggerReportDevices_fn() will be called
   // by profiler.
