@@ -2549,6 +2549,16 @@ static const std::map<rsmi_compute_partition_type_t, std::string>
         {RSMI_COMPUTE_PARTITION_SPX, "SPX"},         {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
         {RSMI_COMPUTE_PARTITION_TPX, "TPX"},         {RSMI_COMPUTE_PARTITION_QPX, "QPX"}};
 
+// True for the multi-partition compute modes (anything other than SPX/unknown).
+// Reuses the compute-partition string map so the mode list has a single source.
+static bool is_multi_partition_mode(const std::string& compute_partition) {
+  auto it = mapStringToRSMIComputePartitionTypes.find(compute_partition);
+  if (it == mapStringToRSMIComputePartitionTypes.end()) {
+    return false;
+  }
+  return it->second != RSMI_COMPUTE_PARTITION_SPX && it->second != RSMI_COMPUTE_PARTITION_INVALID;
+}
+
 static const std::map<std::string, rsmi_compute_partition_mem_alloc_mode_t>
     mapStringToRSMIMemAllocModeTypes{{"CAPPING", RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING},
                                      {"ALL", RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL}};
@@ -4177,25 +4187,20 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
 namespace amd {
 namespace smi {
 // Decide whether the KFD topology (mem_banks) total should be preferred over
-// the sysfs mem_info_vram_total value for VRAM. The sysfs value is unusable
-// when the read failed or returned 0. It is also misleading in multi-partition
-// compute modes (CPX/DPX/TPX/QPX), where it reports the whole-device memory
-// split evenly across partitions and ignores reserved memory, disagreeing with
-// the driver's actual per-partition allocation (see SWDEV-536184). In those
-// modes the per-partition KFD total is authoritative.
-//
-// The mirror-image case is APUs (e.g. gfx1151 / Strix Halo): sysfs
-// mem_info_vram_total reports only the small dedicated BIOS VRAM carveout while
-// the GPU addresses the unified memory pool that KFD mem_banks reports. When KFD
-// reports more memory than sysfs, KFD is authoritative. Discrete GPUs are
-// unaffected because the two sources agree.
+// the sysfs mem_info_vram_total value for VRAM. KFD wins in three cases: the
+// sysfs read is unusable (0 or failure, as on MI300A where the node is absent);
+// a multi-partition compute mode (CPX/DPX/TPX/QPX), where sysfs reports the
+// whole device split evenly across partitions and ignores reserved memory; and
+// APUs (e.g. gfx1151 / Strix Halo), where sysfs exposes only the small BIOS VRAM
+// carveout while the GPU addresses the larger unified pool KFD reports. Discrete
+// and SPX GPUs are unaffected: there sysfs and KFD agree, so the final clause is
+// false and the sysfs value is kept.
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total) {
   if (!sysfs_read_ok || sysfs_total == 0) {
     return true;
   }
-  if (compute_partition == "CPX" || compute_partition == "DPX" || compute_partition == "TPX" ||
-      compute_partition == "QPX") {
+  if (is_multi_partition_mode(compute_partition)) {
     return true;
   }
   return kfd_total > 0 && kfd_total > sysfs_total;
@@ -4236,12 +4241,9 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // The KFD topology (mem_banks) reports the true per-partition VRAM size.
-  // Prefer it for VRAM total when the sysfs read is unusable (0 or failure), or
-  // when the GPU is in a multi-partition compute mode (CPX/DPX/TPX/QPX). In
-  // those modes sysfs mem_info_vram_total reports the whole-device memory split
-  // evenly across partitions, which ignores reserved memory and disagrees with
-  // the driver's actual per-partition allocation (see SWDEV-536184).
+  // Prefer the KFD topology (mem_banks) VRAM total when the sysfs value is
+  // unusable, misleading in a multi-partition compute mode, or an APU carveout.
+  // See vram_total_prefer_kfd for the full rationale.
   if (mem_type == RSMI_MEM_TYPE_VRAM) {
     bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
     std::string compute_partition_str;
