@@ -146,19 +146,6 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     return _fpath;
 }
 
-std::string
-format_path(std::string&& _fpath, const std::vector<output_key>& _keys)
-{
-    if(_fpath.find('%') == std::string::npos && _fpath.find('{') == std::string::npos &&
-       _fpath.find('$') == std::string::npos)
-        return _fpath;
-
-    auto _ref = _fpath;
-    _fpath    = format_path_impl(std::move(_fpath), _keys);
-
-    return (_fpath == _ref) ? _fpath : format_path(std::move(_fpath), _keys);
-}
-
 template <typename Tp>
 Tp
 get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _options)
@@ -232,6 +219,19 @@ get_mpi_rank()
                                            "SLURM_PROCID",
                                            "PBS_NODENUM"});
     return _v;
+}
+
+std::string
+format_path(std::string&& _fpath, const std::vector<output_key>& _keys)
+{
+    if(_fpath.find('%') == std::string::npos && _fpath.find('{') == std::string::npos &&
+       _fpath.find('$') == std::string::npos)
+        return _fpath;
+
+    auto _ref = _fpath;
+    _fpath    = format_path_impl(std::move(_fpath), _keys);
+
+    return (_fpath == _ref) ? _fpath : format_path(std::move(_fpath), _keys);
 }
 
 std::string
