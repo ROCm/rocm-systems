@@ -79,7 +79,10 @@ def find_lib_dirs(artifact_dir: Path) -> list[Path]:
         lib_dirs.add(so_file.parent.resolve())
     sorted_dirs = sorted(lib_dirs)
     for d in sorted_dirs:
-        log.info("Found lib dir: %s", d)
+        so_files = [f.name for f in d.iterdir() if ".so" in f.name]
+        log.info("Found lib dir: %s (%d libs)", d, len(so_files))
+        for f in sorted(so_files):
+            log.info("  %s", f)
     return sorted_dirs
 
 
