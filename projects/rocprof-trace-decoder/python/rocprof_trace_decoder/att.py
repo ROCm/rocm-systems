@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -173,7 +172,7 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         for record in records.occupancy:
             occupancy[se, record.cu, record.simd, record.wave_id].append(record)
 
-    headers: dict[tuple[int, int, int, int, int], list[tuple[object, int, list[object]]]] = defaultdict(list)
+    headers: dict[tuple[int, int, int, int, int], list[tuple[object, int, int, list[object]]]] = defaultdict(list)
     for location, stream in shaderdata.items():
         stream.sort(key=lambda record: record.time)
         intervals = _active_codeobj_intervals(occupancy.get(location, ()))
@@ -219,35 +218,27 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             # can break the declared header/payload record adjacency.
             if codeobj in multi_payload_codeobjs:
                 continue
-            window_mask = (1 << (bits + shift)) - 1
-            bucket_size = 1 << shift
             sampled = ((raw >> (32 - bits)) & ((1 << bits) - 1)) << shift
-            residue = (int(record.time) - sampled) & window_mask
             clock_domain = (*location[:3], bits, shift)
-            headers[clock_domain].append((record, residue, header_payloads))
+            headers[clock_domain].append((record, int(record.time), sampled, header_payloads))
 
     changed = False
     for clock_domain, domain_headers in headers.items():
         bits, shift = clock_domain[-2:]
-        window_mask = (1 << (bits + shift)) - 1
+        window_size = 1 << (bits + shift)
+        window_mask = window_size - 1
+        half_window = window_size // 2
         bucket_size = 1 << shift
-        residues = sorted({header[1] for header in domain_headers})
-        if len(residues) < 2:
-            continue
-        gaps = [
-            (residues[(i + 1) % len(residues)] - residue) & window_mask
-            for i, residue in enumerate(residues)
+        # This is an arbitrary coordinate origin, not a time/minimum anchor.
+        # Comparing deltas cancels the fixed phase between the two clocks.
+        _origin, origin_time, origin_clock, _payloads = domain_headers[0]
+        delays = [
+            (((time - origin_time) - (clock - origin_clock) + half_window) & window_mask) - half_window
+            for _record, time, clock, _payloads in domain_headers
         ]
-        largest_gap = max(gaps)
-        span = window_mask + 1 - largest_gap
-        if span > (window_mask + 1) // 2:
-            warnings.warn(
-                f"SQTT marker correction for {clock_domain}: clock phase span exceeds half the window",
-                RuntimeWarning,
-            )
-        start = residues[(gaps.index(largest_gap) + 1) % len(residues)]
-        for record, residue, header_payloads in domain_headers:
-            correction = max(0, ((residue - start) & window_mask) - (bucket_size - 1))
+        minimum = min(delays)
+        for (record, _time, _clock, header_payloads), delay in zip(domain_headers, delays):
+            correction = max(0, delay - minimum - (bucket_size - 1))
             if correction:
                 record.time -= correction
                 # TODO: sort one-payload blocks atomically; a final per-record

@@ -186,12 +186,14 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual(fast_simd.time, 0x1010)
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
-    def test_correction_unwraps_unknown_clock_phase(self):
+    def test_correction_cancels_unknown_clock_phase(self):
+        # The fixed inter-clock phase crosses the sampled window. The
+        # correction must use clock/time deltas, not absolute values.
         marker_id = 3 << 2
-        reference = _shaderdata(0x21F64, (0x200 << 20) | marker_id)
-        delayed = _shaderdata(0x22384, (0x210 << 20) | marker_id)
+        delayed = _shaderdata(0x101D0, marker_id)
+        reference = _shaderdata(0x10DFC, (0x100 << 20) | marker_id)
         records = TraceRecords(
-            occupancy=[_occupancy(1, 0)], shaderdata=[reference, delayed])
+            occupancy=[_occupancy(1, 0)], shaderdata=[delayed, reference])
 
         _correct_marker_timestamps(
             [(0, records)],
@@ -201,27 +203,8 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x21F64, 0x22073])
+        self.assertEqual([record.time for record in records.shaderdata], [0xFE0B, 0x10DFC])
         self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
-
-    def test_wide_clock_phase_warns_and_is_corrected(self):
-        marker_id = 3 << 2
-        value = (0x200 << 20) | marker_id
-        records = TraceRecords(
-            occupancy=[_occupancy(1, 0)],
-            shaderdata=[_shaderdata(time, value) for time in (0x12000, 0x16000, 0x1B000)],
-        )
-
-        with self.assertWarnsRegex(RuntimeWarning, "span exceeds half"):
-            _correct_marker_timestamps(
-                [(0, records)],
-                {
-                    "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
-                    "sqtt_funcmap_layout": [[7, 12, 4]],
-                },
-            )
-
-        self.assertEqual([record.time for record in records.shaderdata], [0x12000, 0x1200F, 0x1200F])
 
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
         value = (0x100 << 20) | (3 << 2)
