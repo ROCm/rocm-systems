@@ -78,7 +78,7 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
   uint64_t offset;
   ncclResult_t ret = ncclSuccess;
   ALIGN_SIZE(alignedSize, hostPageSize);
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
   if (ncclCuMemEnable() && sym_buffer) {
     CUCHECK(cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                           CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
@@ -377,7 +377,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
     ncclNetProperties_t props_tmp = rmaProxyState->props[n];
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
     if (!ncclCuMemEnable()) {
       props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
     }
@@ -448,8 +448,10 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   struct ncclRmaProxyState *rmaProxyState = &comm->rmaState.rmaProxyState;
   rmaProxyState->comm = comm;
   if (rmaProxyState->ncclGin == NULL) {
-    WARN("GIN not supported.");
-    return ncclInvalidUsage;
+    // Device-initiated GIN backends (e.g. rocshmem GDA) don't register an
+    // RMA plugin — the GPU posts WQEs directly without host proxy involvement.
+    // Silently skip; ginCommCount stays 0 so subsequent register calls are no-ops.
+    return ncclSuccess;
   }
   if (ncclParamGinEnable() == 0) {
     WARN("GIN is disabled.");

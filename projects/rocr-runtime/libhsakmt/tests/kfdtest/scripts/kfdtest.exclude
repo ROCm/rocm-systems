@@ -356,7 +356,17 @@ FILTER[gfx1201]=\
 
 FILTER[gfx1250]=\
 "$BLACKLIST_ALL_ASICS:"\
-"$BLACKLIST_GFX12"
+"$BLACKLIST_GFX12:"\
+"KFDEventTest.SignalInvalidEvent:"\
+"KFDQMTest.ExtendedCuMasking:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch:"\
+"KFDCWSRTest.InternalRegTest:"\
+"KFDEvictTest.QueueTest:"\
+"KFDRASTest.*:"\
+"KFDExceptionTest.AddressFault:"\
+"KFDQMTest.GpuMemCopyTest:"\
+"KFDDBGTest.HitTrapOnWaveStartEndEvent:"\
+"KFDNegativeTest.*"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\

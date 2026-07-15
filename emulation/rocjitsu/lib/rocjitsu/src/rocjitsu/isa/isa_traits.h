@@ -14,6 +14,14 @@
 
 namespace rocjitsu {
 
+/// @brief Width in bits of a single register lane — the finest granularity at
+/// which registers are tracked.
+///
+/// @details A 32-bit lane is the smallest unit RegisterSet addresses. An operand
+/// narrower than this writes only part of its lowest lane and read-modify-writes
+/// the register rather than fully redefining it.
+inline constexpr int REGISTER_GRANULARITY = 32;
+
 /// @brief Compile-time mapping from rj_code_arch_t enum values to Isa trait types.
 ///
 /// @details Specialize this template in each architecture's isa.h to bind its

@@ -33,6 +33,7 @@ subtrees:
     - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
     - file: how-to/using-rocprofv3-on-wsl
+    - file: how-to/using-spm
     - file: how-to/samples
       title: Samples
   - caption: API reference
@@ -55,6 +56,8 @@ subtrees:
       title: PC sampling
     - file: api-reference/thread_trace
       title: Thread trace and ROCprof Trace Decoder
+    - file: api-reference/spm
+      title: Streaming Performance Monitor (SPM)
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:

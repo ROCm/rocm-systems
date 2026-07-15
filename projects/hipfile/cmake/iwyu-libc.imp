@@ -1,0 +1,4 @@
+[
+  { "include": ["<bits/chrono.h>", "private", "<chrono>", "public"] },
+  { "include": ["@<bits/statx.*\\.h>", "private", "<sys/stat.h>", "public"] }
+]

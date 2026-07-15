@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/static_object.hpp"
@@ -30,7 +31,6 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
@@ -104,11 +104,10 @@ get_config()
 std::string
 get_setting_name(std::string _v)
 {
-    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
-    auto _pos = _v.find(_prefix);
-    if(_pos == 0) return _v.substr(_prefix.length());
+    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
 
@@ -1367,7 +1366,7 @@ configure_settings(bool _init)
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
-    if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
+    if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
     get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
     auto _pos          = _exe.find_last_of('/');
@@ -1387,7 +1386,7 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& filename : tim::delimit(
+    for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         if(_config->get_suppress_config()) continue;
@@ -2180,13 +2179,6 @@ get_mode()
 }
 
 bool&
-is_attached()
-{
-    static bool _v = false;
-    return _v;
-}
-
-bool&
 is_binary_rewrite()
 {
     static bool _v = false;
@@ -2363,7 +2355,7 @@ get_use_vaapi_tracing()
         return false;  // Setting not found
     }
     std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        domain_list = tim::delimit(domains, " ,;:\t\n");
+    auto        domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
@@ -2484,7 +2476,7 @@ get_category_config()
         auto _avail = get_available_categories<strset_t>();
         auto _parse = [&_avail](const auto& _setting) {
             auto _ret = strset_t{};
-            for(auto itr : tim::delimit(
+            for(auto itr : rocprofsys::delimit(
                     static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
                     " ,;:\n\t"))
             {
@@ -3612,8 +3604,8 @@ get_causal_binary_scope()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_SCOPE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3621,16 +3613,16 @@ std::vector<std::string>
 get_causal_source_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_scope()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_SCOPE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
@@ -3639,8 +3631,8 @@ get_causal_binary_exclude()
     auto&&      _config = get_config();
     static auto _v      = _config->find(std::string{ env_vars::CAUSAL_BINARY_EXCLUDE });
     return format_causal_scopes(
-        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                     "\t\"';"),
+        rocprofsys::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                            "\t\"';"),
         _config->get_tag());
 }
 
@@ -3648,16 +3640,16 @@ std::vector<std::string>
 get_causal_source_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_SOURCE_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 
 std::vector<std::string>
 get_causal_function_exclude()
 {
     static auto _v = get_config()->find(std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE });
-    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-                        "\t\"';");
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "\t\"';");
 }
 }  // namespace config
 }  // namespace rocprofsys

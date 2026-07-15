@@ -273,3 +273,20 @@ jobs:
     uses: ./.github/workflows/hipfile-sanitizers.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+
+  # clang-tidy findings are compiler- and standard-independent, so run the
+  # analysis exactly once against a single fixed image rather than fanning out
+  # across the build matrix. Change the image key below to retarget the ROCm
+  # version (the combo must exist in Precheck's matrix).
+  clang_tidy:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-clang-tidy.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}

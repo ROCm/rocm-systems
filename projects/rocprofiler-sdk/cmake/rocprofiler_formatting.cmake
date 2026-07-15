@@ -146,30 +146,55 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
         endif()
     endforeach()
 
+    find_program(
+        ROCPROFILER_SH_EXE
+        NAMES sh
+        DOC "sh executable for parallel formatter invocation")
+    find_program(
+        ROCPROFILER_XARGS_EXE
+        NAMES xargs
+        DOC "xargs executable for parallel formatter invocation")
+
+    # For formatters without built-in parallelization, use xargs -P
+    function(rocprofiler_format_target _target _exe _comment)
+        if(ROCPROFILER_SH_EXE AND ROCPROFILER_XARGS_EXE)
+            add_custom_target(
+                ${_target}
+                COMMAND
+                    ${ROCPROFILER_SH_EXE} -c
+                    "printf '%s\\n' \"$@\" | ${ROCPROFILER_XARGS_EXE} -P 0 -n 1 \"$0\" -i"
+                    ${_exe} ${ARGN}
+                VERBATIM
+                COMMENT "${_comment}")
+        else()
+            add_custom_target(
+                ${_target}
+                COMMAND ${_exe} -i ${ARGN}
+                COMMENT "${_comment}")
+        endif()
+    endfunction()
+
     if(ROCPROFILER_CLANG_FORMAT_EXE)
-        add_custom_target(
-            format-rocprofiler-source
-            ${ROCPROFILER_CLANG_FORMAT_EXE} -i ${rocp_header_files} ${rocp_source_files}
-            COMMENT
-                "[rocprofiler] Running source formatter ${ROCPROFILER_CLANG_FORMAT_EXE}..."
-            )
+        rocprofiler_format_target(
+            format-rocprofiler-source "${ROCPROFILER_CLANG_FORMAT_EXE}"
+            "[rocprofiler] Running source formatter ${ROCPROFILER_CLANG_FORMAT_EXE}..."
+            ${rocp_header_files} ${rocp_source_files})
+    endif()
+
+    if(ROCPROFILER_CMAKE_FORMAT_EXE)
+        rocprofiler_format_target(
+            format-rocprofiler-cmake "${ROCPROFILER_CMAKE_FORMAT_EXE}"
+            "[rocprofiler] Running cmake formatter ${ROCPROFILER_CMAKE_FORMAT_EXE}..."
+            ${rocp_cmake_files})
     endif()
 
     if(ROCPROFILER_BLACK_FORMAT_EXE AND rocp_python_files)
+        # black already uses parallelization internally, so no macro is needed
         add_custom_target(
             format-rocprofiler-python
             ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
             COMMENT
                 "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
-            )
-    endif()
-
-    if(ROCPROFILER_CMAKE_FORMAT_EXE)
-        add_custom_target(
-            format-rocprofiler-cmake
-            ${ROCPROFILER_CMAKE_FORMAT_EXE} -i ${rocp_cmake_files}
-            COMMENT
-                "[rocprofiler] Running cmake formatter ${ROCPROFILER_CMAKE_FORMAT_EXE}..."
             )
     endif()
 
