@@ -201,14 +201,12 @@ class ResetCommands:
                             raise PermissionError("Command requires elevation") from e
                         result = f"[{e.get_error_info(detailed=False)}] Unable to reset GPU"
                         self.logger.store_output(args.gpu, "gpu_reset", result)
-                        # record-then-finalize: note this device's failure, keep going
                         self.helpers.error_collector.record_library_error(e.get_error_code())
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
                         return
                 else:
                     result = "Unable to reset non-amd GPU"
-                    # record-then-finalize: note this device's failure, keep going
                     self.helpers.error_collector.record(AmdSmiExitCode.DEVICE_NOT_FOUND)
                 self.logger.store_output(args.gpu, "gpu_reset", result)
                 self.logger.print_output()

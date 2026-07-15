@@ -957,7 +957,7 @@ class AMDSMIHelpers:
         if isinstance(args.gpu, list):
             if len(args.gpu) > 1:
                 for device_handle in args.gpu:
-                    # Record per-device failures and keep going; print all at once
+                    # Record per-device failures and keep going.
                     self.run_device_subcommand(subcommand, args, gpu=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.gpu
@@ -1111,7 +1111,7 @@ class AMDSMIHelpers:
         if isinstance(args.cpu, list):
             if len(args.cpu) > 1:
                 for device_handle in args.cpu:
-                    # Record per-device failures and keep going; print all at once
+                    # Record per-device failures and keep going.
                     self.run_device_subcommand(subcommand, args, cpu=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.cpu
@@ -1141,7 +1141,7 @@ class AMDSMIHelpers:
         if isinstance(args.core, list):
             if len(args.core) > 1:
                 for device_handle in args.core:
-                    # Record per-device failures and keep going; print all at once
+                    # Record per-device failures and keep going.
                     self.run_device_subcommand(subcommand, args, core=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.core
@@ -1474,10 +1474,8 @@ class AMDSMIHelpers:
     def get_accelerator_choices_types_indices(self):
         empty_profiles = {"profile_indices": [], "profile_types": []}
         if os.geteuid() != 0:
-            # Not root: the numeric profile INDEX values can't be enumerated, so
-            # offer the static partition TYPE names as the valid choices. The
-            # profiles stay empty, so each device is attempted individually and
-            # reports its own status instead of the command aborting up front.
+            # Not root: profile INDEX values need sudo to enumerate, so offer the
+            # static TYPE names. Profiles stay empty -> each device reports its own status.
             logging.debug(
                 "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, using static partition types"
             )
@@ -1493,9 +1491,8 @@ class AMDSMIHelpers:
                 + accelerator_partition_profiles["profile_indices"]
             )
             return (compute_partitions_list, accelerator_partition_profiles)
-        # Root, but the profiles couldn't be enumerated (e.g. a device that does
-        # not support accelerator partitions). Fall back to the static partition
-        # type names so `-C` still validates input (typos are rejected cleanly)
+        # Root, but profiles couldn't be enumerated (e.g. device without accelerator
+        # partitions). Fall back to static TYPE names so `-C` still validates input
         # and shows real choices in help.
         return (self.get_accelerator_partition_types(), accelerator_partition_profiles)
 
