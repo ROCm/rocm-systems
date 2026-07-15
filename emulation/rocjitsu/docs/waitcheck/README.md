@@ -63,7 +63,7 @@ Useful options:
 
 | Option | Meaning |
 | --- | --- |
-| `--target gfx950|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
+| `--target gfx942|gfx950|gfx1100|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
@@ -263,7 +263,8 @@ load. This timing lets an inner waitcheck layer inspect the replacement reader
 created by an outer DBT or DBI tool rather than checking only the original
 input.
 
-The current analyzer models gfx12 and gfx950 object-visible wait behavior including:
+The current analyzer models gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, and
+gfx12 object-visible wait behavior including:
 
 - split `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `samplecnt`, `bvhcnt`, and
   `expcnt` hazards;
@@ -275,9 +276,19 @@ The current analyzer models gfx12 and gfx950 object-visible wait behavior includ
 - DSDIR embedded `wait_vm_vsrc` and `wait_va_vdst` fields;
 - VINTERP embedded `wait_exp`;
 - gfx1250 `s_set_vgpr_msb` high-VGPR bank selection;
-- CFG joins, skipped paths, and loop-carried hazards.
+- CFG joins, skipped paths, and loop-carried hazards;
+- legacy CDNA3/CDNA4 VMcnt/LGKMcnt/EXPcnt waits and RDNA3's separate VScnt;
+- gfx1100 SOPK single-counter wait forms.
 
-Supported targets are `gfx950`, `gfx1200`, `gfx1201`, and `gfx1250`.
+Supported targets are `gfx942`, `gfx950`, `gfx1100`, `gfx1200`, `gfx1201`, and
+`gfx1250`.
+
+The `RjWaitcheck.LlvmKernel.*` tests compile the same ordinary HIP vector-add
+kernel with AMD Clang for gfx942 and gfx1100 and require both resulting code
+objects to scan clean. They also compile a deliberately wait-perturbed HIP
+kernel for each target and require waitcheck to diagnose the missing
+`s_waitcnt lgkmcnt(0)`. This keeps the cross-target validation on real
+LLVM-produced code objects rather than synthetic ELF fixtures.
 
 ## Limitations
 
@@ -298,8 +309,8 @@ Known boundaries:
 - Compiler-specific questions such as whether LLVM preserved, removed, or
   intentionally avoided a redundant wait are not modeled. Correct final waits
   are accepted; missing final waits are reported.
-- Targets outside gfx12/RDNA4 and gfx950/CDNA4 are out of scope for this
-  prototype.
+- Targets outside gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, and gfx12/RDNA4
+  are out of scope for this prototype.
 - Unsupported or undecodable code objects are analysis failures. For corpus
   measurement, use `--skip-unsupported`; for runtime enforcement, supported
   analysis failures fail only when `ROCJITSU_WAITCHECK_FAIL=1`.

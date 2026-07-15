@@ -332,7 +332,7 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
   }
 
   if (target_count == 0) {
-    error = "no supported gfx12 code objects found";
+    error = "no supported code objects found";
     selected.executable.reset();
     return selected;
   }
@@ -505,7 +505,7 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
   if (!found) {
     const std::string reason =
         options.target ? "no " + std::string(target_name(*options.target)) + " code objects found"
-                       : "no supported gfx12 code objects found";
+                       : "no supported code objects found";
     if (options.skip_unsupported) {
       skip_input(input_path, reason, totals, options.summary_only);
       return true;

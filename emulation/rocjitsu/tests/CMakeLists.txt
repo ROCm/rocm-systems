@@ -587,6 +587,34 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+if(HAS_DEVICE_KERNELS)
+    function(rj_add_waitcheck_llvm_kernel_test name target input expect_hazard)
+        add_test(
+            NAME "RjWaitcheck.LlvmKernel.${name}"
+            COMMAND
+                ${CMAKE_COMMAND} -DWAITCHECK=$<TARGET_FILE:rj_waitcheck>
+                -DINPUT=${KERNEL_OUTPUT_DIR}/${input} -DTARGET=${target}
+                -DEXPECT_HAZARD=${expect_hazard} -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_waitcheck_llvm_kernel.cmake
+        )
+    endfunction()
+
+    rj_add_waitcheck_llvm_kernel_test(Gfx942Clean gfx942 vector_add_gfx942.o OFF)
+    rj_add_waitcheck_llvm_kernel_test(
+        Gfx942PerturbedWait
+        gfx942
+        waitcheck_missing_wait_gfx942.o
+        ON
+    )
+    rj_add_waitcheck_llvm_kernel_test(Gfx1100Clean gfx1100 vector_add_gfx1100.o OFF)
+    rj_add_waitcheck_llvm_kernel_test(
+        Gfx1100PerturbedWait
+        gfx1100
+        waitcheck_missing_wait_gfx1100.o
+        ON
+    )
+endif()
+
 add_executable(rj_co_smoke_test tools/rj_co_smoke_test.cpp)
 target_link_libraries(rj_co_smoke_test PRIVATE GTest::gtest)
 rj_configure_target(rj_co_smoke_test TEST)
