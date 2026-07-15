@@ -321,8 +321,8 @@ get_forced_configures()
 std::vector<std::pair<std::string, uintptr_t>>
 get_link_map()
 {
-    // each entry pairs the library's path with its load bias (link_map::l_addr), so callers
-    // can compute a symbol's runtime address as (l_addr + st_value) without dlopen/dlsym
+    // each entry pairs the library path with its load bias (l_addr) so callers can compute a
+    // symbol's runtime address as (l_addr + st_value) without dlopen/dlsym
     auto  chain  = std::vector<std::pair<std::string, uintptr_t>>{};
     void* handle = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
 
@@ -344,13 +344,10 @@ get_link_map()
     return chain;
 }
 
-// Resolve the runtime address of an exported function WITHOUT dlopen/dlsym.
-// dlopen(RTLD_NOLOAD) on an already-mapped-but-not-yet-initialized library re-runs its
-// pending DT_INIT; when that init calls into libomp during OMPT bring-up it self-deadlocks
-// on libomp's non-recursive __kmp_initz_lock. Computing (load_bias + st_value) from the
-// already-parsed ELF symbol table touches no loader state. Returns nullptr (caller skips the
-// library, never falling back to dlopen) when the symbol is absent, undefined here, or not a
-// plain function definition (e.g. STT_GNU_IFUNC), for which the arithmetic would be invalid.
+// Resolve an exported function's runtime address as (load_bias + st_value) from the parsed ELF
+// symbol table, without dlopen/dlsym touching loader state (a dlopen here can re-run a pending
+// DT_INIT and deadlock; see find_clients). Returns nullptr, so the caller skips the library, when
+// the symbol is absent, undefined here, or not a plain function definition (e.g. STT_GNU_IFUNC).
 template <typename FuncT>
 FuncT
 resolve_symbol_no_dlopen(const common::elf_utils::ElfInfo& _elf,
@@ -629,21 +626,16 @@ find_clients()
     // libraries
     if(_default_configure)
     {
-        // Resolve the configure symbols via the ELF symbol table + load bias instead of
-        // dlopen/dlsym when reached through the OMPT entry point. libomp invokes ompt_start_tool
-        // while holding its non-recursive init lock; a dlopen here (even RTLD_NOLOAD) can re-run a
-        // pending DT_INIT of an already-mapped library and deadlock libomp. This path bypasses the
-        // library's DT_INIT_ARRAY (global C++ constructors), so it is only used on the OMPT path
-        // (where dlopen would otherwise deadlock) or when explicitly forced via
-        // ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN.
+        // resolve configure symbols from the ELF symbol table + load bias instead of dlopen/dlsym.
+        // a dlopen here (even RTLD_NOLOAD) can re-run a pending DT_INIT and deadlock, so this path
+        // is used on the OMPT path or when forced via ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN. it
+        // bypasses the library's DT_INIT_ARRAY (global C++ constructors).
         const bool avoid_dlopen =
             ompt_init_active() || common::get_env("ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN", false);
         ROCP_WARNING_IF(avoid_dlopen)
-            << "rocprofiler-sdk is discovering client tools via ELF symbol resolution (bypassing "
-               "dlopen) because it was invoked during OpenMP (OMPT) initialization (where dlopen "
-               "can deadlock) or ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN was set. Client libraries "
-               "whose rocprofiler_configure relies on global static initialization (DT_INIT_ARRAY) "
-               "may be affected.";
+            << "rocprofiler-sdk is discovering client tools via ELF symbol resolution instead of "
+               "dlopen. Client libraries whose rocprofiler_configure relies on global static "
+               "initialization (DT_INIT_ARRAY) may be affected.";
 
         for(const auto& [itr, load_bias] : get_link_map())
         {
