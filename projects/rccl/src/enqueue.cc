@@ -3610,11 +3610,17 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
-      struct ncclCudaGraph ceGraph;
-      NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
-      bool ceCapturing = ncclCudaGraphValid(ceGraph);
-      // Apply shared CE AllReduce graph-latch policy.
-      bool ceArGraphAllowed = rcclCeAllReduceGraphAllowed(comm, ceCapturing);
+      bool ceCapturing, ceArGraphAllowed;
+      if (info->ceGraphDecisionValid) {
+        // Already computed by ncclAllReduce_impl() for this call.
+        ceCapturing = info->ceCapturing;
+        ceArGraphAllowed = info->ceArGraphAllowed;
+      } else {
+        struct ncclCudaGraph ceGraph;
+        NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
+        ceCapturing = ncclCudaGraphValid(ceGraph);
+        ceArGraphAllowed = rcclCeAllReduceGraphAllowed(comm, ceCapturing);
+      }
 
       // Trigger CE initialization on the first CE-capable collective.
       // This covers collectives whose user buffers ARE registered (AllGather,

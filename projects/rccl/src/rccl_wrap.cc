@@ -601,10 +601,21 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 }
 
 bool rcclCeAllReduceGraphAllowed(struct ncclComm* comm, bool ceCapturing) {
-  if (ceCapturing && !comm->ceColl.graphModeSeen) {
-    INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
-    comm->ceColl.graphModeSeen = true;
+  if (ceCapturing) {
+    if (!comm->ceColl.graphModeSeen) {
+      INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
+      comm->ceColl.graphModeSeen = true;
+    }
+    // Stay latched while capturing, even if an unrelated older plan on this
+    // comm was just reclaimed: clearing here would wrongly re-enable CE
+    // mid-capture.
   } else if (comm->ceColl.graphModeSeen && comm->localPersistentRefs == 0) {
+    // Do not proactively drain comm->callbackQueue to freshen this check.
+    // localPersistentRefs is reclaimed via a per-rank async callback with no
+    // cross-rank sync, but all ranks must reach the same decision for the
+    // same call. The ambient once-every-few-group-ends cadence in group.cc
+    // gives every rank's reclaim equal time to complete first; checking more
+    // eagerly let ranks diverge and deadlock (confirmed experimentally).
     INFO(NCCL_COLL, "Re-enabling CE AllReduce; graph latch cleared (rank %d): no live captured plans", comm->rank);
     comm->ceColl.graphModeSeen = false;
   }
