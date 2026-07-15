@@ -63,7 +63,7 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
   
   CUDACHECK(cudaMemcpyAsync(
-        comm->ddaIpcScratch,
+        comm->ddaScratch,
         sendbuff,
         totalCount * sizeof(T),
         cudaMemcpyDeviceToDevice,
