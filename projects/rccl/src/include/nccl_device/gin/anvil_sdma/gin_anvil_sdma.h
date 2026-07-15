@@ -85,11 +85,11 @@ NCCL_DEVICE_INLINE int effectiveChannel(ncclGinAnvilSdmaGPUContext* rsCtx, int b
   return stride ? (baseCh + stride * (blockId / 64)) % numCh : baseCh;
 }
 
-NCCL_DEVICE_INLINE ::anvil::SdmaQueueDeviceHandle* queueHandle(
+NCCL_DEVICE_INLINE gin_anvil::sdma::SdmaQueueDeviceHandle* queueHandle(
     ncclGinAnvilSdmaGPUContext* rsCtx, int peer, int blockId) {
   int numCh = loadConst(&rsCtx->numChannels);
   int effCh = effectiveChannel(rsCtx, blockId);
-  auto** handles = (::anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+  auto** handles = (gin_anvil::sdma::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
   return loadConst(handles + peer * numCh + effCh);
 }
 
@@ -101,11 +101,11 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer,
 }
 
 NCCL_DEVICE_INLINE void fenceBeforeSignal(bool sdmaDataPath,
-                                          ::anvil::SdmaQueueDeviceHandle* handle,
+                                          gin_anvil::sdma::SdmaQueueDeviceHandle* handle,
                                           bool hasCounter) {
   if (hasCounter) {
     if (sdmaDataPath && handle != nullptr) {
-      ::anvil::quiet(*handle);
+      gin_anvil::sdma::quiet(*handle);
     } else {
       __threadfence_system();
     }
@@ -156,7 +156,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
     bool useIpcPut = hasWins && bytes <= threshold;
-    ::anvil::SdmaQueueDeviceHandle* handle = nullptr;
+    gin_anvil::sdma::SdmaQueueDeviceHandle* handle = nullptr;
     if (hasWins && !useIpcPut) {
       handle = queueHandle(rsCtx, peer, blockId);
       if (handle == nullptr) useIpcPut = true;
@@ -193,9 +193,9 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           }
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
           if (sdmaFusedSignal) {
-            ::anvil::putSignal(*handle, dstAddr, srcAddr, bytes, remoteSig);
+            gin_anvil::sdma::putSignal(*handle, dstAddr, srcAddr, bytes, remoteSig);
           } else {
-            ::anvil::put(*handle, dstAddr, srcAddr, bytes);
+            gin_anvil::sdma::put(*handle, dstAddr, srcAddr, bytes);
           }
           markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels),
                         effectiveChannel(rsCtx, blockId));
@@ -253,7 +253,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
     const size_t bytes = sizeof(T);
     bool useIpcPut = bytes <= threshold;
-    ::anvil::SdmaQueueDeviceHandle* handle = nullptr;
+    gin_anvil::sdma::SdmaQueueDeviceHandle* handle = nullptr;
     if (!useIpcPut) {
       handle = queueHandle(rsCtx, peer, blockId);
       if (handle == nullptr) useIpcPut = true;
@@ -285,9 +285,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
         }
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
         if (sdmaFusedSignal) {
-          ::anvil::putSignal(*handle, dstAddr, (void*)&tmp, bytes, remoteSig);
+          gin_anvil::sdma::putSignal(*handle, dstAddr, (void*)&tmp, bytes, remoteSig);
         } else {
-          ::anvil::put(*handle, dstAddr, (void*)&tmp, bytes);
+          gin_anvil::sdma::put(*handle, dstAddr, (void*)&tmp, bytes);
         }
         markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
       }
@@ -359,7 +359,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       dirty = __hip_atomic_load(sdmaDirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
     if (dirty != 0) {
-      auto** handles = (::anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+      auto** handles = (gin_anvil::sdma::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
       int nr = ctx.nRanks;
       int numCh = loadConst(&rsCtx->numChannels);
 #pragma unroll 1
@@ -370,7 +370,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           uint64_t bit = 1ULL << (p * numCh + ch);
           if ((dirty & bit) == 0) continue;
           auto* h = loadConst(handles + p * numCh + ch);
-          if (h != nullptr) ::anvil::quiet(*h);
+          if (h != nullptr) gin_anvil::sdma::quiet(*h);
         }
       }
       coop.sync();

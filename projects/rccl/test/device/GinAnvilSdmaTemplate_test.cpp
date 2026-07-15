@@ -38,8 +38,8 @@ struct TemplateHarness {
 static void uploadHarness(DeviceBuffer<TemplateHarness>* d_h, TemplateHarness* host,
                           DeviceBuffer<uint8_t>* d_src, DeviceBuffer<uint8_t>* d_dst,
                           DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
-                          DeviceBuffer<anvil::SdmaQueueDeviceHandle>* d_q,
-                          DeviceBuffer<anvil::SdmaQueueDeviceHandle*>* d_handleRow,
+                          DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle>* d_q,
+                          DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*>* d_handleRow,
                           int threshold) {
   std::memset(host, 0, sizeof(*host));
   host->ctx.layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
@@ -49,10 +49,10 @@ static void uploadHarness(DeviceBuffer<TemplateHarness>* d_h, TemplateHarness* h
   host->ctx.rank = 0;
   host->ctx.fusedSdmaSignal = 1;
 
-  anvil::SdmaQueueDeviceHandle stub{};
+  gin_anvil::sdma::SdmaQueueDeviceHandle stub{};
   stub.tag = 42;
   d_q->upload(stub);
-  anvil::SdmaQueueDeviceHandle* rowHost[2] = {d_q->ptr, d_q->ptr};
+  gin_anvil::sdma::SdmaQueueDeviceHandle* rowHost[2] = {d_q->ptr, d_q->ptr};
   d_handleRow->copyFrom(rowHost, 2);
   host->ctx.queueHandles = reinterpret_cast<void**>(d_handleRow->ptr);
 
@@ -86,8 +86,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_NonLeaderThreadNoOp) {
   DeviceBuffer<uint8_t> d_src(16);
   DeviceBuffer<uint8_t> d_dst(16);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
@@ -116,8 +116,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadScopeFence) {
   DeviceBuffer<uint8_t> d_src(8);
   DeviceBuffer<uint8_t> d_dst(8);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
@@ -146,8 +146,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SdmaPathSetsDirty) {
   DeviceBuffer<uint8_t> d_src(256);
   DeviceBuffer<uint8_t> d_dst(256);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   d_dirty.zero();
@@ -184,8 +184,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SdmaFallbackIpcCopy) {
   d_src.copyFrom(pat);
   d_dst.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
@@ -220,8 +220,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SignalAndCounterIpc) {
   d_counters.zero();
   d_signals.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
@@ -257,8 +257,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_FusedSdmaSignalPath) {
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<bool> d_fused(1);
   TemplateHarness host{};
@@ -289,8 +289,8 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaScalar) {
   DeviceBuffer<uint8_t> d_dst(8);
   d_dst.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 0);
@@ -312,8 +312,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_QuietDirtyQueue) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   uint64_t one = 1;
@@ -351,8 +351,8 @@ TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
   d_counters.zero();
   d_signals.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_outCtr(1);
   DeviceBuffer<uint64_t> d_outSig(1);
@@ -408,8 +408,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SdmaCounterFence) {
   DeviceBuffer<uint64_t> d_counters(1);
   d_counters.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
@@ -436,17 +436,17 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle> d_q(4);
-  DeviceBuffer<anvil::SdmaQueueDeviceHandle*> d_row(4);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle> d_q(4);
+  DeviceBuffer<gin_anvil::sdma::SdmaQueueDeviceHandle*> d_row(4);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   uint64_t mask = (1ULL << 0) | (1ULL << 1) | (1ULL << 2) | (1ULL << 3);
   d_dirty.copyFrom(&mask, 1);
 
-  anvil::SdmaQueueDeviceHandle stub{};
+  gin_anvil::sdma::SdmaQueueDeviceHandle stub{};
   stub.tag = 7;
   d_q.upload(stub);
-  anvil::SdmaQueueDeviceHandle* rowHost[4] = {d_q.ptr, d_q.ptr, d_q.ptr, d_q.ptr};
+  gin_anvil::sdma::SdmaQueueDeviceHandle* rowHost[4] = {d_q.ptr, d_q.ptr, d_q.ptr, d_q.ptr};
   d_row.copyFrom(rowHost, 4);
 
   TemplateHarness host{};
