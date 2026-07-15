@@ -7,8 +7,11 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+
 #include <spdlog/fmt/fmt.h>
 
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
@@ -19,6 +22,8 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 #if !defined(ROCPROFSYS_PATH_LOG_NAME)
 #    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -60,11 +65,7 @@
         fflush(stderr);                                                                  \
     }
 
-namespace rocprofsys
-{
-inline namespace common
-{
-namespace path
+namespace rocprofsys::inline common::path
 {
 inline std::vector<std::string>
 get_link_map(const char*, std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) },
@@ -82,16 +83,11 @@ get_origin(const std::string&,
 inline bool
 exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
-template <typename RetT = std::string>
-inline RetT
-get_default_lib_search_paths() ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
-
 inline std::string
 dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+basename(std::string_view _fname);
 
 inline std::string
 realpath(const std::string& _relpath,
@@ -103,8 +99,28 @@ is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 inline bool
 is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
+inline bool
+is_directory(const std::string& _path);
+
 inline std::string
 readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_cwd();
+
+inline int
+makedir(const std::string& _dir, int umask = 0777);
+
+template <typename... Args>
+inline bool
+open(std::ofstream& _ofs, std::string_view _fpath, Args&&... _args);
+
+template <typename... Args>
+inline bool
+open(std::ifstream& _ifs, std::string_view _fpath, Args&&... _args);
+
+inline std::FILE*
+fopen(std::string_view _fpath, const char* _mode);
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -172,71 +188,6 @@ exists(const std::string& _fname)
     return false;
 }
 
-template <typename RetT>
-RetT
-get_default_lib_search_paths()
-{
-    auto _paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
-                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
-                              get_env("PWD", ""));
-    if constexpr(std::is_same<RetT, std::string>::value)
-        return _paths;
-    else
-        return delimit(_paths, ":");
-}
-
-std::string
-find_path(const std::string& _path, int _verbose, const std::string& _search_paths)
-{
-    if(exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
-
-    auto _paths = delimit(_search_paths, ":");
-    if(_paths.empty())
-    {
-        _paths = get_default_lib_search_paths<std::vector<std::string>>();
-    }
-
-    constexpr int _verbose_lvl = 2;
-    for(const auto& itr : _paths)
-    {
-        auto _f = fmt::format("{}/{}", itr, _path);
-        ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
-                            "searching for '%s' in '%s' ...\n", _path.c_str(),
-                            itr.c_str());
-        if(exists(_f))
-        {
-            ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
-                                _path.c_str(), itr.c_str());
-            return _f;
-        }
-    }
-
-    for(const auto& itr : _paths)
-    {
-        if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
-               std::string_view::npos &&
-           !dirname(itr).empty())
-        {
-            for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
-            {
-                auto _f = fmt::format("{}/{}/{}", dirname(itr), sitr, _path);
-                ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
-                                    "searching for '%s' in '%s' ...\n", _path.c_str(),
-                                    fmt::format("{}/{}", itr, sitr).c_str());
-                if(exists(_f))
-                {
-                    ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
-                                        "found '%s' in '%s' ...\n", _path.c_str(),
-                                        itr.c_str());
-                    return _f;
-                }
-            }
-        }
-    }
-
-    return _path;
-}
-
 std::string
 dirname(const std::string& _fname)
 {
@@ -245,11 +196,30 @@ dirname(const std::string& _fname)
     return std::string{};
 }
 
+std::string
+basename(std::string_view _fname)
+{
+    // owning last path component; matches GNU ::basename semantics (the substring after
+    // the final '/'), without the aliasing/mutation hazard of glibc's char* return
+    auto _pos = _fname.find_last_of('/');
+    if(_pos == std::string_view::npos) return std::string{ _fname };
+    return std::string{ _fname.substr(_pos + 1) };
+}
+
 bool
 is_link(const std::string& _path)
 {
     struct stat _buffer;
     if(lstat(_path.c_str(), &_buffer) == 0) return (S_ISLNK(_buffer.st_mode) != 0);
+    return false;
+}
+
+bool
+is_directory(const std::string& _path)
+{
+    struct stat _buffer;
+    // stat (not lstat) so that a symlink to a directory is reported as a directory
+    if(stat(_path.c_str(), &_buffer) == 0) return (S_ISDIR(_buffer.st_mode) != 0);
     return false;
 }
 
@@ -279,6 +249,140 @@ readlink(const std::string& _path)
         return _buffer;
     }
     return _path;
+}
+
+std::string
+get_cwd()
+{
+    char _default_buffer[PATH_MAX];
+    _default_buffer[0] = '\0';
+
+    size_t _sz     = PATH_MAX;
+    char*  _buffer = _default_buffer;
+
+    auto _alloc_buffer = [&]() {
+        if(_buffer != _default_buffer) delete[] _buffer;
+        _sz *= 2;
+        _buffer    = new char[_sz];
+        _buffer[0] = '\0';
+    };
+
+    while(::getcwd(_buffer, _sz) == nullptr)
+    {
+        auto _err = errno;
+        if(_err == ERANGE)
+        {
+            _alloc_buffer();
+            continue;
+        }
+        else
+        {
+            ROCPROFSYS_PATH_LOG(1, "getcwd failed :: %s\n", strerror(_err));
+            if(_buffer != _default_buffer) delete[] _buffer;
+            return std::string{};
+        }
+    }
+
+    auto _v = std::string{ _buffer };
+    if(_buffer != _default_buffer) delete[] _buffer;
+    return _v;
+}
+
+int
+makedir(const std::string& _dir, int umask)
+{
+    if(_dir.empty()) return 0;
+
+    if(is_directory(_dir)) return 0;
+
+    auto _make_dir = [umask](std::string_view _v) {
+        int _err = 0;
+        int _ret = ::mkdir(_v.data(), umask);
+        if(_ret != 0) _err = errno;
+        return _err;
+    };
+
+    if(_make_dir(_dir) != 0)
+    {
+        std::string _base = (_dir.find('/') == 0) ? "" : get_cwd();
+        for(const auto& itr : rocprofsys::common::delimit(_dir, "/"))
+        {
+            if(itr == ".")
+            {
+                continue;
+            }
+            else if(itr == "..")
+            {
+                _base = dirname(_base);
+            }
+            else
+            {
+                _base += "/" + itr;
+                if(!is_directory(_base))
+                {
+                    auto _err = _make_dir(_base);
+                    // If two competing MPI ranks call makedir() on same dir
+                    // simultaneously, first rank creates dir, second gets EEXIST
+                    if(_err != 0 && _err != EEXIST)
+                    {
+                        ROCPROFSYS_PATH_LOG(1, "mkdir(\"%s\", %i) failed: %s\n",
+                                            _base.c_str(), umask, strerror(_err));
+                        return -1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+template <typename... Args>
+bool
+open(std::ofstream& _ofs, std::string_view _fpath, Args&&... _args)
+{
+    std::string _file{ _fpath };
+    auto        _dir  = dirname(_file);
+    auto        _base = basename(_file);
+
+    // no directory component -> open relative to the current directory
+    if(_dir.empty()) _file = "./" + _base;
+    // create the parent tree; on failure fall back to ./<base> in the current directory
+    else if(makedir(_dir) != 0)
+        _file = "./" + _base;
+
+    _ofs.open(_file, std::forward<Args>(_args)...);
+    return (_ofs && _ofs.is_open() && _ofs.good());
+}
+
+template <typename... Args>
+bool
+open(std::ifstream& _ifs, std::string_view _fpath, Args&&... _args)
+{
+    std::string _file{ _fpath };
+    auto        _dir  = dirname(_file);
+    auto        _base = basename(_file);
+
+    // input stream: never create directories; only normalize a bare filename
+    if(_dir.empty()) _file = "./" + _base;
+
+    _ifs.open(_file, std::forward<Args>(_args)...);
+    return (_ifs && _ifs.is_open() && _ifs.good());
+}
+
+std::FILE*
+fopen(std::string_view _fpath, const char* _mode)
+{
+    std::string _file{ _fpath };
+    auto        _dir  = dirname(_file);
+    auto        _base = basename(_file);
+
+    // no directory component -> open relative to the current directory
+    if(_dir.empty()) _file = "./" + _base;
+    // create the parent tree; on failure fall back to ./<base> in the current directory
+    else if(makedir(_dir) != 0)
+        _file = "./" + _base;
+
+    return std::fopen(_file.c_str(), _mode);
 }
 
 std::string
@@ -440,6 +544,4 @@ get_internal_libdir()
     return get_rocprofsys_root() + "/lib";
 }
 
-}  // namespace path
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common::path

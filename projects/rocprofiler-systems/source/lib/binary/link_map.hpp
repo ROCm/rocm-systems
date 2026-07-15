@@ -23,9 +23,9 @@ struct link_file
     : name{ _v }
     {}
 
-    std::string_view base() const;
-    std::string      real() const;
-    bool             operator<(const link_file&) const;
+    [[nodiscard]] std::string base() const;
+    [[nodiscard]] std::string real() const;
+    bool                      operator<(const link_file&) const;
 
     std::string name = {};
 };

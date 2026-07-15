@@ -8,6 +8,7 @@
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
@@ -698,7 +699,7 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(tim::filepath::open(_ofs, ofname))
+        if(common::path::open(_ofs, ofname))
         {
             if(_verbose >= 0)
                 operation::file_output_message<binary::symbol>{}(
@@ -810,8 +811,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             {
                 auto _location =
                     (_dl_info.location)
-                        ? filepath::realpath(std::string{ _dl_info.location.name },
-                                             nullptr, false)
+                        ? common::path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)
                 {

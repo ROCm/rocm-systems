@@ -7,6 +7,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
@@ -354,7 +355,7 @@ experiment::as_string() const
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
-        _ss << "[" << filepath::basename(selection.symbol.file) << ":"
+        _ss << "[" << common::path::basename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
 
     auto _patch = [](std::string _v) {
@@ -542,7 +543,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
         auto _fname = tim::settings::compose_output_filename(_fname_base, "json", _cfg);
         auto ofs    = std::ofstream{};
-        if(tim::filepath::open(ofs, _fname))
+        if(common::path::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
                 operation::file_output_message<experiment>{}(
@@ -576,7 +577,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
     std::ofstream ofs{};
     ofs.setf(std::ios::fixed);
-    if(tim::filepath::open(ofs, _fname))
+    if(common::path::open(ofs, _fname))
     {
         if(get_verbose() >= 0)
             operation::file_output_message<experiment>{}(
@@ -677,7 +678,7 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
 
     auto ifs   = std::ifstream{};
     auto _data = std::vector<experiment::record>{};
-    if(tim::filepath::open(ifs, _fname))
+    if(common::path::open(ifs, _fname))
     {
         auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 

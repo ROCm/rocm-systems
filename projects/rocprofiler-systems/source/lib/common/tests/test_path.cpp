@@ -1,15 +1,18 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/environment.hpp"
 #include "common/path.hpp"
 #include "filesystem.hpp"
 
+#include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 
+using namespace rocprofsys::common;
 using namespace rocprofsys::common::path;
 
 class PathTest : public ::testing::Test
@@ -251,6 +254,193 @@ TEST_F(PathTest, PathType_Nonexistent)
     path_type pt("/nonexistent/path");
     EXPECT_FALSE(pt.exists());
     EXPECT_FALSE(static_cast<bool>(pt));
+}
+
+TEST_F(PathTest, GetCwd_ReturnsNonEmpty) { EXPECT_FALSE(get_cwd().empty()); }
+
+TEST_F(PathTest, GetCwd_MatchesGetcwd)
+{
+    char  buffer[PATH_MAX];
+    char* result = ::getcwd(buffer, PATH_MAX);
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(get_cwd(), std::string{ buffer });
+}
+
+// NOTE: fully qualify path::basename so overload resolution does not prefer glibc's
+// global ::basename(const char*) for string-literal arguments.
+TEST_F(PathTest, Basename_StandardPath) { EXPECT_EQ(path::basename("/a/b.so"), "b.so"); }
+
+TEST_F(PathTest, Basename_NoSlash) { EXPECT_EQ(path::basename("a"), "a"); }
+
+TEST_F(PathTest, Basename_RootLevel) { EXPECT_EQ(path::basename("/a"), "a"); }
+
+TEST_F(PathTest, Basename_EmptyString) { EXPECT_EQ(path::basename(""), ""); }
+
+TEST_F(PathTest, Basename_OwningLifetime)
+{
+    // result must stay valid after the source string is destroyed.
+    std::string result;
+    {
+        std::string source = "/tmp/some/dir/libexample.so";
+        result             = path::basename(source);
+    }
+    EXPECT_EQ(result, "libexample.so");
+}
+
+TEST_F(PathTest, IsDirectory_Directory) { EXPECT_TRUE(is_directory(m_test_dir)); }
+
+TEST_F(PathTest, IsDirectory_RegularFile)
+{
+    std::string file_path = create_file("is_directory_file.txt");
+    EXPECT_FALSE(is_directory(file_path));
+}
+
+TEST_F(PathTest, IsDirectory_SymlinkToDirectory)
+{
+    std::string subdir    = create_subdir("is_directory_subdir");
+    std::string link_path = create_symlink(subdir, "is_directory_link");
+    EXPECT_TRUE(is_directory(link_path));
+}
+
+TEST_F(PathTest, IsDirectory_Missing)
+{
+    EXPECT_FALSE(is_directory(m_test_dir + "/nonexistent_dir"));
+}
+
+TEST_F(PathTest, Makedir_SingleLevel)
+{
+    std::string dir = m_test_dir + "/single";
+    EXPECT_EQ(makedir(dir), 0);
+    EXPECT_TRUE(is_directory(dir));
+}
+
+TEST_F(PathTest, Makedir_Nested)
+{
+    std::string dir = m_test_dir + "/a/b/c/d";
+    EXPECT_EQ(makedir(dir), 0);
+    EXPECT_TRUE(is_directory(dir));
+}
+
+TEST_F(PathTest, Makedir_IdempotentExisting)
+{
+    std::string dir = m_test_dir + "/idem";
+    EXPECT_EQ(makedir(dir), 0);
+    EXPECT_TRUE(is_directory(dir));
+    // second call on an already-existing directory must succeed (EEXIST tolerated)
+    EXPECT_EQ(makedir(dir), 0);
+    EXPECT_TRUE(is_directory(dir));
+}
+
+TEST_F(PathTest, Makedir_RelativePathResolvedViaCwd)
+{
+    char  cwd[PATH_MAX];
+    char* cwd_result = getcwd(cwd, PATH_MAX);
+    ASSERT_NE(cwd_result, nullptr);
+
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+    EXPECT_EQ(makedir("rel/sub"), 0);
+    EXPECT_TRUE(is_directory(m_test_dir + "/rel/sub"));
+    ASSERT_EQ(chdir(cwd), 0);
+}
+
+TEST_F(PathTest, Makedir_DotAndDotDotComponents)
+{
+    // '.' is skipped and '..' pops a component: x/./y/../z resolves to x/z
+    std::string dir = m_test_dir + "/x/./y/../z";
+    EXPECT_EQ(makedir(dir), 0);
+    EXPECT_TRUE(is_directory(m_test_dir + "/x/z"));
+}
+
+TEST_F(PathTest, Makedir_FailureReturnsNonZero)
+{
+    // a regular file as a parent component makes mkdir fail with ENOTDIR (not EEXIST),
+    // so makedir must return -1 — the load-bearing failure contract for the open/fopen
+    // shim
+    std::string blocker = create_file("blocker");
+    EXPECT_EQ(makedir(blocker + "/child"), -1);
+}
+
+TEST_F(PathTest, OpenOfstream_CreatesParentTreeAndOpens)
+{
+    std::string   file_path = m_test_dir + "/new/nested/tree/out.txt";
+    std::ofstream ofs;
+    EXPECT_TRUE(open(ofs, file_path));
+    EXPECT_TRUE(ofs.is_open());
+    ofs << "hello";
+    ofs.close();
+    EXPECT_TRUE(is_directory(m_test_dir + "/new/nested/tree"));
+    EXPECT_TRUE(exists(file_path));
+}
+
+TEST_F(PathTest, OpenOfstream_ForwardsBinaryFlag)
+{
+    std::string   file_path = m_test_dir + "/bin/data.bin";
+    std::ofstream ofs;
+    EXPECT_TRUE(open(ofs, file_path, std::ios::out | std::ios::binary));
+    EXPECT_TRUE(ofs.is_open());
+    char payload[] = { 'A', '\0', 'B' };
+    ofs.write(payload, sizeof(payload));
+    ofs.close();
+    // a binary write of 3 bytes (incl. an embedded NUL) must land verbatim
+    std::ifstream ifs(file_path, std::ios::in | std::ios::binary);
+    ASSERT_TRUE(ifs.is_open());
+    char readback[sizeof(payload)] = {};
+    ifs.read(readback, sizeof(readback));
+    EXPECT_EQ(ifs.gcount(), static_cast<std::streamsize>(sizeof(payload)));
+    EXPECT_EQ(std::string(readback, sizeof(readback)),
+              std::string(payload, sizeof(payload)));
+}
+
+TEST_F(PathTest, OpenOfstream_FallsBackWhenParentUncreatable)
+{
+    // a regular file as an intermediate parent component makes makedir fail with ENOTDIR
+    // (a deeper level than the file, so it is not tolerated as EEXIST); the ofstream shim
+    // must fall back to ./<base> in the current directory and still open successfully
+    std::string blocker = create_file("open_blocker");
+
+    char  cwd[PATH_MAX];
+    char* cwd_result = getcwd(cwd, PATH_MAX);
+    ASSERT_NE(cwd_result, nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    std::ofstream ofs;
+    EXPECT_TRUE(open(ofs, blocker + "/sub/fallback.txt"));
+    EXPECT_TRUE(ofs.is_open());
+    ofs.close();
+    // the fallback file is ./fallback.txt (i.e. <cwd>/fallback.txt)
+    EXPECT_TRUE(exists(m_test_dir + "/fallback.txt"));
+
+    ASSERT_EQ(chdir(cwd), 0);
+}
+
+TEST_F(PathTest, OpenIfstream_OpensExistingNoDirCreation)
+{
+    std::string   file_path = create_file("readme.txt", "content");
+    std::ifstream ifs;
+    EXPECT_TRUE(open(ifs, file_path));
+    EXPECT_TRUE(ifs.is_open());
+    ifs.close();
+}
+
+TEST_F(PathTest, OpenIfstream_MissingFileReturnsFalse)
+{
+    std::string   file_path = m_test_dir + "/does/not/exist.txt";
+    std::ifstream ifs;
+    EXPECT_FALSE(open(ifs, file_path));
+    EXPECT_FALSE(ifs.is_open());
+    // must NOT have created the directory tree
+    EXPECT_FALSE(is_directory(m_test_dir + "/does"));
+}
+
+TEST_F(PathTest, Fopen_CreatesParentTreeAndReturnsHandle)
+{
+    std::string file_path = m_test_dir + "/fnew/nested/data.txt";
+    std::FILE*  fp        = fopen(file_path, "w");
+    ASSERT_NE(fp, nullptr);
+    std::fputs("hello", fp);
+    std::fclose(fp);
+    EXPECT_TRUE(is_directory(m_test_dir + "/fnew/nested"));
+    EXPECT_TRUE(exists(file_path));
 }
 
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmpty)

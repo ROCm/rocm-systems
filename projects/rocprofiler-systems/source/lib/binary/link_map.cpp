@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "link_map.hpp"
+#include "common/path.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
-
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
@@ -49,7 +48,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return common::path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -120,7 +119,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        LOG_DEBUG("[linkmap][{}]: {}", filepath::basename(_name), itr.real());
+        LOG_DEBUG("[linkmap][{}]: {}", common::path::basename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
@@ -146,16 +145,16 @@ link_file::operator<(const link_file& _rhs) const
     return (_lhs_real < _rhs_real);
 }
 
-std::string_view
+std::string
 link_file::base() const
 {
-    return std::string_view{ filepath::basename(name) };
+    return common::path::basename(name);
 }
 
 std::string
 link_file::real() const
 {
-    return filepath::realpath(name, nullptr, false);
+    return common::path::realpath(name);
 }
 }  // namespace binary
 }  // namespace rocprofsys

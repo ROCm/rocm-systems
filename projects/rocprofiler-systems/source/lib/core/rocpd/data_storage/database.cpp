@@ -3,6 +3,7 @@
 
 #include "database.hpp"
 #include "common/md5sum.hpp"
+#include "common/path.hpp"
 #include "node_info.hpp"
 #include <cstdint>
 
@@ -12,7 +13,6 @@
 #include <regex>
 #include <string>
 #include <timemory/environment/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <unistd.h>
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
@@ -59,10 +59,10 @@ namespace
 void
 create_directory_for_database_file(const std::string& db_file)
 {
-    auto _db_dirname = tim::filepath::dirname(db_file);
-    if(!tim::filepath::direxists(_db_dirname))
+    auto _db_dirname = rocprofsys::common::path::dirname(db_file);
+    if(!rocprofsys::common::path::is_directory(_db_dirname))
     {
-        tim::filepath::makedir(_db_dirname);
+        rocprofsys::common::path::makedir(_db_dirname);
     }
 }
 

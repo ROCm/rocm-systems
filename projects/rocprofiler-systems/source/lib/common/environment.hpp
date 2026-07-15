@@ -4,11 +4,11 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
-
-#include <timemory/utility/filepath.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,6 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -470,7 +469,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::exists(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -588,7 +587,7 @@ discover_torch_libpath(const std::string& python_binary)
 
     std::string torch_libdir = result + "/lib";
 
-    if(!::tim::filepath::direxists(torch_libdir))
+    if(!path::is_directory(torch_libdir))
     {
         LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};
@@ -867,6 +866,86 @@ consolidate_env_entries(std::vector<std::string>& envp)
     }
 
     envp = std::move(result);
+}
+
+/// @brief Get the default library search-path list from the environment.
+/// @tparam RetT Return type: @c std::string or a container.
+/// @return The default search paths as @p RetT.
+template <typename RetT = std::string>
+inline RetT
+get_default_lib_search_paths()
+{
+    auto paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                              get_env("PWD", ""));
+    if constexpr(std::is_same<RetT, std::string>::value)
+        return paths;
+    else
+        return delimit(paths, ":");
+}
+
+/// @brief Locate @p filepath by searching a set of directories.
+///        Returns @p filepath unchanged when it is an existing absolute path; otherwise
+///        searches each directory in @p search_paths (falling back to
+///        @ref get_default_lib_search_paths when empty), also probing lib/lib64 subdirs.
+/// @param filepath     Relative or absolute path/name to locate.
+/// @param verbose      Verbosity level controlling search logging.
+/// @param search_paths Colon-delimited directories to search; empty → environment
+/// defaults.
+/// @return The first existing path found, or @p filepath when nothing matched.
+inline std::string
+find_path(const std::string& filepath, int verbose, const std::string& search_paths = {})
+{
+    if(path::exists(filepath) && !filepath.empty() && filepath.at(0) == '/')
+    {
+        return filepath;
+    }
+
+    auto paths = delimit(search_paths, ":");
+    if(paths.empty())
+    {
+        paths = get_default_lib_search_paths<std::vector<std::string>>();
+    }
+
+    constexpr int verbose_lvl = 2;
+    for(const auto& itr : paths)
+    {
+        auto candidate = fmt::format("{}/{}", itr, filepath);
+        ROCPROFSYS_PATH_LOG(verbose >= verbose_lvl + 1,
+                            "searching for '%s' in '%s' ...\n", filepath.c_str(),
+                            itr.c_str());
+        if(path::exists(candidate))
+        {
+            ROCPROFSYS_PATH_LOG(verbose >= verbose_lvl, "found '%s' in '%s' ...\n",
+                                filepath.c_str(), itr.c_str());
+            return candidate;
+        }
+    }
+
+    for(const auto& itr : paths)
+    {
+        if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
+               std::string_view::npos &&
+           !path::dirname(itr).empty())
+        {
+            for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
+            {
+                auto candidate = fmt::format("{}/{}/{}", path::dirname(itr), sitr, filepath);
+                ROCPROFSYS_PATH_LOG(verbose >= verbose_lvl + 1,
+                                    "searching for '%s' in '%s' ...\n", filepath.c_str(),
+                                    fmt::format("{}/{}", itr, sitr).c_str());
+                if(path::exists(candidate))
+                {
+                    ROCPROFSYS_PATH_LOG(verbose >= verbose_lvl,
+                                        "found '%s' in '%s' ...\n", filepath.c_str(),
+                                        itr.c_str());
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    return filepath;
 }
 
 }  // namespace common

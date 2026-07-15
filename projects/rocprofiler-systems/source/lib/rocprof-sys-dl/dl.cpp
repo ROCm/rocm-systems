@@ -24,7 +24,6 @@
 #include "rocprofiler-systems/types.h"
 
 #include <spdlog/fmt/fmt.h>
-#include <timemory/utility/filepath.hpp>
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -197,17 +196,17 @@ const char* _rocprofsys_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for rocprof-sys's instrumentation functions
 struct ROCPROFSYS_INTERNAL_API indirect
 {
-    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
-                               const std::string& _dllib)
-    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose) }
-    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose) }
+    ROCPROFSYS_INLINE indirect(const std::string& _rocprofsyslib,
+                               const std::string& _userlib, const std::string& _dllib)
+    : m_omnilib{ common::find_path(_rocprofsyslib, _rocprofsys_dl_verbose) }
+    , m_dllib{ common::find_path(_dllib, _rocprofsys_dl_verbose) }
+    , m_userlib{ common::find_path(_userlib, _rocprofsys_dl_verbose) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
             ROCPROFSYS_COMMON_LIBRARY_LOG_START
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_omnilib.c_str()), m_omnilib.c_str());
+                    ::basename(_rocprofsyslib.c_str()), m_omnilib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     ::basename(_dllib.c_str()), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
@@ -215,9 +214,9 @@ struct ROCPROFSYS_INTERNAL_API indirect
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
-        auto _search_paths = fmt::format("{}:{}", common::path::dirname(_omnilib),
+        auto _search_paths = fmt::format("{}:{}", common::path::dirname(_rocprofsyslib),
                                          common::path::dirname(_dllib));
-        common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
+        common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _rocprofsyslib, _dllib);
 
         m_omnihandle = open(m_omnilib);
         m_userhandle = open(m_userlib);
@@ -1240,7 +1239,9 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::ProcessCreate:
         {
             if(_exe.empty())
-                _exe = tim::filepath::readlink(fmt::format("/proc/{}/exe", getpid()));
+            {
+                _exe = common::path::readlink(fmt::format("/proc/{}/exe", getpid()));
+            }
 
             rocprofsys_init_tooling();
             if(_exe.empty())

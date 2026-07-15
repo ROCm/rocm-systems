@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/path.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -12,7 +13,6 @@
 #include "module_function.hpp"
 
 #include <spdlog/fmt/ranges.h>
-#include <timemory/utility/filepath.hpp>
 
 #include <dlfcn.h>
 #include <string>
@@ -136,7 +136,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
 
     if(_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!rocprofsys::common::path::exists(std::string{ _cmd }))
         {
             verbprintf(
                 0,

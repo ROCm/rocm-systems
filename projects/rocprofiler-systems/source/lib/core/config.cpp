@@ -7,6 +7,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -31,7 +32,6 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -1368,7 +1368,7 @@ configure_settings(bool _init)
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
     if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
-    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    get_exe_realpath() = common::path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
@@ -1396,7 +1396,8 @@ configure_settings(bool _init)
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
         // includes '~/.rocprofiler-systems.json' that can be missing
-        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+        if(expanded_filename.ends_with(".json") &&
+           common::path::exists(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
             throw std::runtime_error(
@@ -2127,8 +2128,7 @@ get_exe_realpath()
 {
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
-        if(!_cmd_line.empty())
-            return filepath::realpath(_cmd_line.front(), nullptr, false);
+        if(!_cmd_line.empty()) return common::path::realpath(_cmd_line.front());
         return std::string{};
     }();
     return _v;
@@ -3003,9 +3003,9 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
+        if(!path.empty() && !common::path::is_directory(path))
         {
-            tim::filepath::makedir(path);
+            common::path::makedir(path);
         }
         return path;
     };
@@ -3058,7 +3058,7 @@ get_ump_absolute_path()
         (get_use_rocpd() && !get_caching_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
-    return tim::filepath::dirname(source);
+    return common::path::dirname(source);
 }
 
 bool&
@@ -3287,11 +3287,11 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
+    if(!common::path::exists(filename))
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
+        common::path::open(_ofs, filename);
     }
 }
 
@@ -3328,7 +3328,7 @@ tmp_file::fopen(const char* _mode)
     touch();
 
     m_pid = getpid();
-    file  = filepath::fopen(filename, _mode);
+    file  = common::path::fopen(filename, _mode);
     if(file) fd = ::fileno(file);
 
     return (file != nullptr && fd > 0);
@@ -3412,7 +3412,7 @@ tmp_file::remove()
     if(m_pid != getpid()) return false;
 
     close();
-    if(filepath::exists(filename))
+    if(common::path::exists(filename))
     {
         LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());

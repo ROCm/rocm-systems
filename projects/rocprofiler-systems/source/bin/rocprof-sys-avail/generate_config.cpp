@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
+#include "common/path.hpp"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/fmt/fmt.h>
@@ -22,7 +23,6 @@
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/archives/xml.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>
@@ -31,9 +31,8 @@
 #include <sstream>
 #include <string>
 
-namespace cereal   = ::tim::cereal;
-namespace filepath = ::tim::filepath;
-using settings     = ::tim::settings;
+namespace cereal = ::tim::cereal;
+using settings   = ::tim::settings;
 using ::tim::tsettings;
 using ::tim::type_list;
 using ::tim::policy::output_archive;
@@ -272,7 +271,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
         }
 
-        if(filepath::open(_ofs, _fname))
+        if(rocprofsys::common::path::open(_ofs, _fname))
         {
             if(settings::verbose() >= 0)
                 printf("[rocprof-sys-avail] Outputting %s configuration file '%s'...\n",

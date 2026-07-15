@@ -3,22 +3,16 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
-#include <fstream>
-#include <ios>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
-#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -62,34 +56,32 @@
         fflush(stderr);                                                                  \
     }
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 inline std::vector<env_config<>>
 get_environ(int _verbose, std::string _search_paths = {},
-            std::string _omnilib    = "librocprof-sys.so",
-            std::string _omnilib_dl = "librocprof-sys-dl.so")
+            std::string _rocproflib    = "librocprof-sys.so",
+            std::string _rocproflib_dl = "librocprof-sys-dl.so")
 {
-    auto _data            = std::vector<env_config<>>{};
-    auto _omnilib_path    = path::get_origin(_omnilib);
-    auto _omnilib_dl_path = path::get_origin(_omnilib_dl);
+    auto _data               = std::vector<env_config<>>{};
+    auto _rocproflib_path    = path::get_origin(_rocproflib);
+    auto _rocproflib_dl_path = path::get_origin(_rocproflib_dl);
 
-    if(!_omnilib_path.empty())
+    if(!_rocproflib_path.empty())
     {
-        _omnilib      = fmt::format("{}/{}", _omnilib_path, ::basename(_omnilib.c_str()));
-        _search_paths = fmt::format("{}:{}", _omnilib_path, _search_paths);
+        _rocproflib      = fmt::format("{}/{}", _rocproflib_path, ::basename(_rocproflib.c_str()));
+        _search_paths = fmt::format("{}:{}", _rocproflib_path, _search_paths);
     }
 
-    if(!_omnilib_dl_path.empty())
+    if(!_rocproflib_dl_path.empty())
     {
-        _omnilib_dl =
-            fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
-        _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
+        _rocproflib_dl =
+            fmt::format("{}/{}", _rocproflib_dl_path, path::basename(_rocproflib_dl.c_str()));
+        _search_paths = fmt::format("{}:{}", _rocproflib_dl_path, _search_paths);
     }
 
-    _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
-    _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
+    _rocproflib    = common::find_path(_rocproflib, _verbose, _search_paths);
+    _rocproflib_dl = common::find_path(_rocproflib_dl, _verbose, _search_paths);
 
     return _data;
 }
@@ -104,5 +96,4 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     for(const auto& itr : _data)
         itr();
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common
