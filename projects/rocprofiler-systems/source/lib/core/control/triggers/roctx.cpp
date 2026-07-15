@@ -42,7 +42,7 @@ roctx::initial_vote() const noexcept
 }
 
 void
-roctx::on_range_start(uint64_t range_id, const char* message)
+roctx::on_range_start(std::uint64_t range_id, const char* message)
 {
     if(message == nullptr || m_trace_regions.count(message) == 0) return;
 
@@ -61,7 +61,7 @@ roctx::on_range_start(uint64_t range_id, const char* message)
 }
 
 void
-roctx::on_range_stop(uint64_t range_id)
+roctx::on_range_stop(std::uint64_t range_id)
 {
     bool now_empty = false;
     {

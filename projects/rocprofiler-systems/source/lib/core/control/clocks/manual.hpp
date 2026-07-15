@@ -64,7 +64,7 @@ public:
     }
 
 private:
-    std::atomic<int64_t>    m_now_ns;
+    std::atomic<std::int64_t>    m_now_ns;
     std::mutex              m_mutex;
     std::condition_variable m_cv;
     bool                    m_interrupted{ false };

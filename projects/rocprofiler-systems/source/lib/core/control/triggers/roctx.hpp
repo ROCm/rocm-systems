@@ -29,8 +29,8 @@ public:
     [[nodiscard]] std::string_view name() const noexcept override { return "roctx"; }
     [[nodiscard]] vote             initial_vote() const noexcept override;
 
-    void on_range_start(uint64_t range_id, const char* message);
-    void on_range_stop(uint64_t range_id);
+    void on_range_start(std::uint64_t range_id, const char* message);
+    void on_range_stop(std::uint64_t range_id);
     void on_pause();
     void on_resume();
 
@@ -46,7 +46,7 @@ public:
 private:
     session&                           m_session;
     std::set<std::string, std::less<>> m_trace_regions;
-    std::unordered_set<uint64_t>       m_active_range_ids;
+    std::unordered_set<std::uint64_t>       m_active_range_ids;
     std::atomic<bool>                  m_in_region{ false };
     std::atomic<bool>                  m_user_paused{ false };
     std::atomic<bool>                  m_should_write{ true };
