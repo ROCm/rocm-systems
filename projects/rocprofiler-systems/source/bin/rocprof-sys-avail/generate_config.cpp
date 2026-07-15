@@ -6,10 +6,13 @@
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/json_config.hpp"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -55,10 +58,10 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
     if(!category_view.empty())
     {
         bool _found = false;
-        for(auto& itr : _v->get_categories())
+        for(auto& category : _v->get_categories())
         {
-            if(category_view.count(itr) > 0 ||
-               category_view.count(TIMEMORY_JOIN("::", "settings", itr)) > 0)
+            if(category_view.count(category) > 0 ||
+               category_view.count(fmt::format("settings::{}", category)) > 0)
             {
                 _found = true;
                 break;
@@ -187,7 +190,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     _config_file   = settings::format(_config_file, _settings->get_tag());
     bool _absolute = _config_file.at(0) == '/';
-    auto _dirs     = tim::delimit(_config_file, "/\\/");
+    auto _dirs     = rocprofsys::delimit(_config_file, "/\\/");
     _config_file   = _dirs.back();
     _dirs.pop_back();
 
@@ -196,8 +199,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     {
         _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());
-        for(const auto& itr : _dirs)
-            _output_dir = TIMEMORY_JOIN('/', _output_dir, itr);
+        for(const auto& dir : _dirs)
+        {
+            _output_dir += '/' + dir;
+        }
     }
     _output_dir += "/";
 
@@ -260,7 +265,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                           << "' exists. Overwrite? " << std::flush;
                 std::string _response = {};
                 std::cin >> _response;
-                if(!tim::get_bool(_response, false)) std::exit(EXIT_FAILURE);
+                if(!rocprofsys::to_bool(_response, false))
+                {
+                    std::exit(EXIT_FAILURE);
+                }
             }
         }
 
@@ -273,7 +281,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         else
         {
             throw std::runtime_error(
-                TIMEMORY_JOIN(" ", "Error opening", _type, "output file:", _fname));
+                fmt::format("Error opening {} output file: {}", _type, _fname));
         }
         return _ofs;
     };
@@ -399,7 +407,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(_options[DESC] || fmt_opts.all_info)
             {
                 _ss << "# description:\n";
-                auto              _desc = tim::delimit(itr->get_description(), " \n");
+                auto _desc = rocprofsys::delimit(itr->get_description(), " \n");
                 std::stringstream _line{};
                 _line << "#   ";
                 auto _write = [&_line, &_ss, _w](std::string_view _str) {

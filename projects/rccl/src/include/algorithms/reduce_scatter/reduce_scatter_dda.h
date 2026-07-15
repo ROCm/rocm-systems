@@ -38,7 +38,8 @@ __global__ void ddaReduceScatterIpc(
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
   reduceScatter<T, NRANKS, hasAcc>(
-      ipcbuffs, recvbuff, nullptr, selfRank, idxStart, idxEnd, idxStride, 0);
+      ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride,
+      0);
 
   barrier.syncOnSameBlockIdx<
       true /* hasPreviousMemAccess */,
