@@ -38,7 +38,11 @@ from amdisa.isa_profile import (
     Rdna4Profile,
 )
 from amdisa.parser import Parser
-from amdisa.semantics import InstructionSemantics, derive_all_semantics
+from amdisa.semantics import (
+    InstructionSemantics,
+    derive_all_semantics,
+    derive_semantics,
+)
 
 
 def _repo_root() -> Path:
@@ -386,6 +390,24 @@ def test_readlane_family_uses_source_vgpr_operand_type():
 
     assert codegen._constructor_operand_type(sem, src0) == 'OPR_SRC_VGPR'
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_VGPR'
+
+
+def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        operand_types=[
+            'OPR_SRC_NOLIT',
+            'OPR_SRC_SIMPLE',
+            'OPR_SRC_VGPR_OR_ACCVGPR',
+        ]
+    )
+    sem = derive_semantics('V_PK_MOV_B32', 'ENC_VOP3P')
+    assert sem is not None
+    src0 = Operand('src0', 64, 'OPR_SRC_NOLIT', True, False, False, True, 1)
+    src1 = Operand('src1', 64, 'OPR_SRC_SIMPLE', True, False, False, True, 2)
+
+    assert codegen._constructor_operand_type(sem, src0) == 'OPR_SRC_NOLIT'
+    assert codegen._constructor_operand_type(sem, src1) == 'OPR_SRC_SIMPLE'
 
 
 def test_readlane_family_decodes_lane_selector_as_scalar_value():

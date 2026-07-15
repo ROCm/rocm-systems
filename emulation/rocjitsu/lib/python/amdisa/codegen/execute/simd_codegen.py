@@ -1243,8 +1243,9 @@ SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
     'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
 }
 
-# v_pk_mov_b32 — default-packing-only fast path. Each src is a 64-bit pair
-# (consecutive VGPRs), result is (src0_lo, src1_hi). Functorless / fixed-op.
+# v_pk_mov_b32 — each src is a 64-bit SGPR or VGPR pair. op_sel[0] selects the
+# low output dword from src0 and op_sel[1] selects the high output dword from
+# src1. The fast path is limited to the assembler's default op_sel_hi value.
 SIMD_VOP3P_MOV_B32: set[str] = {
     'v_pk_mov_b32_vop3p',
 }
