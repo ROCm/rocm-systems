@@ -290,7 +290,7 @@ TEST_F(CeInternalMPITest, GraphThenEagerAllReduceDoesNotHang)
               ncclSuccess) << "ncclSymBufAlloc for recvBuf failed";
     ASSERT_EQ(hipSuccess, ceFillRankScalarFloat(sendSym.ptr, kElem, rank));
 
-    const float expectedSum = static_cast<float>(nRanks * (nRanks - 1) / 2); // sum(0..nRanks-1)
+    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2); // sum(1..nRanks)
 
     hipGraph_t graph = nullptr;
     hipGraphExec_t graphExec = nullptr;
