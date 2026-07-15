@@ -7,13 +7,15 @@
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
 #include "rocjitsu/code/dbt/translation_rule.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <array>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -21,14 +23,20 @@
 namespace rocjitsu {
 namespace {
 
-/// @brief Build an RDNA VOP3 instruction word pair.
-/// @details This helper is intentionally narrow: the v_lshl_add_u64 lowering
-/// only needs the VOP3 form used by v_add_co_u32/v_add_co_ci_u32 on RDNA3/4.
-[[nodiscard]] constexpr std::pair<uint32_t, uint32_t>
-build_rdna_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t src2 = 0) {
-  const uint32_t w0 = (vdst & 0xFFu) | ((op & 0x3FFu) << 16) | (0x35u << 26);
-  const uint32_t w1 = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18);
-  return {w0, w1};
+/// @brief Build the explicit-SDST VOP3 form used by the carry chain.
+/// @details RDNA3 and RDNA4 currently share the layout, but selecting the
+/// generated builder by host ISA prevents a future XML change from silently
+/// encoding one target with the other target's format.
+[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3_sdst(rj_code_arch_t host_arch, uint16_t op,
+                                                           uint8_t vdst, uint8_t sdst,
+                                                           uint16_t src0, uint16_t src1 = 0,
+                                                           uint16_t src2 = 0) {
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    return rdna3::build_vop3_sdst_enc(
+        op, {.vdst = vdst, .sdst = sdst, .src0 = src0, .src1 = src1, .src2 = src2});
+  }
+  return rdna4::build_vop3_sdst_enc(
+      op, {.vdst = vdst, .sdst = sdst, .src0 = src0, .src1 = src1, .src2 = src2});
 }
 
 ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
@@ -72,8 +80,8 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
   // v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes VCC as carry-in.
   {
-    auto [w0, w1] = build_rdna_vop3(add_co_u32_op, static_cast<uint8_t>(vdst), src0, src2);
-    w0 |= (kVccLo << 8); // sdst = vcc_lo
+    auto [w0, w1] = build_rdna_vop3_sdst(host_arch, add_co_u32_op, static_cast<uint8_t>(vdst),
+                                         kVccLo, src0, src2);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -82,13 +90,12 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   // GFX11 handles this pair through hardware scoreboarding, and SOPP opcode 8
   // is not s_wait_alu there, so only emit it for RDNA4.
   if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
-    words.push_back(pack_sopp(rdna4::kSWaitAlu, 0xFFFD));
+    words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xFFFD})[0]);
 
   {
-    auto [w0, w1] =
-        build_rdna_vop3(add_co_ci_u32_op, static_cast<uint8_t>(vdst + 1),
-                        static_cast<uint16_t>(src0 + 1), static_cast<uint16_t>(src2 + 1), kVccLo);
-    w0 |= (kVccLo << 8); // sdst = vcc_lo
+    auto [w0, w1] = build_rdna_vop3_sdst(
+        host_arch, add_co_ci_u32_op, static_cast<uint8_t>(vdst + 1), kVccLo,
+        static_cast<uint16_t>(src0 + 1), static_cast<uint16_t>(src2 + 1), kVccLo);
     words.push_back(w0);
     words.push_back(w1);
   }
