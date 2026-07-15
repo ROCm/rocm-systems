@@ -153,7 +153,13 @@
         {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
         {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
-        {"name": "AllReduce.ROCTX", "description": "AllReduce with ROCTX logging (dedicated test)", "test_filter": "AllReduce.ROCTX"}
+        {"name": "AllReduce.ROCTX", "description": "AllReduce with ROCTX logging (dedicated test)", "test_filter": "AllReduce.ROCTX"},
+        {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
+        {"name": "DoneEventOrdering.PostReinitStreamAlternation", "description": "DoneEventOrdering post-reinit stream alternation", "test_filter": "DoneEventOrdering.PostReinitStreamAlternation", "timeout": 240},
+        {"name": "DoneEventOrdering.SameStreamBaseline", "description": "DoneEventOrdering same stream baseline", "test_filter": "DoneEventOrdering.SameStreamBaseline", "timeout": 240},
+        {"name": "DoneEventOrdering.GroupedPathBaseline", "description": "DoneEventOrdering grouped path baseline", "test_filter": "DoneEventOrdering.GroupedPathBaseline", "timeout": 240},
+        {"name": "DoneEventOrdering.DefaultStreamToNamedStream", "description": "DoneEventOrdering default to named stream", "test_filter": "DoneEventOrdering.DefaultStreamToNamedStream", "timeout": 240},
+        {"name": "DoneEventOrdering.SameStreamThenSwitch", "description": "DoneEventOrdering same stream then switch", "test_filter": "DoneEventOrdering.SameStreamThenSwitch", "timeout": 240}
       ]
     },
     "unit_tests_fixtures": {
