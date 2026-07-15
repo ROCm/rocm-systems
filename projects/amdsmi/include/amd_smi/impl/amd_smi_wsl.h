@@ -65,12 +65,19 @@ namespace amd::smi {
 
 /// Cached, mostly-static information for a single HIP-visible GPU on WSL2.
 struct WslGpuInfo {
-  int hip_index = -1;                  //!< HIP device ordinal (hipSetDevice index)
-  std::string market_name;             //!< e.g. "AMD Radeon(TM) 8060S Graphics"
-  std::string bdf_string;              //!< "domain:bus:device.function" from HIP
-  amdsmi_bdf_t bdf = {};               //!< parsed BDF (0 fields if unknown)
-  uint64_t device_id = 0;              //!< PCI device id if readable, else 0
-  uint32_t num_compute_units = 0;      //!< CU count from HIP, 0 if unknown
+  int hip_index = -1;              //!< HIP device ordinal (hipSetDevice index)
+  std::string market_name;         //!< e.g. "AMD Radeon(TM) 8060S Graphics"
+  std::string bdf_string;          //!< "domain:bus:device.function" from HIP
+  amdsmi_bdf_t bdf = {};           //!< parsed BDF (0 fields if unknown)
+  uint64_t device_id = 0;          //!< PCI device id if readable, else 0
+  uint32_t num_compute_units = 0;  //!< CU count from HIP, 0 if unknown
+};
+
+/// Live HIP memory values in bytes, before conversion to the MB-based public
+/// amdsmi_vram_usage_t structure.
+struct WslVramUsageBytes {
+  uint64_t total = 0;
+  uint64_t used = 0;
 };
 
 /// Returns true if the current process is running inside WSL2.
@@ -97,6 +104,13 @@ amdsmi_status_t wsl_fill_vram_info(const WslGpuInfo& gpu, amdsmi_vram_info_t* in
 /// Fill an amdsmi_vram_usage_t for a WSL2 device. Performs a live hipMemGetInfo
 /// query (total/used change at runtime).
 amdsmi_status_t wsl_fill_vram_usage(const WslGpuInfo& gpu, amdsmi_vram_usage_t* info);
+
+/// Query live total/used VRAM in bytes without the precision loss of the
+/// MB-based amdsmi_vram_usage_t structure.
+amdsmi_status_t wsl_get_vram_usage_bytes(const WslGpuInfo& gpu, WslVramUsageBytes* usage);
+
+/// Generate the deterministic WSL2 UUID from the HIP-visible device identity.
+amdsmi_status_t wsl_generate_device_uuid(const WslGpuInfo& gpu, char* uuid);
 
 }  // namespace amd::smi
 

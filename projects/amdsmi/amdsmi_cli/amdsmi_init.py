@@ -23,11 +23,10 @@
 
 import atexit
 import logging
+import os
 import signal
 import sys
-import os
 import threading
-
 from pathlib import Path
 
 current_path = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +35,7 @@ sys.path.insert(0, python_lib_path)
 # Prioritize the library from this installation over any pip-installed version
 
 try:
-    from amdsmi import amdsmi_interface, amdsmi_exception
+    from amdsmi import amdsmi_exception, amdsmi_interface
 except ImportError as e:
     print(f"Unhandled import error: {e}")
     print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
@@ -88,6 +87,7 @@ def check_wsl2_gpu():
     Detection mirrors the library's is_wsl2_environment(): a Microsoft/WSL
     kernel marker AND /dev/dxg present AND /dev/kfd absent.
     """
+    # Keep in sync with amd::smi::is_wsl2_environment().
     try:
         proc_version = Path("/proc/version").read_text(encoding="ascii", errors="ignore").lower()
     except OSError:

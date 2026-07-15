@@ -89,8 +89,8 @@ class AMDSmiSystem {
   amdsmi_status_t populate_brcm_switch_devices();
   uint64_t init_flag_;
   AMDSmiDrm drm_;
-  // True when GPUs were enumerated through the WSL2 HIP fallback (rsmi was never
-  // initialized), so cleanup() must skip rsmi_shut_down(). See amd_smi_wsl.h.
+  // True when GPUs were enumerated through the WSL2 HIP fallback after rsmi_init()
+  // failed, so cleanup() ignores the best-effort rsmi_shut_down() status.
   bool gpu_wsl_mode_ = false;
   smi_nic_ctx_t ainic_ctx_;
   std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;

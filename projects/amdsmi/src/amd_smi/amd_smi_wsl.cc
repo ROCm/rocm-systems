@@ -37,6 +37,8 @@
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_lib_loader.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
+#include "amd_smi/impl/amd_smi_uuid.h"
 
 // When amdsmi happens to be compiled in a HIP-aware environment (a HIP platform
 // macro is predefined AND the runtime headers are reachable) pull in the HIP
@@ -44,10 +46,10 @@
 // time. In the normal amdsmi build (plain g++, no HIP headers on the include
 // path) neither guard holds, nothing is included, and the build is unaffected.
 #if defined(__HIP_PLATFORM_AMD__) && defined(__has_include)
-#  if __has_include(<hip/hip_runtime_api.h>)
-#    include <hip/hip_runtime_api.h>
-#    define AMDSMI_WSL_HIP_HEADERS_AVAILABLE 1
-#  endif
+#if __has_include(<hip/hip_runtime_api.h>)
+#include <hip/hip_runtime_api.h>
+#define AMDSMI_WSL_HIP_HEADERS_AVAILABLE 1
+#endif
 #endif
 
 namespace amd::smi {
@@ -105,7 +107,10 @@ HipRuntime& hip_runtime() {
   std::call_once(once, [&]() {
     // Prefer the unversioned dev symlink, then common SONAME versions.
     const char* candidates[] = {
-        "libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.6", "libamdhip64.so.5",
+        "libamdhip64.so",
+        "libamdhip64.so.7",
+        "libamdhip64.so.6",
+        "libamdhip64.so.5",
     };
     bool loaded = false;
     for (const char* name : candidates) {
@@ -154,15 +159,18 @@ void set_fixed_string(char* dst, size_t cap, const std::string& src) {
 class ScopedHipDevice {
  public:
   ScopedHipDevice(const HipRuntime& hip, int target) : hip_(hip) {
-    if (hip_.GetDevice != nullptr && hip_.GetDevice(&prev_) == kHipSuccess) {
-      have_prev_ = true;
-    }
+    have_prev_ = hip_.GetDevice != nullptr && hip_.GetDevice(&prev_) == kHipSuccess;
     if (hip_.SetDevice != nullptr && hip_.SetDevice(target) == kHipSuccess) {
       set_ok_ = true;
+      if (!have_prev_) {
+        // HIP defaults a thread without a current context to device 0.
+        prev_ = 0;
+        have_prev_ = true;
+      }
     }
   }
   ~ScopedHipDevice() {
-    if (have_prev_ && hip_.SetDevice != nullptr) {
+    if (set_ok_ && have_prev_ && hip_.SetDevice != nullptr) {
       hip_.SetDevice(prev_);
     }
   }
@@ -178,6 +186,29 @@ class ScopedHipDevice {
   bool set_ok_ = false;
 };
 
+amdsmi_status_t get_vram_usage_bytes(const HipRuntime& hip, int hip_index,
+                                     WslVramUsageBytes* usage) {
+  if (usage == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  *usage = {};
+  if (!hip.available) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  ScopedHipDevice dev_guard(hip, hip_index);
+  if (!dev_guard.set_ok()) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+  size_t free_bytes = 0;
+  size_t total_bytes = 0;
+  if (hip.MemGetInfo == nullptr || hip.MemGetInfo(&free_bytes, &total_bytes) != kHipSuccess) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+  usage->total = static_cast<uint64_t>(total_bytes);
+  usage->used = total_bytes >= free_bytes ? static_cast<uint64_t>(total_bytes - free_bytes) : 0;
+  return AMDSMI_STATUS_SUCCESS;
+}
 
 // Parse a HIP "domain:bus:device.function" string (e.g. "0000:c5:00.0") into an
 // amdsmi_bdf_t. Returns false if the string is not in the expected form.
@@ -304,8 +335,7 @@ amdsmi_status_t wsl_discover_gpus(std::vector<WslGpuInfo>* out) {
     // Compute-unit count via the ABI-stable attribute query (best effort).
     if (hip.DeviceGetAttribute != nullptr) {
       int cu = 0;
-      if (hip.DeviceGetAttribute(&cu, kHipDeviceAttributeMultiprocessorCount, i) ==
-              kHipSuccess &&
+      if (hip.DeviceGetAttribute(&cu, kHipDeviceAttributeMultiprocessorCount, i) == kHipSuccess &&
           cu > 0) {
         gpu.num_compute_units = static_cast<uint32_t>(cu);
       }
@@ -381,22 +411,13 @@ amdsmi_status_t wsl_fill_vram_info(const WslGpuInfo& gpu, amdsmi_vram_info_t* in
   info->vram_bit_width = std::numeric_limits<uint32_t>::max();
   info->vram_max_bandwidth = std::numeric_limits<uint64_t>::max();
 
-  // VRAM size is queried live (instead of being cached during enumeration) so
-  // that merely listing devices does not create a HIP context on every GPU.
-  HipRuntime& hip = hip_runtime();
-  if (!hip.available) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  ScopedHipDevice dev_guard(hip, gpu.hip_index);
-  if (!dev_guard.set_ok()) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-  size_t free_bytes = 0, total_bytes = 0;
-  if (hip.MemGetInfo(&free_bytes, &total_bytes) != kHipSuccess) {
-    return AMDSMI_STATUS_API_FAILED;
+  WslVramUsageBytes usage;
+  amdsmi_status_t status = wsl_get_vram_usage_bytes(gpu, &usage);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
   // hipMemGetInfo reports bytes; amdsmi_vram_info_t.vram_size is in MB.
-  info->vram_size = total_bytes / (1024ULL * 1024ULL);
+  info->vram_size = usage.total / (1024ULL * 1024ULL);
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -406,22 +427,52 @@ amdsmi_status_t wsl_fill_vram_usage(const WslGpuInfo& gpu, amdsmi_vram_usage_t* 
   }
   *info = {};
 
-  HipRuntime& hip = hip_runtime();
-  if (!hip.available) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+  WslVramUsageBytes usage;
+  amdsmi_status_t status = wsl_get_vram_usage_bytes(gpu, &usage);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
-  ScopedHipDevice dev_guard(hip, gpu.hip_index);
-  if (!dev_guard.set_ok()) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-  size_t free_bytes = 0, total_bytes = 0;
-  if (hip.MemGetInfo(&free_bytes, &total_bytes) != kHipSuccess) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-  const uint64_t used_bytes = (total_bytes >= free_bytes) ? (total_bytes - free_bytes) : 0;
-  info->vram_total = static_cast<uint32_t>(total_bytes / (1024ULL * 1024ULL));
-  info->vram_used = static_cast<uint32_t>(used_bytes / (1024ULL * 1024ULL));
+  info->vram_total = static_cast<uint32_t>(usage.total / (1024ULL * 1024ULL));
+  info->vram_used = static_cast<uint32_t>(usage.used / (1024ULL * 1024ULL));
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t wsl_get_vram_usage_bytes(const WslGpuInfo& gpu, WslVramUsageBytes* usage) {
+  return get_vram_usage_bytes(hip_runtime(), gpu.hip_index, usage);
+}
+
+amdsmi_status_t wsl_generate_device_uuid(const WslGpuInfo& gpu, char* uuid) {
+  if (uuid == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  const uint16_t device_id = gpu.device_id != 0 ? static_cast<uint16_t>(gpu.device_id & 0xFFFF)
+                                                : std::numeric_limits<uint16_t>::max();
+  const uint64_t serial = (static_cast<uint64_t>(gpu.bdf.bdf.domain_number) << 24) |
+                          (static_cast<uint64_t>(gpu.bdf.bdf.bus_number) << 16) |
+                          (static_cast<uint64_t>(gpu.bdf.bdf.device_number) << 8) |
+                          static_cast<uint64_t>(gpu.bdf.bdf.function_number);
+  return amdsmi_uuid_gen(uuid, serial, device_id, /*idx=*/0xff);
+}
+
+bool amdsmi_test_wsl_scoped_device(amdsmi_test_hip_get_device_fn get_device,
+                                   amdsmi_test_hip_set_device_fn set_device, int target) {
+  HipRuntime hip;
+  hip.GetDevice = get_device;
+  hip.SetDevice = set_device;
+  ScopedHipDevice device_guard(hip, target);
+  return device_guard.set_ok();
+}
+
+amdsmi_status_t amdsmi_test_wsl_get_vram_usage_bytes(amdsmi_test_hip_get_device_fn get_device,
+                                                     amdsmi_test_hip_set_device_fn set_device,
+                                                     amdsmi_test_hip_mem_get_info_fn mem_get_info,
+                                                     int target, WslVramUsageBytes* usage) {
+  HipRuntime hip;
+  hip.available = true;
+  hip.GetDevice = get_device;
+  hip.SetDevice = set_device;
+  hip.MemGetInfo = mem_get_info;
+  return get_vram_usage_bytes(hip, target, usage);
 }
 
 }  // namespace amd::smi

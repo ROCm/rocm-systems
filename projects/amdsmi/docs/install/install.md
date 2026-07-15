@@ -16,6 +16,7 @@ AMD SMI supports:
 
 - {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
 - AMD GPUs in Linux virtual machine guests
+- AMD GPUs exposed through the HIP runtime on Windows Subsystem for Linux 2 (WSL2)
 - AMD EPYC™ CPUs through the [esmi_ib_library](https://github.com/amd/esmi_ib_library)
 
 For AMD SMI on Linux SR-IOV hosts, refer to
@@ -33,7 +34,8 @@ requirements.
 (install_amdgpu_driver)=
 ### Driver requirements
 
-To run AMD SMI, the following components need to be installed on your system:
+For Linux systems using the native `amdgpu`/KFD driver stack, install the applicable components
+below:
 
 - The `amdgpu-dkms` driver
   - For current amdgpu driver installation instructions, see the [AMD GPU
@@ -61,6 +63,38 @@ To run AMD SMI, the following components need to be installed on your system:
 
 Also confirm that your Linux kernel version matches the system requirements
 described in {ref}`Operating system support <rocm:release-supported-os>`.
+
+#### WSL2 requirements and capabilities
+
+On WSL2, the GPU is exposed through the DirectX paravirtual device (`/dev/dxg`) instead of the
+native Linux `amdgpu` and KFD interfaces. Do not install `amdgpu-dkms` inside the WSL2
+distribution. Install a compatible Windows AMD GPU driver and a ROCm distribution that provides
+the HIP runtime library (`libamdhip64.so`) inside WSL2.
+
+AMD SMI automatically uses its HIP runtime fallback when all these conditions are true:
+
+- The Linux kernel version identifies the environment as Microsoft WSL.
+- `/dev/dxg` is present.
+- `/dev/kfd` is absent.
+- The HIP runtime reports at least one GPU.
+
+The WSL2 backend provides the subset of AMD SMI data for which WSL2 and the HIP runtime expose a
+source:
+
+| Capability | WSL2 support |
+| --- | --- |
+| GPU initialization and enumeration | Supported |
+| Device name, vendor, BDF, and UUID | Supported; PCI device ID is reported when available |
+| ASIC and board information | Partially supported; unavailable fields report `N/A` |
+| VRAM total and usage | Supported through `hipMemGetInfo` |
+| Separate GTT accounting | Not supported |
+| Per-process GPU accounting | Not available; process queries return an empty list |
+| Power, temperature, fan, activity, and clock telemetry | Not supported |
+| ECC/RAS, XGMI, partitioning, and management controls | Not supported |
+
+Unsupported queries return `AMDSMI_STATUS_NOT_SUPPORTED` or the corresponding documented
+unavailable value. The WSL2 fallback does not change behavior on systems where `/dev/kfd` is
+present.
 
 ### Interface prerequisites
 

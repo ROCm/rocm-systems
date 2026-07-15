@@ -23,6 +23,8 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
 
+#include <cstddef>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
 
@@ -30,5 +32,26 @@
 // for |seconds| seconds and returns an amdsmi_status_t so tests do not need to
 // extern-declare the rsmi_status_t function directly.
 amdsmi_status_t amdsmi_test_sleep(amdsmi_processor_handle processor_handle, uint32_t seconds);
+
+namespace amd::smi {
+
+struct WslVramUsageBytes;
+
+using amdsmi_test_hip_get_device_fn = int (*)(int*);
+using amdsmi_test_hip_set_device_fn = int (*)(int);
+using amdsmi_test_hip_mem_get_info_fn = int (*)(size_t*, size_t*);
+
+// Exercises the WSL2 HIP device guard with injected HIP functions so tests can
+// verify device restoration without requiring a HIP runtime or GPU.
+bool amdsmi_test_wsl_scoped_device(amdsmi_test_hip_get_device_fn get_device,
+                                   amdsmi_test_hip_set_device_fn set_device, int target);
+
+// Exercises the exact-byte WSL2 memory query with injected HIP functions.
+amdsmi_status_t amdsmi_test_wsl_get_vram_usage_bytes(amdsmi_test_hip_get_device_fn get_device,
+                                                     amdsmi_test_hip_set_device_fn set_device,
+                                                     amdsmi_test_hip_mem_get_info_fn mem_get_info,
+                                                     int target, WslVramUsageBytes* usage);
+
+}  // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_

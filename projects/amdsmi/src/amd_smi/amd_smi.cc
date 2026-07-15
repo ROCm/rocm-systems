@@ -1305,15 +1305,7 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
     amd::smi::AMDSmiGPUDevice* wsl_device = nullptr;
     if (get_gpu_device_from_handle(processor_handle, &wsl_device) == AMDSMI_STATUS_SUCCESS &&
         wsl_device->is_wsl()) {
-      const auto& w = wsl_device->get_wsl_info();
-      uint16_t wsl_dev_id = (w.device_id != 0) ? static_cast<uint16_t>(w.device_id & 0xFFFF)
-                                               : std::numeric_limits<uint16_t>::max();
-      // Pack domain:bus:device.function into the serial so each GPU is distinct.
-      uint64_t wsl_serial = (static_cast<uint64_t>(w.bdf.bdf.domain_number) << 24) |
-                            (static_cast<uint64_t>(w.bdf.bdf.bus_number) << 16) |
-                            (static_cast<uint64_t>(w.bdf.bdf.device_number) << 8) |
-                            (static_cast<uint64_t>(w.bdf.bdf.function_number));
-      return amdsmi_uuid_gen(uuid, wsl_serial, wsl_dev_id, /*partition=*/0xff);
+      return amd::smi::wsl_generate_device_uuid(wsl_device->get_wsl_info(), uuid);
     }
   }
 
@@ -4405,54 +4397,52 @@ amdsmi_status_t amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle pro
   return rsmi_wrapper(rsmi_dev_memory_reserved_pages_get, processor_handle, 0, num_pages,
                       reinterpret_cast<rsmi_retired_page_record_t*>(records));
 }
+
+enum class WslMemoryValue { kTotal, kUsed };
+
+static bool get_wsl_gpu_memory_value(amdsmi_processor_handle processor_handle,
+                                     amdsmi_memory_type_t mem_type, WslMemoryValue requested_value,
+                                     uint64_t* value, amdsmi_status_t* status) {
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  if (get_gpu_device_from_handle(processor_handle, &gpu_device) != AMDSMI_STATUS_SUCCESS ||
+      !gpu_device->is_wsl()) {
+    return false;
+  }
+
+  if (value == nullptr) {
+    *status = AMDSMI_STATUS_INVAL;
+    return true;
+  }
+  // HIP only exposes the device VRAM pool on WSL2; there is no separate GTT accounting.
+  if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM) {
+    *status = AMDSMI_STATUS_NOT_SUPPORTED;
+    return true;
+  }
+
+  amd::smi::WslVramUsageBytes usage;
+  *status = amd::smi::wsl_get_vram_usage_bytes(gpu_device->get_wsl_info(), &usage);
+  if (*status != AMDSMI_STATUS_SUCCESS) {
+    return true;
+  }
+  *value = requested_value == WslMemoryValue::kTotal ? usage.total : usage.used;
+  return true;
+}
+
 amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle,
                                             amdsmi_memory_type_t mem_type, uint64_t* total) {
-  {
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS &&
-        gpu_device->is_wsl()) {
-      if (total == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-      }
-      // HIP (hipMemGetInfo) only exposes the device VRAM pool on WSL2; there is
-      // no separate GTT accounting, so honor the requested type explicitly.
-      if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-      }
-      amdsmi_vram_usage_t vu{};
-      amdsmi_status_t wr = amd::smi::wsl_fill_vram_usage(gpu_device->get_wsl_info(), &vu);
-      if (wr != AMDSMI_STATUS_SUCCESS) {
-        return wr;
-      }
-      *total = static_cast<uint64_t>(vu.vram_total) * 1024ULL * 1024ULL;
-      return AMDSMI_STATUS_SUCCESS;
-    }
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  if (get_wsl_gpu_memory_value(processor_handle, mem_type, WslMemoryValue::kTotal, total,
+                               &status)) {
+    return status;
   }
   return rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), total);
 }
 amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle,
                                             amdsmi_memory_type_t mem_type, uint64_t* used) {
-  {
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS &&
-        gpu_device->is_wsl()) {
-      if (used == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-      }
-      // HIP (hipMemGetInfo) only exposes the device VRAM pool on WSL2; there is
-      // no separate GTT accounting, so honor the requested type explicitly.
-      if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-      }
-      amdsmi_vram_usage_t vu{};
-      amdsmi_status_t wr = amd::smi::wsl_fill_vram_usage(gpu_device->get_wsl_info(), &vu);
-      if (wr != AMDSMI_STATUS_SUCCESS) {
-        return wr;
-      }
-      *used = static_cast<uint64_t>(vu.vram_used) * 1024ULL * 1024ULL;
-      return AMDSMI_STATUS_SUCCESS;
-    }
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  if (get_wsl_gpu_memory_value(processor_handle, mem_type, WslMemoryValue::kUsed, used, &status)) {
+    return status;
   }
   return rsmi_wrapper(rsmi_dev_memory_usage_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), used);

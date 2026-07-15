@@ -31,6 +31,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <tuple>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #ifdef BRCM_NIC
@@ -754,14 +755,12 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
       sockets_.clear();
     }
     drm_.cleanup();
-    // On the WSL2 HIP fallback path rsmi_init() was never successfully called
-    // (the amdgpu/KFD driver is absent), so calling rsmi_shut_down() here would
-    // return an init error. Skip it in that case.
-    if (!gpu_wsl_mode_) {
-      rsmi_status_t ret = rsmi_shut_down();
-      if (ret != RSMI_STATUS_SUCCESS) {
-        return amd::smi::rsmi_to_amdsmi_status(ret);
-      }
+    // A failed rsmi_init() can still leave partial state. Clean it up on the
+    // WSL2 fallback path, but ignore the expected not-initialized status.
+    if (gpu_wsl_mode_) {
+      std::ignore = rsmi_shut_down();
+    } else if (auto rsmi_status_code = rsmi_shut_down(); rsmi_status_code != RSMI_STATUS_SUCCESS) {
+      return amd::smi::rsmi_to_amdsmi_status(rsmi_status_code);
     }
     gpu_wsl_mode_ = false;
   }

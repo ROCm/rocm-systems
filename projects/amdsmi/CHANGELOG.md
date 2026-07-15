@@ -8,6 +8,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added AMD GPU support on WSL2 through the HIP runtime**. AMD SMI can initialize and
+  enumerate GPUs exposed through `/dev/dxg` when the native `amdgpu`/KFD interfaces are
+  unavailable. Identity, board, VRAM, UUID, BDF, and enumeration information is available where
+  the HIP runtime provides a data source. Hardware telemetry and management features without a
+  WSL2 data source continue to report `AMDSMI_STATUS_NOT_SUPPORTED`.
+
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
   - `amdsmi_get_nic_processor_handles()` enumerates NIC processors by socket; the BDF, firmware, and port/vendor statistics getters are reserved and currently return `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`.
