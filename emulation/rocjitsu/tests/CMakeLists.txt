@@ -92,7 +92,11 @@ if(RJ_INSTALL_TESTS)
     # writes plain CMake code because the file is consumed later by
     # `ctest --test-dir <installed tests dir>`.
     function(rj_install_ctest name)
-        set(oneValueArgs TIMEOUT SKIP_REGULAR_EXPRESSION)
+        set(oneValueArgs
+            TIMEOUT
+            SKIP_REGULAR_EXPRESSION
+            PASS_REGULAR_EXPRESSION
+        )
         set(multiValueArgs COMMAND ENVIRONMENT LABELS)
         cmake_parse_arguments(
             ARG
@@ -119,6 +123,12 @@ if(RJ_INSTALL_TESTS)
             string(
                 APPEND _props
                 " \"SKIP_REGULAR_EXPRESSION\" [=[${ARG_SKIP_REGULAR_EXPRESSION}]=]"
+            )
+        endif()
+        if(ARG_PASS_REGULAR_EXPRESSION)
+            string(
+                APPEND _props
+                " \"PASS_REGULAR_EXPRESSION\" [=[${ARG_PASS_REGULAR_EXPRESSION}]=]"
             )
         endif()
         if(ARG_LABELS)
@@ -225,7 +235,13 @@ endfunction()
 # INSTALL_ENVIRONMENT adds to the default installed test environment, which
 # points installed tests at packaged configs, kernels, binaries, and runtimes.
 function(rj_add_test)
-    set(oneValueArgs NAME WORKING_DIRECTORY TIMEOUT SKIP_REGULAR_EXPRESSION)
+    set(oneValueArgs
+        NAME
+        WORKING_DIRECTORY
+        TIMEOUT
+        SKIP_REGULAR_EXPRESSION
+        PASS_REGULAR_EXPRESSION
+    )
     set(multiValueArgs
         COMMAND
         ENVIRONMENT
@@ -267,6 +283,12 @@ function(rj_add_test)
             PROPERTIES SKIP_REGULAR_EXPRESSION "${ARG_SKIP_REGULAR_EXPRESSION}"
         )
     endif()
+    if(ARG_PASS_REGULAR_EXPRESSION)
+        set_tests_properties(
+            "${ARG_NAME}"
+            PROPERTIES PASS_REGULAR_EXPRESSION "${ARG_PASS_REGULAR_EXPRESSION}"
+        )
+    endif()
     if(ARG_LABELS)
         list(JOIN ARG_LABELS ";" _labels)
         set_tests_properties("${ARG_NAME}" PROPERTIES LABELS "${_labels}")
@@ -286,6 +308,13 @@ function(rj_add_test)
                 APPEND _install_args
                 SKIP_REGULAR_EXPRESSION
                 "${ARG_SKIP_REGULAR_EXPRESSION}"
+            )
+        endif()
+        if(ARG_PASS_REGULAR_EXPRESSION)
+            list(
+                APPEND _install_args
+                PASS_REGULAR_EXPRESSION
+                "${ARG_PASS_REGULAR_EXPRESSION}"
             )
         endif()
         if(ARG_LABELS)
@@ -593,6 +622,25 @@ get_filename_component(
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
+add_dependencies(rocjitsu_bin rocjitsu_hooks)
+add_test(
+    NAME "RocjitsuLauncher.PreservesHsaToolsList"
+    COMMAND
+        ${RJ_CLI} --config
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_launcher_hsa_tools.cmake
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(
+    "RocjitsuLauncher.PreservesHsaToolsList"
+    PROPERTIES
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=first-analysis-tool second-analysis-tool;RJ_EXPECTED_HSA_TOOLS_PREFIX=first-analysis-tool second-analysis-tool;RJ_EXPECTED_APPENDED_HSA_TOOL=$<TARGET_FILE:rocjitsu_hooks>"
+        PASS_REGULAR_EXPRESSION
+            "rocjitsu launcher preserved and ordered HSA tools"
+)
+
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)
     foreach(
@@ -805,6 +853,26 @@ target_link_libraries(
 )
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
+
+add_executable(waitcheck_hooks_unit_test tools/waitcheck_hooks_unit_test.cpp)
+target_include_directories(
+    waitcheck_hooks_unit_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+)
+target_include_directories(
+    waitcheck_hooks_unit_test
+    SYSTEM
+    PRIVATE ${HSA_INCLUDE_DIR}
+)
+target_link_libraries(
+    waitcheck_hooks_unit_test
+    PRIVATE rocjitsu_waitcheck_hooks GTest::gtest_main
+)
+rj_configure_target(waitcheck_hooks_unit_test TEST)
+gtest_discover_tests(waitcheck_hooks_unit_test)
 
 # --- Interposer loader initialization regression tests ---
 
@@ -1133,33 +1201,6 @@ if(HSA_RUNTIME64)
     endforeach()
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
-    add_executable(
-        waitcheck_preload_smoke_test
-        tools/waitcheck_preload_smoke_test.cpp
-    )
-    target_include_directories(
-        waitcheck_preload_smoke_test
-        PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
-    )
-    target_link_libraries(
-        waitcheck_preload_smoke_test
-        PRIVATE ${HSA_RUNTIME64} GTest::gtest
-    )
-    target_link_options(
-        waitcheck_preload_smoke_test
-        PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-    )
-    rj_configure_target(waitcheck_preload_smoke_test TEST)
-    add_dependencies(waitcheck_preload_smoke_test rocjitsu_waitcheck_shim)
-    add_test(
-        NAME "WaitcheckPreload.Smoke"
-        COMMAND
-            ${CMAKE_COMMAND} -E env
-            LD_PRELOAD=$<TARGET_FILE:rocjitsu_waitcheck_shim>
-            $<TARGET_FILE:waitcheck_preload_smoke_test>
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-
     # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
     # Requires both compiled device kernels AND an RDNA4 GPU on the host.
     if(HAS_DEVICE_KERNELS)
@@ -1265,6 +1306,7 @@ if(HSA_RUNTIME64)
             device_kernels
             rocjitsu_bin
             rocjitsu_hooks
+            rocjitsu_waitcheck_hooks
         )
         rj_configure_target(hsa_hooks_test TEST)
         if(RJ_INSTALL_TESTS)
@@ -1299,6 +1341,35 @@ if(HSA_RUNTIME64)
                     "--"
                     "bin/hsa_hooks_test"
                     "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+            )
+            rj_add_test(
+                NAME "WaitcheckHsaToolsTest.DbtChecksFinalMfma"
+                COMMAND
+                    $<TARGET_FILE:rocjitsu_bin> --config
+                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+                    $<TARGET_FILE:hsa_hooks_test>
+                    --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 60
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                    "ROCJITSU_WAITCHECK=1"
+                    "ROCJITSU_WAITCHECK_FAIL=1"
+                    "ROCJITSU_WAITCHECK_SUMMARY=1"
+                PASS_REGULAR_EXPRESSION
+                    "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]*"
+                INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "\${RJ_INSTALLED_CONFIG_DIR}/guest_gfx950_on_gfx1201.json"
+                    "--"
+                    "bin/hsa_hooks_test"
+                    "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                INSTALL_ENVIRONMENT
+                    "HSA_TOOLS_LIB=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_waitcheck_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                    "ROCJITSU_WAITCHECK=1"
+                    "ROCJITSU_WAITCHECK_FAIL=1"
+                    "ROCJITSU_WAITCHECK_SUMMARY=1"
             )
         endif()
 
@@ -1747,8 +1818,8 @@ if(RJ_ENABLE_HIP_TESTS)
         cmake_parse_arguments(
             ARG
             ""
-            "CONFIG;NAME;TIMEOUT"
-            "ENVIRONMENT"
+            "CONFIG;NAME;TIMEOUT;PASS_REGULAR_EXPRESSION"
+            "ENVIRONMENT;INSTALL_ENVIRONMENT"
             ${ARGN}
         )
         if(NOT ARG_CONFIG)
@@ -1806,14 +1877,29 @@ if(RJ_ENABLE_HIP_TESTS)
             "bin/${TEST_BIN}"
             "--gtest_filter=${TEST_CASE}"
         )
-        if(RJ_INSTALL_TESTS AND _install_env)
-            list(APPEND _test_args INSTALL_ENVIRONMENT ${_install_env})
+        if(RJ_INSTALL_TESTS)
+            if(ARG_INSTALL_ENVIRONMENT)
+                list(
+                    APPEND _test_args
+                    INSTALL_ENVIRONMENT
+                    ${ARG_INSTALL_ENVIRONMENT}
+                )
+            elseif(_install_env)
+                list(APPEND _test_args INSTALL_ENVIRONMENT ${_install_env})
+            endif()
         endif()
         if(ARG_ENVIRONMENT)
             list(APPEND _test_args ENVIRONMENT ${ARG_ENVIRONMENT})
         endif()
         if(ARG_TIMEOUT)
             list(APPEND _test_args TIMEOUT ${ARG_TIMEOUT})
+        endif()
+        if(ARG_PASS_REGULAR_EXPRESSION)
+            list(
+                APPEND _test_args
+                PASS_REGULAR_EXPRESSION
+                "${ARG_PASS_REGULAR_EXPRESSION}"
+            )
         endif()
         rj_add_test(${_test_args})
     endfunction()
@@ -1840,6 +1926,61 @@ if(RJ_ENABLE_HIP_TESTS)
             hip_vector_add_test
             "HipVectorAddTest.CorrectResult"
             CONFIG ${RJ_HIP_TEST_CONFIG}
+        )
+
+        add_dependencies(
+            hip_vector_add_test_target
+            rocjitsu_hooks
+            rocjitsu_waitcheck_hooks
+        )
+        rj_add_hip_test_case(
+            hip_vector_add_test
+            "HipVectorAddTest.CorrectResult"
+            NAME "WaitcheckHsaToolsHipTest.CleanVectorAdd"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+            ENVIRONMENT
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                "ROCJITSU_WAITCHECK=1"
+                "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_SUMMARY=1"
+            INSTALL_ENVIRONMENT
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "HSA_TOOLS_LIB=${_rj_installed_libdir}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_waitcheck_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                "ROCJITSU_WAITCHECK=1"
+                "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_SUMMARY=1"
+            PASS_REGULAR_EXPRESSION
+                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]*"
+        )
+
+        rj_add_hip_test(
+            hip_waitcheck_hazard_test
+            ARCH ${RJ_HIP_TEST_ARCH}
+        )
+        add_dependencies(
+            hip_waitcheck_hazard_test_target
+            rocjitsu_waitcheck_hooks
+        )
+        rj_add_hip_test_case(
+            hip_waitcheck_hazard_test
+            "HipWaitcheckHazardTest.FailClosedRejectsKernelCodeObject"
+            NAME "WaitcheckHsaToolsHipTest.FailClosedRejectsHazard"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+            ENVIRONMENT
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                "ROCJITSU_WAITCHECK=1"
+                "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_SUMMARY=1"
+            INSTALL_ENVIRONMENT
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "HSA_TOOLS_LIB=${_rj_installed_libdir}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_waitcheck_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                "ROCJITSU_WAITCHECK=1"
+                "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_SUMMARY=1"
+            PASS_REGULAR_EXPRESSION
+                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]* passed=[0-9]+ hazards=[1-9][0-9]*"
         )
 
         # --- Daemon RPC tests (gtest-driven) ---

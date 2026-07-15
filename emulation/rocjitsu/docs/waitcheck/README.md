@@ -10,8 +10,8 @@ It is intended for two workflows:
 
 - `rj_waitcheck`, an offline CLI for code objects, HIP fat binaries, and
   recursive corpus sweeps.
-- `librocjitsu_waitcheck.so`, an `LD_PRELOAD` shim that checks code objects as
-  ROCR creates code-object readers.
+- `librocjitsu_waitcheck_hooks.so`, a ROCR HSA tools library that checks the
+  final code-object reader passed to the runtime loader.
 
 The LLVM parity map is used as a regression checklist for known wait patterns,
 not as a requirement that kernels came from LLVM. See
@@ -22,13 +22,13 @@ not as a requirement that kernels came from LLVM. See
 From the RocJITsu workspace:
 
 ```sh
-cmake --build build --target rj_waitcheck rocjitsu_waitcheck_shim
+cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks
 ```
 
 The expected build products are:
 
 - `build/tools/rj_waitcheck`
-- `build/lib/rocjitsu/src/rocjitsu/kmd/linux/librocjitsu_waitcheck.so`
+- `build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`
 
 ## Offline CLI
 
@@ -183,25 +183,51 @@ This target intentionally skips Tensile intermediate `.o` files and
 `TensileLibrary_gfx950.co` containers. Those artifacts need separate triage
 because they are not the final sidecar HSACOs loaded as individual kernels.
 
-## Runtime Preload
+## Runtime HSA Tool
 
-Preload the shim into a process that uses ROCR/HSA:
+Load the checker through ROCR's HSA tools interface:
 
 ```sh
-LD_PRELOAD="$PWD/build/lib/rocjitsu/src/rocjitsu/kmd/linux/librocjitsu_waitcheck.so" \
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
   ROCJITSU_WAITCHECK_FAIL=1 \
   ./app
+```
+
+`HSA_TOOLS_DISABLE_REGISTER=1` selects the environment-driven HSA tools path on
+ROCR builds that also support rocprofiler registration. Without it, a successful
+registration path can take precedence over `HSA_TOOLS_LIB`.
+
+ROCR reads `HSA_TOOLS_LIB` as a space-separated list and installs tools from
+left to right. A later tool is the outer layer. To check the final code produced
+by the RocJITsu DBT tool, put waitcheck first and DBT last:
+
+```sh
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so $PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_hooks.so" \
+  ROCJITSU_WAITCHECK_FAIL=1 \
+  ./app
+```
+
+The `rocjitsu` launcher preserves an existing space-separated tool list and
+appends `librocjitsu_hooks.so`, so the usual DBT invocation is:
+
+```sh
+HSA_TOOLS_LIB="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
+  ROCJITSU_WAITCHECK_FAIL=1 \
+  build/tools/rocjitsu/rocjitsu --config configs/guest_gfx950_on_gfx1201.json -- ./app
 ```
 
 Environment variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the shim preloaded. |
+| `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
 | `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to reject supported code objects with missing waits by returning `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
+| `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/check/pass/hazard counters at shutdown or process exit. |
 
-The shim prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
-reports hazards but chains to the real runtime reader.
+The tool prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
+reports each reader's hazards once and chains to the next runtime layer.
 
 ## How It Works
 
@@ -220,16 +246,22 @@ such as explicit operands, implicit operands, instruction classes, wait-counter
 effects, embedded wait fields, branch targets, and target predicates can be
 generated or added to the ISA layer.
 
-The runtime shim intercepts:
+The runtime tool patches these core API table entries through chain-safe
+`OnLoad`/`OnUnload` callbacks:
 
 - `hsa_code_object_reader_create_from_memory`
 - `hsa_code_object_reader_create_from_file`
+- `hsa_code_object_reader_destroy`
+- `hsa_executable_load_agent_code_object`
 - `hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size`
 
 It also patches AMD loader extension tables returned through
 `hsa_system_get_extension_table` and `hsa_system_get_major_extension_table`, so
 clients that call the offset-size reader through the extension table are checked
-too.
+too. Reader creation records the backing bytes; analysis happens at executable
+load. This timing lets an inner waitcheck layer inspect the replacement reader
+created by an outer DBT or DBI tool rather than checking only the original
+input.
 
 The current analyzer models gfx12 and gfx950 object-visible wait behavior including:
 
@@ -267,7 +299,7 @@ Known boundaries:
 - Targets outside gfx12/RDNA4 and gfx950/CDNA4 are out of scope for this
   prototype.
 - Unsupported or undecodable code objects are analysis failures. For corpus
-  measurement, use `--skip-unsupported`; for preload enforcement, supported
+  measurement, use `--skip-unsupported`; for runtime enforcement, supported
   analysis failures fail only when `ROCJITSU_WAITCHECK_FAIL=1`.
 
 ## Tests
@@ -275,14 +307,15 @@ Known boundaries:
 Focused validation:
 
 ```sh
-ctest --test-dir build -R 'Waitcheck|RjWaitcheck|WaitcheckPreload' --output-on-failure
+ctest --test-dir build -R 'Waitcheck|RjWaitcheck' --output-on-failure
 ```
 
 The main coverage lives in:
 
 - `tests/analysis/waitcheck_test.cpp`
 - `tests/tools/rj_waitcheck_smoke_test.cpp`
-- `tests/tools/waitcheck_preload_smoke_test.cpp`
+- `tests/tools/waitcheck_hooks_unit_test.cpp`
+- `tests/hip_waitcheck_hazard_test.cpp`
 
 The parity map records which LLVM waitcnt/hazard lit areas are represented by
 object-code fixtures:

@@ -498,6 +498,19 @@ void prepend_env_path(const char *name, const std::string &value) {
   setenv(name, value.c_str(), 1);
 }
 
+// HSA_TOOLS_LIB is a shell-like, space-separated tool list rather than a
+// colon-separated loader path. Append the DBT hook so any preconfigured
+// analysis tool remains inner: the later DBT wrapper can then pass its final
+// translated reader through the earlier tool before ROCR loads it.
+void append_hsa_tool(const std::string &value) {
+  if (const char *old_value = std::getenv("HSA_TOOLS_LIB"); old_value && *old_value) {
+    std::string combined = std::string(old_value) + " " + value;
+    setenv("HSA_TOOLS_LIB", combined.c_str(), 1);
+    return;
+  }
+  setenv("HSA_TOOLS_LIB", value.c_str(), 1);
+}
+
 bool write_config_file(const std::string &config_path, pid_t pid) {
   auto cfg_file = rpc_invocation_config_file_path(pid);
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
@@ -924,7 +937,7 @@ int main(int argc, char *argv[]) {
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers.
     setenv("HSA_TOOLS_DISABLE_REGISTER", "1", 1);
-    setenv("HSA_TOOLS_LIB", hooks_path.c_str(), 1);
+    append_hsa_tool(hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
