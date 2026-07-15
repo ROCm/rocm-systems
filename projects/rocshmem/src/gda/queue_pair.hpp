@@ -366,7 +366,7 @@ class QueuePair {
    *         rather than fabricating a heap offset that could silently corrupt
    *         peer memory.
    */
-  __device__ __forceinline__ raddr_info get_raddr(const void *sym_addr) {
+  __device__ __forceinline__ raddr_info get_raddr_info(const void *sym_addr) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
     if ((addr - base_heap) < base_heap_size) {
       return {remote_heap_base + (addr - base_heap), rkey};

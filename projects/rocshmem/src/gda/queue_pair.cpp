@@ -293,7 +293,7 @@ __device__ void QueuePair::quiet_single() {
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  auto [raddr, dst_rkey] = get_raddr(dest);
+  auto [raddr, dst_rkey] = get_raddr_info(dest);
   uint32_t src_lkey =
       (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
           ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
@@ -341,7 +341,7 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  auto [raddr, src_rkey] = get_raddr(source);
+  auto [raddr, src_rkey] = get_raddr_info(source);
   uint32_t dst_lkey = get_lkey(reinterpret_cast<uintptr_t>(dest));
   get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, length,
           wf_info);

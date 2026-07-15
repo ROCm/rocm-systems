@@ -439,7 +439,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
      */
     char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
     const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
-    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr(dst_local);
+    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
     uint32_t src_lkey =
         (static_cast<int32_t>(nelems) <=
          static_cast<int32_t>(qps[dest_pe].inline_threshold))
@@ -538,7 +538,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
      */
     char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
     const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
-    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr(dst_local);
+    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
     uint32_t src_lkey =
         (static_cast<int32_t>(nelems) <=
          static_cast<int32_t>(qps[dest_pe].inline_threshold))
