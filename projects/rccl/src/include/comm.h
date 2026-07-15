@@ -826,7 +826,12 @@ struct ncclComm {
   struct ncclComm* groupNext[ncclGroupTaskTypeNum];
   // Subset of those in groupNext list. Holds 0x1 if not needing preconnect.
   struct ncclComm* preconnectNext;
-  int localPersistentRefs; // number of persistent plan-lists capturing this comm
+  // Number of persistent plan-lists (graph captures) referencing this comm.
+  // Incremented synchronously on plan creation; decremented asynchronously by
+  // a per-rank host callback on plan reclaim (no cross-rank sync). No
+  // internal lock: relies on the same single-writer-per-comm contract as the
+  // rest of ncclComm (serialized via the group/enqueue API).
+  int localPersistentRefs;
   struct P2pSchedulePair { int sendRank; int recvRank; } *p2pSchedule;
 
   struct ncclKernelPlanner planner;

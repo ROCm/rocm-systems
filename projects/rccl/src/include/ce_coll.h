@@ -52,6 +52,8 @@ struct ncclCeColl {
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE
   // AR during that period and re-enable it after captured plans are reclaimed.
+  // Written only from rcclCeAllReduceGraphLatchTick(); no internal lock, same
+  // single-writer-per-comm contract as localPersistentRefs (comm.h).
   bool graphModeSeen;
 };
 

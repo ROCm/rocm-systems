@@ -504,7 +504,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   struct ncclCudaGraph ceGraph;
   NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
-  bool ceArGraphAllowed = rcclCeAllReduceGraphAllowed(comm, ceCapturing);
+  rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
   if (ceArGraphAllowed &&
       rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;

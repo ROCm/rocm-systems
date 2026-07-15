@@ -2836,6 +2836,22 @@
         }
       ]
     },
+    "ce_allreduce_graph_latch": {
+      "extends": "perf_base",
+      "num_nodes": 1,
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_CE_GraphThenEager_4MB_32MB",
+          "description": "CE AllReduce graph latch regression: captured (-G 2) then eager AllReduce, CE-eligible sizes (4MB-32MB). A latch bug corrupts data or hangs; timeout turns a hang into a fast failure.",
+          "command_args": "-b 4M -e 32M -f 2 -g 1 -n 5 -w 2 -c 1 -G 2 -o sum",
+          "timeout": 90
+        }
+      ]
+    },
     "device_api_symmetric": {
       "extends": "perf_base",
       "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1 -R 2",
@@ -3476,6 +3492,12 @@
       "name": "rccl-tests - Default Collectives",
       "description": "All collectives (all_reduce, reduce, reduce_scatter, all_gather, broadcast, alltoall, scatter, gather, sendrecv) at three message sizes (1 KiB, 64 MiB, 1 GiB), all datatypes (-d all), and all operations (-o all) for reduction collectives",
       "config": "default_collectives",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - CE AllReduce Graph Latch",
+      "description": "Regression for the CE AllReduce graph-capture latch: captured AllReduce immediately followed by eager AllReduce on the same comm, at CE-eligible sizes",
+      "config": "ce_allreduce_graph_latch",
       "enabled": true
     },
     {

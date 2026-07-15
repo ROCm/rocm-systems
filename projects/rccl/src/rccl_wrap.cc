@@ -600,7 +600,7 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
   return true;
 }
 
-bool rcclCeAllReduceGraphAllowed(struct ncclComm* comm, bool ceCapturing) {
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
   if (ceCapturing) {
     if (!comm->ceColl.graphModeSeen) {
       INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
@@ -619,6 +619,9 @@ bool rcclCeAllReduceGraphAllowed(struct ncclComm* comm, bool ceCapturing) {
     INFO(NCCL_COLL, "Re-enabling CE AllReduce; graph latch cleared (rank %d): no live captured plans", comm->rank);
     comm->ceColl.graphModeSeen = false;
   }
+}
+
+bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
