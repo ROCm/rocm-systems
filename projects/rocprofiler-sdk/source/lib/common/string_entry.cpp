@@ -74,7 +74,7 @@ get_string_entry(std::string_view name)
 const std::string*
 get_string_entry(const char* name)
 {
-    return get_string_entry(std::string_view{name ? name : ""});
+    return get_string_entry(std::string_view{name ? name : "(null)"});
 }
 
 const std::string*
