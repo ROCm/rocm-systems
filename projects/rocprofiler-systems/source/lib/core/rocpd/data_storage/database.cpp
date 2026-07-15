@@ -59,10 +59,10 @@ namespace
 void
 create_directory_for_database_file(const std::string& db_file)
 {
-    auto _db_dirname = rocprofsys::common::path::dirname(db_file);
-    if(!rocprofsys::common::path::is_directory(_db_dirname))
+    auto _db_dirname = rocprofsys::path::dirname(db_file);
+    if(!rocprofsys::path::is_directory(_db_dirname))
     {
-        rocprofsys::common::path::makedir(_db_dirname);
+        rocprofsys::path::makedir(_db_dirname);
     }
 }
 

@@ -48,7 +48,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return common::path::realpath(_link_map->l_name);
+            return path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -119,7 +119,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        LOG_DEBUG("[linkmap][{}]: {}", common::path::basename(_name), itr.real());
+        LOG_DEBUG("[linkmap][{}]: {}", path::basename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
@@ -148,13 +148,13 @@ link_file::operator<(const link_file& _rhs) const
 std::string
 link_file::base() const
 {
-    return common::path::basename(name);
+    return path::basename(name);
 }
 
 std::string
 link_file::real() const
 {
-    return common::path::realpath(name);
+    return path::realpath(name);
 }
 }  // namespace binary
 }  // namespace rocprofsys

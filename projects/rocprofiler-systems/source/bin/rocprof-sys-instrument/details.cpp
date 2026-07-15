@@ -775,7 +775,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return rocprofsys::common::path::realpath(_link_map->l_name);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -808,7 +808,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
         if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
         {
-            return rocprofsys::common::path::realpath(_buffer);
+            return rocprofsys::path::realpath(_buffer);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -1036,8 +1036,8 @@ filter_modules(std::vector<module_t*>* app_modules)
         if(!mod) continue;
 
         auto _module_name = std::string{ get_name(mod) };
-        auto _module_base = rocprofsys::common::path::basename(_module_name);
-        auto _module_real = rocprofsys::common::path::realpath(_module_name);
+        auto _module_base = rocprofsys::path::basename(_module_name);
+        auto _module_real = rocprofsys::path::realpath(_module_name);
 
         bool _is_excluded = false;
 
@@ -1052,7 +1052,7 @@ filter_modules(std::vector<module_t*>* app_modules)
         {
             for(const auto& [lib_path, sub_map] : _internal_libs)
             {
-                auto _lib_base = rocprofsys::common::path::basename(lib_path);
+                auto _lib_base = rocprofsys::path::basename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
                    sub_map.find(_module_base) != sub_map.end() ||
                    sub_map.find(_module_real) != sub_map.end() ||
@@ -1254,8 +1254,8 @@ process_modules(const std::vector<module_t*>& _app_modules)
 
     for(auto* itr : symtab_data.modules)
     {
-        auto _base_name = rocprofsys::common::path::basename(itr->fullName());
-        auto _real_name = rocprofsys::common::path::realpath(itr->fullName());
+        auto _base_name = rocprofsys::path::basename(itr->fullName());
+        auto _real_name = rocprofsys::path::realpath(itr->fullName());
 
         if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
         {

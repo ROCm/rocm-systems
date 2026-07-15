@@ -143,14 +143,14 @@ merge_perfetto_files()
     if(cached_mpi_rank != 0) return;
 
     auto _filename      = config::get_perfetto_output_filename();
-    auto _output_folder = common::path::dirname(_filename);
+    auto _output_folder = path::dirname(_filename);
     auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
     auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
     if(!_script_dir.empty())
         _script_path = fmt::format("{}/{}", _script_dir, _script_path);
 
-    if(!common::path::exists(_script_path))
+    if(!path::exists(_script_path))
     {
         LOG_WARNING("Merge script not found: {}", _script_path);
         return;

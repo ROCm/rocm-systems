@@ -294,7 +294,7 @@ extern "C"
                 {
                     auto&& _path = itr.pathname;
                     if(!_path.empty() && _path.at(0) != '[' &&
-                       rocprofsys::common::path::exists(_path))
+                       rocprofsys::path::exists(_path))
                         _libs.emplace(_path);
                 }
                 for(const auto& itr : _libs)

@@ -699,7 +699,7 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(common::path::open(_ofs, ofname))
+        if(path::open(_ofs, ofname))
         {
             if(_verbose >= 0)
                 operation::file_output_message<binary::symbol>{}(
@@ -811,7 +811,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             {
                 auto _location =
                     (_dl_info.location)
-                        ? common::path::realpath(std::string{ _dl_info.location.name })
+                        ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)
                 {

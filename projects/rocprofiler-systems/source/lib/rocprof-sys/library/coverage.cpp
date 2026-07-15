@@ -213,7 +213,7 @@ post_process()
     {
         auto          _fname = tim::settings::compose_output_filename("coverage", ".txt");
         std::ofstream ofs{};
-        if(common::path::open(ofs, _fname))
+        if(path::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
                 operation::file_output_message<code_coverage>{}(
@@ -259,7 +259,7 @@ post_process()
         }
         auto _fname = tim::settings::compose_output_filename("coverage", ".json");
         std::ofstream ofs{};
-        if(common::path::open(ofs, _fname))
+        if(path::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
                 operation::file_output_message<code_coverage>{}(

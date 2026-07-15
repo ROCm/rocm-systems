@@ -102,7 +102,7 @@ get_dwarf_entry(Dwarf_Die* _die)
                 if(_lineno > 0) itr.line = _lineno;
                 const auto* _file = dwarf_linesrc(_line, nullptr, nullptr);
                 if(!_file) _file = dwarf_diename(_die);
-                itr.file = common::path::realpath(_file);
+                itr.file = path::realpath(_file);
             }
         }
     }

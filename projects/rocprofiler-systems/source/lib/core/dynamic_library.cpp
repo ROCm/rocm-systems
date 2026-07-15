@@ -28,7 +28,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(const auto& itr : procfs::get_maps(process::get_id(), true))
     {
         auto&& _path = itr.pathname;
-        if(_path.find(_name) != std::string::npos && common::path::exists(_path))
+        if(_path.find(_name) != std::string::npos && path::exists(_path))
             return _path;
     }
 
@@ -48,11 +48,11 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(auto& itr : _paths)
     {
         auto _v = fmt::format("{}/{}", itr, _name);
-        if(common::path::exists(_v)) return _v;
+        if(path::exists(_v)) return _v;
         for(const auto& litr : _path_suffixes)
         {
             _v = fmt::format("{}/{}/{}", itr, litr, _name);
-            if(common::path::exists(_v)) return _v;
+            if(path::exists(_v)) return _v;
         }
     }
 
@@ -75,7 +75,7 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
         // override with value
         if(!_env_val.empty())
         {
-            if(_env_val.starts_with('/') && common::path::exists(_env_val))
+            if(_env_val.starts_with('/') && path::exists(_env_val))
             {
                 filename = _env_val;
             }

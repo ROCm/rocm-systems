@@ -41,7 +41,7 @@ using open_modes_vec_t = std::vector<int>;
 auto
 get_exe_realpath()
 {
-    return rocprofsys::common::path::realpath("/proc/self/exe");
+    return rocprofsys::path::realpath("/proc/self/exe");
 }
 
 auto&
@@ -121,7 +121,7 @@ get_linked_path(const char*        _name,
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return rocprofsys::common::path::realpath(_link_map->l_name);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
     }
 
@@ -152,7 +152,7 @@ get_link_map(const std::string& _lib,
             if(!std::string_view{ _next->l_name }.empty() &&
                std::string_view{ _next->l_name } != _lib)
             {
-                _chain.emplace(rocprofsys::common::path::realpath(_next->l_name));
+                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
             }
             _next = _next->l_next;
         }
@@ -413,8 +413,8 @@ get_internal_libs_data_impl()
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
     auto _rocprofsys_base_path =
-        rocprofsys::common::path::dirname(rocprofsys::common::path::dirname(
-            rocprofsys::common::path::realpath("/proc/self/exe")));
+        rocprofsys::path::dirname(rocprofsys::path::dirname(
+            rocprofsys::path::realpath("/proc/self/exe")));
     auto _rocprofsys_lib_path = std::string{};
 
     for(const auto* itr : { "lib", "lib64" })
@@ -423,21 +423,21 @@ get_internal_libs_data_impl()
             { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
         {
             auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
-            if(rocprofsys::common::path::exists(_libpath))
+            if(rocprofsys::path::exists(_libpath))
             {
-                _libs.emplace_back(rocprofsys::common::path::realpath(_libpath));
+                _libs.emplace_back(rocprofsys::path::realpath(_libpath));
             }
         }
     }
 
     rocprofsys::utility::filter_sort_unique(_libs, [](const auto& itr) {
-        return itr.empty() || !rocprofsys::common::path::exists(itr);
+        return itr.empty() || !rocprofsys::path::exists(itr);
     });
 
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = rocprofsys::common::path::realpath(itr);
+        auto _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
             continue;
@@ -472,7 +472,7 @@ get_internal_libs_data_impl()
 
             verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
                        _mname.c_str(),
-                       rocprofsys::common::path::basename(itr.first).c_str());
+                       rocprofsys::path::basename(itr.first).c_str());
 
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
@@ -537,7 +537,7 @@ find_library(std::string_view _lib_v)
     for(const auto& itr : get_library_search_paths())
     {
         auto _path = fmt::format("{}/{}", itr, _lib_v);
-        if(rocprofsys::common::path::exists(_path))
+        if(rocprofsys::path::exists(_path))
         {
             return std::optional<std::string>{ _path };
         }
@@ -557,7 +557,7 @@ find_libraries(std::string_view _lib_v)
     for(const auto& itr : get_library_search_paths())
     {
         auto _path = fmt::format("{}/{}", itr, _lib_v);
-        if(rocprofsys::common::path::exists(_path))
+        if(rocprofsys::path::exists(_path))
         {
             _libs.emplace_back(_path);
         }

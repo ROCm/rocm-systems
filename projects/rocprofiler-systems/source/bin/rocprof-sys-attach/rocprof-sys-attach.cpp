@@ -76,7 +76,7 @@ setup_tool_library_env()
     }
 
     const auto path =
-        rocprofsys::common::path::get_internal_libpath("librocprof-sys-dl.so");
+        rocprofsys::path::get_internal_libpath("librocprof-sys-dl.so");
     if(!path.empty())
     {
         setenv(attach_tool_library_env_name, path.c_str(), 0);

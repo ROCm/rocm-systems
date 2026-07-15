@@ -1213,7 +1213,7 @@ rocprofsys_finalize_hidden(void)
             for(auto& itr : _maps)
             {
                 auto&& _path = itr.pathname;
-                if(!_path.empty() && _path.at(0) != '[' && common::path::exists(_path))
+                if(!_path.empty() && _path.at(0) != '[' && path::exists(_path))
                     _libs.emplace(_path);
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),

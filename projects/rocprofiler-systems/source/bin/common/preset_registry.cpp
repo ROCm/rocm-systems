@@ -28,21 +28,21 @@ find_preset_directory()
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
-        if(common::path::exists(dir)) return dir;
+        if(path::exists(dir)) return dir;
     }
 
-    auto root = common::path::get_rocprofsys_root();
+    auto root = path::get_rocprofsys_root();
     if(!root.empty())
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", root);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::exists(candidate)) return candidate;
     }
 
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::exists(candidate)) return candidate;
     }
 
     return {};
@@ -170,7 +170,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     if(is_path)
     {
         // Explicit file path — validate existence via realpath
-        auto resolved = common::path::realpath(name_or_path);
+        auto resolved = path::realpath(name_or_path);
         if(resolved.empty())
         {
             std::cerr << "[rocprof-sys] WARNING: Preset file '" << name_or_path
@@ -184,8 +184,8 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     if(m_directory.empty()) return {};
 
     auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
-    auto resolved  = common::path::realpath(filepath);
-    auto canon_dir = common::path::realpath(m_directory);
+    auto resolved  = path::realpath(filepath);
+    auto canon_dir = path::realpath(m_directory);
     if(resolved.empty() || canon_dir.empty() ||
        resolved.compare(0, canon_dir.size(), canon_dir) != 0)
     {

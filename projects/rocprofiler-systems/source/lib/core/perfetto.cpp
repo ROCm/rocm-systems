@@ -251,7 +251,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                      static_cast<double>(trace_data.size()) / units::megabyte,
                      static_cast<double>(trace_data.size()) / units::gigabyte);
             std::ofstream ofs{};
-            if(!common::path::open(ofs, _filename, std::ios::out | std::ios::binary))
+            if(!path::open(ofs, _filename, std::ios::out | std::ios::binary))
             {
                 _fom.append("Error opening '%s'...", _filename.c_str());
                 _perfetto_output_error = true;
@@ -278,7 +278,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     if(dmp::rank() == 0 &&
        config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        auto _output_folder = common::path::dirname(_filename);
+        auto _output_folder = path::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
         auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
@@ -288,7 +288,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
 
         // Test that the script exists
-        if(!common::path::exists(_script_path))
+        if(!path::exists(_script_path))
         {
             LOG_WARNING("Script not found: {}", _script_path);
         }

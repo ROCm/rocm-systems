@@ -61,7 +61,7 @@ read_inliner_info(bfd* _inp)
         {
             if(_file && _func && _line > 0)
                 _data.emplace_back(
-                    inlined_symbol{ _line, common::path::realpath(_file), _func });
+                    inlined_symbol{ _line, path::realpath(_file), _func });
         }
         else
         {
@@ -243,7 +243,7 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
                 file = bfd_get_filename(_inp);
             if(!func.empty())
             {
-                file    = common::path::realpath(file);
+                file    = path::realpath(file);
                 line    = _line;
                 inlines = read_inliner_info(_inp);
                 return true;

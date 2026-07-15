@@ -415,10 +415,10 @@ bool
 module_function::is_internal_constrained() const
 {
     auto _basename = [](std::string_view _v) {
-        return rocprofsys::common::path::basename(_v);
+        return rocprofsys::path::basename(_v);
     };
     auto _realpath = [](const std::string& _v) {
-        return rocprofsys::common::path::realpath(_v);
+        return rocprofsys::path::realpath(_v);
     };
 
     auto _report = [&](const string_t& _action, const std::string& _type,

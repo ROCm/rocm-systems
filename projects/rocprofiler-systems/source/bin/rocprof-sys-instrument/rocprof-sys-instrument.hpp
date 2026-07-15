@@ -136,7 +136,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
 
     if(_cmd.empty())
     {
-        if(!rocprofsys::common::path::exists(std::string{ _cmd }))
+        if(!rocprofsys::path::exists(std::string{ _cmd }))
         {
             verbprintf(
                 0,

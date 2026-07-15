@@ -818,7 +818,7 @@ generate(py::module& _pymod)
         _name = fmt::format(
             "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
-        if(rocprofsys::common::path::open(ofs, _name))
+        if(rocprofsys::path::open(ofs, _name))
         {
             tim::operation::file_output_message<rocprofsys::coverage::code_coverage>{}(
                 _name, std::string{ "coverage" });
