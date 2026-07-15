@@ -144,6 +144,13 @@ else()
                           INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
 endif()
 
+add_executable(@PACKAGE_NAME@::rocprofiler-core IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofiler-core
+    PROPERTY IMPORTED_LOCATION
+             ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofiler-core)
+
+# Deprecated alias target; 'rocprofv3' is a symlink to 'rocprofiler-core'.
 add_executable(@PACKAGE_NAME@::rocprofv3 IMPORTED)
 set_property(
     TARGET @PACKAGE_NAME@::rocprofv3

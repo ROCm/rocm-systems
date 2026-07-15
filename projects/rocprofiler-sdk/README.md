@@ -1,7 +1,7 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
 > [!IMPORTANT]
-We are phasing out development and support for `ROCTracer, ROCprofiler, rocprof, and rocprofv2` in favour of `ROCprofiler-SDK` and `rocprofv3` in upcoming ROCm releases. Starting with the `ROCm 6.4` release, only critical defect fixes will be addressed for older versions of the profiling tools and libraries. We encourage all users to upgrade to the latest version of the `ROCprofiler-SDK` library and the `rocprofv3` tool to ensure continued support and access to new features.
+We are phasing out development and support for `ROCTracer, ROCprofiler, rocprof, and rocprofv2` in favour of `ROCprofiler-SDK` and `rocprofiler-core` (formerly `rocprofv3`) in upcoming ROCm releases. Starting with the `ROCm 6.4` release, only critical defect fixes will be addressed for older versions of the profiling tools and libraries. We encourage all users to upgrade to the latest version of the `ROCprofiler-SDK` library and the `rocprofiler-core` tool to ensure continued support and access to new features.
 
     Please note that we anticipate the end of life for ROCprofiler V1/V2 and ROCTracer within nine months after the ROCm 7.0 release, aligning with the Q1 2026.
 
@@ -43,9 +43,12 @@ ROCprofiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 
 ## Tool Support
 
-rocprofv3 is the command line tool built using the rocprofiler-sdk library and shipped with the ROCm stack. It supports both launching applications with profiling enabled and attaching to already running processes for dynamic profiling using `--attach`/`--pid`/`-p` options.
+`rocprofiler-core` is the command line tool built using the rocprofiler-sdk library and shipped with the ROCm stack. It supports both launching applications with profiling enabled and attaching to already running processes for dynamic profiling using `--attach`/`--pid`/`-p` options.
 
-To see details on the command line options of rocprofv3, please see rocprofv3 user guide
+> [!NOTE]
+> The `rocprofv3` command has been renamed to `rocprofiler-core`. `rocprofv3` is retained as a deprecated alias (a symlink to `rocprofiler-core`) and will be removed in a future ROCm release; invoking it prints a deprecation warning. Update your scripts and automation to use `rocprofiler-core`.
+
+To see details on the command line options of `rocprofiler-core`, please see the `rocprofiler-core` user guide
 [Click Here](source/docs/how-to/using-rocprofv3.rst)
 
 ## Documentation

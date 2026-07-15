@@ -1,25 +1,29 @@
 .. meta::
   :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
-  :keywords: ROCprofiler-SDK tool usage, rocprofv3 user manual, rocprofv3 usage, rocprofv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
+  :keywords: ROCprofiler-SDK tool usage, rocprofiler-core user manual, rocprofiler-core usage, rocprofiler-core user guide, using rocprofiler-core, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _using-rocprofv3:
 
-==================================================
-Application tracing and profiling using rocprofv3
-==================================================
+========================================================
+Application tracing and profiling using rocprofiler-core
+========================================================
 
-``rocprofv3`` is a CLI tool that helps you optimize applications and analyze the low-level kernel details without requiring any modification in the source code.
+``rocprofiler-core`` is a CLI tool that helps you optimize applications and analyze the low-level kernel details without requiring any modification in the source code.
 It's backward compatible with its predecessor, `rocprof <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_, and provides enhanced features for application profiling with better accuracy.
 
-The following sections demonstrate the use of ``rocprofv3`` for application tracing and kernel counter collection using various command-line options.
+.. note::
 
-``rocprofv3`` is installed with ROCm under ``/opt/rocm/bin``. To use the tool from anywhere in the system, export the ``PATH`` variable:
+   ``rocprofv3`` has been renamed to ``rocprofiler-core``. The ``rocprofv3`` command is retained as a deprecated alias (a symlink to ``rocprofiler-core``) and will be removed in a future ROCm release. Invoking ``rocprofv3`` prints a deprecation warning to stderr. Update your scripts and automation to use ``rocprofiler-core``.
+
+The following sections demonstrate the use of ``rocprofiler-core`` for application tracing and kernel counter collection using various command-line options.
+
+``rocprofiler-core`` is installed with ROCm under ``/opt/rocm/bin``. To use the tool from anywhere in the system, export the ``PATH`` variable:
 
 .. code-block:: bash
 
    export PATH=$PATH:/opt/rocm/bin
 
-Before tracing or profiling your HIP application using ``rocprofv3``, build it using:
+Before tracing or profiling your HIP application using ``rocprofiler-core``, build it using:
 
 .. code-block:: bash
 
@@ -124,11 +128,11 @@ Application tracing
 
 Application tracing provides the big picture of a program’s execution by collecting data on the execution times of API calls and GPU commands, such as kernel execution, async memory copy, and barrier packets. This information can be used as the first step in the profiling process to answer important questions, such as how much percentage of time was spent on memory copy and which kernel took the longest time to execute.
 
-To use ``rocprofv3`` for application tracing, run:
+To use ``rocprofiler-core`` for application tracing, run:
 
 .. code-block:: bash
 
-    rocprofv3 <tracing_option> -- <application_path>
+    rocprofiler-core <tracing_option> -- <application_path>
 
 
 .. note::
@@ -148,7 +152,7 @@ To trace HIP runtime APIs, use:
 
 .. code-block:: bash
 
-    rocprofv3 --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --hip-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -164,7 +168,7 @@ Here are the contents of ``hip_api_trace.csv`` file:
    :header-rows: 1
 
 
-``rocprofv3`` provides options to collect traces at more granular level. For HIP, you can collect traces for HIP compile-time APIs and runtime APIs separately.
+``rocprofiler-core`` provides options to collect traces at more granular level. For HIP, you can collect traces for HIP compile-time APIs and runtime APIs separately.
 
 HIP compile-time API traces
 ****************************
@@ -173,7 +177,7 @@ To collect HIP compile-time API traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --hip-compiler-trace --output-format csv -- <application_path>
+    rocprofiler-core --hip-compiler-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -195,7 +199,7 @@ To collect HIP runtime time API traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --hip-runtime-trace --output-format csv -- <application_path>
+    rocprofiler-core --hip-runtime-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -221,7 +225,7 @@ HSA trace contains the start and end time of HSA runtime API calls and their asy
 
 .. code-block:: bash
 
-    rocprofv3 --hsa-trace --output-format csv -- <application_path>
+    rocprofiler-core --hsa-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
 
@@ -237,13 +241,13 @@ Here are the contents of ``hsa_api_trace.csv`` file:
    :header-rows: 1
 
 
-``rocprofv3`` provides options to collect HSA traces at more granular level. HSA traces can be collected separately for four API domains: ``HSA_AMD_EXT_API``, ``HSA_CORE_API``, ``HSA_IMAGE_EXT_API`` and ``HSA_FINALIZE_EXT_API``.
+``rocprofiler-core`` provides options to collect HSA traces at more granular level. HSA traces can be collected separately for four API domains: ``HSA_AMD_EXT_API``, ``HSA_CORE_API``, ``HSA_IMAGE_EXT_API`` and ``HSA_FINALIZE_EXT_API``.
 
 To collect HSA core API traces, use:
 
 .. code-block:: bash
 
-    rocprofv3 --hsa-core-trace --output-format csv -- <application_path>
+    rocprofiler-core --hsa-core-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
 
@@ -265,7 +269,7 @@ Marker trace
 
 .. note::
 
-  To use ``rocprofv3`` for marker tracing, including and linking to old ``ROCTx`` works but it's recommended to switch to the new ``ROCTx`` to utilize new APIs.
+  To use ``rocprofiler-core`` for marker tracing, including and linking to old ``ROCTx`` works but it's recommended to switch to the new ``ROCTx`` to utilize new APIs.
   To use the new ``ROCTx``, include header ``"rocprofiler-sdk-roctx/roctx.h"`` and link your application with ``librocprofiler-sdk-roctx.so``.
   To see the complete list of ``ROCTx`` APIs, see public header file ``"rocprofiler-sdk-roctx/roctx.h"``.
 
@@ -275,12 +279,12 @@ Kokkos trace
 ++++++++++++++
 
 `Kokkos <https://github.com/kokkos/kokkos>`_ is a C++ library for writing performance portable applications. Kokkos is widely used in scientific applications to write performance-portable code for CPUs, GPUs, and other accelerators.
-``rocprofv3`` loads an inbuilt `Kokkos Tools library <https://github.com/kokkos/kokkos-tools>`_, which emits roctx ranges with the labels passed using Kokkos APIs. For example, ``Kokkos::parallel_for(“MyParallelForLabel”, …)`` calls ``roctxRangePush`` internally and enables the kernel renaming option to replace the highly templated kernel names with the Kokkos labels.
+``rocprofiler-core`` loads an inbuilt `Kokkos Tools library <https://github.com/kokkos/kokkos-tools>`_, which emits roctx ranges with the labels passed using Kokkos APIs. For example, ``Kokkos::parallel_for(“MyParallelForLabel”, …)`` calls ``roctxRangePush`` internally and enables the kernel renaming option to replace the highly templated kernel names with the Kokkos labels.
 To enable the inbuilt marker support, use the ``kokkos-trace`` option. Internally, this option automatically enables ``marker-trace`` and ``kernel-rename``:
 
 .. code-block:: bash
 
-    rocprofv3 --kokkos-trace --output-format csv -- <application_path>
+    rocprofiler-core --kokkos-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``marker-trace`` file prefixed with the process ID.
 
@@ -300,7 +304,7 @@ To trace kernel dispatch traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --kernel-trace --output-format csv -- <application_path>
+    rocprofiler-core --kernel-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``kernel_trace.csv`` file prefixed with the process ID.
 
@@ -324,7 +328,7 @@ Memory copy traces track ``hipMemcpy`` and ``hipMemcpyAsync`` functions, which u
 
 .. code-block:: shell
 
-    rocprofv3 –-memory-copy-trace --output-format csv -- <application_path>
+    rocprofiler-core –-memory-copy-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_copy_trace.csv`` file prefixed with the process ID.
 
@@ -362,7 +366,7 @@ To trace memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofv3 –-memory-allocation-trace --output-format csv -- <application_path>
+    rocprofiler-core –-memory-allocation-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
 
@@ -393,7 +397,7 @@ memory operations (copies, allocations, and scratch).
 
 .. code-block:: shell
 
-    rocprofv3 –-runtime-trace --output-format csv -- <application_path>
+    rocprofiler-core –-runtime-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
@@ -404,7 +408,7 @@ This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory
 
 .. code-block:: shell
 
-    rocprofv3 –-sys-trace --output-format csv -- <application_path>
+    rocprofiler-core –-sys-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
@@ -417,7 +421,7 @@ To trace scratch memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofv3 –-scratch-memory-trace --output-format csv -- <application_path>
+    rocprofiler-core –-scratch-memory-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``scratch_memory_trace.csv`` file prefixed with the process ID.
 
@@ -437,12 +441,12 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 RCCL trace
 ++++++++++++
 
-This section demonstrates how to trace `RCCL` (Rickle) collective communication routines using rocprofv3. `RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library that provides standard collective communication operations for GPUs.
+This section demonstrates how to trace `RCCL` (Rickle) collective communication routines using rocprofiler-core. `RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library that provides standard collective communication operations for GPUs.
 The trace output is captured in a rocpd database file and can be converted to pftrace format for visualization in the Perfetto UI. This approach is useful for analyzing GPU communication performance and identifying bottlenecks in collective operations.
 
 .. code-block:: shell
 
-   rocprofv3 --rccl-trace --sys-trace -- <application_path>
+   rocprofiler-core --rccl-trace --sys-trace -- <application_path>
 
 The preceding command generates a rocpd database file prefixed with the process ID, which can be converted into PFTrace for visualization in the Perfetto UI.
 
@@ -465,7 +469,7 @@ rocDecode trace
 
 .. code-block:: shell
 
-    rocprofv3 --rocdecode-trace --output-format csv -- <application_path>
+    rocprofiler-core --rocdecode-trace --output-format csv -- <application_path>
 
 The above command generates a ``rocdecode_api_trace`` file prefixed with the process ID.
 
@@ -489,7 +493,7 @@ rocJPEG trace
 
 .. code-block:: shell
 
-    rocprofv3 --rocjpeg-trace --output-format csv -- <application_path>
+    rocprofiler-core --rocjpeg-trace --output-format csv -- <application_path>
 
 The above command generates a ``rocjpeg_api_trace`` file prefixed with the process ID.
 
@@ -511,9 +515,9 @@ OMPT trace
 
 .. code-block:: shell
 
-    rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
+    rocprofiler-core --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofiler-core`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. note::
 
@@ -522,7 +526,7 @@ OMPT is a rocpd-only trace: records are written to the rocpd database (the defau
 Dynamic process attachment
 +++++++++++++++++++++++++++
 
-To profile applications dynamically without requiring to restart the application,``rocprofv3`` provides dynamic process attachment. This is particularly useful for profiling long-running applications, services, or applications in a specific state.
+To profile applications dynamically without requiring to restart the application,``rocprofiler-core`` provides dynamic process attachment. This is particularly useful for profiling long-running applications, services, or applications in a specific state.
 
 Dynamic process attachment uses the ``-p``, ``--pid``, or ``--attach`` options (all equivalent) followed by the target process ID. The profiler instruments the target process and collects the specified tracing or counter data for the configured duration.
 
@@ -531,7 +535,7 @@ For more information, see :ref:`rocprofv3-process-attachment`.
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++
 
-``rocprofv3`` provides options to collect tracing summary or statistics after conclusion of a tracing session. These options are described here.
+``rocprofiler-core`` provides options to collect tracing summary or statistics after conclusion of a tracing session. These options are described here.
 
 Stats
 ######
@@ -541,7 +545,7 @@ The statistics help to determine the API or function that took the most amount o
 
 .. code-block:: shell
 
-    rocprofv3 --stats --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --stats --hip-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_stats.csv``, ``domain_stats.csv`` and ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -572,7 +576,7 @@ This option displays a summary of tracing data for the enabled tracing type, aft
 
 .. code-block:: shell
 
-   rocprofv3 -S --hip-trace -- <application_path>
+   rocprofiler-core -S --hip-trace -- <application_path>
 
 .. image:: /data/rocprofv3_summary.png
 
@@ -583,7 +587,7 @@ This option displays a summary of each tracing domain for the enabled tracing ty
 
 .. code-block:: shell
 
-    rocprofv3 -D --hsa-trace --hip-trace --output-format csv  -- <application_path>
+    rocprofiler-core -D --hsa-trace --hip-trace --output-format csv  -- <application_path>
 
 The preceding command generates a ``hip_trace.csv`` and ``hsa_trace.csv`` file prefixed with the process ID along with displaying the summary of each domain.
 
@@ -596,7 +600,7 @@ To see a summary for ``MEMORY_COPY`` domains, use:
 
 .. code-block:: shell
 
-   rocprofv3 --summary-groups MEMORY_COPY --sys-trace  -- <application_path>
+   rocprofiler-core --summary-groups MEMORY_COPY --sys-trace  -- <application_path>
 
 .. image:: /data/rocprofv3_memcpy_summary.png
 
@@ -604,7 +608,7 @@ To see a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
 
 .. code-block:: shell
 
-   rocprofv3 --summary-groups 'MEMORY_COPY|HIP_API' --sys-trace -- <application_path>
+   rocprofiler-core --summary-groups 'MEMORY_COPY|HIP_API' --sys-trace -- <application_path>
 
 .. image:: /data/rocprofv3_hip_memcpy_summary.png
 
@@ -615,7 +619,7 @@ This option specifies the output file for the summary. By default, the summary i
 
 .. code-block:: shell
 
-   rocprofv3 -S -D --summary-output-file filename --sys-trace -- <application_path>
+   rocprofiler-core -S -D --summary-output-file filename --sys-trace -- <application_path>
 
 The preceding command generates an output file named "filename" consisting of the summary for each domain. This also generates the files for the enabled tracing types under ``-sys-trace`` option.
 
@@ -625,13 +629,13 @@ The preceding command generates an output file named "filename" consisting of th
 Configuration output
 +++++++++++++++++++++++
 
-The ``--output-config`` option generates a comprehensive configuration output file that contains all resolved ``rocprofv3`` settings and options used during a profiling session. This feature is essential for debugging, reproducibility, and configuration validation.
+The ``--output-config`` option generates a comprehensive configuration output file that contains all resolved ``rocprofiler-core`` settings and options used during a profiling session. This feature is essential for debugging, reproducibility, and configuration validation.
 
 To generate a configuration output file during profiling, use:
 
 .. code-block:: bash
 
-    rocprofv3 --output-config --hip-trace -- <application_path>
+    rocprofiler-core --output-config --hip-trace -- <application_path>
 
 This command generates a configuration file (typically ``<process_id>_config.json``) alongside the regular profiling output files.
 
@@ -699,7 +703,7 @@ Sample configuration output structure:
       ]
     }
 
-The configuration output file provides complete transparency into ``rocprofv3`` operation, documenting all settings, defaults, and environmental context required for profiling sessions.
+The configuration output file provides complete transparency into ``rocprofiler-core`` operation, documenting all settings, defaults, and environmental context required for profiling sessions.
 
 Collecting traces using input file
 ++++++++++++++++++++++++++++++++++++
@@ -745,9 +749,9 @@ Here is a sample input.json file for collecting tracing summary:
 
 Here is the input schema (properties) of JSON or YAML input files:
 
--  **jobs** *(array)*: ``rocprofv3`` input data per application run.
+-  **jobs** *(array)*: ``rocprofiler-core`` input data per application run.
 
-   -  **Items** *(object)*: Data for ``rocprofv3``
+   -  **Items** *(object)*: Data for ``rocprofiler-core``
 
       -  **hip_trace** *(boolean)*
       -  **hip_runtime_trace** *(boolean)*
@@ -780,7 +784,7 @@ To supply the input file for collecting traces, use:
 
 .. code-block:: shell
 
-   rocprofv3 -i input.yaml -- <application_path>
+   rocprofiler-core -i input.yaml -- <application_path>
 
 Please note that input file format must be a valid YAML or JSON file.
 
@@ -791,7 +795,7 @@ When using aggregate tracing options like ``--runtime-trace`` or ``--sys-trace``
 
 .. code-block:: shell
 
-   rocprofv3 --runtime-trace --scratch-memory-trace=False -- <application_path>
+   rocprofiler-core --runtime-trace --scratch-memory-trace=False -- <application_path>
 
 The preceding command enables all traces included in ``--runtime-trace`` except for scratch memory tracing.
 
@@ -799,7 +803,7 @@ Similarly, for ``--sys-trace``:
 
 .. code-block:: shell
 
-   rocprofv3 --sys-trace --hsa-trace=False -- <application_path>
+   rocprofiler-core --sys-trace --hsa-trace=False -- <application_path>
 
 The preceding command enables all traces included in ``--sys-trace`` except for HSA API tracing.
 
@@ -807,7 +811,7 @@ To disable multiple specific tracing options, use:
 
 .. code-block:: shell
 
-   rocprofv3 --sys-trace --hsa-trace=False --scratch-memory-trace=False -- <application_path>
+   rocprofiler-core --sys-trace --hsa-trace=False --scratch-memory-trace=False -- <application_path>
 
 This feature is particularly useful to collect most traces excluding specific ones that might be unnecessary for your analysis or that generate excessive data.
 
@@ -828,7 +832,7 @@ To see the counters available on the GPU, use:
 
 .. code-block:: shell
 
-   rocprofv3 --list-avail
+   rocprofiler-core --list-avail
 
 Sample output for the list-avail command:
 
@@ -844,7 +848,7 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 
    **Counter dimension collection:** When collecting counters with multiple dimensions or instances, such as ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``, individual dimension values can't be collected separately using bracket notation, such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in the input files.
 
-   **To collect aggregated values:** Specify the counter name without dimension specifiers, such as ``pmc: TCC_MISS``. The ``rocprofv3`` tool automatically collects accumulated values across all instances.
+   **To collect aggregated values:** Specify the counter name without dimension specifiers, such as ``pmc: TCC_MISS``. The ``rocprofiler-core`` tool automatically collects accumulated values across all instances.
 
    **To collect values per instance:** Use JSON output format, which includes detailed dimension information for individual counter instances.
 
@@ -868,9 +872,9 @@ While the input file in text format can only be used for counter collection, JSO
 
 Here is the input schema (properties) of JSON or YAML input files:
 
--  **jobs** *(array)*: ``rocprofv3`` input data per application run
+-  **jobs** *(array)*: ``rocprofiler-core`` input data per application run
 
-   -  **Items** *(object)*: Data for ``rocprofv3``
+   -  **Items** *(object)*: Data for ``rocprofiler-core``
 
       -  **pmc** *(array)*: list of counters for collection
       -  **kernel_include_regex** *(string)*
@@ -939,7 +943,7 @@ To supply the input file for kernel counter collection, use:
 
 .. code-block:: bash
 
-   rocprofv3 -i input.yaml -- <application_path>
+   rocprofiler-core -i input.yaml -- <application_path>
 
 Counter collection using command line
 ++++++++++++++++++++++++++++++++++++++
@@ -950,7 +954,7 @@ To supply the counters in the command line, use:
 
 .. code-block:: shell
 
-   rocprofv3 --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+   rocprofiler-core --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 .. note::
 
@@ -968,7 +972,7 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
 .. code-block:: shell
 
-   rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+   rocprofiler-core --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 The preceding command creates two profiling passes:
 
@@ -982,7 +986,7 @@ You can combine ``--pmc`` flag with an input file. The counters specified in CLI
 
 .. code-block:: shell
 
-   rocprofv3 -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
+   rocprofiler-core -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
 
 If ``input.txt`` contains:
 
@@ -1078,14 +1082,14 @@ in the ``extra_counters.yaml`` file, use the ``-E`` / ``--extra-counters`` optio
 
 .. code-block:: shell
 
-   rocprofv3 -E <path-to-extra_counters.yaml> --pmc GRBM_GUI_ACTIVE_SUM --output-format csv -- <application_path>
+   rocprofiler-core -E <path-to-extra_counters.yaml> --pmc GRBM_GUI_ACTIVE_SUM --output-format csv -- <application_path>
 
 Where the option ``--pmc`` is used to specify the extra counters to be collected.
 
 Kernel counter collection output
 +++++++++++++++++++++++++++++++++
 
-Using ``rocprofv3`` for counter collection using input file or command line generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
+Using ``rocprofiler-core`` for counter collection using input file or command line generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
 
 When using input file in JSON or YAML format, for each job, a directory ``pass_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first job and so on.
 
@@ -1159,7 +1163,7 @@ To generate a Perfetto trace file, use the ``--output-format pftrace`` option al
 
 .. code-block:: bash
 
-  rocprofv3 --sys-trace --output-format pftrace -- <application_path>
+  rocprofiler-core --sys-trace --output-format pftrace -- <application_path>
 
 The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.perfetto.dev/>`_.
 
@@ -1184,7 +1188,7 @@ To generate a Perfetto trace file with counter data, use:
 
 .. code-block:: shell
 
-    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- <application_path>
+    rocprofiler-core --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- <application_path>
 
 The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.perfetto.dev/>`_. In the viewer, performance counters will appear as counter tracks organized by agent, allowing you to visualize counter values changing over time alongside kernel executions and other traced activities.
 
@@ -1192,7 +1196,7 @@ You can also combine this with the system trace option to get a more comprehensi
 
 .. code-block:: bash
 
-  rocprofv3 --pmc SQ_WAVES GRBM_COUNT --sys-trace --output-format pftrace -- <application_path>
+  rocprofiler-core --pmc SQ_WAVES GRBM_COUNT --sys-trace --output-format pftrace -- <application_path>
 
 .. image:: /data/perfetto_counters.png
    :width: 100%
@@ -1207,7 +1211,7 @@ To generate a Perfetto trace file that includes scratch memory visualization:
 
 .. code-block:: bash
 
-  rocprofv3 --scratch-memory-trace --output-format pftrace -- <application_path>
+  rocprofiler-core --scratch-memory-trace --output-format pftrace -- <application_path>
 
 In the Perfetto UI, scratch memory appears as counter tracks that show:
 
@@ -1225,7 +1229,7 @@ For comprehensive GPU execution insights, combine scratch memory tracing with ke
 
 .. code-block:: bash
 
-  rocprofv3 --kernel-trace --scratch-memory-trace --output-format pftrace -- <application_path>
+  rocprofiler-core --kernel-trace --scratch-memory-trace --output-format pftrace -- <application_path>
 
 This allows you to correlate scratch memory allocation patterns with specific kernel executions in the Perfetto visualization.
 
@@ -1387,7 +1391,7 @@ To specify the particular output format, use the ``--output-format`` option foll
 
 .. code-block::
 
-   rocprofv3 -i input.txt --output-format json -- <application_path>
+   rocprofiler-core -i input.txt --output-format json -- <application_path>
 
 Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2, rocpd`` enables all four output formats for the run.
 
@@ -1401,7 +1405,7 @@ For OTF2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`
 JSON output schema
 ++++++++++++++++++++
 
-``rocprofv3`` supports a custom JSON output format designed for programmatic analysis and **NOT** for visualization.
+``rocprofiler-core`` supports a custom JSON output format designed for programmatic analysis and **NOT** for visualization.
 The schema is optimized for size while factoring in usability.
 
 .. note::
@@ -1415,8 +1419,8 @@ Properties
 
 Here are the properties of the JSON output schema:
 
-- **rocprofiler-sdk-tool** `(array)`: rocprofv3 data per process (each element represents a process).
-   - **Items** `(object)`: Data for rocprofv3.
+- **rocprofiler-sdk-tool** `(array)`: rocprofiler-core data per process (each element represents a process).
+   - **Items** `(object)`: Data for rocprofiler-core.
       - **metadata** `(object, required)`: Metadata related to the profiler session.
          - **pid** `(integer, required)`: Process ID.
          - **init_time** `(integer, required)`: Initialization time in nanoseconds.

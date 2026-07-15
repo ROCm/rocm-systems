@@ -1,15 +1,15 @@
 .. meta::
-  :description: Documentation for using rocprofv3 with OpenMP applications
-  :keywords: ROCprofiler-SDK tool, OpenMP, rocprofv3, rocprofv3 tool usage, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
+  :description: Documentation for using rocprofiler-core with OpenMP applications
+  :keywords: ROCprofiler-SDK tool, OpenMP, rocprofiler-core, rocprofiler-core tool usage, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
 
 
 .. _using-rocprofv3-with-openmp:
 
-============================
-Using rocprofv3 with OpenMP
-============================
+==================================
+Using rocprofiler-core with OpenMP
+==================================
 
-For computations offloaded to AMD GPUs using OpenMP (for example, via OpenMP target offload), ``rocprofv3`` can be used to capture and profile GPU activities initiated by these offloaded regions. The ``--ompt-trace`` option additionally records host-side OpenMP execution — parallel regions, tasks, work-sharing, and sync — for any application linked against an OMPT-capable OpenMP runtime; see :ref:`tracing-openmp-with-ompt-trace`.
+For computations offloaded to AMD GPUs using OpenMP (for example, via OpenMP target offload), ``rocprofiler-core`` can be used to capture and profile GPU activities initiated by these offloaded regions. The ``--ompt-trace`` option additionally records host-side OpenMP execution — parallel regions, tasks, work-sharing, and sync — for any application linked against an OMPT-capable OpenMP runtime; see :ref:`tracing-openmp-with-ompt-trace`.
 
 Example: Vector addition using OpenMP offload on AMD GPUs
 ==========================================================
@@ -72,16 +72,16 @@ To compile the application for AMD GPU offload, use:
 
     amdclang++ -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -L/opt/rocm/lib --offload-arch=gfx9xx -o vector_add <application>
 
-Profiling the application with rocprofv3
-=========================================
+Profiling the application with rocprofiler-core
+===============================================
 
-To profile the GPU activity during execution, run the application with ``rocprofv3``:
+To profile the GPU activity during execution, run the application with ``rocprofiler-core``:
 
 .. code-block:: bash
 
-    rocprofv3 -s --output-format csv -- ./vector_add
+    rocprofiler-core -s --output-format csv -- ./vector_add
 
-Upon execution, ``rocprofv3`` generates several CSV trace files, such as:
+Upon execution, ``rocprofiler-core`` generates several CSV trace files, such as:
 
 - <pid>_kernel_trace.csv
 - <pid>_hsa_api_trace.csv
@@ -100,9 +100,9 @@ The flags shown above capture HIP / HSA / kernel-dispatch / memory activity but 
 
 .. code-block:: bash
 
-    rocprofv3 --ompt-trace --kernel-trace --memory-copy-trace --output-format rocpd -- ./vector_add
+    rocprofiler-core --ompt-trace --kernel-trace --memory-copy-trace --output-format rocpd -- ./vector_add
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (``rocpd`` is also the default output format) and are **not** emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is combined with another ``--output-format``, ``rocprofv3`` prints a warning and adds ``rocpd`` automatically so OMPT data is not lost. To view OMPT in CSV / Perfetto / OTF2, convert the database with ``rocpd convert`` (see below).
+OMPT is a rocpd-only trace: records are written to the rocpd database (``rocpd`` is also the default output format) and are **not** emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is combined with another ``--output-format``, ``rocprofiler-core`` prints a warning and adds ``rocpd`` automatically so OMPT data is not lost. To view OMPT in CSV / Perfetto / OTF2, convert the database with ``rocpd convert`` (see below).
 
 Combined with ``--kernel-trace`` / ``--memory-copy-trace``, each GPU kernel can be correlated with the surrounding ``target_submit`` / ``target_data_op`` region on the host and placed on the same timeline as the enclosing ``parallel`` / ``work`` regions and tasks.
 
@@ -125,13 +125,13 @@ By default ``--ompt-trace`` records every OMPT operation. To cut down on high ev
 .. code-block:: bash
 
     # All OMPT operations (default; same as bare --ompt-trace or --ompt-trace=all)
-    rocprofv3 --ompt-trace -- ./vector_add
+    rocprofiler-core --ompt-trace -- ./vector_add
 
     # Only host parallel regions, tasks, and target offload
-    rocprofv3 --ompt-trace parallel task target -- ./vector_add
+    rocprofiler-core --ompt-trace parallel task target -- ./vector_add
 
     # Only target-offload events, correlated with kernel dispatches
-    rocprofv3 --ompt-trace target --kernel-trace -- ./vector_add
+    rocprofiler-core --ompt-trace target --kernel-trace -- ./vector_add
 
 Recognised categories are ``thread``, ``parallel``, ``task``, ``sync``, ``mutex``, ``target``, ``device``, ``error``, and ``all``. Each resolves to a fixed set of OMPT operations (for example, ``parallel`` covers ``parallel_begin``/``parallel_end``/``implicit_task``/``work``/``dispatch``/``reduction``/``masked``; ``target`` covers ``target_emi``/``target_data_op_emi``/``target_submit_emi``). The CLI rejects unknown categories, and comma-separated tokens, at parse time.
 

@@ -1,21 +1,21 @@
 .. meta::
   :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
-  :keywords: ROCprofiler-SDK tool usage, rocprofv3 user manual, rocprofv3 usage, rocprofv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
+  :keywords: ROCprofiler-SDK tool usage, rocprofiler-core user manual, rocprofiler-core usage, rocprofiler-core user guide, using rocprofiler-core, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _rocprofv3-advanced-options:
 
-===========================
-rocprofv3 advanced options
-===========================
+=================================
+rocprofiler-core advanced options
+=================================
 
-``rocprofv3`` provides the following miscellaneous functionalities for improved control and flexibility.
+``rocprofiler-core`` provides the following miscellaneous functionalities for improved control and flexibility.
 
 Minimum output data threshold
 ------------------------------
 
 The ``--minimum-output-data`` option allows you to control the generation of output files by setting a minimum data size threshold. This prevents the creation of empty or very small output files that contain no meaningful profiling data.
 
-When this option is specified, ``rocprofv3`` only generates output files if the collected data size exceeds the specified threshold. This is particularly useful in scenarios where:
+When this option is specified, ``rocprofiler-core`` only generates output files if the collected data size exceeds the specified threshold. This is particularly useful in scenarios where:
 
 - You're profiling applications that may have sporadic GPU activity
 - You want to avoid processing empty trace files in automated workflows
@@ -25,7 +25,7 @@ To specify the minimum output data threshold, use the ``--minimum-output-data`` 
 
 .. code-block:: bash
 
-    rocprofv3 --minimum-output-data 100 --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --minimum-output-data 100 --hip-trace --output-format csv -- <application_path>
 
 The preceding command only generates output files if the HIP trace data is larger than 100 KB.
 
@@ -36,14 +36,14 @@ The preceding command only generates output files if the HIP trace data is large
 .. code-block:: bash
 
     # Only generate output if kernel trace data > 50 KB
-    rocprofv3 --minimum-output-data 50 --kernel-trace --output-format csv -- <application_path>
+    rocprofiler-core --minimum-output-data 50 --kernel-trace --output-format csv -- <application_path>
 
 **Scenario 2: Batch profiling with meaningful data collection**
 
 .. code-block:: bash
 
     # For system tracing, only output files if data > 1 MB
-    rocprofv3 --minimum-output-data 1024 --sys-trace --output-format pftrace -- <application_path>
+    rocprofiler-core --minimum-output-data 1024 --sys-trace --output-format pftrace -- <application_path>
 
 **Using with input files:**
 
@@ -84,15 +84,15 @@ This feature is especially valuable in automated testing environments where you 
 Signal handler control
 -----------------------
 
-The ``--disable-signal-handlers`` option provides control over signal handling behavior in ``rocprofv3``, allowing you to manage how the profiler responds to system signals like SIGSEGV, SIGTERM, and others.
+The ``--disable-signal-handlers`` option provides control over signal handling behavior in ``rocprofiler-core``, allowing you to manage how the profiler responds to system signals like SIGSEGV, SIGTERM, and others.
 
-By default, ``rocprofv3`` installs its own signal handlers to ensure proper cleanup and data collection when the application encounters errors or is terminated. However, in some scenarios, you may want the application's own signal handlers to take precedence.
+By default, ``rocprofiler-core`` installs its own signal handlers to ensure proper cleanup and data collection when the application encounters errors or is terminated. However, in some scenarios, you may want the application's own signal handlers to take precedence.
 
-When ``--disable-signal-handlers`` is set to ``true``, ``rocprofv3`` disables the prioritization of its signal handlers over application-installed signal handlers. This means:
+When ``--disable-signal-handlers`` is set to ``true``, ``rocprofiler-core`` disables the prioritization of its signal handlers over application-installed signal handlers. This means:
 
-- If your application has custom signal handlers for SIGSEGV, SIGTERM, or similar signals, those handlers will be executed instead of ``rocprofv3``'s handlers
+- If your application has custom signal handlers for SIGSEGV, SIGTERM, or similar signals, those handlers will be executed instead of ``rocprofiler-core``'s handlers
 - The application maintains full control over signal handling behavior
-- ``rocprofv3`` will still attempt to collect and save profiling data when possible
+- ``rocprofiler-core`` will still attempt to collect and save profiling data when possible
 
 **Important note**: Even with this option enabled, the underlying ``glog`` library may still install signal handlers that provide stack backtraces for debugging purposes.
 
@@ -100,9 +100,9 @@ When ``--disable-signal-handlers`` is set to ``true``, ``rocprofv3`` disables th
 
 .. code-block:: bash
 
-    rocprofv3 --disable-signal-handlers --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --disable-signal-handlers --hip-trace --output-format csv -- <application_path>
 
-The preceding command disables ``rocprofv3`` signal handler prioritization, allowing the application's signal handlers to take precedence.
+The preceding command disables ``rocprofiler-core`` signal handler prioritization, allowing the application's signal handlers to take precedence.
 
 **Example scenarios:**
 
@@ -111,21 +111,21 @@ The preceding command disables ``rocprofv3`` signal handler prioritization, allo
 .. code-block:: bash
 
     # For applications that implement custom crash reporting or recovery
-    rocprofv3 --disable-signal-handlers --sys-trace --output-format pftrace -- ./my_app_with_custom_handlers
+    rocprofiler-core --disable-signal-handlers --sys-trace --output-format pftrace -- ./my_app_with_custom_handlers
 
 **Scenario 2: Debugging applications with existing signal handlers**
 
 .. code-block:: bash
 
     # When debugging applications that rely on specific signal handling behavior
-    rocprofv3 --disable-signal-handlers --kernel-trace --pmc SQ_WAVES -- ./debug_application
+    rocprofiler-core --disable-signal-handlers --kernel-trace --pmc SQ_WAVES -- ./debug_application
 
 **Scenario 3: Integration with testing frameworks**
 
 .. code-block:: bash
 
     # For test frameworks that need to handle signals for test orchestration
-    rocprofv3 --disable-signal-handlers --runtime-trace --output-directory test_results -- ./test_suite
+    rocprofiler-core --disable-signal-handlers --runtime-trace --output-directory test_results -- ./test_suite
 
 **Using with input files:**
 
@@ -163,7 +163,7 @@ You can also specify this option in YAML or JSON input files:
 
 **Avoid this option when:**
 
-- You want ``rocprofv3`` to provide maximum protection against data loss
+- You want ``rocprofiler-core`` to provide maximum protection against data loss
 - Your application doesn't have custom signal handlers
 - You're doing standard profiling where signal handling isn't a concern
 
@@ -191,28 +191,28 @@ Use ``--disable-signal-handlers`` to ensure your custom handler executes:
 
 .. code-block:: bash
 
-    rocprofv3 --disable-signal-handlers --hip-trace -- ./app_with_custom_handler
+    rocprofiler-core --disable-signal-handlers --hip-trace -- ./app_with_custom_handler
 
 **Troubleshooting:**
 
 - If profiling data appears incomplete with this option enabled, check if your application's signal handlers are properly saving or flushing data
-- Consider implementing explicit ``rocprofv3`` cleanup calls in your application's signal handlers if data integrity is important
+- Consider implementing explicit ``rocprofiler-core`` cleanup calls in your application's signal handlers if data integrity is important
 - Monitor application behavior to ensure custom signal handling doesn't interfere with profiling data collection
 
-This option provides the flexibility needed for complex applications and testing environments while maintaining ``rocprofv3``'s core profiling functionality.
+This option provides the flexibility needed for complex applications and testing environments while maintaining ``rocprofiler-core``'s core profiling functionality.
 
 Library preloading
 -------------------
 
 The ``--preload`` option allows you to specify additional libraries to prepend to the ``LD_PRELOAD`` environment variable. This is particularly useful when working with sanitizer libraries, debugging tools, or other instrumentation libraries that need to be loaded before the application starts.
 
-``LD_PRELOAD`` is a powerful mechanism in Linux that allows you to load shared libraries before any other libraries, effectively intercepting and overriding function calls. The ``--preload`` option in ``rocprofv3`` provides a convenient way to manage this without manually setting environment variables.
+``LD_PRELOAD`` is a powerful mechanism in Linux that allows you to load shared libraries before any other libraries, effectively intercepting and overriding function calls. The ``--preload`` option in ``rocprofiler-core`` provides a convenient way to manage this without manually setting environment variables.
 
 **Basic usage:**
 
 .. code-block:: bash
 
-    rocprofv3 --preload /path/to/library.so --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --preload /path/to/library.so --hip-trace --output-format csv -- <application_path>
 
 The preceding command preloads the specified library and enables HIP tracing.
 
@@ -223,28 +223,28 @@ The preceding command preloads the specified library and enables HIP tracing.
 .. code-block:: bash
 
     # Preload AddressSanitizer for memory error detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libasan.so.5 --sys-trace -- ./my_application
+    rocprofiler-core --preload /usr/lib/x86_64-linux-gnu/libasan.so.5 --sys-trace -- ./my_application
 
 **Scenario 2: Using ThreadSanitizer (TSan)**
 
 .. code-block:: bash
 
     # Preload ThreadSanitizer for race condition detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libtsan.so.0 --kernel-trace --pmc SQ_WAVES -- ./threaded_app
+    rocprofiler-core --preload /usr/lib/x86_64-linux-gnu/libtsan.so.0 --kernel-trace --pmc SQ_WAVES -- ./threaded_app
 
 **Scenario 3: Multiple preloaded libraries**
 
 .. code-block:: bash
 
     # Preload multiple libraries (custom profiler and sanitizer)
-    rocprofv3 --preload /opt/custom/libprofiler.so /usr/lib/libasan.so --runtime-trace -- ./complex_app
+    rocprofiler-core --preload /opt/custom/libprofiler.so /usr/lib/libasan.so --runtime-trace -- ./complex_app
 
 **Scenario 4: Using MemorySanitizer (MSan)**
 
 .. code-block:: bash
 
     # Preload MemorySanitizer for uninitialized memory detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libmsan.so.0 --hip-trace -- ./memory_intensive_app
+    rocprofiler-core --preload /usr/lib/x86_64-linux-gnu/libmsan.so.0 --hip-trace -- ./memory_intensive_app
 
 **Using with input files:**
 
@@ -302,7 +302,7 @@ The order of libraries in ``--preload`` matters as they are processed in the ord
 .. code-block:: bash
 
     # Library1 will be loaded before Library2
-    rocprofv3 --preload /path/to/library1.so /path/to/library2.so --hip-trace -- ./app
+    rocprofiler-core --preload /path/to/library1.so /path/to/library2.so --hip-trace -- ./app
 
 **Environment variable interaction:**
 
@@ -312,7 +312,7 @@ The ``--preload`` option works alongside existing ``LD_PRELOAD`` settings:
 
     # If LD_PRELOAD is already set, --preload libraries are prepended
     export LD_PRELOAD="/existing/library.so"
-    rocprofv3 --preload /new/library.so --hip-trace -- ./app
+    rocprofiler-core --preload /new/library.so --hip-trace -- ./app
     # Effective LD_PRELOAD: "/new/library.so:/existing/library.so"
 
 **Troubleshooting:**
@@ -327,13 +327,13 @@ ROCm root path configuration
 
 The ``--rocm-root`` option allows you to specify a custom ROCm installation directory instead of using the default relative path detection. This is useful when working with multiple ROCm installations, custom builds, or non-standard installation locations.
 
-By default, ``rocprofv3`` automatically detects the ROCm installation path relative to its own location. However, in some environments, you may need to explicitly specify which ROCm installation to use.
+By default, ``rocprofiler-core`` automatically detects the ROCm installation path relative to its own location. However, in some environments, you may need to explicitly specify which ROCm installation to use.
 
 **Basic usage:**
 
 .. code-block:: bash
 
-    rocprofv3 --rocm-root /opt/custom-rocm --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --rocm-root /opt/custom-rocm --hip-trace --output-format csv -- <application_path>
 
 The preceding command uses the ROCm installation located at ``/opt/custom-rocm``.
 
@@ -344,31 +344,31 @@ The preceding command uses the ROCm installation located at ``/opt/custom-rocm``
 .. code-block:: bash
 
     # Use ROCm 5.7.0 specifically
-    rocprofv3 --rocm-root /opt/rocm-5.7.0 --sys-trace -- ./app_for_rocm_5_7
+    rocprofiler-core --rocm-root /opt/rocm-5.7.0 --sys-trace -- ./app_for_rocm_5_7
 
     # Use ROCm 6.0.0 for comparison
-    rocprofv3 --rocm-root /opt/rocm-6.0.0 --sys-trace -- ./app_for_rocm_6_0
+    rocprofiler-core --rocm-root /opt/rocm-6.0.0 --sys-trace -- ./app_for_rocm_6_0
 
 **Scenario 2: Custom ROCm build**
 
 .. code-block:: bash
 
     # Use custom ROCm build with debugging symbols
-    rocprofv3 --rocm-root /home/developer/rocm-debug-build --kernel-trace --pmc SQ_WAVES -- ./debug_app
+    rocprofiler-core --rocm-root /home/developer/rocm-debug-build --kernel-trace --pmc SQ_WAVES -- ./debug_app
 
 **Scenario 3: Development environment**
 
 .. code-block:: bash
 
     # Use locally built ROCm for development
-    rocprofv3 --rocm-root /workspace/rocm-dev --runtime-trace -- ./test_application
+    rocprofiler-core --rocm-root /workspace/rocm-dev --runtime-trace -- ./test_application
 
 **Scenario 4: Container environments**
 
 .. code-block:: bash
 
     # Use ROCm mounted at custom location in container
-    rocprofv3 --rocm-root /usr/local/rocm --hip-trace -- ./containerized_app
+    rocprofiler-core --rocm-root /usr/local/rocm --hip-trace -- ./containerized_app
 
 **Directory structure requirements:**
 
@@ -392,7 +392,7 @@ This option is typically used from the command line, but can be specified in wra
     #!/bin/bash
     # profile_with_custom_rocm.sh
     ROCM_PATH="/opt/rocm-custom"
-    rocprofv3 --rocm-root "$ROCM_PATH" -i input.yaml -- "$@"
+    rocprofiler-core --rocm-root "$ROCM_PATH" -i input.yaml -- "$@"
 
 **Environment variable interaction:**
 
@@ -402,7 +402,7 @@ The ``--rocm-root`` option overrides automatic path detection and environment va
 
     # --rocm-root takes precedence over environment variables
     export ROCM_PATH="/opt/rocm-default"
-    rocprofv3 --rocm-root /opt/rocm-override --hip-trace -- ./app
+    rocprofiler-core --rocm-root /opt/rocm-override --hip-trace -- ./app
     # Uses /opt/rocm-override, not /opt/rocm-default
 
 **Validation and troubleshooting:**
@@ -423,7 +423,7 @@ Shared object versioning follows the Linux convention where libraries have versi
 
 .. code-block:: bash
 
-    rocprofv3 --sdk-soversion 2 --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --sdk-soversion 2 --hip-trace --output-format csv -- <application_path>
 
 The preceding command uses ``librocprofiler-sdk.so.2`` instead of the default version.
 
@@ -434,31 +434,31 @@ The preceding command uses ``librocprofiler-sdk.so.2`` instead of the default ve
 .. code-block:: bash
 
     # Test application with SDK version 1
-    rocprofv3 --sdk-soversion 1 --kernel-trace --pmc SQ_WAVES -- ./app_v1_test
+    rocprofiler-core --sdk-soversion 1 --kernel-trace --pmc SQ_WAVES -- ./app_v1_test
 
     # Test same application with SDK version 2
-    rocprofv3 --sdk-soversion 2 --kernel-trace --pmc SQ_WAVES -- ./app_v2_test
+    rocprofiler-core --sdk-soversion 2 --kernel-trace --pmc SQ_WAVES -- ./app_v2_test
 
 **Scenario 2: Compatibility verification**
 
 .. code-block:: bash
 
     # Verify backward compatibility with older SDK
-    rocprofv3 --sdk-soversion 0 --sys-trace -- ./legacy_application
+    rocprofiler-core --sdk-soversion 0 --sys-trace -- ./legacy_application
 
 **Scenario 3: Development and testing**
 
 .. code-block:: bash
 
     # Use specific version for regression testing
-    rocprofv3 --sdk-soversion 3 --runtime-trace --output-directory regression_test -- ./test_suite
+    rocprofiler-core --sdk-soversion 3 --runtime-trace --output-directory regression_test -- ./test_suite
 
 **Scenario 4: Production environment pinning**
 
 .. code-block:: bash
 
     # Pin to specific version for production consistency
-    rocprofv3 --sdk-soversion 1 --hip-trace --minimum-output-data 100 -- ./production_app
+    rocprofiler-core --sdk-soversion 1 --hip-trace --minimum-output-data 100 -- ./production_app
 
 **Library resolution behavior:**
 
@@ -475,7 +475,7 @@ The option affects library loading in the following order:
     # test_matrix.sh - Test with multiple SDK versions
     for version in 0 1 2; do
         echo "Testing with SDK SO version $version"
-        rocprofv3 --sdk-soversion $version --hip-trace -- ./test_app
+        rocprofiler-core --sdk-soversion $version --hip-trace -- ./test_app
     done
 
 **Troubleshooting:**
@@ -496,7 +496,7 @@ This option helps resolve library paths for version-specific libraries like ``li
 
 .. code-block:: bash
 
-    rocprofv3 --sdk-version 1.2.3 --hip-trace --output-format csv -- <application_path>
+    rocprofiler-core --sdk-version 1.2.3 --hip-trace --output-format csv -- <application_path>
 
 The preceding command uses ``librocprofiler-sdk.so.1.2.3`` if available.
 
@@ -507,17 +507,17 @@ The preceding command uses ``librocprofiler-sdk.so.1.2.3`` if available.
 .. code-block:: bash
 
     # Test with specific patch version for bug verification
-    rocprofv3 --sdk-version 2.1.5 --kernel-trace -- ./bug_reproduction_case
+    rocprofiler-core --sdk-version 2.1.5 --kernel-trace -- ./bug_reproduction_case
 
     # Test with fixed version
-    rocprofv3 --sdk-version 2.1.6 --kernel-trace -- ./bug_verification_case
+    rocprofiler-core --sdk-version 2.1.6 --kernel-trace -- ./bug_verification_case
 
 **Scenario 2: Reproducible profiling**
 
 .. code-block:: bash
 
     # Ensure exact same SDK version for reproducible results
-    rocprofv3 --sdk-version 2.2.1 --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- ./benchmark_app
+    rocprofiler-core --sdk-version 2.2.1 --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- ./benchmark_app
 
 **Version format support:**
 
@@ -546,7 +546,7 @@ While typically used from command line, it can be scripted:
 
     for version in "${VERSIONS[@]}"; do
         echo "Testing SDK version $version"
-        rocprofv3 --sdk-version "$version" --hip-trace --output-directory "results_$version" -- ./test_app
+        rocprofiler-core --sdk-version "$version" --hip-trace --output-directory "results_$version" -- ./test_app
     done
 
 **Combined with other version options:**
@@ -554,15 +554,15 @@ While typically used from command line, it can be scripted:
 .. code-block:: bash
 
     # Combine with soversion for maximum control
-    rocprofv3 --sdk-version 2.1.5 --sdk-soversion 2 --hip-trace -- ./app
+    rocprofiler-core --sdk-version 2.1.5 --sdk-soversion 2 --hip-trace -- ./app
 
     # Combine with custom ROCm root
-    rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
+    rocprofiler-core --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
 
 Agent index
 ------------
 
-The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime or tool has an independent representation of the agent's indices, ``rocprofv3`` provides an option to configure the agent index in the output files.
+The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime or tool has an independent representation of the agent's indices, ``rocprofiler-core`` provides an option to configure the agent index in the output files.
 
 - **absolute == node_id:** Absolute index of the agent, regardless of cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes``. For example, Agent-0, Agent-2, Agent-4.
 - **relative == logical_node_id:** Relative index of the agent accounting for cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes/``, whose properties file is non-empty. For example, Agent-0, Agent-1, Agent-2.
@@ -581,7 +581,7 @@ To set the agent index to relative, use:
 
 .. code-block:: shell
 
-    rocprofv3 --kernel-trace --agent-index=relative --output-format csv -- <application_path>
+    rocprofiler-core --kernel-trace --agent-index=relative --output-format csv -- <application_path>
 
 Here is the generated output file with ``Agent_Id`` as "Agent 7":
 
@@ -596,7 +596,7 @@ To set the agent index to type-relative, use:
 
 .. code-block:: shell
 
-    rocprofv3 --kernel-trace --agent-index=type-relative --output-format csv -- <application_path>
+    rocprofiler-core --kernel-trace --agent-index=type-relative --output-format csv -- <application_path>
 
 Here is the generated output file with ``Agent_Id`` as "GPU 3":
 
@@ -610,13 +610,13 @@ Here is the generated output file with ``Agent_Id`` as "GPU 3":
 Group by queue
 ---------------
 
-By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory copy operations were submitted, when outputting a perfetto trace. Whereas, the ``--group-by-queue`` option displays the HSA queues to which these kernel and memory operations were submitted.
+By default, ``rocprofiler-core`` shows the HIP streams to which the kernel and memory copy operations were submitted, when outputting a perfetto trace. Whereas, the ``--group-by-queue`` option displays the HSA queues to which these kernel and memory operations were submitted.
 
 .. image:: /data/streams_pftrace.png
 
 .. code-block:: shell
 
-    rocprofv3 -s --group-by-queue --output-format pftrace  -- <application_path>
+    rocprofiler-core -s --group-by-queue --output-format pftrace  -- <application_path>
 
 The preceding command generates a ``pftrace`` file with the kernel and memory copy operations grouped into HSA queues instead of HIP streams.
 

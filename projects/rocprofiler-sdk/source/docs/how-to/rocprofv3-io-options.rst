@@ -1,15 +1,15 @@
 
 .. meta::
   :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
-  :keywords: ROCprofiler-SDK tool usage, rocprofv3 user manual, rocprofv3 usage, rocprofv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
+  :keywords: ROCprofiler-SDK tool usage, rocprofiler-core user manual, rocprofiler-core usage, rocprofiler-core user guide, using rocprofiler-core, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _rocprofv3-io-options:
 
-==============================
-rocprofv3 I/O control options
-==============================
+====================================
+rocprofiler-core I/O control options
+====================================
 
-``rocprofv3`` provides the following options to control the output.
+``rocprofiler-core`` provides the following options to control the output.
 
 .. _output-prefix-keys:
 
@@ -73,7 +73,7 @@ To specify the output directory, use ``--output-directory`` or ``-d`` option. If
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-directory output_dir --output-format csv -- <application_path>
+   rocprofiler-core --hip-trace --output-directory output_dir --output-format csv -- <application_path>
 
 The preceding command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
 
@@ -93,9 +93,9 @@ The following example shows how to use the output directory option with placehol
 
 .. code-block:: bash
 
-   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- <application_path>
+   mpirun -n 2 rocprofiler-core --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- <application_path>
 
-The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
+The preceding command runs the application with ``rocprofiler-core`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
 
 Assuming the hostname as ``ubuntu-latest`` and the process IDs as 3000020 and 3000019, the output file names are:
 
@@ -113,7 +113,7 @@ To specify the output file name, use ``--output-file`` or ``-o`` option. If not 
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-file output --output-format csv -- <application_path>
+   rocprofiler-core --hip-trace --output-file output --output-format csv -- <application_path>
 
 The preceding command generates an ``output_hip_api_trace.csv`` file.
 
@@ -121,7 +121,7 @@ The output file name can also include placeholders such as ``%hostname%`` and ``
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace --output-format csv -- <application_path>
+   rocprofiler-core --hip-trace --output-file %hostname%/%pid%_hip_api_trace --output-format csv -- <application_path>
 
 The preceding command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
 
@@ -141,7 +141,7 @@ The triplet is defined as follows:
 
 .. code-block:: shell
 
-   rocprofv3 --collection-period 5:1:1 --hip-trace -- <application_path>
+   rocprofiler-core --collection-period 5:1:1 --hip-trace -- <application_path>
 
 The preceding command collects the profiling data for 1 second, starting 5 seconds after the application starts, and this cycle will be repeated once.
 
@@ -155,7 +155,7 @@ To specify the time unit as milliseconds, use:
 
 .. code-block:: shell
 
-   rocprofv3 --collection-period 5:1:0 --collection-period-unit msec --hip-trace -- <application_path>
+   rocprofiler-core --collection-period 5:1:0 --collection-period-unit msec --hip-trace -- <application_path>
 
 Perfetto-specific options
 --------------------------

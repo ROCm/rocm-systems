@@ -79,14 +79,14 @@ def patch_message(msg, *args):
 
 def fatal_error(msg, *args, exit_code=1):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
+    sys.stderr.write(f"[rocprofiler-core] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
 
 
 def warning(msg, *args):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
+    sys.stderr.write(f"[rocprofiler-core] Warning: {msg}\n")
     sys.stderr.flush()
 
 
@@ -413,22 +413,22 @@ def parse_arguments(args=None):
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
 
-    $ rocprofv3 [<rocprofv3-option> ...] -- <application> [<application-arg> ...]
-    $ rocprofv3 --hip-trace -- ./myapp -n 1
+    $ rocprofiler-core [<rocprofiler-core-option> ...] -- <application> [<application-arg> ...]
+    $ rocprofiler-core --hip-trace -- ./myapp -n 1
 
-For MPI applications (or other job launchers such as SLURM), place rocprofv3 inside the job launcher:
+For MPI applications (or other job launchers such as SLURM), place rocprofiler-core inside the job launcher:
 
-    $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
+    $ mpirun -n 4 rocprofiler-core --hip-trace -- ./mympiapp
 
 For MPI applications, select specific ranks to provide profile/trace output:
 
-    $ mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3,8 -- ./mympiapp
-    $ srun -n 32 rocprofv3 --hip-trace --profile-mpi-ranks 0 -- ./myapp
+    $ mpirun -n 16 rocprofiler-core --hip-trace --profile-mpi-ranks 0-3,8 -- ./mympiapp
+    $ srun -n 32 rocprofiler-core --hip-trace --profile-mpi-ranks 0 -- ./myapp
 
 For attachment profiling of running processes:
 
-    $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
-    $ rocprofv3 --attach 1234 --attach-duration-msec 10 --hsa-trace
+    $ rocprofiler-core --attach <PID> --hip-trace --kernel-trace
+    $ rocprofiler-core --attach 1234 --attach-duration-msec 10 --hsa-trace
 
 """
 
@@ -2306,6 +2306,14 @@ def run(app_args, args, **kwargs):
 
 
 def main(argv=None):
+
+    _invoked_as = os.path.basename(sys.argv[0]) if sys.argv else ""
+    if _invoked_as == "rocprofv3":
+        warning(
+            "rocprofv3 has been renamed to rocprofiler-core. Please update your "
+            "scripts and automation; the rocprofv3 command will be removed in a "
+            "future ROCm release. Use 'rocprofiler-core' instead."
+        )
 
     cmd_args, app_args = parse_arguments(argv)
 

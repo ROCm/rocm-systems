@@ -1,6 +1,6 @@
 .. meta::
   :description: Documentation of the usage of rocprofv3-avail
-  :keywords: ROCprofiler-SDK tool usage, rocprofv3-avail usage, rocprofv3 user manual, rocprofv3 usage, rocprofv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
+  :keywords: ROCprofiler-SDK tool usage, rocprofv3-avail usage, rocprofiler-core user manual, rocprofiler-core usage, rocprofiler-core user guide, using rocprofiler-core, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _using-rocprofv3-avail:
 

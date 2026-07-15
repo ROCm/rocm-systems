@@ -4,14 +4,25 @@
 
 rocprofiler_activate_clang_tidy()
 
-# Adding main rocprofv3
-configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3 @ONLY)
+# Adding main rocprofiler-core
+configure_file(rocprofiler-core.py
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofiler-core @ONLY)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofiler-core
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
+                WORLD_EXECUTE
+    COMPONENT tools)
+
+# Ship the legacy 'rocprofv3' name as a deprecated relative symlink to 'rocprofiler-core'.
+# The script emits a deprecation warning when invoked via the old name.
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink rocprofiler-core
+                        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-                WORLD_EXECUTE
     COMPONENT tools)
 
 configure_file(rocprofv3-avail.py

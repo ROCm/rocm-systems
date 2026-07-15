@@ -1,24 +1,24 @@
 .. meta::
-  :description: Documentation of the MPI usage for rocprofv3
-  :keywords: ROCprofiler-SDK tool, mpirun, rocprofv3, rocprofv3 tool usage, mpich, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
+  :description: Documentation of the MPI usage for rocprofiler-core
+  :keywords: ROCprofiler-SDK tool, mpirun, rocprofiler-core, rocprofiler-core tool usage, mpich, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
 
 
 .. _using-rocprofv3-with-mpi:
 
-=========================
-Using rocprofv3 with MPI
-=========================
+===============================
+Using rocprofiler-core with MPI
+===============================
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
 MPI applications are parallel programs that run across multiple processes, which can be distributed over one or more nodes.
 
-For MPI applications or other job launchers such as `SLURM <https://slurm.schedmd.com/documentation.html>`_, place ``rocprofv3`` inside the job launcher. The following example demonstrates how to use ``rocprofv3`` with MPI:
+For MPI applications or other job launchers such as `SLURM <https://slurm.schedmd.com/documentation.html>`_, place ``rocprofiler-core`` inside the job launcher. The following example demonstrates how to use ``rocprofiler-core`` with MPI:
 
 .. code-block:: bash
 
-    mpirun -n 4 rocprofv3 --hip-trace --output-format csv -- <application_path>
+    mpirun -n 4 rocprofiler-core --hip-trace --output-format csv -- <application_path>
 
-The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with the process ID.
+The preceding command runs the application with ``rocprofiler-core`` and generates the trace file for each rank. The trace files are prefixed with the process ID.
 
 .. code-block:: bash
 
@@ -31,12 +31,12 @@ The preceding command runs the application with ``rocprofv3`` and generates the 
     2293215_agent_info.csv
     2293215_hip_api_trace.csv
 
-Since the data collection is performed in-process, it's ideal to collect data from within the processes launched by MPI. When ``rocprofv3`` is run outside of ``mpirun``, the tool library is loaded into the `mpirun` executable..
+Since the data collection is performed in-process, it's ideal to collect data from within the processes launched by MPI. When ``rocprofiler-core`` is run outside of ``mpirun``, the tool library is loaded into the `mpirun` executable..
 Collecting data outside of ``mpirun`` works but fetches agent info for the ``mpirun`` process too. For example:
 
 .. code-block:: bash
 
-    rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- mpirun -n 2  <application_path>
+    rocprofiler-core --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- mpirun -n 2  <application_path>
 
 In the preceding example, an extra agent info file is generated for the ``mpirun`` process. The trace files are prefixed with the hostname, process ID, and the MPI rank.
 
@@ -153,11 +153,11 @@ The preceding sample program generates output similar to the following:
 Output format features
 =======================
 
-To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option which sends output to unique files.
+To collect the profiles of the individual MPI processes, use ``rocprofiler-core`` with output directory option which sends output to unique files.
 
 .. code-block:: bash
 
-    mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv --  <application_path>
+    mpirun -n 2 rocprofiler-core --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv --  <application_path>
 
 To see the placeholders supported by the output directory option, see :ref:`output directory placeholders <output_field_format>`.
 
@@ -183,16 +183,16 @@ To specify the ranks for profiling, use the ``--profile-mpi-ranks`` option with 
 .. code-block:: bash
 
     # Profiles only rank 0
-    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0 -- <application_path>
+    mpirun -n 16 rocprofiler-core --hip-trace --profile-mpi-ranks 0 -- <application_path>
 
     # Profiles ranks 0-3 and rank 8
-    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3,8 -- <application_path>
+    mpirun -n 16 rocprofiler-core --hip-trace --profile-mpi-ranks 0-3,8 -- <application_path>
 
     # Profiles ranks 0, 4, 8, and 12
-    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0,4,8,12 -- <application_path>
+    mpirun -n 16 rocprofiler-core --hip-trace --profile-mpi-ranks 0,4,8,12 -- <application_path>
 
     # Profiles a range of ranks (10 through 15)
-    srun -n 32 rocprofv3 --kernel-trace --profile-mpi-ranks 10-15 -- <application_path>
+    srun -n 32 rocprofiler-core --kernel-trace --profile-mpi-ranks 10-15 -- <application_path>
 
 The rank specification syntax supports:
 
@@ -205,7 +205,7 @@ Behavior
 
 When using ``--profile-mpi-ranks``:
 
-- The ``rocprofv3`` tool runs on **all** MPI ranks to avoid disrupting the application's execution.
+- The ``rocprofiler-core`` tool runs on **all** MPI ranks to avoid disrupting the application's execution.
 - Only the specified ranks collect and output profiling or trace data.
 - Non-selected ranks execute the application without profiling overhead or output generation.
 - This reduces output file count and storage requirements for large-scale runs.
@@ -241,7 +241,7 @@ For mixed environments or non-standard MPI configurations (such as interactive S
 .. code-block:: bash
 
     # Uses custom environment variables for rank and world size detection
-    mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3 \
+    mpirun -n 16 rocprofiler-core --hip-trace --profile-mpi-ranks 0-3 \
         --mpi-world-rank-variable MY_CUSTOM_RANK \
         --mpi-world-size-variable MY_CUSTOM_SIZE -- <application_path>
 
