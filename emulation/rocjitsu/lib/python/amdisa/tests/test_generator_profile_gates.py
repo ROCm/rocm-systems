@@ -38,7 +38,11 @@ from amdisa.isa_profile import (
     Rdna4Profile,
 )
 from amdisa.parser import Parser
-from amdisa.semantics import InstructionSemantics, derive_all_semantics
+from amdisa.semantics import (
+    InstructionSemantics,
+    derive_all_semantics,
+    derive_semantics,
+)
 
 
 def _repo_root() -> Path:
@@ -124,6 +128,31 @@ def test_simm64_literals_require_operand_type():
 
     codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SIMM32', 'OPR_SIMM64'])
     assert codegen._supports_simm64_literal_operands()
+
+
+def test_generated_literal_fixups_separate_declared_and_dynamic_true16(
+    amdgpu_generated_root: Path,
+):
+    cdna3_vop2 = (amdgpu_generated_root / 'cdna3' / 'vop2.cpp').read_text()
+    madak_start = cdna3_vop2.index('VMadakF16Vop2::VMadakF16Vop2')
+    madak_end = cdna3_vop2.index('void VMadakF16Vop2::execute_impl', madak_start)
+    madak_ctor = cdna3_vop2[madak_start:madak_end]
+    assert 'Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu' in madak_ctor
+
+    rdna4_vop3 = (amdgpu_generated_root / 'rdna4' / 'vop3.cpp').read_text()
+    and_start = rdna4_vop3.index('VAndB16Vop3::VAndB16Vop3')
+    and_end = rdna4_vop3.index('void VAndB16Vop3::implicit_uses', and_start)
+    and_ctor = rdna4_vop3[and_start:and_end]
+    assert (
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)'
+        in and_ctor
+    )
+    assert '((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u' in and_ctor
+    assert '((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u' in and_ctor
+
+    rdna4_operand = (amdgpu_generated_root / 'rdna4' / 'operand.cpp').read_text()
+    assert 'if (has_literal16_display_)' in rdna4_operand
+    assert 'static_cast<uint32_t>(encoding_value_)' in rdna4_operand
 
 
 def test_vop_dpp8_support_is_detected_from_machine_inst_structs():
@@ -386,6 +415,24 @@ def test_readlane_family_uses_source_vgpr_operand_type():
 
     assert codegen._constructor_operand_type(sem, src0) == 'OPR_SRC_VGPR'
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_VGPR'
+
+
+def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        operand_types=[
+            'OPR_SRC_NOLIT',
+            'OPR_SRC_SIMPLE',
+            'OPR_SRC_VGPR_OR_ACCVGPR',
+        ]
+    )
+    sem = derive_semantics('V_PK_MOV_B32', 'ENC_VOP3P')
+    assert sem is not None
+    src0 = Operand('src0', 64, 'OPR_SRC_NOLIT', True, False, False, True, 1)
+    src1 = Operand('src1', 64, 'OPR_SRC_SIMPLE', True, False, False, True, 2)
+
+    assert codegen._constructor_operand_type(sem, src0) == 'OPR_SRC_NOLIT'
+    assert codegen._constructor_operand_type(sem, src1) == 'OPR_SRC_SIMPLE'
 
 
 def test_readlane_family_decodes_lane_selector_as_scalar_value():
@@ -1617,6 +1664,10 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert '(word0 >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
+    assert 'bool literal_uses_f64_high_bits' in cpp
+    assert '(static_cast<uint64_t>(literal) << 32), true' in cpp
+    assert 'is_float64_op(opx_), literal_, srcx0' in cpp
+    assert 'is_float64_op(opy_), literal_, srcy0' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
     src_neg_start = cpp.index('bool Vopd::uses_src_neg_modifier')
@@ -1667,6 +1718,10 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
     assert '(word0 >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
+    assert 'literal_uses_f64_high_bits' in cpp
+    assert 'is_float64_op' not in cpp
+    assert 'false, literal_, srcx0' in cpp
+    assert 'false, literal_, srcy0' in cpp
     assert 'kVopdAddF64' not in cpp
     assert 'execute_slot64' not in cpp
     assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in cpp

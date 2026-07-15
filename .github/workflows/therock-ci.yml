@@ -48,6 +48,7 @@ jobs:
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
       run_mi455_test: ${{ steps.linux_projects.outputs.run_mi455_test }}
+      test_type: ${{ steps.linux_projects.outputs.test_type }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -153,6 +154,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
@@ -237,6 +239,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
