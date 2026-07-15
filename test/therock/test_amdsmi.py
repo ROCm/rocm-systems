@@ -57,28 +57,32 @@ env["GTEST_TOTAL_SHARDS"] = str(TOTAL_SHARDS)
 # If quick mode is enabled, run minimal suite (only dynamic metric tests)
 test_type = os.getenv("TEST_TYPE", "full")
 
+# Suite names are matched under both their legacy names and the post-rename
+# names (GpuFunctional*/GpuUnit) so a suite rename cannot silently drop
+# coverage or match zero tests.
 if test_type == "quick":
     logging.info("Running quick tests only for amdsmitst")
-    test_filter = ["--gtest_filter=AmdSmiDynamicMetricTest.*"]
+    test_filter = ["--gtest_filter=AmdSmiDynamicMetricTest.*:*Unit*"]
 else:
     # Full test mode: run whitelist and explicitly exclude known failing tests
     logging.info("Running full amdsmitst test suite (include + exclude filter)")
 
     include_tests = [
         "amdsmitstReadOnly.*",
-        "amdsmitstReadWrite.FanReadWrite",
-        "amdsmitstReadWrite.TestOverdriveReadWrite",
-        "amdsmitstReadWrite.TestPciReadWrite",
-        "amdsmitstReadWrite.TestPowerReadWrite",
-        "amdsmitstReadWrite.TestPerfCntrReadWrite",
-        "amdsmitstReadWrite.TestEvtNotifReadWrite",
+        "amdsmitstReadWrite.*",
         "AmdSmiDynamicMetricTest.*",
+        "*FunctionalReadOnly.*",
+        "*FunctionalReadWrite.*",
+        "*Unit*",
     ]
 
     exclude_tests = [
         "amdsmitstReadOnly.TempRead",
         "amdsmitstReadOnly.TestFrequenciesRead",
         "amdsmitstReadWrite.TestPowerReadWrite",
+        "*FunctionalReadOnly.TempRead",
+        "*FunctionalReadOnly.TestFrequenciesRead",
+        "*FunctionalReadWrite.TestPowerReadWrite",
     ]
 
     gtest_filter = f"{':'.join(include_tests)}:-{':'.join(exclude_tests)}"
