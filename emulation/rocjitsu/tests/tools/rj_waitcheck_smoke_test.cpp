@@ -330,6 +330,48 @@ TEST(RjWaitcheck, BatchSkipsUndecodableCodeObjects) {
   }
 }
 
+TEST(RjWaitcheck, BatchSkipsRelocatableCodeObjects) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto intermediate = temp_dir.path / "intermediate_gfx1200.o";
+  const auto correct = temp_dir.path / "correct_wait_gfx1200.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+
+  ASSERT_TRUE(write_binary_file(
+      intermediate, rocjitsu::waitcheck_test::make_relocatable_code_object(
+                        rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object())));
+  ASSERT_TRUE(write_binary_file(correct,
+                                rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object()));
+
+  const std::string command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(intermediate.string()) + " " +
+      shell_quote(correct.string()) + " --all-code-objects --skip-unsupported --no-fail > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+
+  const std::array<std::string_view, 3> expected = {
+      "intermediate_gfx1200.o: skipped: waitcheck analysis failed for gfx1200[0]: "
+      "relocatable AMDGPU objects are not final loadable code objects",
+      "correct_wait_gfx1200.co:gfx1200[0]: instructions=3 memory-events=1 diagnostics=0",
+      "rj_waitcheck: scanned inputs=2 skipped=1 code-objects=1 diagnostics=0"};
+  for (const std::string_view needle : expected) {
+    EXPECT_TRUE(contains(stdout_text, needle))
+        << "missing expected output fragment: " << needle << "\noutput:\n"
+        << stdout_text;
+  }
+}
+
 TEST(RjWaitcheck, RecursiveDirectorySweepScansNestedCorpusFiles) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

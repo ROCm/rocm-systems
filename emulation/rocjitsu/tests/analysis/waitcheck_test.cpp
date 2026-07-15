@@ -215,6 +215,13 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return inst;
 }
 
+[[nodiscard]] rdna4::SopcMachineInst s_cmp_ge_u32(uint32_t ssrc0, uint32_t ssrc1) {
+  auto inst = std::bit_cast<rdna4::SopcMachineInst>(0xBF090000U);
+  inst.ssrc0 = ssrc0;
+  inst.ssrc1 = ssrc1;
+  return inst;
+}
+
 [[nodiscard]] rdna4::SmemMachineInst s_load_b32(uint32_t sdata, uint32_t sbase) {
   auto inst = std::bit_cast<rdna4::SmemMachineInst>(std::array<uint32_t, 2>{0xF4000000U, 0});
   inst.sdata = sdata;
@@ -3198,6 +3205,23 @@ TEST(WaitcheckTest, ObjectAnalysisIgnoresBranchInfeasibleSkippedWaitPath) {
   append_inst(program, global_load_b32(0));   // load executes only when s0 != 1
   append_inst(program, s_cmp_eq_u32(0, 129)); // s0 == 1
   append_inst(program, sopp(34, 1));          // s_cbranch_scc1 over the wait
+  append_inst(program, sopp(64, 0));          // s_wait_loadcnt 0
+  append_inst(program, v_mov_b32(1, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, ObjectAnalysisCorrelatesUnsignedRangeChecksAroundWait) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_cmp_ge_u32(0, 129)); // s0 >= 1
+  append_inst(program, sopp(33, 2));          // s_cbranch_scc0 over the load
+  append_inst(program, global_load_b32(0));   // load executes only when s0 >= 1
+  append_inst(program, s_cmp_ge_u32(0, 129)); // s0 >= 1
+  append_inst(program, sopp(33, 1));          // s_cbranch_scc0 over the wait
   append_inst(program, sopp(64, 0));          // s_wait_loadcnt 0
   append_inst(program, v_mov_b32(1, 0));
 
