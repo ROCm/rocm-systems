@@ -10,28 +10,24 @@
 #include <cstdint>
 #include <mutex>
 
-namespace rocprofsys::control::clocks
+namespace rocprofsys::control::testing
 {
 /// Test-only clock with virtual time. Tests advance the clock explicitly
 /// via advance(); sleep_until blocks until the virtual now() catches up to
 /// the deadline or interrupt() is called.
-///
-/// Header-only on purpose: not part of the production library; consumed
-/// directly from test translation units. Satisfies the clock concept (see
-/// core/control/clock.hpp).
-class manual
+class mock_clock
 {
 public:
-    explicit manual(clock_time_point start = {}) noexcept
+    explicit mock_clock(clock_time_point start = {}) noexcept
     : m_now_ns{ start.time_since_epoch().count() }
     {}
 
-    ~manual() = default;
+    ~mock_clock() = default;
 
-    manual(const manual&)            = delete;
-    manual& operator=(const manual&) = delete;
-    manual(manual&&)                 = delete;
-    manual& operator=(manual&&)      = delete;
+    mock_clock(const mock_clock&)            = delete;
+    mock_clock& operator=(const mock_clock&) = delete;
+    mock_clock(mock_clock&&)                 = delete;
+    mock_clock& operator=(mock_clock&&)      = delete;
 
     [[nodiscard]] clock_time_point now() const noexcept
     {
@@ -64,9 +60,9 @@ public:
     }
 
 private:
-    std::atomic<std::int64_t>    m_now_ns;
-    std::mutex              m_mutex;
-    std::condition_variable m_cv;
-    bool                    m_interrupted{ false };
+    std::atomic<std::int64_t> m_now_ns;
+    std::mutex                m_mutex;
+    std::condition_variable   m_cv;
+    bool                      m_interrupted{ false };
 };
-}  // namespace rocprofsys::control::clocks
+}  // namespace rocprofsys::control::testing

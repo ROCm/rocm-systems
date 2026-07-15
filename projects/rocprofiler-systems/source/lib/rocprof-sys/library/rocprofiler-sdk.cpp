@@ -125,11 +125,11 @@ get_roctx_client()
         }
 
         const auto roctx_config = roctx_client_config{
-            has_marker_domain,  // pause_resume_enabled
-            config::get_use_perfetto(),
-            config::get_use_timemory(),
-            config::get_perfetto_annotations(),
-            roctx_traced_regions,
+            .pause_resume_enabled  = has_marker_domain,
+            .use_perfetto          = config::get_use_perfetto(),
+            .use_timemory          = config::get_use_timemory(),
+            .perfetto_annotations  = config::get_perfetto_annotations(),
+            .selected_trace_regions = roctx_traced_regions,
         };
         g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
     }

@@ -46,7 +46,7 @@ clock_name(std::string _v)
     return _v;
 }
 
-auto accepted_clock_ids =
+const auto accepted_clock_ids =
     std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
                                 ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
                                 ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),

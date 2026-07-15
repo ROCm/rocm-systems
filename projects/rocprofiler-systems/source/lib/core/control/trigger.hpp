@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 
 namespace rocprofsys::control
@@ -12,6 +13,12 @@ enum class vote
     abstain,
     active,
     paused
+};
+
+struct vote_entry
+{
+    std::string name{};
+    vote        current_vote{ vote::active };
 };
 
 class trigger

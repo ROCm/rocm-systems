@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <cstdint>
 #include <timemory/log/color.hpp>
 //
@@ -675,25 +676,23 @@ rocprofsys_init_tooling_hidden(void)
             using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
             using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
 
-            session->subscribe(
-                { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
-            session->subscribe({ &sampling::pause, &sampling::resume, "sampling" });
-            session->subscribe(
-                { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
-            session->subscribe({ &ucx_t::pause, &ucx_t::resume, "ucx" });
-            session->subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
-            session->subscribe({ &component::vaapi_gotcha::pause,
-                                 &component::vaapi_gotcha::resume, "vaapi" });
-            session->subscribe({ &::rocprofsys::pthread_gotcha::pause,
-                                 &::rocprofsys::pthread_gotcha::resume, "pthread" });
-            session->subscribe({ &component::numa_gotcha::pause,
-                                 &component::numa_gotcha::resume, "numa" });
-            session->subscribe(
-                { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" });
-            session->subscribe(
-                { &process_sampler::pause, &process_sampler::resume, "process_sampler" });
-            session->subscribe({ &invoke_external_pause_callbacks,
-                                 &invoke_external_resume_callbacks, "external" });
+            // clang-format off
+            const std::array<control::subscriber, 11> subscribers{ {
+                { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" },
+                { &sampling::pause, &sampling::resume, "sampling" },
+                { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" },
+                { &ucx_t::pause, &ucx_t::resume, "ucx" },
+                { &shmem_t::pause, &shmem_t::resume, "shmem" },
+                { &component::vaapi_gotcha::pause, &component::vaapi_gotcha::resume, "vaapi" },
+                { &::rocprofsys::pthread_gotcha::pause, &::rocprofsys::pthread_gotcha::resume, "pthread" },
+                { &component::numa_gotcha::pause, &component::numa_gotcha::resume, "numa" },
+                { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" },
+                { &process_sampler::pause, &process_sampler::resume, "process_sampler" },
+                { &invoke_external_pause_callbacks, &invoke_external_resume_callbacks, "external" },
+            } };
+            // clang-format on
+            for(const auto& sub : subscribers)
+                session->subscribe(sub);
 
             session->force_initial_pause();
         }
