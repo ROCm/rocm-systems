@@ -53,6 +53,8 @@ class GraphModuleLaunchKernel {
   void moduleLoad();
   bool extModuleKernelExecutionMatmul();
   bool extModuleKernelExecutionMatmulwithStreamCapture(bool LaunchByDifferentStream = false);
+  bool extModuleKernelExecutionMatmulwithStreamCaptureN(int n, unsigned int blockX,
+                                                        unsigned int blockY);
   static constexpr char fileName[] = "hipMatMul.code";
 };
 
@@ -165,6 +167,90 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
   return testStatus;
 }
 
+// Helper to test kernel launch with and without clean global/local sizes.
+bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCaptureN(
+    int n, unsigned int blockX, unsigned int blockY) {
+  // Allocate fresh host/device buffers sized for n×n.
+  int* hA = new int[n * n];
+  int* hB = new int[n * n];
+  int* hC = nullptr;
+  HIPCHECK(hipHostMalloc(reinterpret_cast<void**>(&hC), n * n * sizeof(int)));
+
+  for (int i = 0; i < n * n; i++) {
+    hA[i] = 1;
+    hB[i] = 1;
+    hC[i] = 0;
+  }
+
+  int* dA = nullptr;
+  int* dB = nullptr;
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&dA), n * n * sizeof(int)));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&dB), n * n * sizeof(int)));
+  HIPCHECK(hipMemcpy(dA, hA, n * n * sizeof(int), hipMemcpyHostToDevice));
+  HIPCHECK(hipMemcpy(dB, hB, n * n * sizeof(int), hipMemcpyHostToDevice));
+
+  struct {
+    void* _Ad;
+    void* _Bd;
+    void* _Cd;
+    int _n;
+  } localArgs;
+  localArgs._Ad = dA;
+  localArgs._Bd = dB;
+  localArgs._Cd = hC;
+  localArgs._n = n;
+  size_t localArgsSize = sizeof(localArgs);
+
+  // global dims: ceil(n/blockX)*blockX is NOT used — we pass n directly so
+  // the launch covers exactly the matrix; the kernel guard handles remainder
+  // threads in the last block.
+  unsigned int globalX = static_cast<unsigned int>(n);
+  unsigned int globalY = static_cast<unsigned int>(n);
+
+  hipGraph_t graph{nullptr};
+  hipGraphExec_t graphExec{nullptr};
+
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
+
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &localArgs, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                    &localArgsSize, HIP_LAUNCH_PARAM_END};
+
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, globalX, globalY, 1, blockX, blockY, 1, 0, stream1,
+                                    NULL, reinterpret_cast<void**>(&config), NULL, NULL, 0));
+
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  REQUIRE(graph != nullptr);
+
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  REQUIRE(graphExec != nullptr);
+
+  HIP_CHECK(hipGraphLaunch(graphExec, stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1));
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  bool testStatus = true;
+  // Validate every element of the n×n result; each C[i][j] = n (sum of n ones).
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      if (hC[i * n + j] != n) {
+        testStatus = false;
+        break;
+      }
+    }
+    if (!testStatus) break;
+  }
+
+  HIPCHECK(hipFree(dA));
+  HIPCHECK(hipFree(dB));
+  HIPCHECK(hipHostFree(hC));
+  delete[] hA;
+  delete[] hB;
+
+  return testStatus;
+}
+
 HIP_TEST_CASE(Unit_hipStreamCapture_ExtModuleLaunchKernel) {
   struct stat fileStat;
   if (stat(GraphModuleLaunchKernel::fileName, &fileStat) || !(fileStat.st_mode & S_IFREG)) {
@@ -186,5 +272,13 @@ HIP_TEST_CASE(Unit_hipStreamCapture_ExtModuleLaunchKernel) {
 
   SECTION("extModuleKernelExecutionMatmul_withStreamCapture_launchByDifferentStream") {
     REQUIRE(kernelLaunch.extModuleKernelExecutionMatmulwithStreamCapture(true));
+  }
+
+  // Tests simple global % local == 0 and remainder global % local != 0 cases
+  SECTION("extModuleKernelExecutionMatmul_withStreamCapture_remainder") {
+    const auto cfg =
+        GENERATE(gridblockDim{64, 1, 1, 32, 32, 1}, gridblockDim{100, 1, 1, 32, 32, 1});
+    REQUIRE(kernelLaunch.extModuleKernelExecutionMatmulwithStreamCaptureN(
+        static_cast<int>(cfg.gridX), cfg.blockX, cfg.blockY));
   }
 }

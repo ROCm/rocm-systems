@@ -237,6 +237,155 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   HIP_CHECK(hipModuleUnload(Module));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *    - Launch via hipExtModuleLaunchKernel with global=1000, local=256.
+ *      testing when global doesn't cleanly divide into local
+ *    - Validates ALL 1000 output elements, exercising the
+ *      global = grid*block + remainder reconstruction path.
+ * Test source
+ * ------------------------
+ *    - catch\unit\module\hipExtModuleLaunchKernel.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup_Success) {
+  // Requires uniform_work_group_size = 0 (non-uniform launch allowed).
+  const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
+  if (true == searchRegExpr(regexp, "copyKernel.s")) {
+    HIP_SKIP_TEST("test requires non-uniform work group support (uniform_work_group_size = 0).");
+  }
+
+  constexpr size_t kGlobalSize = 1000;
+  constexpr uint32_t kLocalSize = 256;
+  // remainder = 1000 % 256 = 232; full groups = 3 (768 threads) + 1 partial (232 threads)
+  size_t sizeBytes = kGlobalSize * sizeof(int);
+
+  hipModule_t Module;
+  hipFunction_t Function;
+  HIP_CHECK(hipModuleLoad(&Module, fileName));
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+
+  int* A = new int[kGlobalSize];
+  REQUIRE(A != nullptr);
+  int* B = new int[kGlobalSize];
+  REQUIRE(B != nullptr);
+  for (size_t i = 0; i < kGlobalSize; i++) {
+    A[i] = static_cast<int>(i);
+    B[i] = -1;
+  }
+
+  int *Ad, *Bd;
+  HIP_CHECK(hipMalloc(&Ad, sizeBytes));
+  HIP_CHECK(hipMalloc(&Bd, sizeBytes));
+
+  struct {
+    void* _Ad;
+    void* _Bd;
+    size_t buffersize;
+  } args;
+  args._Ad = Ad;
+  args._Bd = Bd;
+  args.buffersize = kGlobalSize;
+  size_t size = sizeof(args);
+
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
+
+  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipExtModuleLaunchKernel(Function, kGlobalSize, 1, 1, kLocalSize, 1, 1, 0, 0, NULL,
+                                     reinterpret_cast<void**>(&config), 0));
+  HIP_CHECK(hipMemcpy(B, Bd, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t i = 0; i < kGlobalSize; i++) {
+    REQUIRE(B[i] == static_cast<int>(i));
+  }
+
+  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd));
+  delete[] A;
+  delete[] B;
+  HIP_CHECK(hipModuleUnload(Module));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Precondition: .uniform_work_group_size = 0 (non-uniform allowed).
+ *    - Launch via hipExtModuleLaunchKernel with global=100, local=256.
+ *      testing when global doesn't cleanly divide into local and the local
+ *      threads must be clamped down to the global size
+ *    - Validates ALL 100 output elements, confirming the local-clamp path
+ *      produces correct results.
+ * Test source
+ * ------------------------
+ *    - catch\unit\module\hipExtModuleLaunchKernel.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_LocalClamp_Success) {
+  // Requires uniform_work_group_size = 0 (non-uniform launch allowed).
+  const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
+  if (true == searchRegExpr(regexp, "copyKernel.s")) {
+    HIP_SKIP_TEST("test requires non-uniform work group support (uniform_work_group_size = 0).");
+  }
+
+  constexpr size_t kGlobalSize = 100;
+  constexpr uint32_t kLocalSize = 256;  // local > global; runtime clamps to 100
+  size_t sizeBytes = kGlobalSize * sizeof(int);
+
+  hipModule_t Module;
+  hipFunction_t Function;
+  HIP_CHECK(hipModuleLoad(&Module, fileName));
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+
+  int* A = new int[kGlobalSize];
+  REQUIRE(A != nullptr);
+  int* B = new int[kGlobalSize];
+  REQUIRE(B != nullptr);
+  for (size_t i = 0; i < kGlobalSize; i++) {
+    A[i] = static_cast<int>(i);
+    B[i] = -1;
+  }
+
+  int *Ad, *Bd;
+  HIP_CHECK(hipMalloc(&Ad, sizeBytes));
+  HIP_CHECK(hipMalloc(&Bd, sizeBytes));
+
+  struct {
+    void* _Ad;
+    void* _Bd;
+    size_t buffersize;
+  } args;
+  args._Ad = Ad;
+  args._Bd = Bd;
+  args.buffersize = kGlobalSize;
+  size_t size = sizeof(args);
+
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
+
+  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipExtModuleLaunchKernel(Function, kGlobalSize, 1, 1, kLocalSize, 1, 1, 0, 0, NULL,
+                                     reinterpret_cast<void**>(&config), 0));
+  HIP_CHECK(hipMemcpy(B, Bd, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t i = 0; i < kGlobalSize; i++) {
+    REQUIRE(B[i] == static_cast<int>(i));
+  }
+
+  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd));
+  delete[] A;
+  delete[] B;
+  HIP_CHECK(hipModuleUnload(Module));
+}
+
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
   ModuleLaunchKernelPositiveParameters<hipExtModuleLaunchKernel>();
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");

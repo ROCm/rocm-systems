@@ -107,6 +107,45 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_LaunchApi_Basic) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Negative test: grid block count (10) is not divisible by cluster dimension (3).
+ *    hipLaunchKernelExC must return hipErrorInvalidConfiguration.
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterLaunch.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipClusterLaunch_NonDivisibleGrid_Negative) {
+  if (!CheckTargetSupport()) {
+    INFO("Target Not Supported!");
+    return;
+  }
+
+  // grid=10 blocks, cluster=3: 10 % 3 != 0 => hipErrorInvalidConfiguration
+  hipLaunchConfig_t config;
+  config.gridDim = 10;  // 10 blocks — not divisible by cluster dim 3
+  config.blockDim = ntib;
+  config.dynamicSmemBytes = 0;
+  config.stream = nullptr;
+
+  hipLaunchAttribute attribute[1];
+  attribute[0].id = hipLaunchAttributeClusterDimension;
+  attribute[0].val.clusterDim = {3, 1, 1};
+  config.attrs = attribute;
+  config.numAttrs = 1;
+
+  // kernel_params may be null; the runtime rejects the launch before dispatch
+  HIP_CHECK_ERROR(hipLaunchKernelExC(
+                      &config, reinterpret_cast<const void*>(&ClusterLaunchKernelBasicL), nullptr),
+                  hipErrorInvalidConfiguration);
+}
+
+/**
 * End doxygen group ClusterTest.
 * @}
 */

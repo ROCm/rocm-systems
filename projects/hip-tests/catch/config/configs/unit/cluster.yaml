@@ -7,3 +7,5 @@ cluster:
     <<: *level_2
   Unit_hipClusterLaunch_LaunchApi_Basic:
     <<: *level_2
+  Unit_hipClusterLaunch_NonDivisibleGrid_Negative:
+    <<: *level_2

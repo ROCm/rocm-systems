@@ -44,6 +44,9 @@ kernel:
   Unit_kernel_LaunchBounds_Functional:
     <<: *level_2
     tags: [attributes, smoke]
+  Unit_kernel_BlockDim3D_Validation_Functional:
+    <<: *level_2
+    tags: [launch, smoke]
   Unit_kernel_Assign_threadIdx_to_auto:
     <<: *level_2
     tags: [language]

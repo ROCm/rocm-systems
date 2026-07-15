@@ -291,6 +291,12 @@ module:
   Unit_hipExtModuleLaunchKernel_UniformWorkGroup:
     <<: *level_2
     tags: [launch]
+  Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup_Success:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipExtModuleLaunchKernel_LocalClamp_Success:
+    <<: *level_2
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151

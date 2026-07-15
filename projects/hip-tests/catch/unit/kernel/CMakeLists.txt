@@ -17,6 +17,7 @@ set(TEST_SRC
     hipTestGlobalVariable.cc
     hipTestMemKernel.cc
     hipLaunchBoundsBasic.cc
+    hipBlockDim3DValidation.cc
     hipAutoThreadIdx.cc
     hipLaunchKernelEx.cc
     hipTestUserSgprIncrease.cc

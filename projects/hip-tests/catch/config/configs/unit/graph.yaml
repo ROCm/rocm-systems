@@ -1104,6 +1104,9 @@ graph:
   Unit_hipGraphLaunch_Positive:
     <<: *level_2
     tags: [exec, smoke]
+  Unit_hipGraphLaunch_Positive_RepeatedLaunchIdempotency:
+    <<: *level_2
+    tags: [exec, smoke]
   Unit_hipGraphLaunch_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -1488,6 +1491,9 @@ graph:
     <<: *level_2
     tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Positive_RemainderWithClusterDimension:
     <<: *level_2
     tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:

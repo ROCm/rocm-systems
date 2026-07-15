@@ -275,6 +275,32 @@ bool Module_WorkGroup_Test() {
                               0, stream1, NULL, NULL);
   if (err != hipSuccess) {
     testStatus = false;
+  } else {
+    // Validate kernel output for the success case using Kernel42
+    hipModule_t LKModule;
+    hipFunction_t Kernel42Func;
+    if (hipModuleLoad(&LKModule, "launch_kernel_module.code") == hipSuccess &&
+        hipModuleGetFunction(&Kernel42Func, LKModule, "Kernel42") == hipSuccess) {
+      LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
+      HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(int)));
+      int* result_ptr = result_dev.ptr();
+      void* kernel_args[1] = {&result_ptr};
+      err = hipModuleLaunchKernel(Kernel42Func, 1, 1, 1, cuberoot_floor, cuberoot_floor,
+                                  cuberoot_floor, 0, stream1, kernel_args, NULL);
+      if (err != hipSuccess) {
+        testStatus = false;
+      } else {
+        HIP_CHECK(hipStreamSynchronize(stream1));
+        int result = 0;
+        HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+        if (result != 42) {
+          testStatus = false;
+        }
+      }
+      HIP_CHECK(hipModuleUnload(LKModule));
+    } else {
+      testStatus = false;
+    }
   }
   // Scenario: (block.x * block.y * block.z) > Work Group Size where
   // block.x < MaxBlockDimX , block.y < MaxBlockDimY and block.z < MaxBlockDimZ
@@ -283,6 +309,55 @@ bool Module_WorkGroup_Test() {
   if (err == hipSuccess) {
     testStatus = false;
   }
+  HIP_CHECK(hipStreamDestroy(stream1));
+  HIP_CHECK(hipModuleUnload(Module));
+#ifdef HT_NVIDIA
+  HIP_CHECK(hipCtxDestroy(context));
+#endif
+  return testStatus;
+}
+
+// grid * block overflow — product gridDimX * blockDimX = 0x800000 * 1024 = 2^33 which
+// overflows uint32_t.
+
+__global__ void NOPKernelForOverflowTest() {}
+
+bool Module_GridBlock_Overflow_Test() {
+  bool testStatus = true;
+  HIP_CHECK(hipSetDevice(0));
+  hipError_t err;
+  hipFunction_t DummyKernel;
+  hipModule_t Module;
+  hipStream_t stream1;
+  hipDeviceProp_t deviceProp;
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  // Check blockDimX=1024 is a valid block size
+  if (deviceProp.maxThreadsDim[0] < 1024 || deviceProp.maxThreadsPerBlock < 1024) {
+    return testStatus;
+  }
+#ifdef HT_NVIDIA
+  HIP_CHECK(hipInit(0));
+  hipCtx_t context;
+  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+#endif
+  HIP_CHECK(hipModuleLoad(&Module, fileName));
+  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel));
+  HIP_CHECK(hipStreamCreate(&stream1));
+
+  // hipModuleLaunchKernel: gridDimX=0x800000, blockDimX=1024 => 2^33 total threads in X.
+  // gridDimX=0x800000 (8388608) is within maxGridSize[0] on all current AMD hardware
+  err = hipModuleLaunchKernel(DummyKernel, 0x800000u, 1, 1, 1024, 1, 1, 0, stream1, NULL, NULL);
+  if (err != hipErrorInvalidValue) {
+    testStatus = false;
+  }
+
+  // hipLaunchKernel (runtime-API) variant: the same overflow is rejected from different entry point
+  err = hipLaunchKernel(reinterpret_cast<void*>(NOPKernelForOverflowTest), dim3(0x800000u, 1, 1),
+                        dim3(1024, 1, 1), nullptr, 0, stream1);
+  if (err != hipErrorInvalidConfiguration) {
+    testStatus = false;
+  }
+
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipModuleUnload(Module));
 #ifdef HT_NVIDIA
@@ -303,6 +378,10 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
   }
   SECTION("Work Group Test") {
     testStatus = Module_WorkGroup_Test();
+    REQUIRE(testStatus == true);
+  }
+  SECTION("Grid Block overflow test") {
+    testStatus = Module_GridBlock_Overflow_Test();
     REQUIRE(testStatus == true);
   }
 }
