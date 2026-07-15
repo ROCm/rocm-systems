@@ -37,3 +37,5 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )
+
+target_link_libraries(rocjitsu_code PUBLIC ZLIB::ZLIB zstd::libzstd)

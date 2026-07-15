@@ -25,13 +25,14 @@ namespace {
 
 using CreateFromFileWithOffsetSizeFn = hsa_status_t (*)(hsa_file_t, size_t, size_t,
                                                         hsa_code_object_reader_t *);
+using LoadedCodeObjectGetInfoFn = hsa_status_t (*)(hsa_loaded_code_object_t, uint32_t, void *);
 
 struct AmdLoaderTablePrefix {
   void *query_host_address = nullptr;
   void *query_segment_descriptors = nullptr;
   void *query_executable = nullptr;
   void *executable_iterate_loaded_code_objects = nullptr;
-  void *loaded_code_object_get_info = nullptr;
+  LoadedCodeObjectGetInfoFn loaded_code_object_get_info = nullptr;
   CreateFromFileWithOffsetSizeFn create_from_file_with_offset_size = nullptr;
 };
 
@@ -40,6 +41,11 @@ int g_load_calls = 0;
 int g_destroy_calls = 0;
 int g_first_tool_memory_calls = 0;
 int g_first_tool_load_calls = 0;
+int g_writer_calls = 0;
+int64_t g_load_delta = 0x100000;
+hsa_amd_queue_intercept_handler_t g_intercept_handler = nullptr;
+void *g_intercept_data = nullptr;
+hsa_queue_t g_intercept_queue{};
 
 decltype(hsa_code_object_reader_create_from_memory) *g_inner_create = nullptr;
 decltype(hsa_code_object_reader_destroy) *g_inner_destroy = nullptr;
@@ -87,6 +93,13 @@ hsa_status_t HSA_API fake_get_major_extension_table(uint16_t extension, uint16_t
   }
   auto *loader = static_cast<AmdLoaderTablePrefix *>(table);
   *loader = {};
+  loader->loaded_code_object_get_info = [](hsa_loaded_code_object_t, uint32_t attribute,
+                                           void *value) -> hsa_status_t {
+    if (attribute != 8 || value == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    *static_cast<int64_t *>(value) = g_load_delta;
+    return HSA_STATUS_SUCCESS;
+  };
   loader->create_from_file_with_offset_size = fake_reader_create_from_file_range;
   return HSA_STATUS_SUCCESS;
 }
@@ -97,9 +110,40 @@ hsa_status_t HSA_API fake_reader_destroy(hsa_code_object_reader_t) {
 }
 
 hsa_status_t HSA_API fake_load(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t,
-                               const char *, hsa_loaded_code_object_t *) {
+                               const char *, hsa_loaded_code_object_t *loaded) {
   ++g_load_calls;
+  if (loaded != nullptr)
+    loaded->handle = static_cast<uint64_t>(g_load_calls);
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_freeze(hsa_executable_t, const char *) {
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t) { return HSA_STATUS_SUCCESS; }
+
+hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *) { return HSA_STATUS_SUCCESS; }
+
+hsa_status_t HSA_API fake_queue_intercept_create(hsa_agent_t, uint32_t, hsa_queue_type32_t,
+                                                 void (*)(hsa_status_t, hsa_queue_t *, void *),
+                                                 void *, uint32_t, uint32_t, hsa_queue_t **queue) {
+  if (queue == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *queue = &g_intercept_queue;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_queue_intercept_register(hsa_queue_t *,
+                                                   hsa_amd_queue_intercept_handler_t handler,
+                                                   void *data) {
+  g_intercept_handler = handler;
+  g_intercept_data = data;
+  return HSA_STATUS_SUCCESS;
+}
+
+void fake_packet_writer(const void *, uint64_t packet_count) {
+  g_writer_calls += static_cast<int>(packet_count);
 }
 
 hsa_status_t HSA_API first_tool_load(hsa_executable_t executable, hsa_agent_t agent,
@@ -133,6 +177,10 @@ CoreApiTable make_core_table() {
   core.version.minor_id = sizeof(CoreApiTable);
   core.hsa_system_get_extension_table_fn = fake_get_extension_table;
   core.hsa_system_get_major_extension_table_fn = fake_get_major_extension_table;
+  core.hsa_queue_create_fn = fake_queue_intercept_create;
+  core.hsa_queue_destroy_fn = fake_queue_destroy;
+  core.hsa_executable_destroy_fn = fake_executable_destroy;
+  core.hsa_executable_freeze_fn = fake_executable_freeze;
   core.hsa_code_object_reader_create_from_file_fn = fake_reader_create_from_file;
   core.hsa_code_object_reader_create_from_memory_fn = fake_reader_create_from_memory;
   core.hsa_code_object_reader_destroy_fn = fake_reader_destroy;
@@ -140,11 +188,21 @@ CoreApiTable make_core_table() {
   return core;
 }
 
-HsaApiTable make_api_table(CoreApiTable *core) {
+AmdExtTable make_amd_ext_table() {
+  AmdExtTable table{};
+  table.version.major_id = 1;
+  table.version.minor_id = sizeof(AmdExtTable);
+  table.hsa_amd_queue_intercept_create_fn = fake_queue_intercept_create;
+  table.hsa_amd_queue_intercept_register_fn = fake_queue_intercept_register;
+  return table;
+}
+
+HsaApiTable make_api_table(CoreApiTable *core, AmdExtTable *amd_ext = nullptr) {
   HsaApiTable table{};
   table.version.major_id = 1;
   table.version.minor_id = sizeof(HsaApiTable);
   table.core_ = core;
+  table.amd_ext_ = amd_ext;
   return table;
 }
 
@@ -184,6 +242,36 @@ CapturedCall capture_stderr(const std::function<hsa_status_t()> &call) {
 
 bool contains(std::string_view text, std::string_view needle) {
   return text.find(needle) != std::string_view::npos;
+}
+
+uint64_t kernel_descriptor_vaddr(const std::vector<uint8_t> &image, std::string_view symbol_name) {
+  if (image.size() < sizeof(rocjitsu::Elf64_Ehdr))
+    return 0;
+  rocjitsu::Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  if (ehdr.e_shoff > image.size() ||
+      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(rocjitsu::Elf64_Shdr) >
+          image.size() - ehdr.e_shoff) {
+    return 0;
+  }
+  const auto *shdrs = reinterpret_cast<const rocjitsu::Elf64_Shdr *>(image.data() + ehdr.e_shoff);
+  for (uint16_t i = 0; i < ehdr.e_shnum; ++i) {
+    const auto &symtab = shdrs[i];
+    if (symtab.sh_type != rocjitsu::SHT_SYMTAB ||
+        symtab.sh_entsize != sizeof(rocjitsu::Elf64_Sym) || symtab.sh_link >= ehdr.e_shnum)
+      continue;
+    const auto &strtab = shdrs[symtab.sh_link];
+    const auto *symbols =
+        reinterpret_cast<const rocjitsu::Elf64_Sym *>(image.data() + symtab.sh_offset);
+    const char *names = reinterpret_cast<const char *>(image.data() + strtab.sh_offset);
+    for (size_t j = 0; j < symtab.sh_size / sizeof(rocjitsu::Elf64_Sym); ++j) {
+      if (symbols[j].st_name < strtab.sh_size &&
+          std::string_view(names + symbols[j].st_name) == symbol_name) {
+        return symbols[j].st_value;
+      }
+    }
+  }
+  return 0;
 }
 
 struct TempFile {
@@ -229,8 +317,12 @@ protected:
     g_destroy_calls = 0;
     g_first_tool_memory_calls = 0;
     g_first_tool_load_calls = 0;
+    g_writer_calls = 0;
+    g_intercept_handler = nullptr;
+    g_intercept_data = nullptr;
     setenv("ROCJITSU_WAITCHECK", "1", 1);
     setenv("ROCJITSU_WAITCHECK_FAIL", "1", 1);
+    setenv("ROCJITSU_WAITCHECK_MODE", "eager", 1);
     unsetenv("ROCJITSU_WAITCHECK_SUMMARY");
     core_ = make_core_table();
     table_ = make_api_table(&core_);
@@ -243,6 +335,7 @@ protected:
       OnUnload();
     unsetenv("ROCJITSU_WAITCHECK");
     unsetenv("ROCJITSU_WAITCHECK_FAIL");
+    unsetenv("ROCJITSU_WAITCHECK_MODE");
     unsetenv("ROCJITSU_WAITCHECK_SUMMARY");
   }
 
@@ -401,6 +494,79 @@ TEST_F(WaitcheckHooksTest, InnerWaitcheckAnalyzesOuterToolsFinalReplacement) {
 
   core_.hsa_code_object_reader_create_from_memory_fn = g_inner_create;
   core_.hsa_executable_load_agent_code_object_fn = g_inner_load;
+}
+
+TEST_F(WaitcheckHooksTest, DispatchModeChecksOnlySelectedKernelAndCachesIt) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
+
+  core_ = make_core_table();
+  AmdExtTable amd_ext = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  std::vector<uint32_t> clean_words;
+  rocjitsu::waitcheck_test::append_inst(clean_words, rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(clean_words, rocjitsu::waitcheck_test::s_wait_loadcnt(0));
+  rocjitsu::waitcheck_test::append_inst(clean_words, rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  clean_words.push_back(0xBFB00000U); // s_endpgm
+  std::vector<uint32_t> hazardous_words;
+  rocjitsu::waitcheck_test::append_inst(hazardous_words,
+                                        rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(hazardous_words, rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  hazardous_words.push_back(0xBFB00000U); // s_endpgm
+  const auto bytes = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"clean", clean_words}, {"hazardous", hazardous_words}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const uint64_t clean_descriptor = kernel_descriptor_vaddr(bytes, "clean.kd");
+  const uint64_t hazardous_descriptor = kernel_descriptor_vaddr(bytes, "hazardous.kd");
+  ASSERT_NE(clean_descriptor, 0U);
+  ASSERT_NE(hazardous_descriptor, 0U);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  constexpr hsa_executable_t executable{77};
+  const CapturedCall load = capture_stderr([&] {
+    return core_.hsa_executable_load_agent_code_object_fn(executable, {}, reader, nullptr, nullptr);
+  });
+  EXPECT_EQ(load.status, HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(load.stderr_text.empty()) << load.stderr_text;
+  ASSERT_EQ(core_.hsa_executable_freeze_fn(executable, nullptr), HSA_STATUS_SUCCESS);
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(queue, &g_intercept_queue);
+  ASSERT_NE(g_intercept_handler, nullptr);
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+  packet.kernel_object = clean_descriptor + static_cast<uint64_t>(g_load_delta);
+  const CapturedCall clean = capture_stderr([&] {
+    g_intercept_handler(&packet, 1, 0, g_intercept_data, fake_packet_writer);
+    return HSA_STATUS_SUCCESS;
+  });
+  packet.kernel_object = hazardous_descriptor + static_cast<uint64_t>(g_load_delta);
+  const CapturedCall first_hazard = capture_stderr([&] {
+    g_intercept_handler(&packet, 1, 0, g_intercept_data, fake_packet_writer);
+    return HSA_STATUS_SUCCESS;
+  });
+  const CapturedCall cached_hazard = capture_stderr([&] {
+    g_intercept_handler(&packet, 1, 0, g_intercept_data, fake_packet_writer);
+    return HSA_STATUS_SUCCESS;
+  });
+
+  EXPECT_TRUE(clean.stderr_text.empty()) << clean.stderr_text;
+  EXPECT_TRUE(contains(first_hazard.stderr_text, "kernel hazardous")) << first_hazard.stderr_text;
+  EXPECT_TRUE(contains(first_hazard.stderr_text, "1 waitcnt hazard")) << first_hazard.stderr_text;
+  EXPECT_TRUE(cached_hazard.stderr_text.empty()) << cached_hazard.stderr_text;
+  EXPECT_EQ(g_writer_calls, 3);
+  EXPECT_EQ(core_.hsa_executable_destroy_fn(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
 }
 
 TEST(WaitcheckHooksValidationTest, RejectsTruncatedCoreTable) {

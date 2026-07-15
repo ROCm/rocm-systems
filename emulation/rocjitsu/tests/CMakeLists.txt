@@ -578,7 +578,10 @@ rj_add_test(
 )
 
 add_executable(rj_waitcheck_smoke_test tools/rj_waitcheck_smoke_test.cpp)
-target_link_libraries(rj_waitcheck_smoke_test PRIVATE GTest::gtest)
+target_link_libraries(
+    rj_waitcheck_smoke_test
+    PRIVATE GTest::gtest zstd::libzstd
+)
 rj_configure_target(rj_waitcheck_smoke_test TEST)
 add_dependencies(rj_waitcheck_smoke_test rj_waitcheck)
 add_test(
@@ -1431,7 +1434,7 @@ if(HSA_RUNTIME64)
                     "ROCJITSU_WAITCHECK_FAIL=1"
                     "ROCJITSU_WAITCHECK_SUMMARY=1"
                 PASS_REGULAR_EXPRESSION
-                    "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]*"
+                    "rocjitsu-waitcheck: summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
                 INSTALL_COMMAND
                     "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                     "--config"
@@ -2044,7 +2047,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_WAITCHECK_FAIL=1"
                 "ROCJITSU_WAITCHECK_SUMMARY=1"
             PASS_REGULAR_EXPRESSION
-                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]*"
+                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
         )
 
         rj_add_hip_test(
@@ -2065,15 +2068,17 @@ if(RJ_ENABLE_HIP_TESTS)
                 "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
                 "ROCJITSU_WAITCHECK=1"
                 "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_MODE=eager"
                 "ROCJITSU_WAITCHECK_SUMMARY=1"
             INSTALL_ENVIRONMENT
                 "HSA_TOOLS_DISABLE_REGISTER=1"
                 "HSA_TOOLS_LIB=${_rj_installed_libdir}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_waitcheck_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
                 "ROCJITSU_WAITCHECK=1"
                 "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_MODE=eager"
                 "ROCJITSU_WAITCHECK_SUMMARY=1"
             PASS_REGULAR_EXPRESSION
-                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* checked=[1-9][0-9]* passed=[0-9]+ hazards=[1-9][0-9]*"
+                "rocjitsu-waitcheck: summary loads=[1-9][0-9]* dispatches=0 checked=[1-9][0-9]* cache_hits=0 passed=[0-9]+ hazards=[1-9][0-9]*"
         )
 
         # --- Daemon RPC tests (gtest-driven) ---

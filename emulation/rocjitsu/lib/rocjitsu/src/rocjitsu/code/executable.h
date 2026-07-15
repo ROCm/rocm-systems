@@ -61,6 +61,9 @@ private:
                                                      'O', 'F', 'F', 'L', 'O', 'A', 'D', '_',
                                                      'B', 'U', 'N', 'D', 'L', 'E', '_', '_'};
   static constexpr std::size_t CLANG_OFFLOAD_MAGIC_STR_SIZE = sizeof(CLANG_OFFLOAD_MAGIC_STR);
+  static constexpr char COMPRESSED_OFFLOAD_MAGIC_STR[] = {'C', 'C', 'O', 'B'};
+  static constexpr std::size_t COMPRESSED_OFFLOAD_MAGIC_STR_SIZE =
+      sizeof(COMPRESSED_OFFLOAD_MAGIC_STR);
 
   struct ClangOffloadBundleInfo {
     uint64_t offset;
@@ -77,6 +80,8 @@ private:
   void load_device_elf();
   void load_fat_binary();
   void load_hip_fatbin(const Section &fatbin_section);
+  void load_compressed_hip_fatbins(const char *fatbin_data, size_t fatbin_size);
+  void load_clang_offload_bundle(const char *bundle_data, size_t bundle_size);
   void register_code_object(std::unique_ptr<AmdGpuCodeObject> co);
 
   std::vector<std::unique_ptr<AmdGpuCodeObject>> owned_code_objs_;

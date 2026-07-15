@@ -7,7 +7,13 @@
 #include "rocjitsu/code/file_io.h"
 #include "util/log.h"
 
+#include <zlib.h>
+#include <zstd.h>
+
+#include <algorithm>
 #include <cstring>
+#include <limits>
+#include <optional>
 #include <ranges>
 #include <utility>
 
@@ -53,6 +59,87 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 using detail::fits_in_bounds;
 using detail::read_value;
 
+struct DecompressedOffloadBundle {
+  size_t compressed_file_size = 0;
+  std::vector<char> data;
+};
+
+[[nodiscard]] std::optional<DecompressedOffloadBundle>
+decompress_offload_bundle(const char *input, size_t input_size) {
+  constexpr char magic[] = {'C', 'C', 'O', 'B'};
+  constexpr uint16_t kZlibMethod = 0;
+  constexpr uint16_t kZstdMethod = 1;
+
+  if (input == nullptr || input_size < sizeof(magic) ||
+      std::memcmp(input, magic, sizeof(magic)) != 0)
+    return std::nullopt;
+
+  size_t cursor = sizeof(magic);
+  uint16_t version = 0;
+  uint16_t method = 0;
+  if (!read_value(input, input_size, cursor, version) ||
+      !read_value(input, input_size, cursor, method))
+    return std::nullopt;
+
+  uint64_t total_file_size = input_size;
+  uint64_t uncompressed_size = 0;
+  switch (version) {
+  case 1: {
+    uint32_t size = 0;
+    if (!read_value(input, input_size, cursor, size))
+      return std::nullopt;
+    uncompressed_size = size;
+    break;
+  }
+  case 2: {
+    uint32_t file_size = 0;
+    uint32_t size = 0;
+    if (!read_value(input, input_size, cursor, file_size) ||
+        !read_value(input, input_size, cursor, size))
+      return std::nullopt;
+    total_file_size = file_size;
+    uncompressed_size = size;
+    break;
+  }
+  case 3:
+    if (!read_value(input, input_size, cursor, total_file_size) ||
+        !read_value(input, input_size, cursor, uncompressed_size))
+      return std::nullopt;
+    break;
+  default:
+    return std::nullopt;
+  }
+
+  uint64_t hash = 0;
+  if (!read_value(input, input_size, cursor, hash) || total_file_size < cursor ||
+      total_file_size > input_size || uncompressed_size > std::numeric_limits<size_t>::max())
+    return std::nullopt;
+  (void)hash;
+
+  const size_t compressed_size = static_cast<size_t>(total_file_size) - cursor;
+  std::vector<char> decompressed(static_cast<size_t>(uncompressed_size));
+  if (method == kZstdMethod) {
+    const size_t result =
+        ZSTD_decompress(decompressed.data(), decompressed.size(), input + cursor, compressed_size);
+    if (ZSTD_isError(result) || result != decompressed.size())
+      return std::nullopt;
+  } else if (method == kZlibMethod) {
+    if (compressed_size > std::numeric_limits<uLong>::max() ||
+        decompressed.size() > std::numeric_limits<uLongf>::max())
+      return std::nullopt;
+    uLongf result_size = static_cast<uLongf>(decompressed.size());
+    const int result = uncompress(reinterpret_cast<Bytef *>(decompressed.data()), &result_size,
+                                  reinterpret_cast<const Bytef *>(input + cursor),
+                                  static_cast<uLong>(compressed_size));
+    if (result != Z_OK || result_size != decompressed.size())
+      return std::nullopt;
+  } else {
+    return std::nullopt;
+  }
+
+  return DecompressedOffloadBundle{static_cast<size_t>(total_file_size), std::move(decompressed)};
+}
+
 } // namespace
 
 Executable::Executable(const std::string &path) {
@@ -88,7 +175,7 @@ Executable::Executable(const std::string &path) {
   }
 
   // x86 host ELF (fat binary with .hip_fatbin section).
-  if (ehdr.e_ident[EI_OSABI] == ELFOSABI_NONE) {
+  if (ehdr.e_ident[EI_OSABI] == ELFOSABI_NONE || ehdr.e_ident[EI_OSABI] == ELFOSABI_GNU) {
     header_ = std::make_unique<HsaHeader>(ehdr);
     load_fat_binary();
     return;
@@ -183,15 +270,63 @@ void Executable::load_fat_binary() {
 }
 
 void Executable::load_hip_fatbin(const Section &fatbin_section) {
-  ClangOffloadBundleHeader bundle_hdr;
   const char *fatbin_data = fatbin_section.data();
   const size_t fatbin_size = fatbin_section.size();
+  if (fatbin_size >= COMPRESSED_OFFLOAD_MAGIC_STR_SIZE &&
+      std::memcmp(fatbin_data, COMPRESSED_OFFLOAD_MAGIC_STR, COMPRESSED_OFFLOAD_MAGIC_STR_SIZE) ==
+          0) {
+    load_compressed_hip_fatbins(fatbin_data, fatbin_size);
+    return;
+  }
+  load_clang_offload_bundle(fatbin_data, fatbin_size);
+}
+
+void Executable::load_compressed_hip_fatbins(const char *fatbin_data, size_t fatbin_size) {
   size_t cursor = 0;
-  if (!fits_in_bounds(cursor, sizeof(bundle_hdr.magic), fatbin_size)) {
+  size_t bundle_count = 0;
+  while (cursor < fatbin_size) {
+    const char *search_begin = fatbin_data + cursor;
+    const char *search_end = fatbin_data + fatbin_size;
+    const char *bundle_begin =
+        std::search(search_begin, search_end, std::begin(COMPRESSED_OFFLOAD_MAGIC_STR),
+                    std::end(COMPRESSED_OFFLOAD_MAGIC_STR));
+    if (bundle_begin == search_end)
+      break;
+
+    const size_t bundle_offset = static_cast<size_t>(bundle_begin - fatbin_data);
+    // Version 1 does not encode its compressed file size. Match Clang's
+    // bundler behavior and delimit it with the next CCOB header when present.
+    const char *next_bundle = std::search(bundle_begin + COMPRESSED_OFFLOAD_MAGIC_STR_SIZE,
+                                          search_end, std::begin(COMPRESSED_OFFLOAD_MAGIC_STR),
+                                          std::end(COMPRESSED_OFFLOAD_MAGIC_STR));
+    const size_t available_size = static_cast<size_t>(next_bundle - bundle_begin);
+    auto decompressed = decompress_offload_bundle(bundle_begin, available_size);
+    if (!decompressed) {
+      is_valid_ = false;
+      return;
+    }
+
+    load_clang_offload_bundle(decompressed->data.data(), decompressed->data.size());
+    if (!is_valid_)
+      return;
+    ++bundle_count;
+    cursor = bundle_offset + decompressed->compressed_file_size;
+  }
+
+  if (bundle_count == 0)
+    is_valid_ = false;
+  else
+    util::Logger::debug_print(__func__, ": Found ", bundle_count, " compressed offload bundles");
+}
+
+void Executable::load_clang_offload_bundle(const char *bundle_data, size_t bundle_size) {
+  ClangOffloadBundleHeader bundle_hdr;
+  size_t cursor = 0;
+  if (!fits_in_bounds(cursor, sizeof(bundle_hdr.magic), bundle_size)) {
     is_valid_ = false;
     return;
   }
-  std::memcpy(bundle_hdr.magic, fatbin_data + cursor, sizeof(bundle_hdr.magic));
+  std::memcpy(bundle_hdr.magic, bundle_data + cursor, sizeof(bundle_hdr.magic));
   cursor += sizeof(bundle_hdr.magic);
 
   if (std::memcmp(bundle_hdr.magic, CLANG_OFFLOAD_MAGIC_STR, CLANG_OFFLOAD_MAGIC_STR_SIZE)) {
@@ -199,7 +334,8 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
     return;
   }
 
-  if (!read_value(fatbin_data, fatbin_size, cursor, bundle_hdr.num_code_objs)) {
+  if (!read_value(bundle_data, bundle_size, cursor, bundle_hdr.num_code_objs) ||
+      bundle_hdr.num_code_objs > (bundle_size - cursor) / (3 * sizeof(uint64_t))) {
     is_valid_ = false;
     return;
   }
@@ -209,24 +345,24 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
 
   std::vector<ClangOffloadBundleInfo> infos(bundle_hdr.num_code_objs);
   for (auto &info : infos) {
-    if (!read_value(fatbin_data, fatbin_size, cursor, info.offset)) {
+    if (!read_value(bundle_data, bundle_size, cursor, info.offset)) {
       is_valid_ = false;
       return;
     }
-    if (!read_value(fatbin_data, fatbin_size, cursor, info.size)) {
+    if (!read_value(bundle_data, bundle_size, cursor, info.size)) {
       is_valid_ = false;
       return;
     }
-    if (!read_value(fatbin_data, fatbin_size, cursor, info.bundle_entry_id_size)) {
+    if (!read_value(bundle_data, bundle_size, cursor, info.bundle_entry_id_size)) {
       is_valid_ = false;
       return;
     }
-    if (!fits_in_bounds(cursor, info.bundle_entry_id_size, fatbin_size)) {
+    if (!fits_in_bounds(cursor, info.bundle_entry_id_size, bundle_size)) {
       is_valid_ = false;
       return;
     }
     info.bundle_entry_id.resize(info.bundle_entry_id_size, '\0');
-    std::memcpy(info.bundle_entry_id.data(), fatbin_data + cursor, info.bundle_entry_id_size);
+    std::memcpy(info.bundle_entry_id.data(), bundle_data + cursor, info.bundle_entry_id_size);
     cursor += static_cast<size_t>(info.bundle_entry_id_size);
 
     auto parts_view = info.bundle_entry_id | std::views::split('-');
@@ -241,14 +377,13 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
 
     if (parts[0] == CLANG_OFFLOAD_KIND_HIP || parts[0] == CLANG_OFFLOAD_KIND_HIPV4) {
       util::Logger::debug_print(__func__, ": Fatbin has target triple ", parts[5]);
-      const uint64_t fatbin_offset = fatbin_section.sectionOffset() + info.offset;
-      if (!fits_in_bounds(fatbin_offset, info.size, image_.size())) {
+      if (!fits_in_bounds(info.offset, info.size, bundle_size)) {
         is_valid_ = false;
         return;
       }
 
       auto co = std::make_unique<AmdGpuCodeObject>(
-          reinterpret_cast<const uint8_t *>(image_.data() + fatbin_offset),
+          reinterpret_cast<const uint8_t *>(bundle_data + info.offset),
           static_cast<size_t>(info.size), parts[0], parts[5]);
       if (!co->is_valid()) {
         is_valid_ = false;

@@ -34,6 +34,7 @@ RJ_DIAGNOSTIC_POP
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace rocjitsu {
@@ -181,7 +182,8 @@ struct LegacyWaitcnt {
   return len > 3 && std::string_view(name + len - 3, 3) == ".kd";
 }
 
-[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const CodeObject &code_object) {
+[[nodiscard]] std::vector<WaitcheckKernelInfo>
+find_waitcheck_kernels(const CodeObject &code_object) {
   if (code_object.text_sections().size() != 1)
     return {};
 
@@ -205,7 +207,7 @@ struct LegacyWaitcnt {
   if (text_size == 0)
     return {};
 
-  std::set<uint64_t> entries;
+  std::vector<WaitcheckKernelInfo> kernels;
   std::set<uint64_t> seen_descriptors;
   for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
     const Elf64_Shdr &symtab_shdr = shdrs[i];
@@ -253,11 +255,15 @@ struct LegacyWaitcnt {
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
       if (entry_vaddr < text_vaddr || entry_vaddr >= text_vaddr + text_size)
         continue;
-      entries.insert(entry_vaddr - text_vaddr);
+      const char *symbol_name = strtab + sym.st_name;
+      const size_t symbol_name_size = strnlen(symbol_name, strtab_shdr.sh_size - sym.st_name);
+      kernels.push_back(
+          {std::string(symbol_name, symbol_name_size - 3), sym.st_value, entry_vaddr - text_vaddr});
     }
   }
 
-  return {entries.begin(), entries.end()};
+  std::ranges::sort(kernels, {}, &WaitcheckKernelInfo::entry_offset);
+  return kernels;
 }
 
 enum class WaitEventKind {
@@ -349,8 +355,8 @@ struct SgprHazardState {
   std::bitset<128> salu_hazards;
   std::bitset<128> valu_hazards;
   uint8_t vcc_hazard = 0;
-  std::array<std::optional<SgprHazardProducer>, 128> salu_producers;
-  std::array<std::optional<SgprHazardProducer>, 128> valu_producers;
+  std::unordered_map<uint16_t, SgprHazardProducer> salu_producers;
+  std::unordered_map<uint16_t, SgprHazardProducer> valu_producers;
   std::optional<SgprHazardProducer> salu_vcc_producer;
   std::optional<SgprHazardProducer> valu_vcc_producer;
   uint8_t consecutive_ds_nops = 0;
@@ -367,7 +373,7 @@ struct VaVdstHazard {
 };
 
 struct VaVdstHazardState {
-  std::array<std::optional<VaVdstHazard>, REGISTER_SET_MAX_VGPRS> hazards;
+  std::unordered_map<uint16_t, VaVdstHazard> hazards;
 
   bool operator==(const VaVdstHazardState &) const = default;
 };
@@ -427,6 +433,9 @@ struct PendingState {
   bool operator==(const PendingState &) const = default;
 };
 
+static_assert(sizeof(PendingState) < 4096,
+              "waitcheck CFG states must keep architecture-specific hazard storage sparse");
+
 struct CfgInstructionView {
   uint64_t section_offset = 0;
   const Instruction *instruction = nullptr;
@@ -435,6 +444,8 @@ struct CfgInstructionView {
 struct CfgBlockView {
   const BasicBlock *block = nullptr;
   std::vector<CfgInstructionView> instructions;
+  std::vector<size_t> predecessors;
+  std::vector<size_t> successors;
 };
 
 struct ScalarValueConstraint {
@@ -510,6 +521,74 @@ struct Analyzer {
     for (size_t i = 0; i < blocks.size(); ++i)
       block_index.emplace(blocks[i].get(), i);
 
+    // BasicBlock keeps calls outside its ordinary successor list because each
+    // return continuation belongs to one call site. Materialize a temporary,
+    // kernel-local interprocedural graph for waitcheck: replace the caller's
+    // direct fallthrough with caller -> callee and pair every validated return
+    // with that call's continuation. This is the same conservative scoped-edge
+    // model used by DBT liveness, and lets waits in a device helper affect the
+    // instructions that execute after the call.
+    std::vector<std::vector<size_t>> cfg_successors(blocks.size());
+    auto add_edge = [&](size_t from, size_t to) {
+      auto &successors = cfg_successors[from];
+      if (std::ranges::find(successors, to) == successors.end())
+        successors.push_back(to);
+    };
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      const BasicBlock &block = *blocks[i];
+      for (const BasicBlock *successor : block.successors()) {
+        const auto successor_it = block_index.find(successor);
+        if (successor_it == block_index.end())
+          continue;
+        const bool is_call_fallthrough =
+            std::ranges::any_of(block.call_edges(), [&](const BasicBlock::CallEdge &call) {
+              return call.continuation == successor;
+            });
+        if (!is_call_fallthrough)
+          add_edge(i, successor_it->second);
+      }
+      for (const BasicBlock::CallEdge &call : block.call_edges()) {
+        if (const auto callee_it = block_index.find(call.callee); callee_it != block_index.end())
+          add_edge(i, callee_it->second);
+      }
+    }
+
+    for (const auto &block : blocks) {
+      for (const BasicBlock::CallEdge &call : block->call_edges()) {
+        const auto continuation_it = block_index.find(call.continuation);
+        if (call.callee == nullptr || continuation_it == block_index.end())
+          continue;
+        std::vector<const BasicBlock *> worklist{call.callee};
+        std::unordered_set<const BasicBlock *> visited;
+        while (!worklist.empty()) {
+          const BasicBlock *callee_block = worklist.back();
+          worklist.pop_back();
+          if (callee_block == nullptr || !visited.insert(callee_block).second)
+            continue;
+          const auto callee_it = block_index.find(callee_block);
+          if (callee_it == block_index.end())
+            continue;
+          const Instruction *term = callee_block->terminator();
+          const uint32_t word =
+              term != nullptr && term->raw_encoding() != nullptr ? term->raw_encoding()[0] : 0;
+          if (term != nullptr && term->size() == static_cast<int>(sizeof(uint32_t)) &&
+              term->mnemonic() == "s_setpc_b64" &&
+              static_cast<uint16_t>(word & 0xffu) == call.return_sreg) {
+            add_edge(callee_it->second, continuation_it->second);
+            continue;
+          }
+          for (const BasicBlock *successor : callee_block->successors())
+            worklist.push_back(successor);
+        }
+      }
+    }
+
+    std::vector<std::vector<size_t>> cfg_predecessors(blocks.size());
+    for (size_t from = 0; from < cfg_successors.size(); ++from) {
+      for (size_t to : cfg_successors[from])
+        cfg_predecessors[to].push_back(from);
+    }
+
     std::vector<PendingState> in(blocks.size());
     std::vector<PendingState> out(blocks.size());
 
@@ -519,7 +598,7 @@ struct Analyzer {
     while (changed && iterations++ < max_iterations) {
       changed = false;
       for (size_t i = 0; i < blocks.size(); ++i) {
-        PendingState merged = merge_predecessors(*blocks[i], block_index, out);
+        PendingState merged = merge_predecessors(cfg_predecessors[i], out);
         PendingState next_out =
             analyze_block(*blocks[i], merged, section_name, file_offset_base, arch, false);
         if (!(merged == in[i]) || !(next_out == out[i])) {
@@ -536,7 +615,7 @@ struct Analyzer {
       return;
     }
 
-    prepare_cfg_path_filter(blocks);
+    prepare_cfg_path_filter(blocks, cfg_predecessors, cfg_successors);
     for (size_t i = 0; i < blocks.size(); ++i) {
       (void)analyze_block(*blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
@@ -551,11 +630,13 @@ private:
   }
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
-    PendingEvent lhs_key = lhs;
-    PendingEvent rhs_key = rhs;
-    lhs_key.min_younger = 0;
-    rhs_key.min_younger = 0;
-    return lhs_key == rhs_key;
+    return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
+           lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
+           lhs.check_uses == rhs.check_uses && lhs.check_defs == rhs.check_defs &&
+           lhs.check_exec_defs == rhs.check_exec_defs && lhs.section_name == rhs.section_name &&
+           lhs.section_offset == rhs.section_offset && lhs.file_offset == rhs.file_offset &&
+           lhs.instruction == rhs.instruction && lhs.check_memory_order == rhs.check_memory_order &&
+           lhs.check_program_end == rhs.check_program_end;
   }
 
   [[nodiscard]] static auto find_event(std::vector<PendingEvent> &events,
@@ -574,24 +655,27 @@ private:
 
   [[nodiscard]] bool should_stop_after_diagnostic() const { return report_.stopped_early; }
 
-  void prepare_cfg_path_filter(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  void prepare_cfg_path_filter(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                               const std::vector<std::vector<size_t>> &predecessors,
+                               const std::vector<std::vector<size_t>> &successors) {
     cfg_views_.clear();
-    cfg_view_index_.clear();
     cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
 
     cfg_views_.reserve(blocks.size());
-    for (const auto &block : blocks) {
+    for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+      const auto &block = blocks[block_index];
       CfgBlockView view;
       view.block = block.get();
+      view.predecessors = predecessors[block_index];
+      view.successors = successors[block_index];
       uint64_t section_offset = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
         view.instructions.push_back({section_offset, &inst});
         section_offset += static_cast<uint64_t>(inst.size());
       }
-      cfg_view_index_.emplace(view.block, cfg_views_.size());
       cfg_block_by_start_offset_.emplace(block->start_offset(), cfg_views_.size());
       cfg_views_.push_back(std::move(view));
     }
@@ -599,7 +683,6 @@ private:
 
   void clear_cfg_path_filter() {
     cfg_views_.clear();
-    cfg_view_index_.clear();
     cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
@@ -607,6 +690,14 @@ private:
   }
 
   void record_diagnostic(WaitcheckDiagnostic diag) {
+    const auto key =
+        std::make_tuple(diag.counter, diag.access, diag.reg.cls, diag.reg.index, diag.reg.width,
+                        diag.section_name, diag.section_offset, diag.file_offset,
+                        diag.producer_section_offset, diag.producer_file_offset,
+                        diag.required_count, diag.instruction, diag.producer_instruction);
+    if (!diagnostic_keys_.insert(key).second)
+      return;
+
     ++report_.diagnostics_observed;
     if (options_.stop_after_first_diagnostic) {
       report_.stopped_early = true;
@@ -626,20 +717,16 @@ private:
   }
 
   static void merge_va_vdst_hazards(VaVdstHazardState &dst, const VaVdstHazardState &src) {
-    for (size_t i = 0; i < dst.hazards.size(); ++i) {
-      const auto &src_hazard = src.hazards[i];
-      if (!src_hazard)
+    for (const auto &[index, src_hazard] : src.hazards) {
+      auto [dst_it, inserted] = dst.hazards.try_emplace(index, src_hazard);
+      if (inserted)
         continue;
-      auto &dst_hazard = dst.hazards[i];
-      if (!dst_hazard) {
-        dst_hazard = src_hazard;
-        continue;
-      }
-      if (*dst_hazard == *src_hazard)
+      VaVdstHazard &dst_hazard = dst_it->second;
+      if (dst_hazard == src_hazard)
         continue;
 
-      dst_hazard->trans_since = dst_hazard->trans_since || src_hazard->trans_since;
-      dst_hazard->age = dst_hazard->trans_since ? 0 : std::min(dst_hazard->age, src_hazard->age);
+      dst_hazard.trans_since = dst_hazard.trans_since || src_hazard.trans_since;
+      dst_hazard.age = dst_hazard.trans_since ? 0 : std::min(dst_hazard.age, src_hazard.age);
     }
   }
 
@@ -663,22 +750,19 @@ private:
     }
   }
 
-  [[nodiscard]] static PendingState
-  merge_predecessors(const BasicBlock &block,
-                     const std::unordered_map<const BasicBlock *, size_t> &block_index,
-                     const std::vector<PendingState> &outputs) {
+  [[nodiscard]] static PendingState merge_predecessors(std::span<const size_t> predecessors,
+                                                       const std::vector<PendingState> &outputs) {
     PendingState merged;
-    if (block.predecessors().empty())
+    if (predecessors.empty())
       return merged;
 
     std::array<std::optional<std::vector<PendingEvent>>, kCounterCount> first_source;
     std::optional<VgprMsbState> first_vgpr_msb;
     std::optional<ExpertSchedulingState> first_expert_scheduling;
-    for (const BasicBlock *pred : block.predecessors()) {
-      const auto pred_it = block_index.find(pred);
-      if (pred_it == block_index.end())
+    for (size_t predecessor : predecessors) {
+      if (predecessor >= outputs.size())
         continue;
-      const PendingState &pred_out = outputs[pred_it->second];
+      const PendingState &pred_out = outputs[predecessor];
       if (!first_expert_scheduling) {
         first_expert_scheduling = pred_out.expert_scheduling;
       } else if (*first_expert_scheduling != pred_out.expert_scheduling) {
@@ -850,16 +934,14 @@ private:
 
   static void clear_salu_sgpr_hazards(SgprHazardState &state) {
     state.salu_hazards.reset();
-    for (auto &producer : state.salu_producers)
-      producer.reset();
+    state.salu_producers.clear();
     state.vcc_hazard = static_cast<uint8_t>(state.vcc_hazard & ~kSgprHazardSalu);
     state.salu_vcc_producer.reset();
   }
 
   static void clear_valu_sgpr_hazards(SgprHazardState &state) {
     state.valu_hazards.reset();
-    for (auto &producer : state.valu_producers)
-      producer.reset();
+    state.valu_producers.clear();
   }
 
   static void clear_valu_vcc_hazard(SgprHazardState &state) {
@@ -873,12 +955,10 @@ private:
     clear_valu_vcc_hazard(state);
   }
 
-  static void merge_lane_producers(std::array<std::optional<SgprHazardProducer>, 128> &dst,
-                                   const std::array<std::optional<SgprHazardProducer>, 128> &src) {
-    for (size_t i = 0; i < dst.size(); ++i) {
-      if (!dst[i] && src[i])
-        dst[i] = src[i];
-    }
+  static void merge_lane_producers(std::unordered_map<uint16_t, SgprHazardProducer> &dst,
+                                   const std::unordered_map<uint16_t, SgprHazardProducer> &src) {
+    for (const auto &[index, producer] : src)
+      dst.try_emplace(index, producer);
   }
 
   static void merge_sgpr_hazards(SgprHazardState &dst, const SgprHazardState &src) {
@@ -1637,8 +1717,7 @@ private:
     record_diagnostic(std::move(diag));
   }
 
-  void emit_sgpr_hazard_diagnostic(const Instruction &inst,
-                                   const std::optional<SgprHazardProducer> &producer,
+  void emit_sgpr_hazard_diagnostic(const Instruction &inst, const SgprHazardProducer *producer,
                                    RegisterRef reg, std::string_view depctr_field,
                                    uint64_t section_offset, uint64_t file_offset) {
     WaitcheckDiagnostic diag;
@@ -1694,17 +1773,18 @@ private:
 
     bool emitted = false;
     du.defs.for_each([&](RegisterRef ref) {
-      if (emitted || ref.cls != RegClass::VGPR || ref.index >= state.hazards.size())
+      if (emitted || ref.cls != RegClass::VGPR || ref.index >= REGISTER_SET_MAX_VGPRS)
         return;
-      const auto &hazard = state.hazards[ref.index];
-      if (!hazard)
+      const auto hazard_it = state.hazards.find(ref.index);
+      if (hazard_it == state.hazards.end())
         return;
+      const VaVdstHazard &hazard = hazard_it->second;
 
-      const uint32_t required_wait = hazard->trans_since ? 0u : hazard->age;
+      const uint32_t required_wait = hazard.trans_since ? 0u : hazard.age;
       if (*encoded_wait <= required_wait)
         return;
 
-      emit_va_vdst_hazard_diagnostic(inst, *hazard, ref, *encoded_wait, required_wait,
+      emit_va_vdst_hazard_diagnostic(inst, hazard, ref, *encoded_wait, required_wait,
                                      section_offset, file_offset);
       emitted = true;
     });
@@ -1712,30 +1792,27 @@ private:
 
   static void age_va_vdst_hazards(VaVdstHazardState &state, bool trans_seen) {
     constexpr uint8_t kNoHazardWaitStates = 15;
-    for (auto &hazard : state.hazards) {
-      if (!hazard)
-        continue;
-      if (hazard->age < kNoHazardWaitStates)
-        ++hazard->age;
-      if (hazard->age >= kNoHazardWaitStates) {
-        hazard.reset();
+    for (auto it = state.hazards.begin(); it != state.hazards.end();) {
+      VaVdstHazard &hazard = it->second;
+      if (hazard.age < kNoHazardWaitStates)
+        ++hazard.age;
+      if (hazard.age >= kNoHazardWaitStates) {
+        it = state.hazards.erase(it);
         continue;
       }
-      hazard->trans_since = hazard->trans_since || trans_seen;
+      hazard.trans_since = hazard.trans_since || trans_seen;
+      ++it;
     }
   }
 
-  static void clear_va_vdst_hazards(VaVdstHazardState &state) {
-    for (auto &hazard : state.hazards)
-      hazard.reset();
-  }
+  static void clear_va_vdst_hazards(VaVdstHazardState &state) { state.hazards.clear(); }
 
   static void set_va_vdst_hazard_for_regs(VaVdstHazardState &state, const RegisterSet &regs,
                                           bool trans_seen, const SgprHazardProducer &producer) {
     regs.for_each([&](RegisterRef ref) {
-      if (ref.cls != RegClass::VGPR || ref.index >= state.hazards.size())
+      if (ref.cls != RegClass::VGPR || ref.index >= REGISTER_SET_MAX_VGPRS)
         return;
-      state.hazards[ref.index] = VaVdstHazard{0, trans_seen, producer};
+      state.hazards.insert_or_assign(ref.index, VaVdstHazard{0, trans_seen, producer});
     });
   }
 
@@ -1786,14 +1863,8 @@ private:
       if (reachable[block_index] != 0)
         continue;
       reachable[block_index] = 1;
-      const BasicBlock *block = cfg_views_[block_index].block;
-      if (block == nullptr)
-        continue;
-      for (const BasicBlock *predecessor : block->predecessors()) {
-        const auto predecessor_it = cfg_view_index_.find(predecessor);
-        if (predecessor_it != cfg_view_index_.end())
-          worklist.push_back(predecessor_it->second);
-      }
+      for (size_t predecessor : cfg_views_[block_index].predecessors)
+        worklist.push_back(predecessor);
     }
     return reverse_reachability_cache_.emplace(target_block_index, std::move(reachable))
         .first->second;
@@ -1812,14 +1883,8 @@ private:
       if (reachable[block_index] != 0)
         continue;
       reachable[block_index] = 1;
-      const BasicBlock *block = cfg_views_[block_index].block;
-      if (block == nullptr)
-        continue;
-      for (const BasicBlock *successor : block->successors()) {
-        const auto successor_it = cfg_view_index_.find(successor);
-        if (successor_it != cfg_view_index_.end())
-          worklist.push_back(successor_it->second);
-      }
+      for (size_t successor : cfg_views_[block_index].successors)
+        worklist.push_back(successor);
     }
     return forward_reachability_cache_.emplace(source_block_index, std::move(reachable))
         .first->second;
@@ -2067,7 +2132,7 @@ private:
     std::vector<SearchState> worklist;
     for (size_t i = 0; i < cfg_views_.size(); ++i) {
       const BasicBlock *block = cfg_views_[i].block;
-      if (block != nullptr && block->predecessors().empty() && can_reach_producer[i] != 0)
+      if (block != nullptr && cfg_views_[i].predecessors.empty() && can_reach_producer[i] != 0)
         worklist.push_back({i, 0, false, 0, {}, std::nullopt});
     }
     if (worklist.empty())
@@ -2098,12 +2163,10 @@ private:
       if (state.inst_index >= block_view.instructions.size()) {
         if (block_view.block == nullptr)
           continue;
-        for (const BasicBlock *successor : block_view.block->successors()) {
-          const auto successor_it = cfg_view_index_.find(successor);
-          if (successor_it != cfg_view_index_.end() &&
-              can_continue_from(successor_it->second, state.pending))
-            worklist.push_back({successor_it->second, 0, state.pending, state.age,
-                                state.constraints, state.scc_predicate});
+        for (size_t successor : block_view.successors) {
+          if (can_continue_from(successor, state.pending))
+            worklist.push_back(
+                {successor, 0, state.pending, state.age, state.constraints, state.scc_predicate});
         }
         continue;
       }
@@ -2434,10 +2497,10 @@ private:
 
     if (is_valu) {
       state.valu_hazards.set(ref.index);
-      state.valu_producers[ref.index] = producer;
+      state.valu_producers.insert_or_assign(ref.index, producer);
     } else {
       state.salu_hazards.set(ref.index);
-      state.salu_producers[ref.index] = producer;
+      state.salu_producers.insert_or_assign(ref.index, producer);
     }
   }
 
@@ -2465,12 +2528,18 @@ private:
       if (!state.tracked_pairs.test(sgpr_pair(ref)))
         return;
 
-      if (state.salu_hazards.test(ref.index))
-        emit_sgpr_hazard_diagnostic(inst, state.salu_producers[ref.index], ref, "depctr_sa_sdst",
-                                    section_offset, file_offset);
-      if (is_valu && state.valu_hazards.test(ref.index))
-        emit_sgpr_hazard_diagnostic(inst, state.valu_producers[ref.index], ref, "depctr_va_sdst",
-                                    section_offset, file_offset);
+      if (state.salu_hazards.test(ref.index)) {
+        const auto producer = state.salu_producers.find(ref.index);
+        emit_sgpr_hazard_diagnostic(
+            inst, producer == state.salu_producers.end() ? nullptr : &producer->second, ref,
+            "depctr_sa_sdst", section_offset, file_offset);
+      }
+      if (is_valu && state.valu_hazards.test(ref.index)) {
+        const auto producer = state.valu_producers.find(ref.index);
+        emit_sgpr_hazard_diagnostic(
+            inst, producer == state.valu_producers.end() ? nullptr : &producer->second, ref,
+            "depctr_va_sdst", section_offset, file_offset);
+      }
     });
   }
 
@@ -2481,11 +2550,13 @@ private:
 
     RegisterRef vcc{RegClass::VCC, 0, 1};
     if (state.vcc_hazard & kSgprHazardSalu)
-      emit_sgpr_hazard_diagnostic(inst, state.salu_vcc_producer, vcc, "depctr_sa_sdst",
-                                  section_offset, file_offset);
+      emit_sgpr_hazard_diagnostic(inst,
+                                  state.salu_vcc_producer ? &*state.salu_vcc_producer : nullptr,
+                                  vcc, "depctr_sa_sdst", section_offset, file_offset);
     if (is_valu && (state.vcc_hazard & kSgprHazardValu))
-      emit_sgpr_hazard_diagnostic(inst, state.valu_vcc_producer, vcc, "depctr_va_vcc",
-                                  section_offset, file_offset);
+      emit_sgpr_hazard_diagnostic(inst,
+                                  state.valu_vcc_producer ? &*state.valu_vcc_producer : nullptr,
+                                  vcc, "depctr_va_vcc", section_offset, file_offset);
   }
 
   void update_sgpr_hazards(SgprHazardState &state, const Instruction &inst, const InstDefUse &du,
@@ -2628,8 +2699,11 @@ private:
 
   WaitcheckReport &report_;
   WaitcheckOptions options_;
+  std::set<
+      std::tuple<WaitCounterKind, WaitcheckAccessKind, RegClass, uint16_t, uint16_t, std::string,
+                 uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, std::string, std::string>>
+      diagnostic_keys_;
   std::vector<CfgBlockView> cfg_views_;
-  std::unordered_map<const BasicBlock *, size_t> cfg_view_index_;
   std::unordered_map<uint64_t, size_t> cfg_block_by_start_offset_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind>, bool> feasible_path_cache_;
   std::map<size_t, std::vector<uint8_t>> reverse_reachability_cache_;
@@ -2684,6 +2758,10 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   }
 }
 
+std::vector<WaitcheckKernelInfo> waitcheck_kernels(const CodeObject &code_object) {
+  return find_waitcheck_kernels(code_object);
+}
+
 WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t arch,
                                  WaitcheckOptions options) {
   WaitcheckReport report;
@@ -2699,8 +2777,11 @@ WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t
   return report;
 }
 
-WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
-                                 WaitcheckOptions options) {
+namespace {
+
+WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_t arch,
+                                    std::optional<uint64_t> selected_kernel_entry,
+                                    WaitcheckOptions options) {
   WaitcheckReport report;
   report.arch = arch;
   if (!is_supported_waitcheck_arch(arch)) {
@@ -2731,8 +2812,20 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
                                     ? code_object.text_sections().front()->sectionOffset()
                                     : 0;
   try {
-    const auto entry_offsets = kernel_entry_offsets(code_object);
-    if (entry_offsets.empty()) {
+    const auto kernels = find_waitcheck_kernels(code_object);
+    if (selected_kernel_entry) {
+      if (std::ranges::none_of(kernels, [&](const WaitcheckKernelInfo &kernel) {
+            return kernel.entry_offset == *selected_kernel_entry;
+          })) {
+        report.supported = false;
+        report.analysis_error = "kernel entry offset is not present in the code object";
+        return report;
+      }
+      const std::array<uint64_t, 1> entry{*selected_kernel_entry};
+      std::vector<std::unique_ptr<BasicBlock>> blocks =
+          BasicBlock::build_reachable(code_object, *decoder, arch, entry);
+      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+    } else if (kernels.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
@@ -2740,10 +2833,10 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
       // at once; generated Tensile libraries can contain hundreds of kernels.
-      for (uint64_t entry_offset : entry_offsets) {
-        const std::array<uint64_t, 1> entry{entry_offset};
+      for (const WaitcheckKernelInfo &kernel : kernels) {
+        const std::array<uint64_t, 1> entry{kernel.entry_offset};
         std::vector<std::unique_ptr<BasicBlock>> blocks =
-            BasicBlock::build_reachable(code_object, *decoder, entry);
+            BasicBlock::build_reachable(code_object, *decoder, arch, entry);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
         if (!report.supported || report.stopped_early)
           break;
@@ -2757,6 +2850,8 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
   if (!report.supported)
     return report;
   if (report.stopped_early)
+    return report;
+  if (selected_kernel_entry)
     return report;
 
   for (const auto &owned_section : code_object.all_sections()) {
@@ -2772,6 +2867,19 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
                             section->sectionOffset());
   }
   return report;
+}
+
+} // namespace
+
+WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
+                                 WaitcheckOptions options) {
+  return analyze_code_object(code_object, arch, std::nullopt, options);
+}
+
+WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
+                                            uint64_t kernel_entry_offset,
+                                            WaitcheckOptions options) {
+  return analyze_code_object(code_object, arch, kernel_entry_offset, options);
 }
 
 } // namespace rocjitsu

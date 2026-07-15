@@ -13,7 +13,9 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::waitcheck_test {
@@ -64,12 +66,19 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return inst;
 }
 
-[[nodiscard]] inline std::vector<uint8_t>
-make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
+[[nodiscard]] inline std::vector<uint8_t> make_gfx_multi_kernel_code_object(
+    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &kernels, uint32_t mach) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t kernel_descriptor_size = 64;
+  std::vector<uint32_t> text_words;
+  std::vector<uint64_t> entry_offsets;
+  for (const auto &[name, words] : kernels) {
+    (void)name;
+    entry_offsets.push_back(text_words.size() * sizeof(uint32_t));
+    text_words.insert(text_words.end(), words.begin(), words.end());
+  }
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
 
   std::vector<uint8_t> shstrtab{'\0'};
@@ -80,13 +89,18 @@ make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
 
   std::vector<uint8_t> strtab{'\0'};
-  const uint32_t kd_symbol_name = add_elf_name(strtab, "waitcheck.kd");
+  std::vector<uint32_t> kd_symbol_names;
+  for (const auto &[name, words] : kernels) {
+    (void)words;
+    kd_symbol_names.push_back(add_elf_name(strtab, name + ".kd"));
+  }
 
   const uint64_t rodata_offset = text_offset + text_size;
   const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
-  const uint64_t strtab_offset = rodata_offset + kernel_descriptor_size;
+  const uint64_t rodata_size = kernels.size() * kernel_descriptor_size;
+  const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
-  constexpr size_t sym_count = 2;
+  const size_t sym_count = kernels.size() + 1;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -130,27 +144,33 @@ make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
   phdrs[1].p_offset = rodata_offset;
   phdrs[1].p_vaddr = rodata_vaddr;
   phdrs[1].p_paddr = rodata_vaddr;
-  phdrs[1].p_filesz = kernel_descriptor_size;
-  phdrs[1].p_memsz = kernel_descriptor_size;
+  phdrs[1].p_filesz = rodata_size;
+  phdrs[1].p_memsz = rodata_size;
   phdrs[1].p_align = load_align;
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   constexpr size_t kernel_code_entry_byte_offset_offset = 16;
-  std::array<uint8_t, kernel_descriptor_size> kernel_descriptor{};
-  const int64_t entry_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
-  std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
-              sizeof(entry_offset));
-  std::memcpy(image.data() + rodata_offset, kernel_descriptor.data(), kernel_descriptor.size());
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    std::array<uint8_t, kernel_descriptor_size> kernel_descriptor{};
+    const uint64_t descriptor_vaddr = rodata_vaddr + i * kernel_descriptor_size;
+    const int64_t entry_offset = static_cast<int64_t>(text_vaddr + entry_offsets[i]) -
+                                 static_cast<int64_t>(descriptor_vaddr);
+    std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
+                sizeof(entry_offset));
+    std::memcpy(image.data() + rodata_offset + i * kernel_descriptor_size, kernel_descriptor.data(),
+                kernel_descriptor.size());
+  }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
-  syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-  syms[1].st_shndx = 2;
-  syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = kernel_descriptor.size();
+  std::vector<Elf64_Sym> syms(sym_count);
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    syms[i + 1].st_name = kd_symbol_names[i];
+    syms[i + 1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+    syms[i + 1].st_shndx = 2;
+    syms[i + 1].st_value = rodata_vaddr + i * kernel_descriptor_size;
+    syms[i + 1].st_size = kernel_descriptor_size;
+  }
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
@@ -168,7 +188,7 @@ make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
   shdrs[2].sh_flags = SHF_ALLOC;
   shdrs[2].sh_addr = rodata_vaddr;
   shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = kernel_descriptor.size();
+  shdrs[2].sh_size = rodata_size;
   shdrs[2].sh_addralign = kernel_descriptor_size;
 
   shdrs[3].sh_name = symtab_name;
@@ -194,6 +214,11 @@ make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+[[nodiscard]] inline std::vector<uint8_t>
+make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
+  return make_gfx_multi_kernel_code_object({{"waitcheck", text_words}}, mach);
 }
 
 [[nodiscard]] inline std::vector<uint8_t>
