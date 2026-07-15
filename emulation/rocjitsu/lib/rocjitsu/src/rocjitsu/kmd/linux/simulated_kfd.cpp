@@ -370,7 +370,8 @@ int SimulatedKfd::open() {
   proc->event_state_.reset();
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                            &proc->page_table_generation_);
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -431,7 +432,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     proc->event_state_.reset();
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                              &proc->page_table_generation_);
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }

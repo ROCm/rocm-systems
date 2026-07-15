@@ -28,16 +28,22 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -437,6 +443,120 @@ TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
             "vmid_kernel");
 
   mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> page{};
+  page[kOffset] = 0x5a;
+  process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          &process.page_table_generation_);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), page.data());
+  EXPECT_EQ(memory.read8(kAddr, kPid), page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.unregister_process(kPid);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+  alignas(amdgpu::GpuMemory) unsigned char storage[sizeof(amdgpu::GpuMemory)];
+
+  KfdProcess first_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  first_page[kOffset] = 0x11;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+
+  auto *first_memory = new (storage) amdgpu::GpuMemory("memory");
+  first_memory->register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                                 &first_process.page_table_generation_);
+  EXPECT_EQ(first_memory->read8(kAddr, kPid), first_page[kOffset]);
+  EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+  first_memory->~GpuMemory();
+
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  second_page[kOffset] = 0x22;
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  auto *second_memory = new (storage) amdgpu::GpuMemory("memory");
+  second_memory->register_process(kPid, &second_process.page_table_,
+                                  &second_process.page_table_mutex_,
+                                  &second_process.page_table_generation_);
+  EXPECT_EQ(second_memory->read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(second_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+  second_memory->~GpuMemory();
+}
+
+TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          &process.page_table_generation_);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
+            nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kMappingSize = KfdProcess::kPageSize * 2;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    ~Mapping() {
+      if (data)
+        munmap(data, size);
+    }
+  } mapping{static_cast<uint8_t *>(raw_mapping), kMappingSize};
+
+  for (size_t i = 0; i < kMappingSize; ++i)
+    mapping.data[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          &process.page_table_generation_);
+  memory.set_process_client_pid(kPid, getpid());
+
+  constexpr size_t kAccessOffset = KfdProcess::kPageSize - 8;
+  constexpr size_t kAccessSize = 32;
+  const uint64_t addr = reinterpret_cast<uint64_t>(mapping.data + kAccessOffset);
+
+  std::array<uint8_t, kAccessSize> actual{};
+  memory.read_block(addr, std::span<uint8_t>(actual), kPid);
+  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), mapping.data + kAccessOffset));
+
+  std::array<uint8_t, kAccessSize> replacement{};
+  for (size_t i = 0; i < replacement.size(); ++i)
+    replacement[i] = static_cast<uint8_t>(0xa0 + i);
+
+  memory.write_block(addr, std::span<const uint8_t>(replacement), kPid);
+  EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), mapping.data + kAccessOffset));
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -2248,8 +2368,10 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
   alignas(4096) std::array<uint8_t, 4096> backing_b{};
   proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
   proc_b.map_pages(kSharedVa, backing_b.data(), backing_b.size());
-  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_);
-  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_);
+  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_,
+                       &proc_a.page_table_generation_);
+  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_,
+                       &proc_b.page_table_generation_);
 
   amdgpu::L2Cache l2("test.l2");
   l2.set_backing_memory(&mem);

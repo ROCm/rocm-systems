@@ -6,7 +6,6 @@
 #include "util/log.h"
 
 #include <algorithm>
-#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cstring>
@@ -23,10 +22,9 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
     backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
   if (backing_memory_) {
     if (op == simdojo::MessageOp::WRITE) {
-      static std::atomic<uint64_t> wb_count{0};
-      const uint64_t count = wb_count.fetch_add(1, std::memory_order_relaxed) + 1;
-      if (count <= 3)
-        util::Logger::vm("L2 writeback(backing) #", count, " addr=0x", std::hex, addr,
+      thread_local uint64_t wb_count = 0;
+      if (++wb_count <= 3)
+        util::Logger::vm("L2 writeback(backing) #", wb_count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);
       backing_memory_->write_block(addr, std::span<const uint8_t>(data, size), vmid);
     } else {
@@ -95,12 +93,13 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    std::lock_guard set_lock(set_mutex(ea));
 
     if (mtype == Mtype::CC) {
       // Coherently Cacheable: invalidate L2 line before refetch, mirroring
       // the L1 CC behavior. This ensures cross-XCD store visibility when
       // different L2s share a backing store. Dirty data is flushed first.
-      flush_line(ea, vmid);
+      flush_line_locked(ea, vmid);
     }
 
     ensure_line(ea, vmid);
@@ -129,6 +128,7 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    std::lock_guard set_lock(set_mutex(ea));
 
     ensure_line(ea, vmid);
     cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
@@ -147,18 +147,36 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
         (mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED : simdojo::CoherenceState::EXCLUSIVE;
     tag->dirty = false;
 
-    ++write_count_;
+    write_count_.fetch_add(1, std::memory_order_relaxed);
     copied += chunk;
   }
 }
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
+  std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
-  ensure_line(line_addr, vmid);
-  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE, vmid);
+  const uint8_t *line = cache_.line_data_for_read(line_addr, vmid);
+  if (!line) {
+    simdojo::CacheTag evicted;
+    uint8_t evicted_data[LINE_SIZE];
+    auto allocated = cache_.allocate_with_data(line_addr, vmid, &evicted, evicted_data);
+
+    if (evicted.valid && evicted.dirty) {
+      static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
+      uint64_t evicted_addr =
+          (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
+          (static_cast<uint64_t>(CacheStore::set_index(line_addr)) << LINE_SIZE_BITS);
+      send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, evicted.vmid);
+    }
+
+    send_backing(line_addr, allocated.data, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+    line = allocated.data;
+  }
+  std::memcpy(line_buf, line, LINE_SIZE);
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {
+  std::lock_guard set_lock(set_mutex(line_addr));
   simdojo::CacheTag *tag = nullptr;
   if (cache_.lookup(line_addr, &tag, vmid)) {
     cache_.write_line(line_addr, data, 0, LINE_SIZE, vmid);
@@ -189,7 +207,7 @@ void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtyp
   }
 }
 
-void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
+void L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;
   if (!cache_.lookup(addr, &tag, vmid))
     return;
@@ -203,8 +221,14 @@ void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
   cache_.invalidate(addr, vmid);
 }
 
+void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
+  std::lock_guard set_lock(set_mutex(addr));
+  flush_line_locked(addr, vmid);
+}
+
 void L2Cache::flush_all(uint32_t vmid) {
   (void)vmid;
+  auto locks = lock_all_sets();
   uint32_t dirty_count = 0;
   uint64_t min_addr = UINT64_MAX, max_addr = 0;
   cache_.for_each_dirty([this, &dirty_count, &min_addr,
@@ -219,8 +243,19 @@ void L2Cache::flush_all(uint32_t vmid) {
       max_addr = line_addr;
   });
   util::Logger::vm("L2 flush: ", dirty_count, " dirty lines [0x", std::hex, min_addr, "-0x",
-                   max_addr, "]", std::dec, " total_writes=", write_count_);
+                   max_addr, "]", std::dec,
+                   " total_writes=", write_count_.load(std::memory_order_relaxed));
   cache_.invalidate_all();
+}
+
+void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
+  if (size == 0)
+    return;
+  uint64_t line_start = CacheStore::line_address(addr);
+  uint64_t end = addr + size;
+  auto locks = lock_sets_for_range(line_start, end);
+  for (uint64_t la = line_start; la < end; la += LINE_SIZE)
+    cache_.invalidate_all_vmids(la);
 }
 
 } // namespace amdgpu

@@ -13,6 +13,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <format>
 #include <memory>
@@ -36,7 +37,9 @@ namespace amdgpu {
 /// issuing wave through the memory hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
-  explicit GpuMemory(std::string name) : simdojo::SparseMemory(std::move(name)) {
+  explicit GpuMemory(std::string name)
+      : simdojo::SparseMemory(std::move(name)),
+        instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                     simdojo::PortProtocol::MEMORY));
     cpl_->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *msg) {
@@ -54,11 +57,15 @@ public:
   simdojo::Port *cpl_port() { return cpl_; }
 
   /// @brief Register a process's page table in the VMID table.
-  void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu) {
+  /// @param generation Optional mutation counter used by translation caches.
+  ///        Omitting it disables the per-thread fast path for this page table.
+  void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu,
+                        std::atomic<uint64_t> *generation = nullptr) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     std::unique_lock lk(vmid_mutex_);
-    vmid_table_[pid] = {pt, mu};
+    vmid_table_[pid] = {pt, mu, 0, generation};
+    vmid_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
   /// @brief Unregister a process from the VMID table.
@@ -66,7 +73,13 @@ public:
     util::Logger::cp("VMID_UNREG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec);
     std::unique_lock lk(vmid_mutex_);
-    vmid_table_.erase(pid);
+    auto it = vmid_table_.find(pid);
+    if (it == vmid_table_.end())
+      return;
+    if (it->second.generation)
+      it->second.generation->fetch_add(1, std::memory_order_release);
+    vmid_table_.erase(it);
+    vmid_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
   void set_process_client_pid(uint32_t pid, pid_t client_pid) {
@@ -91,15 +104,49 @@ public:
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
       return Mtype::RW;
+    const uint64_t page_key = addr >> PAGE_SHIFT;
+    struct MtypeCache {
+      const GpuMemory *memory = nullptr;
+      uint64_t memory_instance = 0;
+      uint32_t vmid = 0;
+      uint64_t table_generation = 0;
+      uint64_t page_key = 0;
+      uint64_t generation = 0;
+      Mtype mtype = Mtype::RW;
+      KfdProcess::PageTable *page_table = nullptr;
+      std::shared_mutex *mutex = nullptr;
+      std::atomic<uint64_t> *generation_ptr = nullptr;
+    };
+    static thread_local MtypeCache cache;
+
     {
       std::shared_lock lk(vmid_mutex_);
+      uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
+      if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+          cache.table_generation == table_generation && cache.generation_ptr) {
+        uint64_t generation = cache.generation_ptr->load(std::memory_order_acquire);
+        if (cache.generation == generation && cache.page_key == page_key)
+          return cache.mtype;
+        if (cache.generation == generation && cache.page_table && cache.mutex) {
+          std::shared_lock pt_lk(*cache.mutex);
+          auto pt_it = cache.page_table->find(page_key);
+          cache.page_key = page_key;
+          cache.mtype = pt_it != cache.page_table->end() ? pt_it->second.mtype : Mtype::RW;
+          return cache.mtype;
+        }
+      }
+
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end()) {
         auto &entry = it->second;
+        uint64_t generation =
+            entry.generation ? entry.generation->load(std::memory_order_acquire) : 0;
         std::shared_lock pt_lk(*entry.mutex);
-        auto pt_it = entry.page_table->find(addr >> PAGE_SHIFT);
-        if (pt_it != entry.page_table->end())
-          return pt_it->second.mtype;
+        auto pt_it = entry.page_table->find(page_key);
+        Mtype mtype = pt_it != entry.page_table->end() ? pt_it->second.mtype : Mtype::RW;
+        cache = {this,  instance_id_,     vmid,        table_generation, page_key, generation,
+                 mtype, entry.page_table, entry.mutex, entry.generation};
+        return mtype;
       }
     }
     return Mtype::RW;
@@ -311,27 +358,74 @@ private:
     }
   }
 
+  static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  // Thread-local translation caches keep these pointers only while the simulated
+  // process is active; driver teardown unregisters after GPU work is drained.
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
+    std::atomic<uint64_t> *generation = nullptr;
   };
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
     if (vmid == 0)
       return passthrough_ ? reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK) : nullptr;
+    const uint64_t page_key = addr >> PAGE_SHIFT;
+    struct TranslationCache {
+      const GpuMemory *memory = nullptr;
+      uint64_t memory_instance = 0;
+      uint32_t vmid = 0;
+      uint64_t table_generation = 0;
+      uint64_t page_key = 0;
+      uint64_t generation = 0;
+      uint8_t *host_ptr = nullptr;
+      KfdProcess::PageTable *page_table = nullptr;
+      std::shared_mutex *mutex = nullptr;
+      std::atomic<uint64_t> *generation_ptr = nullptr;
+    };
+    static thread_local TranslationCache cache;
+
     {
       std::shared_lock lk(vmid_mutex_);
+      uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
+      if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+          cache.table_generation == table_generation && cache.generation_ptr) {
+        uint64_t generation = cache.generation_ptr->load(std::memory_order_acquire);
+        if (cache.generation == generation && cache.page_key == page_key)
+          return cache.host_ptr;
+        if (cache.generation == generation && cache.page_table && cache.mutex) {
+          std::shared_lock pt_lk(*cache.mutex);
+          auto pt_it = cache.page_table->find(page_key);
+          uint8_t *host_ptr = nullptr;
+          if (pt_it != cache.page_table->end())
+            host_ptr = pt_it->second.host_ptr;
+          else if (passthrough_ && addr < kUserSpaceLimit)
+            host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+          cache.page_key = page_key;
+          cache.host_ptr = host_ptr;
+          return host_ptr;
+        }
+      }
+
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end()) {
         auto &entry = it->second;
+        uint64_t generation =
+            entry.generation ? entry.generation->load(std::memory_order_acquire) : 0;
         std::shared_lock pt_lk(*entry.mutex);
-        auto pt_it = entry.page_table->find(addr >> PAGE_SHIFT);
+        auto pt_it = entry.page_table->find(page_key);
+        uint8_t *host_ptr = nullptr;
         if (pt_it != entry.page_table->end())
-          return pt_it->second.host_ptr;
+          host_ptr = pt_it->second.host_ptr;
+        else if (passthrough_ && addr < kUserSpaceLimit)
+          host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+        cache = {this,     instance_id_,     vmid,        table_generation, page_key, generation,
+                 host_ptr, entry.page_table, entry.mutex, entry.generation};
+        return host_ptr;
       }
     }
-    static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
     if (passthrough_ && addr < kUserSpaceLimit)
       return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     return nullptr;
@@ -374,8 +468,11 @@ private:
   }
 
   simdojo::Port *cpl_ = nullptr;
+  inline static std::atomic<uint64_t> next_instance_id_{1};
+  const uint64_t instance_id_;
   mutable std::shared_mutex vmid_mutex_;
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
+  mutable std::atomic<uint64_t> vmid_table_generation_ = 1;
   bool passthrough_ = false;
 };
 
