@@ -1118,7 +1118,6 @@ class SetValueCommands:
                         else:
                             result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
                             self.logger.store_output(args.gpu, "fan", result)
-                            # record-then-finalize: note this device's failure, keep going
                             self.helpers.error_collector.record(
                                 AmdSmiExitCode.INVALID_PARAMETER_VALUE
                             )
@@ -1136,7 +1135,6 @@ class SetValueCommands:
                         include_driver_note=has_gpu_od,
                     )
                     self.logger.store_output(args.gpu, "fan", result)
-                    # record-then-finalize: note this device's failure, keep going
                     self.helpers.error_collector.record_library_error(e.get_error_code())
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -1162,7 +1160,6 @@ class SetValueCommands:
                         "perflevel",
                         f"[{e.get_error_info(detailed=False)}] Unable to set performance level to {args.perf_level}",
                     )
-                    # record-then-finalize: note this device's failure, keep going
                     self.helpers.error_collector.record_library_error(e.get_error_code())
                     perf_options = (
                         str(self.helpers.get_perf_levels()[0][0:-1])
@@ -1312,12 +1309,9 @@ class SetValueCommands:
                         args.compute_partition
                         in amdsmi_interface.AmdSmiComputePartitionType.__members__
                     ):
-                        # Profiles could not be enumerated (e.g. a device that
-                        # does not support accelerator partitions). Attempt the
-                        # set anyway so the driver reports THIS device's real
-                        # status; any failure is recorded below and the loop keeps
-                        # going to the remaining devices instead of aborting the
-                        # whole command.
+                        # Profiles couldn't be enumerated (device without accelerator
+                        # partitions); attempt the set anyway so the driver reports
+                        # this device's real status.
                         compute_partition = amdsmi_interface.AmdSmiComputePartitionType[
                             args.compute_partition
                         ]
@@ -1351,10 +1345,6 @@ class SetValueCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    # record-then-finalize: surface THIS device's failure and keep
-                    # going to the remaining devices instead of aborting the whole
-                    # command. The library status in the message says what the
-                    # issue is (e.g. SETTING_UNAVAILABLE, NOT_SUPPORTED).
                     out = (
                         f"[{e.get_error_info(detailed=False)}] Unable to set accelerator partition "
                         f"to {user_requested_partition_args}"

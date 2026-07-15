@@ -183,9 +183,8 @@ def amdsmi_cli_init():
     init_thread.join(timeout=_INIT_TIMEOUT_SEC)
 
     if init_thread.is_alive():
-        # The library call hung and returned no status, so this timeout is the
-        # CLI's own watchdog decision. Exit with a CLI code, not a borrowed
-        # library status, so the exit code unambiguously means "CLI gave up".
+        # The library hung with no status, so exit with a CLI code (not a borrowed
+        # library status) -- the exit code unambiguously means the CLI watchdog gave up.
         from amdsmi_cli_exceptions import AmdSmiExitCode
 
         logging.error(
@@ -199,15 +198,12 @@ def amdsmi_cli_init():
         (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
     ):
         e = init_result["exception"]
-        # "Drivers not loaded" is a single CLI conclusion reached two ways:
-        #   1. the library returned NOT_INIT / DRIVER_NOT_LOADED, or
-        #   2. no drivers were detected up front (init_flag == 0), in which case
-        #      amdsmi_init() raises AmdSmiParameterException with err_code=None
-        #      (not a library status), so it won't match the tuple below -- the
-        #      init_flag == 0 check is what catches that case.
-        # Since the CLI owns this normalization (it also collapses NOT_INIT and
-        # DRIVER_NOT_LOADED into one answer), exit with a CLI code rather than a
-        # borrowed library status.
+        # Normalize "drivers not loaded" to one CLI code, reached two ways:
+        # 1) Library returns NOT_INIT/DRIVER_NOT_LOADED
+        # 2) No drivers detected up front -> init_flag == 0. (amdsmi_init raises
+        #    AmdSmiParameterException with err_code=None, which won't match (1)'s
+        #    tuple, so the init_flag == 0 check catches it.)
+        # We don't want to clash with library error codes, so we use a CLI code (AmdSmiExitCode.DRIVERS_NOT_LOADED) for this case.
         if (
             e.err_code
             in (

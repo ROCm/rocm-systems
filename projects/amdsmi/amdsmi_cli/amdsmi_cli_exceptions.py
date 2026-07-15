@@ -39,10 +39,7 @@ class AmdSmiExitCode(enum.IntEnum):
     """
 
     def __new__(cls, value, note=""):
-        # ``note`` is deliberate metadata, not dead code: it documents each exit
-        # code at its definition site (replacing scattered inline comments) and
-        # is queryable if a future --help / exit-code doc renders this table.
-        # There is intentionally no runtime consumer today.
+        # Per-code doc string, queryable for a future --help/exit-code table (no runtime consumer today).
         obj = int.__new__(cls, value)
         obj._value_ = value
         obj.note = note
@@ -65,11 +62,9 @@ class AmdSmiExitCode(enum.IntEnum):
     USER_ABORTED = (208, "user declined an interactive confirmation prompt")
 
 
-# Bounds of the reserved band the CLI-invented codes above must live in. The
-# band sits above the library status range (library statuses fold to ~0-56; the two
-# sentinels fold to 254/255), so a CLI code can never be mistaken for a library
-# status. The end is the POSIX single-byte exit-code ceiling that
-# library_code_to_exit_code folds into (0xFF == 255).
+# Reserved band for the CLI-invented codes above. Sits above the library status
+# range (statuses fold to ~0-56, sentinels to 254/255) so the two never collide;
+# 0xFF is the POSIX single-byte exit-code ceiling.
 CLI_EXIT_CODE_BAND_START = 192
 CLI_EXIT_CODE_BAND_END = 0xFF
 
@@ -88,9 +83,8 @@ class AmdSmiErrorSeverity(enum.Enum):
     DEVICE = "device"
 
 
-# The two 32-bit library sentinels (see amdsmi_wrapper.amdsmi_status_t). Named
-# here so this module stays importable without the amdsmi package and so the
-# error table / fallback don't rely on bare hex literals.
+# The two 32-bit library sentinels (see amdsmi_wrapper.amdsmi_status_t), named here
+# so this module stays importable without the amdsmi package and avoids bare hex.
 AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE
 AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
 
@@ -149,12 +143,10 @@ AMDSMI_ERROR_MESSAGES = {
 
 
 def _get_error_message(error_code):
-    # Every library-defined status is guaranteed a mapping by
-    # test_every_library_status_has_a_friendly_message, so this fallback only
-    # fires for a value the CLI genuinely doesn't recognize (e.g. a mismatched
-    # library version). Keep it distinct from AMDSMI_STATUS_UNKNOWN_ERROR's own
-    # "Unknown error" message, and include the raw code, so the two are distinguishable
-    # apart from the output alone.
+    # test_every_library_status_has_a_friendly_message guarantees a mapping for
+    # every known status, so this fallback only fires for an unrecognized value
+    # (e.g. a mismatched library version). Include the raw code so it stays
+    # distinct from AMDSMI_STATUS_UNKNOWN_ERROR's own "Unknown error".
     code = abs(error_code)
     if code in AMDSMI_ERROR_MESSAGES:
         return AMDSMI_ERROR_MESSAGES[code]
