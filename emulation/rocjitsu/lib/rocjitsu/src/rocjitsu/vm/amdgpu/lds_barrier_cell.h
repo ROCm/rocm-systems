@@ -11,23 +11,21 @@ namespace amdgpu {
 
 /// Raw LDS barrier cell used by the gfx1250 DS barrier-arrive instructions.
 ///
-/// The AMDGCN ISA raw async-barrier object uses [15:0] pending, [31:16]
-/// phase, and [47:32] init count. This is intentionally distinct from MLIR's
-/// ds_barrier_state helper; kernels that poll the raw cell directly test bit
-/// 16 for phase parity.
-constexpr uint64_t kLdsBarrierCellPendingMask = 0xffffull;
-constexpr uint64_t kLdsBarrierCellPhaseMask = 0xffffull;
-constexpr uint64_t kLdsBarrierCellInitCountMask = 0xffffull;
-constexpr uint32_t kLdsBarrierCellPhaseShift = 16;
+/// The gfx1250 raw async-barrier object uses [28:0] for the pending count,
+/// [31:29] for a decrementing phase, and [63:32] for the initial count.  The
+/// phase wraps from zero to seven when an arrival completes a phase.
+constexpr uint64_t kLdsBarrierCellPendingMask = 0x1fffffffull;
+constexpr uint64_t kLdsBarrierCellPhaseMask = 0x7ull;
+constexpr uint64_t kLdsBarrierCellInitCountMask = 0xffffffffull;
+constexpr uint32_t kLdsBarrierCellPhaseShift = 29;
 constexpr uint32_t kLdsBarrierCellInitCountShift = 32;
-constexpr uint64_t kLdsBarrierCellReservedMask = 0xffff000000000000ull;
 
 /// Return the remaining arrivals before the current phase completes.
 inline uint64_t lds_barrier_cell_pending_count(uint64_t state) {
   return state & kLdsBarrierCellPendingMask;
 }
 
-/// Return the raw 16-bit phase counter.
+/// Return the raw three-bit phase counter.
 inline uint64_t lds_barrier_cell_phase(uint64_t state) {
   return (state >> kLdsBarrierCellPhaseShift) & kLdsBarrierCellPhaseMask;
 }
@@ -66,7 +64,7 @@ inline uint64_t lds_barrier_cell_update_arrive(uint64_t state, uint64_t decremen
     pending = initial_count - remainder;
   }
 
-  return (state & kLdsBarrierCellReservedMask) | (initial_count << kLdsBarrierCellInitCountShift) |
+  return (initial_count << kLdsBarrierCellInitCountShift) |
          (phase_value << kLdsBarrierCellPhaseShift) | pending;
 }
 

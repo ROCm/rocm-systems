@@ -17902,3 +17902,75 @@ TEST(BinaryTranslator, Gfx1250ClusterAndAsyncGlobalMemoryUseExplicitRdna4Sequenc
   EXPECT_EQ(words[*store_index + 3u], pack_sopp(rdna4::kSWaitStorecntSopp, 0));
   EXPECT_EQ(std::ranges::count(words, 0xBFCA0000u), 0u);
 }
+
+TEST(BinaryTranslator, Gfx1250DsCountersAndBarrierArrivalsUseRdna4Atomics) {
+  using namespace rocjitsu;
+
+  gfx1250::VdsMachineInst append{};
+  append.encoding = 0x36;
+  append.op = gfx1250::kDsAppendVds;
+  append.vdst = 0;
+
+  gfx1250::VdsMachineInst consume{};
+  consume.encoding = 0x36;
+  consume.op = gfx1250::kDsConsumeVds;
+  consume.vdst = 1;
+
+  gfx1250::VdsMachineInst async_arrive{};
+  async_arrive.encoding = 0x36;
+  async_arrive.op = gfx1250::kDsAtomicAsyncBarrierArriveB64Vds;
+  async_arrive.addr = 2;
+  async_arrive.offset0 = 8;
+
+  gfx1250::VdsMachineInst arrive_rtn{};
+  arrive_rtn.encoding = 0x36;
+  arrive_rtn.op = gfx1250::kDsAtomicBarrierArriveRtnB64Vds;
+  arrive_rtn.vdst = 4;
+  arrive_rtn.addr = 3;
+  arrive_rtn.data0 = 6;
+
+  std::array<uint32_t, 9> text_words{};
+  std::memcpy(text_words.data(), &append, sizeof(append));
+  std::memcpy(text_words.data() + 2, &consume, sizeof(consume));
+  std::memcpy(text_words.data() + 4, &async_arrive, sizeof(async_arrive));
+  std::memcpy(text_words.data() + 6, &arrive_rtn, sizeof(arrive_rtn));
+  text_words[8] = 0xBFB00000u;
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(has_error_diagnostic(result.diagnostics));
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto words = translated_executable_words_for_test(translated);
+  ASSERT_FALSE(words.empty());
+
+  size_t add_rtn_count = 0;
+  size_t sub_rtn_count = 0;
+  size_t load_b64_count = 0;
+  size_t cmpstore_rtn_b64_count = 0;
+  for (size_t i = 0; i + 1 < words.size(); ++i) {
+    rdna4::VdsMachineInst ds{};
+    std::memcpy(&ds, words.data() + i, sizeof(ds));
+    if (ds.encoding != 0x36)
+      continue;
+    add_rtn_count += ds.op == rdna4::kDsAddRtnU32Vds;
+    sub_rtn_count += ds.op == rdna4::kDsSubRtnU32Vds;
+    load_b64_count += ds.op == rdna4::kDsLoadB64Vds;
+    if (ds.op == rdna4::kDsCmpstoreRtnB64Vds) {
+      ++cmpstore_rtn_b64_count;
+      EXPECT_NE(ds.vdst, ds.data0);
+      EXPECT_NE(ds.vdst, ds.data1);
+    }
+  }
+  EXPECT_EQ(add_rtn_count, 1u);
+  EXPECT_EQ(sub_rtn_count, 1u);
+  EXPECT_EQ(load_b64_count, 2u);
+  EXPECT_EQ(cmpstore_rtn_b64_count, 2u);
+}

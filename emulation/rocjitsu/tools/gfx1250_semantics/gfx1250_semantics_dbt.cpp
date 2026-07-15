@@ -550,7 +550,8 @@ void dispatch_kernel(HsaState &state, uint64_t kernel_object, uint32_t group_seg
   hsa_signal_value_t value = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
                                                        5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
   if (value != 0)
-    throw std::runtime_error("kernel dispatch timed out or failed");
+    throw std::runtime_error("kernel dispatch timed out or failed (completion signal " +
+                             std::to_string(value) + ")");
 
   check_hsa(hsa_signal_destroy(signal), "hsa_signal_destroy");
   check_hsa(hsa_queue_destroy(queue), "hsa_queue_destroy");

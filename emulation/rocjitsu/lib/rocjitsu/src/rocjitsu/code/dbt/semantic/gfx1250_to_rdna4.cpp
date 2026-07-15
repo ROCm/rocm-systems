@@ -1947,6 +1947,11 @@ ExpandResult expand_global_atomic_add_f64(const Instruction &inst, uint32_t, uin
     return ExpandResult::failed("Could not encode the F64 atomic CAS replacement");
   words.push_back(pack_sopp(kOpWaitLoadcnt, 0));
 
+  // Retry lanes are progressively removed from EXEC; clear inactive bits that
+  // the vector compare does not overwrite before deriving the next mask.
+  words.push_back(
+      build_s_mov_b64(static_cast<uint8_t>(*success_pred), scalar_positive_inline_u32(0)));
+  append_wait_salu_sgpr(words);
   append_vop3(words, kOpCmpEqU64, static_cast<uint8_t>(*success_pred), vgpr_src(tmp_new),
               vgpr_src(tmp_compare));
   words.push_back(build_s_wait_alu(kWaitAluDepctrVaSdst0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -2839,6 +2844,266 @@ std::vector<uint32_t> expand_ds_store_2addr_b64(const Instruction &inst, uint32_
 
   words.push_back(pack_sopp(kOpWaitStorecnt, 0));
   return words;
+}
+
+ExpandResult expand_ds_append_consume(const Instruction &inst, uint32_t, uint64_t,
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
+                                      const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VdsMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VdsMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  constexpr uint16_t kOpConsume = 61;
+  constexpr uint16_t kOpAppend = 62;
+  if (src.op != kOpConsume && src.op != kOpAppend)
+    return ExpandResult::not_handled();
+
+  std::vector<uint8_t> avoid_vgpr;
+  add_avoid_vgpr(avoid_vgpr, static_cast<uint8_t>(src.vdst));
+  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, 2, avoid_vgpr);
+  if (!tmp_base || *tmp_base > 254u) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot allocate its atomic counter scratch VGPRs");
+  }
+  const uint8_t addr = static_cast<uint8_t>(*tmp_base);
+  const uint8_t one = static_cast<uint8_t>(*tmp_base + 1u);
+  context.require_vgprs(static_cast<uint32_t>(*tmp_base) + 2u);
+
+  constexpr uint8_t kOpDsAddRtnU32 = 32;
+  constexpr uint8_t kOpDsSubRtnU32 = 33;
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpSubNcU32 = 38;
+  constexpr uint8_t kOpWaitDscnt = 70;
+  constexpr uint16_t kM0 = 125;
+  constexpr uint16_t kInline1 = scalar_positive_inline_u32(1);
+
+  std::vector<uint32_t> words;
+  words.reserve(src.op == kOpConsume ? 8 : 6);
+  append_vop1(words, kOpMovB32, addr, kM0);
+  append_vop1(words, kOpMovB32, one, kInline1);
+  append_wait_valu_vgpr(words);
+
+  auto fields = gfx1250_to_rdna4::decode_vds_gfx1250(raw[0], raw[1]);
+  fields.vaddr = addr;
+  fields.data0 = one;
+  fields.data1 = 0;
+  fields.vdst = src.vdst;
+  if (!append_rdna4_vds_inst(words, fields,
+                             src.op == kOpAppend ? kOpDsAddRtnU32 : kOpDsSubRtnU32)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 LDS atomic replacement");
+  }
+  words.push_back(pack_sopp(kOpWaitDscnt, 0));
+  if (src.op == kOpConsume) {
+    append_vop2(words, kOpSubNcU32, static_cast<uint8_t>(src.vdst),
+                vgpr_src(static_cast<uint8_t>(src.vdst)), one);
+    append_wait_valu_vgpr(words);
+  }
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_ds_barrier_arrive(const Instruction &inst, uint32_t, uint64_t,
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
+                                      const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VdsMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VdsMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  constexpr uint16_t kOpAsyncArrive = 86;
+  constexpr uint16_t kOpArriveRtn = 117;
+  const bool returns_old = src.op == kOpArriveRtn;
+  if (src.op != kOpAsyncArrive && !returns_old)
+    return ExpandResult::not_handled();
+
+  if (returns_old && (src.data0 > 254 || src.vdst > 254)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " uses an out-of-range VGPR operand");
+  }
+
+  std::vector<uint8_t> avoid_vgpr;
+  add_avoid_vgpr(avoid_vgpr, static_cast<uint8_t>(src.addr));
+  if (returns_old) {
+    add_avoid_vgpr_run(avoid_vgpr, static_cast<uint8_t>(src.data0), 2);
+    add_avoid_vgpr_run(avoid_vgpr, static_cast<uint8_t>(src.vdst), 2);
+  }
+  constexpr uint8_t kScratchVgprs = 13;
+  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, kScratchVgprs, avoid_vgpr);
+  if (!tmp_base || *tmp_base > 256u - kScratchVgprs) {
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) + " cannot allocate its barrier CAS scratch VGPRs",
+        {"Reduce VGPR pressure or add private spilling for DS atomic lowering."});
+  }
+  const uint8_t expected = static_cast<uint8_t>(*tmp_base);
+  const uint8_t new_value = static_cast<uint8_t>(*tmp_base + 2u);
+  const uint8_t remaining = static_cast<uint8_t>(*tmp_base + 4u);
+  const uint8_t pending = static_cast<uint8_t>(*tmp_base + 6u);
+  const uint8_t phase = static_cast<uint8_t>(*tmp_base + 8u);
+  const uint8_t no_wrap_pending = static_cast<uint8_t>(*tmp_base + 9u);
+  const uint8_t phase_decremented = static_cast<uint8_t>(*tmp_base + 10u);
+  const uint8_t observed = static_cast<uint8_t>(*tmp_base + 11u);
+  context.require_vgprs(static_cast<uint32_t>(*tmp_base) + kScratchVgprs);
+
+  std::vector<uint8_t> avoid_sgpr;
+  const auto exec_save = find_free_sgpr_pair_avoiding(inst, liveness, avoid_sgpr);
+  if (!exec_save)
+    return ExpandResult::failed(
+        "No free SGPR pair is available to save EXEC for DS atomic lowering");
+  avoid_sgpr.push_back(static_cast<uint8_t>(*exec_save));
+  avoid_sgpr.push_back(static_cast<uint8_t>(*exec_save + 1u));
+  const auto transition_pred = find_free_sgpr_pair_avoiding(inst, liveness, avoid_sgpr);
+  if (!transition_pred)
+    return ExpandResult::failed("No free SGPR pair is available for the barrier phase predicate");
+  avoid_sgpr.push_back(static_cast<uint8_t>(*transition_pred));
+  avoid_sgpr.push_back(static_cast<uint8_t>(*transition_pred + 1u));
+  const auto success_pred = find_free_sgpr_pair_avoiding(inst, liveness, avoid_sgpr);
+  if (!success_pred)
+    return ExpandResult::failed("No free SGPR pair is available for the barrier CAS predicate");
+  context.require_sgprs(std::max({static_cast<uint32_t>(*exec_save) + 2u,
+                                  static_cast<uint32_t>(*transition_pred) + 2u,
+                                  static_cast<uint32_t>(*success_pred) + 2u}));
+
+  constexpr uint16_t kOpDsCmpstoreRtnB64 = 112;
+  constexpr uint16_t kOpDsLoadB64 = 118;
+  constexpr uint16_t kOpCmpEqU64 = 90;
+  constexpr uint16_t kOpCmpGtU64 = 92;
+  constexpr uint16_t kOpCndmaskB32 = 257;
+  constexpr uint16_t kOpSubCoCiU32 = 289;
+  constexpr uint16_t kOpSubCoU32 = 769;
+  constexpr uint16_t kOpSubNcU32Vop3 = 294;
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpAndB32 = 27;
+  constexpr uint8_t kOpOrB32 = 28;
+  constexpr uint8_t kOpLshlrevB32 = 24;
+  constexpr uint8_t kOpLshrrevB32 = 25;
+  constexpr uint8_t kOpAddNcU32 = 37;
+  constexpr uint8_t kOpSubNcU32 = 38;
+  constexpr uint8_t kOpSAndNot1B64 = 35;
+  constexpr uint8_t kOpSCbranchScc1 = 34;
+  constexpr uint8_t kOpSCbranchExecnz = 0x26;
+  constexpr uint8_t kOpSCmpLgU64 = 17;
+  constexpr uint8_t kOpWaitDscnt = 70;
+  constexpr uint8_t kExecLo = 126;
+  constexpr uint16_t kInline0 = scalar_positive_inline_u32(0);
+  constexpr uint16_t kInline1 = scalar_positive_inline_u32(1);
+
+  std::vector<uint32_t> words;
+  words.reserve(80);
+  auto append_sub_u64 = [&](uint8_t dst, uint8_t lhs, uint16_t rhs_lo, uint16_t rhs_hi) {
+    auto [lo0, lo1] = build_vop3_sdst(kOpSubCoU32, dst, static_cast<uint8_t>(*success_pred),
+                                      vgpr_src(lhs), rhs_lo);
+    words.push_back(lo0);
+    words.push_back(lo1);
+    words.push_back(build_s_wait_alu(kWaitAluDepctrVaSdst0, ROCJITSU_CODE_ARCH_RDNA4));
+    auto [hi0, hi1] = build_vop3_sdst(kOpSubCoCiU32, static_cast<uint8_t>(dst + 1u), kNullSgpr,
+                                      vgpr_src(static_cast<uint8_t>(lhs + 1u)), rhs_hi,
+                                      static_cast<uint8_t>(*success_pred));
+    words.push_back(hi0);
+    words.push_back(hi1);
+    words.push_back(build_s_wait_alu(kWaitAluDepctrVaVdst0, ROCJITSU_CODE_ARCH_RDNA4));
+  };
+
+  append_save_exec(words, static_cast<uint8_t>(*exec_save));
+
+  auto fields = gfx1250_to_rdna4::decode_vds_gfx1250(raw[0], raw[1]);
+  fields.vdst = expected;
+  fields.data0 = 0;
+  fields.data1 = 0;
+  if (!append_rdna4_vds_inst(words, fields, kOpDsLoadB64))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its initial RDNA4 LDS load");
+  words.push_back(pack_sopp(kOpWaitDscnt, 0));
+
+  const size_t cas_loop_start = words.size();
+  if (returns_old) {
+    append_vop1(words, kOpMovB32, remaining, vgpr_src(static_cast<uint8_t>(src.data0)));
+    append_vop1(words, kOpMovB32, static_cast<uint8_t>(remaining + 1u),
+                vgpr_src(static_cast<uint8_t>(src.data0 + 1u)));
+  } else {
+    append_vop1(words, kOpMovB32, remaining, kInline1);
+    append_vop1(words, kOpMovB32, static_cast<uint8_t>(remaining + 1u), kInline0);
+  }
+  append_vop2(words, kOpAndB32, pending, 255, expected, 0x1FFFFFFFu);
+  append_vop1(words, kOpMovB32, static_cast<uint8_t>(pending + 1u), kInline0);
+  append_vop2(words, kOpLshrrevB32, phase, scalar_positive_inline_u32(29), expected);
+  append_wait_valu_vgpr(words);
+
+  // Reduce an arbitrary 64-bit arrival count one barrier phase at a time.
+  // The predicate is a lane mask, so lanes that finish early retain their
+  // result while other lanes continue around this scalar-controlled loop.
+  const size_t phase_loop_start = words.size();
+  // VOP compare destinations preserve inactive lane bits. Clear the whole
+  // mask so an inactive garbage bit cannot keep the scalar phase loop alive.
+  words.push_back(build_s_mov_b64(static_cast<uint8_t>(*transition_pred), kInline0));
+  append_wait_salu_sgpr(words);
+  append_vop3(words, kOpCmpGtU64, static_cast<uint8_t>(*transition_pred), vgpr_src(remaining),
+              vgpr_src(pending));
+  words.push_back(build_s_wait_alu(kWaitAluDepctrVaSdst0, ROCJITSU_CODE_ARCH_RDNA4));
+  append_vop2(words, kOpSubNcU32, no_wrap_pending, vgpr_src(pending), remaining);
+  append_vop2(words, kOpAddNcU32, new_value, kInline1, pending);
+  append_sub_u64(new_value, remaining, vgpr_src(new_value), kInline0);
+  append_vop3(words, kOpSubNcU32Vop3, phase_decremented, vgpr_src(phase), kInline1);
+  append_vop2(words, kOpAndB32, phase_decremented, 255, phase_decremented, 0x7u);
+  append_vop3(words, kOpCndmaskB32, pending, vgpr_src(no_wrap_pending),
+              vgpr_src(static_cast<uint8_t>(expected + 1u)), *transition_pred);
+  append_vop3(words, kOpCndmaskB32, remaining, kInline0, vgpr_src(new_value), *transition_pred);
+  append_vop3(words, kOpCndmaskB32, static_cast<uint8_t>(remaining + 1u), kInline0,
+              vgpr_src(static_cast<uint8_t>(new_value + 1u)), *transition_pred);
+  append_vop3(words, kOpCndmaskB32, phase, vgpr_src(phase), vgpr_src(phase_decremented),
+              *transition_pred);
+  append_wait_valu_vgpr(words);
+  words.push_back(build_sopc(kOpSCmpLgU64, *transition_pred, kInline0));
+  append_wait_salu_sgpr(words);
+  const size_t phase_branch_index = words.size();
+  const auto phase_branch_delta = static_cast<int16_t>(
+      static_cast<ptrdiff_t>(phase_loop_start) - static_cast<ptrdiff_t>(phase_branch_index + 1u));
+  words.push_back(pack_sopp(kOpSCbranchScc1, static_cast<uint16_t>(phase_branch_delta)));
+
+  append_vop2(words, kOpLshlrevB32, phase, scalar_positive_inline_u32(29), phase);
+  append_vop2(words, kOpOrB32, new_value, vgpr_src(pending), phase);
+  append_vop1(words, kOpMovB32, static_cast<uint8_t>(new_value + 1u),
+              vgpr_src(static_cast<uint8_t>(expected + 1u)));
+  append_wait_valu_vgpr(words);
+
+  fields.vdst = observed;
+  fields.data0 = new_value;
+  fields.data1 = expected;
+  if (!append_rdna4_vds_inst(words, fields, kOpDsCmpstoreRtnB64))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 LDS CAS replacement");
+  words.push_back(pack_sopp(kOpWaitDscnt, 0));
+
+  // The outer CAS loop progressively removes successful lanes from EXEC, so
+  // its compare mask needs the same inactive-bit initialization.
+  words.push_back(build_s_mov_b64(static_cast<uint8_t>(*success_pred), kInline0));
+  append_wait_salu_sgpr(words);
+  append_vop3(words, kOpCmpEqU64, static_cast<uint8_t>(*success_pred), vgpr_src(observed),
+              vgpr_src(expected));
+  words.push_back(build_s_wait_alu(kWaitAluDepctrVaSdst0, ROCJITSU_CODE_ARCH_RDNA4));
+  append_vop1(words, kOpMovB32, expected, vgpr_src(observed));
+  append_vop1(words, kOpMovB32, static_cast<uint8_t>(expected + 1u),
+              vgpr_src(static_cast<uint8_t>(observed + 1u)));
+  append_wait_valu_vgpr(words);
+  words.push_back(pack_sop2(kOpSAndNot1B64, kExecLo, kExecLo, *success_pred));
+  append_wait_salu_sgpr(words);
+  const size_t cas_branch_index = words.size();
+  const auto cas_branch_delta = static_cast<int16_t>(static_cast<ptrdiff_t>(cas_loop_start) -
+                                                     static_cast<ptrdiff_t>(cas_branch_index + 1u));
+  words.push_back(pack_sopp(kOpSCbranchExecnz, static_cast<uint16_t>(cas_branch_delta)));
+
+  append_restore_exec(words, static_cast<uint8_t>(*exec_save));
+  if (returns_old) {
+    append_vop1(words, kOpMovB32, static_cast<uint8_t>(src.vdst), vgpr_src(expected));
+    append_vop1(words, kOpMovB32, static_cast<uint8_t>(src.vdst + 1u),
+                vgpr_src(static_cast<uint8_t>(expected + 1u)));
+    append_wait_valu_vgpr(words);
+  }
+  return ExpandResult::success(std::move(words));
 }
 
 std::vector<uint32_t> expand_ds_transpose_load(const Instruction &inst, uint32_t host_arch,
@@ -13003,7 +13268,9 @@ constexpr uint16_t kEncVop3_4 = 0x1AC;
 constexpr uint16_t kEncVop3_5 = 0x1AD;
 constexpr uint16_t kEncVop3_6 = 0x1AE;
 constexpr uint16_t kEncVop3_7 = 0x1AF;
+constexpr uint16_t kEncVdsAppendConsume = 0x1B1;
 constexpr uint16_t kEncVdsStore2AddrB64 = 0x1B2;
+constexpr uint16_t kEncVdsBarrierArriveRtn = 0x1B3;
 constexpr uint16_t kEncVdsTranspose = 0x1B7;
 constexpr uint16_t kEncVflat = 0x1D8;
 constexpr uint16_t kEncVflat1 = 0x1D9;
@@ -13167,6 +13434,10 @@ constexpr uint16_t kOpVectorPrefetchB8 = 93;
 constexpr uint16_t kOpTensorLoadToLds = 196;
 constexpr uint16_t kOpTensorStoreFromLds = 197;
 constexpr uint16_t kOpDsStore2AddrB64 = 0x4E;
+constexpr uint16_t kOpDsConsume = 61;
+constexpr uint16_t kOpDsAppend = 62;
+constexpr uint16_t kOpDsAtomicAsyncBarrierArriveB64 = 86;
+constexpr uint16_t kOpDsAtomicBarrierArriveRtnB64 = 117;
 constexpr uint16_t kOpDsLoadTr4B64 = 0xFA;
 constexpr uint16_t kOpDsLoadTr6B96 = 0xFB;
 constexpr uint16_t kOpDsLoadTr16B128 = 0xFC;
@@ -14242,8 +14513,16 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
     RJ_VOP3_CVT_PK_F16_F32_RULE(kEncVop3_7),
     RJ_VOP3_CVT_F16_F8_ENCODE_RULES(kEncVop3_7),
     RJ_VOP3_SINGLE_SRC_RULE(kEncVop3_7),
+    {kEncVdsAppendConsume, kOpDsConsume, RuleAction::Expand, 0, 0, nullptr,
+     expand_ds_append_consume, nullptr, nullptr},
+    {kEncVdsAppendConsume, kOpDsAppend, RuleAction::Expand, 0, 0, nullptr, expand_ds_append_consume,
+     nullptr, nullptr},
     {kEncVdsStore2AddrB64, kOpDsStore2AddrB64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_ds_store_2addr_b64), nullptr, nullptr},
+    {kEncVdsStore2AddrB64, kOpDsAtomicAsyncBarrierArriveB64, RuleAction::Expand, 0, 0, nullptr,
+     expand_ds_barrier_arrive, nullptr, nullptr},
+    {kEncVdsBarrierArriveRtn, kOpDsAtomicBarrierArriveRtnB64, RuleAction::Expand, 0, 0, nullptr,
+     expand_ds_barrier_arrive, nullptr, nullptr},
     {kEncVdsTranspose, kOpDsLoadTr4B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_ds_transpose_load), nullptr, nullptr},
     {kEncVdsTranspose, kOpDsLoadTr6B96, RuleAction::Expand, 0, 0, nullptr,

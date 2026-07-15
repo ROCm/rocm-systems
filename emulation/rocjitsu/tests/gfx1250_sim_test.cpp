@@ -2801,7 +2801,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x55000000u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x55000001u);
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_EQ(state, 0x7ull << 29);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
 }
 
@@ -2917,7 +2917,7 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_EQ(state, 0x7ull << 29);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
   EXPECT_TRUE(wf->wait_counters().empty());
 }
@@ -2949,7 +2949,7 @@ TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) 
   const uint64_t expected =
       amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), decrement);
   EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), expected);
-  EXPECT_EQ(expected, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_EQ(expected, (1ull << 32) | (0x7ull << 29) | 1ull);
   EXPECT_TRUE(wf->wait_counters().empty());
 }
 
@@ -2962,7 +2962,7 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
   EXPECT_FALSE(amdgpu::lds_barrier_cell_phase_parity(state));
 
   state = amdgpu::lds_barrier_cell_update_arrive(state);
-  EXPECT_EQ(state, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_EQ(state, (1ull << 32) | (0x7ull << 29) | 1ull);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
 
   const uint64_t drained =
@@ -2978,7 +2978,7 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
   const uint64_t batched =
       amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), 5);
   EXPECT_EQ(batched, iterated);
-  EXPECT_EQ(batched, (1ull << 32) | (0xfffeull << 16));
+  EXPECT_EQ(batched, (1ull << 32) | (0x6ull << 29));
 
   for (uint32_t arrivals_per_phase : {0u, 1u}) {
     state = amdgpu::lds_barrier_cell_init_state(arrivals_per_phase);
@@ -2989,11 +2989,10 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
     EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
   }
 
-  const uint64_t reserved = 0xabcdull << 48;
-  const uint64_t reserved_state =
-      amdgpu::lds_barrier_cell_update_arrive(reserved | amdgpu::lds_barrier_cell_init_state(2));
-  EXPECT_EQ(reserved_state & amdgpu::kLdsBarrierCellReservedMask, reserved);
-  EXPECT_EQ(amdgpu::lds_barrier_cell_init_count(reserved_state), 1ull);
+  const uint64_t wide_init_state = (0xabcd1234ull << 32) | 1ull;
+  const uint64_t updated_wide_init_state = amdgpu::lds_barrier_cell_update_arrive(wide_init_state);
+  EXPECT_EQ(amdgpu::lds_barrier_cell_init_count(updated_wide_init_state), 0xabcd1234ull);
+  EXPECT_EQ(amdgpu::lds_barrier_cell_pending_count(updated_wide_init_state), 0ull);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
