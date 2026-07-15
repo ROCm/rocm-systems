@@ -259,6 +259,11 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
     bool isOneThreadMultiGpus = input->comm->intraRanks > 1 && !ncclParamSingleProcMemRegEnable();
     bool needFallback = bestTuning.symKernelId != ncclSymkKernelId_Count ? false : true;
 
+    // General kernel tuning structs if fallback is needed
+    struct ncclTuningResult_t generalTuning = NCCL_TUNING_RESULT_INIT;
+    struct ncclTuningInput_t generalInput = *input;
+    generalInput.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS;
+
     // Fallback logic for symmetric LL kernels:
     // - If both src and dst are registered, we don't fall back if a symmetric kernel is available.
     // - Otherwise, we have to fall back to generl kernel if running the selected symmetric LL kernel is
@@ -273,17 +278,19 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
         needFallback = isOneThreadMultiGpus && input->winRegType == ncclSymSendNonregRecvNonreg;
         if (!needFallback && !result->forced) {
           needFallback = !ncclParamSymNoWinEnable() && input->winRegType == ncclSymSendNonregRecvNonreg;
+          if (!needFallback) {
+            NOWARN(ncclTuningCompute(&generalInput, &generalTuning), NCCL_TUNING);
+            needFallback = (generalTuning.proto != NCCL_PROTO_LL);
+          }
         }
       }
     }
+    // Fallback to general kernel if needed.
     if (needFallback) {
-      struct ncclTuningResult_t generalTuning = NCCL_TUNING_RESULT_INIT;
-      struct ncclTuningInput_t generalInput = *input;
-      generalInput.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS;
-      NOWARN(ncclTuningCompute(&generalInput, &generalTuning), NCCL_TUNING);
-      if (!isLLKernel || generalTuning.proto != NCCL_PROTO_LL) {
-        bestTuning = generalTuning;
-      }
+      // LL kernel checks may have already run general kernel tuning.
+      if (generalTuning.algo == NCCL_ALGO_UNDEF || generalTuning.proto == NCCL_PROTO_UNDEF)
+        NOWARN(ncclTuningCompute(&generalInput, &generalTuning), NCCL_TUNING);
+      bestTuning = generalTuning;
     }
   }
 
