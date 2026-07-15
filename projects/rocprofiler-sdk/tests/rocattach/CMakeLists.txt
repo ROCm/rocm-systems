@@ -122,6 +122,7 @@ rocprofiler_add_integration_execute_test(
          $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-b>
     TIMEOUT 30
     LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected ambiguous and malformed mappings"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
