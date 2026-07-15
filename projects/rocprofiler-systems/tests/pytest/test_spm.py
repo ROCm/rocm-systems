@@ -20,7 +20,6 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.rocm,
     pytest.mark.transpose,
-    pytest.mark.ci_enable,
 ]
 
 
@@ -141,7 +140,7 @@ def _spm_counter_track_names(trace_path: Path) -> list[str]:
 
 
 @pytest.fixture
-def spm_perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
+def spm_perfetto_env() -> dict[str, str]:
     """Environment for a bounded SPM Perfetto validation run."""
     return {
         "ROCPROFSYS_TRACE": "ON",
@@ -152,7 +151,6 @@ def spm_perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
         "ROCPROFSYS_ROCM_SPM_EVENTS": "SQ_WAVES:device=0",
         "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL": "32768",
         "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT": "sclk_cycles",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 
