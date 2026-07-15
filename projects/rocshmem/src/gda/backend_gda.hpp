@@ -506,8 +506,11 @@ class GDABackend : public Backend {
    * VMM handle, compacts the device NIC table, frees the per-registration
    * device arrays, and drops the GDA record. Used by both the normal
    * unregister path and the registration rollback path.
+   *
+   * @return ROCSHMEM_SUCCESS if a matching record was found and torn down,
+   *         ROCSHMEM_ERROR otherwise.
    */
-  void gda_nic_unregister(uintptr_t key);
+  int gda_nic_unregister(uintptr_t key);
 
   /**
    * @brief Allocate and initialize barrier operation addresses on

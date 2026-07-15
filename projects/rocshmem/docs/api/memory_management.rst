@@ -175,7 +175,7 @@ Backend behavior:
 
 * **IPC backend:** peer buffers are mapped into the local address space, so
   registered buffers are reached directly through inter-process copies.
-* **GDA backend:** registered buffers are always registered with each NIC's
+* **GDA backend:** registered buffers are registered with each NIC's
   protection domain and are reachable over the NIC by every peer. When the IPC
   fast path is additionally available for node-local peers (see
   ``ROCSHMEM_DISABLE_MIXED_IPC``), the buffer is also exposed to those peers

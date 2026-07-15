@@ -116,7 +116,6 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   NicDevice &nic = nic_for_qp(conn_num);
   gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
   gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->nic_idx = nic_idx;
   gpu_qp->qp_num = qp.qpn;
   gpu_qp->inline_threshold = inline_threshold;
 

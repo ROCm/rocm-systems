@@ -164,17 +164,17 @@ class QueuePair {
   /**
    * @brief Create and enqueue a non-blocking put to a symmetric destination.
    *
-   * The target PE is this QP's connected peer (@ref dest_pe). Resolves the
+   * The target PE is this QP's connected peer. Resolves the
    * remote address and remote key for @p dest and the local key for @p source
    * internally (heap or registered buffer), so callers pass symmetric addresses
    * only. Small transfers are inlined (no source key).
    *
    * @param[in] dest    Symmetric destination address (local address space).
    * @param[in] source  Local source address.
-   * @param[in] nelems  Size in bytes of data transmission.
+   * @param[in] length  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
+  __device__ void put_nbi(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
@@ -205,17 +205,17 @@ class QueuePair {
   /**
    * @brief Create and enqueue a non-blocking get from a symmetric source.
    *
-   * The target PE is this QP's connected peer (@ref dest_pe). Resolves the
+   * The target PE is this QP's connected peer. Resolves the
    * remote address and remote key for @p source and the local key for @p dest
    * internally (heap or registered buffer), so callers pass symmetric addresses
    * only.
    *
    * @param[in] dest    Local destination address.
    * @param[in] source  Symmetric source address (local address space).
-   * @param[in] nelems  Size in bytes of data transmission.
+   * @param[in] length  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
+  __device__ void get_nbi(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 
   __device__ void get_nbi_single(void *dest, const void *source, size_t length,
@@ -260,23 +260,6 @@ class QueuePair {
       ActiveWFInfo &wf_info);
 
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
-
-  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
-      int64_t value, bool fence = false);
-
-  /**
-   * @brief Non-fetching atomic add with explicit remote key.
-   *
-   * Used when the signal buffer has its own rkey distinct from
-   * the QP's default heap key.
-   *
-   * @param[in] raddr Remote destination address.
-   * @param[in] rkey  Remote key for the destination buffer.
-   * @param[in] value Atomic add value.
-   * @param[in] wf_info Wavefront information.
-   */
-  __device__ void atomic_add(void *raddr, uint32_t rkey,
-      int64_t value, ActiveWFInfo &wf_info, bool fence = false);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -335,7 +318,7 @@ class QueuePair {
   size_t base_heap_size = 0;
 
   /**
-   * @brief Cached remote heap base for this QP's connected peer (@ref dest_pe).
+   * @brief Cached remote heap base for this QP's connected peer.
    *
    * Equals heap_bases[dest_pe], captured once at setup. Lets the (common) heap
    * translation run as pure register arithmetic with no memory load.
@@ -363,7 +346,7 @@ class QueuePair {
   /**
    * @brief Resolve the remote address and remote key for a symmetric target.
    *
-   * The target PE is this QP's connected peer (@ref dest_pe). Common case is a
+   * The target PE is this QP's connected peer. Common case is a
    * symmetric-heap address, translated from the cached remote heap base using
    * this QP's default heap key. Otherwise the address is matched against this
    * QP's registration slice, which supplies the peer base and per-NIC key
@@ -399,26 +382,13 @@ class QueuePair {
   }
 
   /**
-   * @brief Resolve the local key for a locally-sourced symmetric buffer.
+   * @brief Resolve the local key for a locally-sourced buffer.
    *
-   * Heap buffers use this QP's default heap key; registered buffers use their
-   * per-NIC local key (from this QP's slice); anything else falls back to the
-   * user-buffer lookup.
+   * Heap buffers use this QP's default heap key; per-QP registered user buffers
+   * and registered symmetric buffers use their own per-NIC local key. Aborts if
+   * the address belongs to none of them.
    */
-  __device__ __forceinline__ uint32_t local_lkey(const void *local_addr) {
-    uintptr_t addr = reinterpret_cast<uintptr_t>(local_addr);
-    if ((addr - base_heap) < base_heap_size) {
-      return lkey;
-    }
-    int n = symm_count ? *symm_count : 0;
-    for (int i = 0; i < n; ++i) {
-      QpSymmEntry e = symm_entries[i];
-      if ((addr - e.local_base) < e.length) {
-        return e.lkey;
-      }
-    }
-    return get_lkey(addr);
-  }
+  __device__ uint32_t get_lkey(uintptr_t addr);
 
  private:
   /**
@@ -640,22 +610,6 @@ class QueuePair {
   uint32_t rkey{0};
   uint32_t lkey{0};
 
-  /**
-   * @brief Index of the NIC backing this QP.
-   *
-   * Used at setup to select this QP's registration slice (see QpSymmEntry),
-   * mirroring how the symmetric heap picks heap_rkey[pe * num_nics + nic_idx].
-   */
-  int nic_idx{0};
-
-  /**
-   * @brief Remote PE this QP is connected to (conn_num % num_pes).
-   *
-   * Set once at setup. The resolvers use it to index the per-PE arrays (heap
-   * bases and registered-region remote bases/keys).
-   */
-  int dest_pe{0};
-
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};
   struct ibv_mr *mr_nonfetching_atomic;
@@ -687,8 +641,6 @@ class QueuePair {
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);
   void buffer_unregister_all();
-
-  __device__ uint32_t get_lkey(uintptr_t addr);
 };
 
 }  // namespace rocshmem

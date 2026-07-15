@@ -292,13 +292,13 @@ __device__ void QueuePair::quiet_single() {
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
-    size_t nelems, ActiveWFInfo &wf_info) {
+    size_t length, ActiveWFInfo &wf_info) {
   uint32_t dst_rkey;
   uintptr_t raddr = translate_remote(dest, &dst_rkey);
   uint32_t src_lkey =
-      (static_cast<int32_t>(nelems) <= static_cast<int32_t>(inline_threshold))
-          ? 0 : local_lkey(source);
-  put_nbi(reinterpret_cast<void *>(raddr), dst_rkey, source, src_lkey, nelems,
+      (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
+          ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
+  put_nbi(reinterpret_cast<void *>(raddr), dst_rkey, source, src_lkey, length,
           wf_info);
 }
 
@@ -341,11 +341,11 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
 
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
-    size_t nelems, ActiveWFInfo &wf_info) {
+    size_t length, ActiveWFInfo &wf_info) {
   uint32_t src_rkey;
   uintptr_t raddr = translate_remote(source, &src_rkey);
-  uint32_t dst_lkey = local_lkey(dest);
-  get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, nelems,
+  uint32_t dst_lkey = get_lkey(reinterpret_cast<uintptr_t>(dest));
+  get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, length,
           wf_info);
 }
 
@@ -414,18 +414,6 @@ __device__ void QueuePair::get_nbi(void *dest, uint32_t lkey,
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo_single(dst, rkey, gda_op_atomic_fa, value, 0);
-}
-
-__device__ void QueuePair::atomic_add_single(void *raddr, uint32_t rkey,
-    int64_t value, bool fence) {
-  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo_single(r, rkey, gda_op_atomic_fa, value, 0, false, fence);
-}
-
-__device__ void QueuePair::atomic_add(void *raddr, uint32_t rkey,
-    int64_t value, ActiveWFInfo &wf_info, bool fence) {
-  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo(r, rkey, gda_op_atomic_fa, value, 0, wf_info, false, fence);
 }
 
 int QueuePair::buffer_register(uintptr_t addr, size_t length) {
@@ -513,6 +501,15 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
 
     if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
       return user_buf_info[i].lkey;
+    }
+  }
+
+  /* Get the correct lkey for a registered symmetric buffer */
+  int n = symm_count ? *symm_count : 0;
+  for (int i = 0; i < n; ++i) {
+    QpSymmEntry e = symm_entries[i];
+    if (is_ptr_in_range(e.local_base, e.length, addr)) {
+      return e.lkey;
     }
   }
 

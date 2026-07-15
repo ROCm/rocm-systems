@@ -941,11 +941,11 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 #endif
 }
 
-void GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
+int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
 #if HIP_VERSION >= 70000000
   auto it = gda_symm_records_.find(key);
   if (it == gda_symm_records_.end()) {
-    return;
+    return ROCSHMEM_ERROR;
   }
 
   int slot = it->second.slot;
@@ -1012,6 +1012,9 @@ void GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
   }
 
   gda_symm_records_.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
 #endif
 }
 
@@ -1022,22 +1025,25 @@ int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
   }
 
   uintptr_t key = reinterpret_cast<uintptr_t>(addr);
-  if (gda_symm_records_.find(key) == gda_symm_records_.end()) {
-    return ROCSHMEM_ERROR;
-  }
 
   /*
-   * Tear down the IPC-side registration first (if this buffer was also exposed
-   * over IPC), then the NIC-side state, then the common bookkeeping.
+   * Unregister in the reverse order of registration, unwinding the most
+   * specialized state first:
+   *   1. IPC exposure (only present if this buffer was also mapped for
+   *      node-local peers via the mixed IPC path),
+   *   2. NIC state (device table entry, per-NIC MRs, dmabuf fds, VMM handle),
+   *   3. common host-side bookkeeping (alias unmap + region maps) in the base
+   *      class.
    */
   if (ipcImpl.symm_table != nullptr &&
       ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
     (void)unregister_ipc_symm_region(addr);
   }
 
-  gda_nic_unregister(key);
+  if (gda_nic_unregister(key) != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
 
-  /* Common host-side bookkeeping (alias unmap + region maps). */
   return Backend::buffer_unregister_symmetric(addr);
 #else
   return ROCSHMEM_ERROR;
@@ -1701,7 +1707,6 @@ void GDABackend::setup_gpu_qps() {
   for (size_t i = 0; i < qp_objs_count; i++) {
     new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
     int qp_dest_pe = static_cast<int>(i % num_pes);
-    host_qps[i].dest_pe = qp_dest_pe;
     /* Cache the peer heap base so the heap translation is load-free. */
     host_qps[i].remote_heap_base =
         reinterpret_cast<uintptr_t>(heap_bases[qp_dest_pe]);
