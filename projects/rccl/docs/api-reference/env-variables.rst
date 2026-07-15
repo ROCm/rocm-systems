@@ -606,6 +606,20 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``NCCL_IB_SPLIT_DATA_ON_QPS``
+        | Controls how multiple QPs are used when more than one QP is
+          configured per connection.
+      - | ``0``: Round-robin mode (default). Each message is sent on a single
+          QP per device, cycling through available QPs across messages (more
+          than one QP is used when NIC Fusion combines multiple devices into
+          one vNIC).
+        | ``1``: Split mode. Each message is split evenly across all QPs.
+        | Under the CAST QP scheduler (see `QP scheduling (CAST)`_ below),
+          this instead selects between a single WRR-chosen QP (``0``) and
+          RTT-weighted splitting above ``RCCL_IB_QP_SCHED_SPLIT_DATA_MIN``
+          (``1``); with the scheduler disabled, every message is split
+          across all QPs regardless of this value.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
@@ -697,6 +711,81 @@ in the following table.
         | A short name is resolved against the ``librccl-rma`` prefix, so
           ``example`` loads ``librccl-rma-example.so``
         | See :ref:`using-rccl-rma-plugin`
+
+QP scheduling (CAST)
+====================
+
+CAST (Congestion Aware Sprayed Traffic) adds a dynamic QP (Queue Pair) scheduler
+that balances RDMA traffic across multiple QPs per connection based on measured
+round-trip time (RTT). The following variables tune the scheduler and are
+accessible with either the ``RCCL_`` or ``NCCL_`` prefix; the ``RCCL_`` form is
+shown below.
+
+These variables only take effect when the IB-CAST net plugin is loaded
+(``NCCL_NET=IB-CAST`` or ``ROCM-IB``, or an AINIC NIC with ``NCCL_NET`` unset)
+*and* the CAST QP scheduler is enabled (see ``RCCL_IB_QP_SCHED_ENABLE`` below).
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IB_QP_SCHED_ENABLE``
+        | Enables the CAST QP scheduler.
+      - | ``-1``: Auto (default). Disabled unless ``NCCL_NET=IB-CAST`` is set,
+          which forces it on. Can be explicitly overridden regardless of
+          ``NCCL_NET``. Stays disabled, even with ``NCCL_NET=IB-CAST``, when
+          the connection's receiver matching scheme resolves to ``BY_ORDER``
+          — the default on AINIC, since CTS offload is enabled there by
+          default.
+        | ``0``: Force off.
+        | ``1``: Force on, except the scheduler is still disabled (with an
+          ``INFO`` log, not a warning) when port failover/recovery
+          (``NCCL_IB_RESILIENCY_PORT_FAILOVER``/``_PORT_RECOVERY``) or QP
+          sharing (``RCCL_IB_QP_SHARING_ENABLE``) is enabled. On a
+          ``BY_ORDER`` comm it instead reports enabled (with a ``WARN``), but
+          WRR and split-data never run — an unsupported combination.
+
+    * - | ``RCCL_IB_QP_SCHED_RESET_INTERVAL``
+        | Interval at which accumulated RTT statistics are reset, to prevent
+          stale samples from permanently biasing the scheduler. Value is in
+          milliseconds.
+      - | Integer milliseconds. Default: ``60000`` (60 seconds).
+        | ``0``: Never reset.
+
+    * - | ``RCCL_IB_QP_SCHED_UPDATE_INTERVAL``
+        | Minimum interval between scheduler weight updates. Value is in
+          microseconds.
+      - | Integer microseconds. Default: ``50``.
+        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
+
+    * - | ``RCCL_IB_QP_SCHED_WEIGHT``
+        | Exponential moving average (EMA) weight applied to new RTT samples.
+      - | Floating-point value in the range ``0`` to ``1.0``. Default: ``0``.
+        | ``0``: Simple average.
+        | Values closer to ``1.0`` react faster to recent samples.
+
+    * - | ``RCCL_IB_QP_SCHED_SPLIT_DATA_MIN``
+        | Minimum chunk size when splitting a message across QPs (split-data
+          mode, enabled via ``NCCL_IB_SPLIT_DATA_ON_QPS``). Value is in bytes.
+      - | Integer bytes. Default: ``65536``.
+        | Only positive values are applied.
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_PATH``
+        | Directory for a per-process scheduler log file (one line per QP:
+          device, min/current/max weight, and smoothed RTT). Log file is
+          named ``cast_log_<hostname>_<pid>``.
+      - | String directory path.
+        | Default: unset (logging disabled).
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_INTERVAL``
+        | Interval at which scheduler statistics are written to the log file.
+          Value is in microseconds. Only used when
+          ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
+      - | Integer microseconds. Default: ``1000000`` (1 second).
+        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
 
 Development and testing (advanced)
 ==================================
