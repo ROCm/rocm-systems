@@ -751,10 +751,34 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     closedir(proc_root);
   }
 
-  // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
-  int kfd_ret = GetKfdGpuIdsForPid(pid, gpu_set);
-  if (kfd_ret != 0) {
-    return kfd_ret;
+  // Active queues are the authoritative signal for GPUs a process is actively
+  // running work on. A process can also hold a VRAM allocation on a GPU without
+  // a live queue (e.g. memory staged before/after a kernel), so also attribute
+  // it to any GPU whose per-node vram_<gpuid> file reports a non-zero size.
+  // The stats/counters/sdma per-node files are deliberately not used: opening
+  // /dev/kfd creates them for the whole topology, so they exist (as zero) for
+  // every GPU and would attribute an idle process to all of them.
+  {
+    DIR* pd = opendir(proc_path.c_str());
+    if (pd) {
+      struct dirent* de;
+      while ((de = readdir(pd))) {
+        if (strncmp(de->d_name, kKFDVramPrefix, strlen(kKFDVramPrefix)) != 0) continue;
+        std::string gpu_id_str = de->d_name + strlen(kKFDVramPrefix);
+        if (gpu_id_str.empty() || !is_number(gpu_id_str)) continue;
+
+        std::string vram_bytes;
+        if (ReadSysfsStr(std::string(proc_path) + "/" + de->d_name, &vram_bytes) != 0) continue;
+        try {
+          if (std::stoull(vram_bytes) > 0) {
+            gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
+          }
+        } catch (...) {
+          // Unreadable/garbage size: skip, treat as no allocation.
+        }
+      }
+      closedir(pd);
+    }
   }
 
   // PID namespace: fall back to discovering GPU IDs from KFD vram_* files.
