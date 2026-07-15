@@ -68,8 +68,8 @@ struct Float {
   bool HasInf;
 };
 
-static const float ieee754_nan = __hip_internal::numeric_limits<float>::quiet_NaN();
-static const float ieee754_inf = __hip_internal::numeric_limits<float>::infinity();
+static const float ieee754_nan = __hip_internal::NumericLimits<float>::quiet_NaN();
+static const float ieee754_inf = __hip_internal::NumericLimits<float>::infinity();
 
 __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t U32(float f) {
   static_assert(sizeof(__hip_uint32_t) == sizeof(float), "");
@@ -769,6 +769,27 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_
     return inf<E, sat>(signBit);
 }
 
+// Manual little-endian, LSB-first 6-bit packing.
+__OCP_FP_HOST_DEVICE_STATIC__ void pack_fp6(__hip_uint8_t* buf, int idx, __hip_uint8_t val) {
+  const unsigned bit = static_cast<unsigned>(idx) * 6u;
+  const unsigned byte = bit >> 3;
+  const unsigned off = bit & 7u;
+  val &= 0x3f;
+  buf[byte] = static_cast<__hip_uint8_t>((buf[byte] & ~(0x3f << off)) | (val << off));
+  if (off > 2u)
+    buf[byte + 1] = static_cast<__hip_uint8_t>((buf[byte + 1] & ~(0x3f >> (8u - off))) |
+                                               (val >> (8u - off)));
+}
+
+__OCP_FP_HOST_DEVICE_STATIC__ __hip_uint8_t unpack_fp6(const __hip_uint8_t* buf, int idx) {
+  const unsigned bit = static_cast<unsigned>(idx) * 6u;
+  const unsigned byte = bit >> 3;
+  const unsigned off = bit & 7u;
+  unsigned v = static_cast<unsigned>(buf[byte]) >> off;
+  if (off > 2u) v |= static_cast<unsigned>(buf[byte + 1]) << (8u - off);
+  return static_cast<__hip_uint8_t>(v & 0x3f);
+}
+
 // ------------
 template <typename InType, typename OutType, typename float_base_t, Encoding in_encode,
           Encoding out_encode, bool sr = false>
@@ -780,105 +801,32 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, __hip_int8_t 
       __hip_internal::is_same<InType, __amd_bf16x16_storage_t>::value;
   using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
 
-  struct fp6x16_packed {
-    __hip_uint8_t val1 : 6;
-    __hip_uint8_t val2 : 6;
-    __hip_uint8_t val3 : 6;
-    __hip_uint8_t val4 : 6;
-    __hip_uint8_t val5 : 6;
-    __hip_uint8_t val6 : 6;
-    __hip_uint8_t val7 : 6;
-    __hip_uint8_t val8 : 6;
-    __hip_uint8_t val9 : 6;
-    __hip_uint8_t val10 : 6;
-    __hip_uint8_t val11 : 6;
-    __hip_uint8_t val12 : 6;
-    __hip_uint8_t val13 : 6;
-    __hip_uint8_t val14 : 6;
-    __hip_uint8_t val15 : 6;
-    __hip_uint8_t val16 : 6;
-    unsigned int padded;
-  } __attribute__((packed, gcc_struct));
-
-  static_assert(sizeof(other_type) == sizeof(fp6x16_packed));
   union {
     other_type o;
-    fp6x16_packed fp6;
+    __hip_uint8_t bytes[sizeof(other_type)];
   } u;
 
-  // TODO maybe make it simpler
   if constexpr (in_float) {
-    if constexpr (sr) {
-      u.fp6.val1 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
-      u.fp6.val2 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
-      u.fp6.val3 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
-      u.fp6.val4 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
-      u.fp6.val5 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
-      u.fp6.val6 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
-      u.fp6.val7 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
-      u.fp6.val8 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
-      u.fp6.val9 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
-      u.fp6.val10 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
-      u.fp6.val11 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
-      u.fp6.val12 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
-      u.fp6.val13 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
-      u.fp6.val14 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
-      u.fp6.val15 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
-      u.fp6.val16 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
-    } else {
-      u.fp6.val1 = from_float<float_base_t, out_encode, true>(in[0], scale);
-      u.fp6.val2 = from_float<float_base_t, out_encode, true>(in[1], scale);
-      u.fp6.val3 = from_float<float_base_t, out_encode, true>(in[2], scale);
-      u.fp6.val4 = from_float<float_base_t, out_encode, true>(in[3], scale);
-      u.fp6.val5 = from_float<float_base_t, out_encode, true>(in[4], scale);
-      u.fp6.val6 = from_float<float_base_t, out_encode, true>(in[5], scale);
-      u.fp6.val7 = from_float<float_base_t, out_encode, true>(in[6], scale);
-      u.fp6.val8 = from_float<float_base_t, out_encode, true>(in[7], scale);
-      u.fp6.val9 = from_float<float_base_t, out_encode, true>(in[8], scale);
-      u.fp6.val10 = from_float<float_base_t, out_encode, true>(in[9], scale);
-      u.fp6.val11 = from_float<float_base_t, out_encode, true>(in[10], scale);
-      u.fp6.val12 = from_float<float_base_t, out_encode, true>(in[11], scale);
-      u.fp6.val13 = from_float<float_base_t, out_encode, true>(in[12], scale);
-      u.fp6.val14 = from_float<float_base_t, out_encode, true>(in[13], scale);
-      u.fp6.val15 = from_float<float_base_t, out_encode, true>(in[14], scale);
-      u.fp6.val16 = from_float<float_base_t, out_encode, true>(in[15], scale);
+    for (int i = 0; i < static_cast<int>(sizeof(other_type)); ++i) {
+       u.bytes[i] = 0;
+    }
+    for (int i = 0; i < 16; ++i) {
+      __hip_uint8_t v;
+      if constexpr (sr) {
+        v = static_cast<__hip_uint8_t>(
+            from_float_sr<float_base_t, out_encode, true>(in[i], seed, scale));
+      } else {
+        v = static_cast<__hip_uint8_t>(from_float<float_base_t, out_encode, true>(in[i], scale));
+      }
+      pack_fp6(u.bytes, i, v);
     }
     return u.o;
   } else {
     OutType ret;
     u.o = in;
-    ret[0] = to_float<float_base_t, in_encode, true>(u.fp6.val1, scale);
-    ret[1] = to_float<float_base_t, in_encode, true>(u.fp6.val2, scale);
-    ret[2] = to_float<float_base_t, in_encode, true>(u.fp6.val3, scale);
-    ret[3] = to_float<float_base_t, in_encode, true>(u.fp6.val4, scale);
-    ret[4] = to_float<float_base_t, in_encode, true>(u.fp6.val5, scale);
-    ret[5] = to_float<float_base_t, in_encode, true>(u.fp6.val6, scale);
-    ret[6] = to_float<float_base_t, in_encode, true>(u.fp6.val7, scale);
-    ret[7] = to_float<float_base_t, in_encode, true>(u.fp6.val8, scale);
-    ret[8] = to_float<float_base_t, in_encode, true>(u.fp6.val9, scale);
-    ret[9] = to_float<float_base_t, in_encode, true>(u.fp6.val10, scale);
-    ret[10] = to_float<float_base_t, in_encode, true>(u.fp6.val11, scale);
-    ret[11] = to_float<float_base_t, in_encode, true>(u.fp6.val12, scale);
-    ret[12] = to_float<float_base_t, in_encode, true>(u.fp6.val13, scale);
-    ret[13] = to_float<float_base_t, in_encode, true>(u.fp6.val14, scale);
-    ret[14] = to_float<float_base_t, in_encode, true>(u.fp6.val15, scale);
-    ret[15] = to_float<float_base_t, in_encode, true>(u.fp6.val16, scale);
+    for (int i = 0; i < 16; ++i) {
+      ret[i] = to_float<float_base_t, in_encode, true>(unpack_fp6(u.bytes, i), scale);
+    }
     return ret;
   }
 }
@@ -894,185 +842,32 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t 
                             __hip_internal::is_same<InType, __amd_bf16x32_storage_t>::value;
   using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
 
-  struct fp6x32_packed {
-    __hip_uint8_t val1 : 6;
-    __hip_uint8_t val2 : 6;
-    __hip_uint8_t val3 : 6;
-    __hip_uint8_t val4 : 6;
-    __hip_uint8_t val5 : 6;
-    __hip_uint8_t val6 : 6;
-    __hip_uint8_t val7 : 6;
-    __hip_uint8_t val8 : 6;
-    __hip_uint8_t val9 : 6;
-    __hip_uint8_t val10 : 6;
-    __hip_uint8_t val11 : 6;
-    __hip_uint8_t val12 : 6;
-    __hip_uint8_t val13 : 6;
-    __hip_uint8_t val14 : 6;
-    __hip_uint8_t val15 : 6;
-    __hip_uint8_t val16 : 6;
-    __hip_uint8_t val17 : 6;
-    __hip_uint8_t val18 : 6;
-    __hip_uint8_t val19 : 6;
-    __hip_uint8_t val20 : 6;
-    __hip_uint8_t val21 : 6;
-    __hip_uint8_t val22 : 6;
-    __hip_uint8_t val23 : 6;
-    __hip_uint8_t val24 : 6;
-    __hip_uint8_t val25 : 6;
-    __hip_uint8_t val26 : 6;
-    __hip_uint8_t val27 : 6;
-    __hip_uint8_t val28 : 6;
-    __hip_uint8_t val29 : 6;
-    __hip_uint8_t val30 : 6;
-    __hip_uint8_t val31 : 6;
-    __hip_uint8_t val32 : 6;
-    unsigned long long padded;
-  } __attribute__((packed, gcc_struct));
-
-  static_assert(sizeof(other_type) == sizeof(fp6x32_packed), "");
   union {
     other_type o;
-    fp6x32_packed fp6;
+    __hip_uint8_t bytes[sizeof(other_type)];
   } u;
 
-  // TODO maybe make it simpler
   if constexpr (in_float) {
-    if constexpr (sr) {
-      u.fp6.val1 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
-      u.fp6.val2 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
-      u.fp6.val3 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
-      u.fp6.val4 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
-      u.fp6.val5 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
-      u.fp6.val6 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
-      u.fp6.val7 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
-      u.fp6.val8 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
-      u.fp6.val9 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
-      u.fp6.val10 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
-      u.fp6.val11 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
-      u.fp6.val12 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
-      u.fp6.val13 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
-      u.fp6.val14 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
-      u.fp6.val15 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
-      u.fp6.val16 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
-      u.fp6.val17 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[16], seed, scale));
-      u.fp6.val18 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[17], seed, scale));
-      u.fp6.val19 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[18], seed, scale));
-      u.fp6.val20 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[19], seed, scale));
-      u.fp6.val21 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[20], seed, scale));
-      u.fp6.val22 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[21], seed, scale));
-      u.fp6.val23 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[22], seed, scale));
-      u.fp6.val24 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[23], seed, scale));
-      u.fp6.val25 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[24], seed, scale));
-      u.fp6.val26 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[25], seed, scale));
-      u.fp6.val27 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[26], seed, scale));
-      u.fp6.val28 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[27], seed, scale));
-      u.fp6.val29 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[28], seed, scale));
-      u.fp6.val30 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[29], seed, scale));
-      u.fp6.val31 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[30], seed, scale));
-      u.fp6.val32 =
-          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[31], seed, scale));
-    } else {
-      u.fp6.val1 = from_float<float_base_t, out_encode, true>(in[0], scale);
-      u.fp6.val2 = from_float<float_base_t, out_encode, true>(in[1], scale);
-      u.fp6.val3 = from_float<float_base_t, out_encode, true>(in[2], scale);
-      u.fp6.val4 = from_float<float_base_t, out_encode, true>(in[3], scale);
-      u.fp6.val5 = from_float<float_base_t, out_encode, true>(in[4], scale);
-      u.fp6.val6 = from_float<float_base_t, out_encode, true>(in[5], scale);
-      u.fp6.val7 = from_float<float_base_t, out_encode, true>(in[6], scale);
-      u.fp6.val8 = from_float<float_base_t, out_encode, true>(in[7], scale);
-      u.fp6.val9 = from_float<float_base_t, out_encode, true>(in[8], scale);
-      u.fp6.val10 = from_float<float_base_t, out_encode, true>(in[9], scale);
-      u.fp6.val11 = from_float<float_base_t, out_encode, true>(in[10], scale);
-      u.fp6.val12 = from_float<float_base_t, out_encode, true>(in[11], scale);
-      u.fp6.val13 = from_float<float_base_t, out_encode, true>(in[12], scale);
-      u.fp6.val14 = from_float<float_base_t, out_encode, true>(in[13], scale);
-      u.fp6.val15 = from_float<float_base_t, out_encode, true>(in[14], scale);
-      u.fp6.val16 = from_float<float_base_t, out_encode, true>(in[15], scale);
-      u.fp6.val17 = from_float<float_base_t, out_encode, true>(in[16], scale);
-      u.fp6.val18 = from_float<float_base_t, out_encode, true>(in[17], scale);
-      u.fp6.val19 = from_float<float_base_t, out_encode, true>(in[18], scale);
-      u.fp6.val20 = from_float<float_base_t, out_encode, true>(in[19], scale);
-      u.fp6.val21 = from_float<float_base_t, out_encode, true>(in[20], scale);
-      u.fp6.val22 = from_float<float_base_t, out_encode, true>(in[21], scale);
-      u.fp6.val23 = from_float<float_base_t, out_encode, true>(in[22], scale);
-      u.fp6.val24 = from_float<float_base_t, out_encode, true>(in[23], scale);
-      u.fp6.val25 = from_float<float_base_t, out_encode, true>(in[24], scale);
-      u.fp6.val26 = from_float<float_base_t, out_encode, true>(in[25], scale);
-      u.fp6.val27 = from_float<float_base_t, out_encode, true>(in[26], scale);
-      u.fp6.val28 = from_float<float_base_t, out_encode, true>(in[27], scale);
-      u.fp6.val29 = from_float<float_base_t, out_encode, true>(in[28], scale);
-      u.fp6.val30 = from_float<float_base_t, out_encode, true>(in[29], scale);
-      u.fp6.val31 = from_float<float_base_t, out_encode, true>(in[30], scale);
-      u.fp6.val32 = from_float<float_base_t, out_encode, true>(in[31], scale);
+    for (int i = 0; i < static_cast<int>(sizeof(other_type)); ++i) {
+      u.bytes[i] = 0;
+    }
+    for (int i = 0; i < 32; ++i) {
+      __hip_uint8_t v;
+      if constexpr (sr) {
+        v = static_cast<__hip_uint8_t>(
+            from_float_sr<float_base_t, out_encode, true>(in[i], seed, scale));
+      } else {
+        v = static_cast<__hip_uint8_t>(from_float<float_base_t, out_encode, true>(in[i], scale));
+      }
+      pack_fp6(u.bytes, i, v);
     }
     return u.o;
   } else {
     OutType ret;
     u.o = in;
-    ret[0] = to_float<float_base_t, in_encode, true>(u.fp6.val1, scale);
-    ret[1] = to_float<float_base_t, in_encode, true>(u.fp6.val2, scale);
-    ret[2] = to_float<float_base_t, in_encode, true>(u.fp6.val3, scale);
-    ret[3] = to_float<float_base_t, in_encode, true>(u.fp6.val4, scale);
-    ret[4] = to_float<float_base_t, in_encode, true>(u.fp6.val5, scale);
-    ret[5] = to_float<float_base_t, in_encode, true>(u.fp6.val6, scale);
-    ret[6] = to_float<float_base_t, in_encode, true>(u.fp6.val7, scale);
-    ret[7] = to_float<float_base_t, in_encode, true>(u.fp6.val8, scale);
-    ret[8] = to_float<float_base_t, in_encode, true>(u.fp6.val9, scale);
-    ret[9] = to_float<float_base_t, in_encode, true>(u.fp6.val10, scale);
-    ret[10] = to_float<float_base_t, in_encode, true>(u.fp6.val11, scale);
-    ret[11] = to_float<float_base_t, in_encode, true>(u.fp6.val12, scale);
-    ret[12] = to_float<float_base_t, in_encode, true>(u.fp6.val13, scale);
-    ret[13] = to_float<float_base_t, in_encode, true>(u.fp6.val14, scale);
-    ret[14] = to_float<float_base_t, in_encode, true>(u.fp6.val15, scale);
-    ret[15] = to_float<float_base_t, in_encode, true>(u.fp6.val16, scale);
-    ret[16] = to_float<float_base_t, in_encode, true>(u.fp6.val17, scale);
-    ret[17] = to_float<float_base_t, in_encode, true>(u.fp6.val18, scale);
-    ret[18] = to_float<float_base_t, in_encode, true>(u.fp6.val19, scale);
-    ret[19] = to_float<float_base_t, in_encode, true>(u.fp6.val20, scale);
-    ret[20] = to_float<float_base_t, in_encode, true>(u.fp6.val21, scale);
-    ret[21] = to_float<float_base_t, in_encode, true>(u.fp6.val22, scale);
-    ret[22] = to_float<float_base_t, in_encode, true>(u.fp6.val23, scale);
-    ret[23] = to_float<float_base_t, in_encode, true>(u.fp6.val24, scale);
-    ret[24] = to_float<float_base_t, in_encode, true>(u.fp6.val25, scale);
-    ret[25] = to_float<float_base_t, in_encode, true>(u.fp6.val26, scale);
-    ret[26] = to_float<float_base_t, in_encode, true>(u.fp6.val27, scale);
-    ret[27] = to_float<float_base_t, in_encode, true>(u.fp6.val28, scale);
-    ret[28] = to_float<float_base_t, in_encode, true>(u.fp6.val29, scale);
-    ret[29] = to_float<float_base_t, in_encode, true>(u.fp6.val30, scale);
-    ret[30] = to_float<float_base_t, in_encode, true>(u.fp6.val31, scale);
-    ret[31] = to_float<float_base_t, in_encode, true>(u.fp6.val32, scale);
+    for (int i = 0; i < 32; ++i) {
+      ret[i] = to_float<float_base_t, in_encode, true>(unpack_fp6(u.bytes, i), scale);
+    }
     return ret;
   }
 }
