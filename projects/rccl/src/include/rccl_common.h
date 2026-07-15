@@ -126,6 +126,9 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
                         ncclDataType_t datatype, ncclRedOp_t op);
+// Updates CE AllReduce graph latch state and returns whether CE AllReduce is
+// allowed for this call. Should be invoked at each CE AR decision point.
+bool rcclCeAllReduceGraphAllowed(struct ncclComm* comm, bool ceCapturing);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

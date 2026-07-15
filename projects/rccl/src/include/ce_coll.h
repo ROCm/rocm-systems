@@ -48,6 +48,11 @@ struct ncclCeColl {
   //         [nRanks*chunkBytes .. (nRanks+1)*chunkBytes) reduce scratch.
   uint8_t*               ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+
+  // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
+  // can deadlock on eager calls that share a graph-mode comm, so we disable CE
+  // AR during that period and re-enable it after captured plans are reclaimed.
+  bool graphModeSeen;
 };
 
 struct ncclCeInitTask {

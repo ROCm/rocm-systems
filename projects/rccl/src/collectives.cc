@@ -497,8 +497,16 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  // CE AllReduce 
-  if (rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
+  // CE AllReduce
+  // Disable CE AllReduce while this comm has live graph-captured plans. Per-call
+  // capture checks are not enough because CE AR can still deadlock on eager
+  // calls sharing a graph-mode comm (e.g. rccl-tests warmup).
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
+  bool ceArGraphAllowed = rcclCeAllReduceGraphAllowed(comm, ceCapturing);
+  if (ceArGraphAllowed &&
+      rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d",
          count, (int)datatype, (int)op, comm->rank, comm->nRanks);

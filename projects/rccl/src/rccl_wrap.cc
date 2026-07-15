@@ -600,6 +600,17 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
   return true;
 }
 
+bool rcclCeAllReduceGraphAllowed(struct ncclComm* comm, bool ceCapturing) {
+  if (ceCapturing && !comm->ceColl.graphModeSeen) {
+    INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
+    comm->ceColl.graphModeSeen = true;
+  } else if (comm->ceColl.graphModeSeen && comm->localPersistentRefs == 0) {
+    INFO(NCCL_COLL, "Re-enabling CE AllReduce; graph latch cleared (rank %d): no live captured plans", comm->rank);
+    comm->ceColl.graphModeSeen = false;
+  }
+  return !comm->ceColl.graphModeSeen;
+}
+
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
   // Only if PXN is enabled
