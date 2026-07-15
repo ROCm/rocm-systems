@@ -308,10 +308,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   flags_ |= PROGRAM_TERMINATOR;
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
 
 SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
     : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding *>(inst),

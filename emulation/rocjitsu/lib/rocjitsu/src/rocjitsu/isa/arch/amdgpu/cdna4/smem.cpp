@@ -781,7 +781,8 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -799,7 +800,8 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -817,7 +819,8 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -835,7 +838,8 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -853,7 +857,8 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -871,7 +876,8 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -889,7 +895,8 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -907,7 +914,8 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -925,7 +933,8 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -943,7 +952,8 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -961,7 +971,8 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -979,7 +990,8 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -997,7 +1009,8 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1015,7 +1028,8 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1033,7 +1047,8 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1051,7 +1066,8 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1069,7 +1085,8 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1087,7 +1104,8 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1105,7 +1123,8 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1123,7 +1142,8 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1141,7 +1161,8 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1159,7 +1180,8 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1177,7 +1199,8 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1195,7 +1218,8 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1213,7 +1237,8 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1231,7 +1256,8 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1249,7 +1275,8 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1267,7 +1294,8 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1285,7 +1313,8 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1303,7 +1332,8 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1321,7 +1351,8 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1339,7 +1370,8 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1357,7 +1389,8 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1375,7 +1408,8 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1393,7 +1427,8 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1411,7 +1446,8 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1429,7 +1465,8 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1447,7 +1484,8 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1465,7 +1503,8 @@ SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1483,7 +1522,8 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1501,7 +1541,8 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1519,7 +1560,8 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1537,7 +1579,8 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1555,7 +1598,8 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1573,7 +1617,8 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1591,7 +1636,8 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1609,7 +1655,8 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1627,7 +1674,8 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1645,7 +1693,8 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1663,7 +1712,8 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1681,7 +1731,8 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -1699,7 +1750,8 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &sdata;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
