@@ -1,0 +1,34 @@
+name: resolve-ci-config Tests
+run-name: resolve-ci-config-tests
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
+      - '.github/workflows/resolve-ci-config-tests.yml'
+  pull_request:
+    paths:
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
+      - '.github/workflows/resolve-ci-config-tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.x'
+
+      - name: Run tests
+        working-directory: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+        run: python -m pytest test_resolve_ci_config.py -v
