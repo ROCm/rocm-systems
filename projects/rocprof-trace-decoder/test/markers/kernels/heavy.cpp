@@ -361,9 +361,9 @@ int main()
 
     if (devProp.major > 9 && devProp.minor == 0)
     {
-        M /= 2;
-        K /= 2;
-        N /= 2;
+        M /= 4;
+        K /= 4;
+        N /= 4;
     }
 
     Matrix<float8> a(K, M);
