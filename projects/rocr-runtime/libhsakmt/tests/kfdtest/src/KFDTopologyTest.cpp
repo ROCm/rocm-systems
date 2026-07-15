@@ -173,11 +173,14 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     " LineSize " << cacheProperties[n].CacheLineSize <<
                     " LinesPerTag " << cacheProperties[n].CacheLinesPerTag << std::endl;
                     char string[1024] = "";
-                    char sibling[5] = "";
+                    size_t offset = 0;
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
-                            sprintf(sibling, "%d,", i);
-                            strcat(string, sibling);
+                            int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
+                            }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
@@ -194,11 +197,14 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     " LineSize " << cacheProperties[n].CacheLineSize <<
                     " LinesPerTag " << cacheProperties[n].CacheLinesPerTag << std::endl;
                     char string[1024] = "";
-                    char sibling[5] = "";
+                    size_t offset = 0;
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
-                            snprintf(sibling, 5, "%d,", i);
-                            strcat(string, sibling);
+                            int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
+                            }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
