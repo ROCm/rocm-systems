@@ -3,6 +3,8 @@
 
 #pragma once
 
+// RCCL_API_TRACE_VERSION_PATCH, which gates the newer RCCL argument structs
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
 #include <rocprofiler-sdk/rccl/api_args.h>
 
 #include <cstddef>
