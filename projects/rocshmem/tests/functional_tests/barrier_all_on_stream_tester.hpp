@@ -34,9 +34,12 @@ using namespace rocshmem;
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
+enum CollectiveOnStreamOp { BARRIER_ALL_OP, SYNC_ALL_OP };
+
 class BarrierAllOnStreamTester : public Tester {
  public:
-  explicit BarrierAllOnStreamTester(TesterArguments args);
+  explicit BarrierAllOnStreamTester(TesterArguments args,
+                                    CollectiveOnStreamOp op = BARRIER_ALL_OP);
   virtual ~BarrierAllOnStreamTester();
 
  protected:
@@ -59,6 +62,7 @@ class BarrierAllOnStreamTester : public Tester {
   std::vector<hipStream_t> streams;
   std::vector<hipEvent_t> start_events_timed;
   std::vector<hipEvent_t> stop_events_timed;
+  CollectiveOnStreamOp collective_op;
 };
 
 #include "barrier_all_on_stream_tester.cpp"

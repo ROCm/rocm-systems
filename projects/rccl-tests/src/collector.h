@@ -7,20 +7,23 @@
 /*************************************************************************
  * Network Counter Collector
  *
- * Self-contained library for collecting Thor2 NIC counters before/after
- * an operation and printing a summary table.  No dependency on NCCL,
- * RCCL, or any GPU runtime -- can be integrated into any application.
+ * Self-contained library for collecting Thor2 / AINIC NIC counters
+ * before/after an operation and printing a summary table.  No dependency
+ * on NCCL, RCCL, or any GPU runtime -- can be integrated into any
+ * application.
  *
  * Environment variables:
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
- *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter names
- *                                        (default: all known counters)
+ *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter subset
+ *                                        (default: all counters for detected NIC)
  *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary)
  *   RCCL_TESTS_NET_COUNTER_NIC_PREFIX – NIC prefix filter for auto-discovery
  *
- * Counter sources (looked up automatically from registry):
+ * Counter sources (looked up automatically per NIC type):
  *   COUNTER_SRC_ETHTOOL  – ethtool -S <ethernet device>
- *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/1/hw_counters/
+ *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/<port>/hw_counters/
+ *                           (port parsed from NCCL_IB_HCA suffix, default 1;
+ *                            falls back to device-level hw_counters/ if needed)
  *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info
  *************************************************************************/
 #ifndef __COLLECTOR_H__
@@ -41,16 +44,20 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;
+  std::string name;           // canonical/display key (also primary sysfs lookup name)
   CounterSource source;
-  bool is_prefix;   // true  → prefix match (expands to name0..name7)
+  bool is_prefix;             // true -> prefix match (expands to name0..name7)
+  std::string fallback_name;  // alternative sysfs key to try when 'name' is missing
 };
+
+typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
 
 struct NetworkCounterSnapshot {
   std::map<std::string, uint64_t> counters;
-  char nic_name[256];
-  char ib_device[256];
-  long timestamp;
+  char    nic_name[256];
+  char    ib_device[256];
+  int64_t timestamp_us;
+  NicType nic_type;
 };
 
 struct NetworkCounterContext {
@@ -66,11 +73,21 @@ struct NetworkCounterContext {
 
 // ---- public API ---------------------------------------------------------
 
+// Detect NIC type from IB device driver symlink
+NicType NetCounterDetectNicType(const std::string& ib_device);
+
+// Scan snapshots and return the dominant NIC type; sets mixed=true if types differ
+NicType DetectNicTypeFromSnapshots(
+    const std::vector<NetworkCounterSnapshot>& snaps, bool& mixed);
+
+// Human-readable NIC type string
+const char* NicTypeStr(NicType t);
+
 // Check RCCL_TESTS_NET_COUNTER_ENABLE=1
 bool NetCounterIsEnabled();
 
-// Parse RCCL_TESTS_NIC_COUNTER_LIST (or return full registry)
-std::vector<CounterDescriptor> NetCounterParseCounterList();
+// Return counter list for the given NIC type
+std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type);
 
 // Parse NCCL_IB_HCA into IB device names (empty if unset)
 std::vector<std::string> NetCounterParseIbHcaList();

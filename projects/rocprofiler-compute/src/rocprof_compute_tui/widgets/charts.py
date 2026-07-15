@@ -17,6 +17,7 @@ from textual.widgets import Static
 
 from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
 from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
+from utils.utils_common import is_gfx115x
 
 # Constants
 MIN_PLOT_WIDTH = 20
@@ -193,7 +194,7 @@ def px_simple_bar(
         range_color = [0, 100]
         xrange = [0, 110]
     if id == 1701.2:
-        label_txt = "Gb/s"
+        label_txt = "GB/s"
         range_color = [0, 1638]
         xrange = [0, 1638]
 
@@ -316,7 +317,7 @@ class MemoryChart(Static):
             # Route to arch-specific chart renderer
             mspec = getattr(self.app, "mspec", None)
             gpu_arch = mspec.gpu_arch if mspec else ""
-            if gpu_arch.startswith("gfx115"):
+            if is_gfx115x(gpu_arch):
                 plot_func = plot_mem_chart_gfx11
             else:
                 plot_func = plot_mem_chart_gfx9
@@ -325,7 +326,7 @@ class MemoryChart(Static):
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    result = plot_func("", "per_kernel", metric_dict)
+                    result = plot_func("per_kernel", metric_dict)
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout

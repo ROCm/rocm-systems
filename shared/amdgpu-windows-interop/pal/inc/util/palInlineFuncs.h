@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -47,21 +47,17 @@ namespace Util
 /// Describes a value type, primarily used for loading settings values.
 enum class ValueType : uint32
 {
-    Boolean,       ///< Boolean type.
-    Int8,          ///< 8-bit integer type.
-    Uint8,         ///< 8-bit unsigned integer type.
-    Int16,         ///< 16-bit integer type.
-    Uint16,        ///< 16-bit unsigned integer type.
-    Int32,         ///< 32-bit integer type.
-    Uint32,        ///< 32-bit unsigned integer type.
-    Int64,         ///< 64-bit integer type.
-    Uint64,        ///< 64-bit unsigned integer type.
-    Float,         ///< Floating point type.
-    Str,           ///< String type.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 905
-    Int = Int32,   ///< Signed integer type.
-    Uint = Uint32, ///< Unsigned integer type.
-#endif
+    Boolean, ///< Boolean type.
+    Int8,    ///< 8-bit integer type.
+    Uint8,   ///< 8-bit unsigned integer type.
+    Int16,   ///< 16-bit integer type.
+    Uint16,  ///< 16-bit unsigned integer type.
+    Int32,   ///< 32-bit integer type.
+    Uint32,  ///< 32-bit unsigned integer type.
+    Int64,   ///< 64-bit integer type.
+    Uint64,  ///< 64-bit unsigned integer type.
+    Float,   ///< Floating point type.
+    Str,     ///< String type.
 };
 
 /// Determines the length of an array at compile-time.
@@ -668,8 +664,9 @@ constexpr T BitfieldGenMask(
 /// Determines if a value is a power of two.
 ///
 /// @returns True if it is a power of two, false otherwise.
+template <typename T>
 constexpr bool IsPowerOfTwo(
-    uint64 value)  ///< Value to check.
+    T value)  ///< Value to check.
 {
     return (value == 0) ? false : ((value & (value - 1)) == 0);
 }
@@ -1555,6 +1552,98 @@ template<typename RandomIt> void Sort(
 {
     using ElementTy = typename std::iterator_traits<RandomIt>::value_type;
     qsort(&pStart[0], pEnd - pStart, sizeof(ElementTy), SortComparisonFunc<ElementTy>);
+}
+
+/// 2-function-arg memcpy with compile-time size assertions
+/// @returns destination
+template<
+    typename DestType,                      // type of destination buffer elements
+    size_t   DestSize,                      // number of elements in destination buffer
+    typename SourceType,                    // type of source buffer elements
+    size_t   SourceSize>                    // number of elements in source buffer
+constexpr void* Memcpy(
+    DestType         (&dest)[DestSize],     // destination buffer
+    const SourceType (&source)[SourceSize]) // source buffer
+{
+    static_assert((sizeof(DestType) * DestSize) >= (sizeof(SourceType) * SourceSize));
+    return std::memcpy(dest, source, sizeof(SourceType) * SourceSize);
+}
+
+/// 2-function-arg + 1-template-arg memcpy with compile-time size assertions
+/// @returns destination
+template<
+    size_t   ByteCount,                     // number of bytes to copy
+    typename DestType,                      // type of destination buffer elements
+    size_t   DestSize,                      // number of elements in destination buffer
+    typename SourceType,                    // type of source buffer elements
+    size_t   SourceSize>                    // number of elements in source buffer
+constexpr void* Memcpy(
+    DestType         (&dest)[DestSize],     // destination buffer
+    const SourceType (&source)[SourceSize]) // source buffer
+{
+    static_assert((sizeof(DestType) * DestSize) >= ByteCount);
+    return std::memcpy(dest, source, ByteCount);
+}
+
+/// 2-function-arg + 1-template-arg memcpy with compile-time size assertions
+/// @returns destination
+template<
+    size_t   ByteCount,          // number of bytes to copy
+    typename DestType,           // type of destination buffer elements
+    size_t   DestSize>           // number of elements in destination buffer
+constexpr void* Memcpy(
+    DestType  (&dest)[DestSize], // destination buffer
+    const void* pSource)         // source buffer
+{
+    static_assert((sizeof(DestType) * DestSize) >= ByteCount);
+    return std::memcpy(dest, pSource, ByteCount);
+}
+
+/// 2-function-arg + 1-template-arg memcpy with compile-time size assertions
+/// @returns destination
+template<
+    size_t   DestByteSize,                  // number of bytes in destination buffer
+    typename SourceType,                    // type of source buffer elements
+    size_t   SourceSize>                    // number of elements in source buffer
+inline void* Memcpy(
+    void*              pDest,               // destination buffer
+    const SourceType (&source)[SourceSize]) // source buffer
+{
+    static_assert(DestByteSize >= (sizeof(SourceType) * SourceSize));
+    return std::memcpy(pDest, source, sizeof(SourceType) * SourceSize);
+}
+
+/// This function should be used to convert a larger integer to a smaller integer without generating a "possible loss
+/// of data" warning. The caller must manually specify the LimitT template parameter, which tells this function that
+/// the author of this code has explicitly verified that all possible "src" values fit in a LimitT. The DstT and SrcT
+/// types should be automatically inferred by the compiler.
+///
+/// TruncateCast is superior to a simple `dst = static_cast<LimitT>(src)` because the compiler won't warn you if you
+/// increase the size of DstT and SrcT but forget to update some of your casts. That would lead to some assignments
+/// silently truncating bits that actually matter which is a bug. TruncateCast avoids this by simply using DstT in its
+/// internal static_cast.
+///
+/// TruncateCast is also superior to `dst = static_cast<decltype(dst)>(src)` because the compiler won't warn you if you
+/// decrease the size of DstT without verifying that the new DstT fits all possible "src" values. TruncateCast's LimitT
+/// template parameter forces someone to manually re-certify that all possible "src" values fit inside the new DstT.
+///
+/// @note Unlike a normal cast, TruncateCast needs to use an output reference instead of simply returning a value.
+///       It really must work this way because C++ disallows function overloading based on return types.
+///
+/// @param [out] dst  Write the truncated value to this location.
+/// @param [in]  src  Truncate this value and write it to "dst".
+template <typename LimitT, typename DstT, typename SrcT>
+inline void TruncateCast(
+    DstT& dst,
+    SrcT  src)
+{
+    static_assert(std::is_integral_v<LimitT> && (std::is_integral_v<DstT> || std::is_enum_v<DstT>) &&
+                  (std::is_integral_v<SrcT> || std::is_enum_v<SrcT>),
+                  "TruncateCast expects an integer LimitT and integers or enums for DstT and SrcT.");
+
+    static_assert(sizeof(DstT) >= sizeof(LimitT), "The truncated value cannot fit inside the destination.");
+
+    dst = static_cast<DstT>(src);
 }
 
 } // Util

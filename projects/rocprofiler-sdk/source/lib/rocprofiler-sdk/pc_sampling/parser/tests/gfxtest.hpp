@@ -73,6 +73,13 @@ public:
             snap.perf_snapshot_data1 = wave_cnt;
             snap.perf_snapshot_data1 |= (arb_issue << 6) | (arb_stall << 14);
         }
+        else if constexpr(std::is_same_v<GFX, GFX1250>)
+        {
+            snap.perf_snapshot_data = (inst_type << 2) | (reason << 6);
+            snap.perf_snapshot_data |= 0x1;  // sample is valid
+            snap.perf_snapshot_data1 = wave_cnt;
+            snap.perf_snapshot_data1 |= (arb_issue << 9) | (arb_stall << 17);
+        }
 
         EXPECT_NE(dispatch.get(), nullptr);
         dispatch->submit(packet_union_t{.snap = snap});
@@ -379,4 +386,33 @@ public:
 protected:
     ///< testing data
     std::vector<PcSamplingRecordT> compare;
+};
+
+template <typename GFX, typename PcSamplingRecordT>
+class SamplingLockErrorTest : public WaveSnapTest<GFX, PcSamplingRecordT>
+{
+    void FillBuffers() override
+    {
+        this->buffer->genUpcomingSamples(2);
+        // sampling_lock_error = 0;
+        this->genPCSample(0);
+        // sapmling lock error = 1
+        this->genPCSample(1);
+    }
+
+    // Could be reused with assumption that the num_combinations will be overridden
+    void CheckBuffers() override
+    {
+        auto parsed = this->buffer->get_parsed_buffer(GFX1250::gfx_ip_major, GFX1250::gfx_ip_minor);
+        EXPECT_EQ(parsed.size(), 1);
+        EXPECT_EQ(parsed[0].size(), 2);
+        EXPECT_EQ(this->snapshots.size(), 2);
+
+        EXPECT_EQ(this->snapshots[0].snapshot.sampling_lock_error,
+                  parsed[0][0].snapshot.sampling_lock_error);
+        EXPECT_EQ(this->snapshots[1].snapshot.sampling_lock_error,
+                  parsed[0][1].snapshot.sampling_lock_error);
+    }
+
+    virtual void genPCSample(bool sampling_lock_error) = 0;
 };

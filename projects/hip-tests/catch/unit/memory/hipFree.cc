@@ -218,8 +218,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
 
 #if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
-  return;
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
 
   size_t width = GENERATE(32, 512, 1024);
   size_t height = GENERATE(0, 32, 512, 1024);
@@ -236,8 +235,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
 }
 
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
-  return;
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
   using vec_info = vector_info<char>;
 
   size_t width = GENERATE(32, 512, 1024);

@@ -15,7 +15,7 @@ class Device;
 namespace amd::device {
 
 // Light abstraction over HSA/PAL signals
-class Signal : public amd::HeapObject {
+class Signal {
  public:
   enum class Condition : uint32_t {
     Eq = 0,
@@ -43,6 +43,15 @@ class Signal : public amd::HeapObject {
 
   // Atomically sets the current value of the signal
   virtual void Reset(uint64_t value) {}
+
+  // Atomically loads the current value of the signal
+  virtual uint64_t Load() { return 0; }
+
+  // Exports the signal as an IPC handle into the provided buffer
+  virtual bool IpcExport(void* handle, size_t handle_size) { return false; }
+
+  // Initializes this signal from an IPC handle (alternative to Init for imported signals)
+  virtual bool IpcImport(const void* handle, size_t handle_size) { return false; }
 
   // Return the handle to the underlying amd_signal_t object
   virtual void* getHandle() { return nullptr; }

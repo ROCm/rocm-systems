@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <cstdint>
 
 #include "common/env_vars.hpp"
 
@@ -10,6 +11,7 @@
 #include <charconv>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 
 namespace rocprofsys
@@ -41,6 +43,52 @@ split_csv_lowercase(const std::string& input)
     }
     return tokens;
 }
+
+std::vector<std::string>
+collect_enabled_entry_names(const nlohmann::json&             metrics_obj,
+                            const std::set<std::string_view>& exclude = {})
+{
+    std::vector<std::string> result;
+    for(const auto& [name, metric] : metrics_obj.items())
+    {
+        if(exclude.count(name) > 0) continue;
+        if(metric.is_object() && metric.contains("enabled") &&
+           metric["enabled"].get<bool>())
+        {
+            result.push_back(name);
+        }
+    }
+    return result;
+}
+
+std::string
+join_with(const std::vector<std::string>& items, char sep)
+{
+    std::string result;
+    for(const auto& item : items)
+    {
+        if(!result.empty()) result += sep;
+        result += item;
+    }
+    return result;
+}
+
+void
+csv_to_json_enabled_flags(nlohmann::json& target_obj, const std::string& csv_value)
+{
+    std::istringstream ss(csv_value);
+    std::string        token;
+    while(std::getline(ss, token, ','))
+    {
+        auto start = token.find_first_not_of(" \t");
+        auto end   = token.find_last_not_of(" \t");
+        if(start != std::string::npos)
+        {
+            token                        = token.substr(start, end - start + 1);
+            target_obj[token]["enabled"] = true;
+        }
+    }
+}
 }  // namespace
 
 std::string
@@ -51,7 +99,7 @@ json_value_to_string(const nlohmann::json& val)
     else if(val.is_boolean())
         return val.get<bool>() ? "true" : "false";
     else if(val.is_number_integer())
-        return std::to_string(val.get<int64_t>());
+        return std::to_string(val.get<std::int64_t>());
     else if(val.is_number_float())
         return std::to_string(val.get<double>());
     else if(val.is_array())
@@ -168,29 +216,12 @@ resolve_schema_config(const nlohmann::json& config)
                 result[std::string{ env_vars::USE_AMD_SMI }]          = "true";
                 result[std::string{ env_vars::USE_PROCESS_SAMPLING }] = "true";
 
-                // Collect enabled metrics
                 if(gpu.contains("metrics"))
                 {
-                    std::vector<std::string> enabled_metrics;
-                    const auto&              metrics = gpu["metrics"];
-                    for(const auto& [name, metric] : metrics.items())
-                    {
-                        if(metric.is_object() && metric.contains("enabled") &&
-                           metric["enabled"].get<bool>())
-                        {
-                            enabled_metrics.push_back(name);
-                        }
-                    }
-                    if(!enabled_metrics.empty())
-                    {
-                        std::string metrics_str;
-                        for(const auto& m : enabled_metrics)
-                        {
-                            if(!metrics_str.empty()) metrics_str += ',';
-                            metrics_str += m;
-                        }
-                        result[std::string{ env_vars::AMD_SMI_METRICS }] = metrics_str;
-                    }
+                    auto enabled = collect_enabled_entry_names(gpu["metrics"]);
+                    if(!enabled.empty())
+                        result[std::string{ env_vars::AMD_SMI_METRICS }] =
+                            join_with(enabled, ',');
                 }
 
                 resolve_value(result, gpu, "sampling_rate_hz", env_vars::AMD_SMI_FREQ);
@@ -200,6 +231,9 @@ resolve_schema_config(const nlohmann::json& config)
                               env_vars::PROCESS_SAMPLING_DURATION);
                 if(gpu.contains("ainic"))
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
+                if(gpu.contains("unified_memory_profiling"))
+                    resolve_enabled(result, gpu["unified_memory_profiling"], "enabled",
+                                    env_vars::USE_UNIFIED_MEMORY_PROFILING);
             }
         }
 
@@ -261,6 +295,11 @@ resolve_schema_config(const nlohmann::json& config)
                     {
                         result[std::string{ env_vars::CPU_FREQ }] = "true";
                     }
+
+                    auto enabled = collect_enabled_entry_names(metrics, { "freq" });
+                    if(!enabled.empty())
+                        result[std::string{ env_vars::CPU_METRICS }] =
+                            join_with(enabled, ',');
                 }
             }
         }
@@ -313,6 +352,8 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
+        resolve_value(result, output, "unified_memory_output_path",
+                      env_vars::UNIFIED_MEMORY_OUTPUT_PATH);
         if(output.contains("time_output"))
             resolve_enabled(result, output["time_output"], "enabled",
                             env_vars::TIME_OUTPUT);
@@ -356,10 +397,11 @@ resolve_schema_config(const nlohmann::json& config)
         {
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
+            resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
-                            env_vars::PAPI_MULTIPLEXING);
+                            env_vars::PAPI_MULTIPLEXING_ENABLED);
     }
 
     // --- Advanced section ---
@@ -377,7 +419,7 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, adv, "trace_duration_sec", env_vars::TRACE_DURATION);
         resolve_value(result, adv, "verbose", env_vars::VERBOSE);
         if(adv.contains("debug"))
-            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG);
+            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG_MODE);
         resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
         resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
         resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
@@ -663,19 +705,20 @@ export_double_value(nlohmann::json&                           config,
         set_json_double(config[json_path_section][json_path_key]["value"], it->second);
 }
 
-nlohmann::json
-env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
+namespace
 {
-    nlohmann::json config;
+std::optional<std::string>
+lookup(const std::map<std::string, std::string>& env_map, std::string_view key)
+{
+    auto it = env_map.find(std::string{ key });
+    if(it != env_map.end()) return it->second;
+    return std::nullopt;
+}
 
-    // Helper to check if env var exists and get value
-    auto get_val = [&](std::string_view key) -> std::optional<std::string> {
-        auto it = env_map.find(std::string{ key });
-        if(it != env_map.end()) return it->second;
-        return std::nullopt;
-    };
-
-    // --- Tracing ---
+void
+export_tracing_section(nlohmann::json&                           config,
+                       const std::map<std::string, std::string>& env_map)
+{
     export_section_enabled(config, env_map, env_vars::TRACE, "tracing");
     export_enabled(config, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
     export_int_value(config, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
@@ -687,12 +730,12 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_int_value(config, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
                      "flush_period_ms");
     export_string_value(config, env_map, env_vars::SELECTED_REGIONS, "tracing", "region");
+}
 
-    // --- Profiling ---
-    export_section_enabled(config, env_map, env_vars::PROFILE, "profiling");
-    export_enabled(config, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
-
-    // --- Sampling ---
+void
+export_sampling_section(nlohmann::json&                           config,
+                        const std::map<std::string, std::string>& env_map)
+{
     export_section_enabled(config, env_map, env_vars::USE_SAMPLING, "sampling");
     export_int_value(config, env_map, env_vars::SAMPLING_FREQ, "sampling",
                      "frequency_hz");
@@ -706,113 +749,147 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_string_value(config, env_map, env_vars::SAMPLING_AINICS, "sampling", "ainics");
     export_string_value(config, env_map, env_vars::SAMPLING_OVERFLOW_EVENT, "sampling",
                         "overflow_event");
+}
 
-    // --- Domains: GPU ---
-    if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
-        config["domains"]["gpu"]["process_sampling"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_AMD_SMI))
+void
+export_domain_gpu(nlohmann::json&                           config,
+                  const std::map<std::string, std::string>& env_map)
+{
+    auto& gpu = config["domains"]["gpu"];
+
+    if(auto v = lookup(env_map, env_vars::USE_PROCESS_SAMPLING))
+        gpu["process_sampling"]["enabled"] = is_truthy(*v);
+
+    auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);
+    if(!use_amd_smi) return;
+
+    gpu["enabled"] = is_truthy(*use_amd_smi);
+    if(auto metrics = lookup(env_map, env_vars::AMD_SMI_METRICS))
+        csv_to_json_enabled_flags(gpu["metrics"], *metrics);
+    if(auto freq = lookup(env_map, env_vars::AMD_SMI_FREQ))
+        set_json_int(gpu["sampling_rate_hz"]["value"], *freq);
+    if(auto freq = lookup(env_map, env_vars::PROCESS_SAMPLING_FREQ))
+        set_json_double(gpu["process_sampling_freq"]["value"], *freq);
+    if(auto dur = lookup(env_map, env_vars::PROCESS_SAMPLING_DURATION))
+        set_json_double(gpu["process_sampling_duration"]["value"], *dur);
+    if(auto v = lookup(env_map, env_vars::USE_AINIC))
+        gpu["ainic"]["enabled"] = is_truthy(*v);
+    if(auto v = lookup(env_map, env_vars::USE_UNIFIED_MEMORY_PROFILING))
+        gpu["unified_memory_profiling"]["enabled"] = is_truthy(*v);
+}
+
+void
+export_domain_rocm(nlohmann::json&                           config,
+                   const std::map<std::string, std::string>& env_map)
+{
+    auto& rocm = config["domains"]["rocm"];
+
+    if(auto v = lookup(env_map, env_vars::ROCM_DOMAINS))
     {
-        config["domains"]["gpu"]["enabled"] = is_truthy(*v);
-        if(auto metrics = get_val(env_vars::AMD_SMI_METRICS))
-        {
-            std::istringstream ss(*metrics);
-            std::string        token;
-            while(std::getline(ss, token, ','))
-            {
-                auto start = token.find_first_not_of(" \t");
-                auto end   = token.find_last_not_of(" \t");
-                if(start != std::string::npos)
-                {
-                    token = token.substr(start, end - start + 1);
-                    config["domains"]["gpu"]["metrics"][token]["enabled"] = true;
-                }
-            }
-        }
-        if(auto freq = get_val(env_vars::AMD_SMI_FREQ))
-            set_json_int(config["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
-        if(auto freq = get_val(env_vars::PROCESS_SAMPLING_FREQ))
-            set_json_double(config["domains"]["gpu"]["process_sampling_freq"]["value"],
-                            *freq);
-        if(auto dur = get_val(env_vars::PROCESS_SAMPLING_DURATION))
-            set_json_double(
-                config["domains"]["gpu"]["process_sampling_duration"]["value"], *dur);
-        if(auto v = get_val(env_vars::USE_AINIC))
-            config["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
+        rocm["enabled"] = true;
+        csv_to_json_enabled_flags(rocm["api_domains"], *v);
+    }
+    if(auto v = lookup(env_map, env_vars::ROCM_GROUP_BY_QUEUE))
+        rocm["group_by_queue"]["enabled"] = is_truthy(*v);
+}
+
+void
+export_domain_cpu(nlohmann::json&                           config,
+                  const std::map<std::string, std::string>& env_map)
+{
+    auto& cpu = config["domains"]["cpu"];
+
+    if(auto v = lookup(env_map, env_vars::CPU_FREQ_ENABLED))
+        cpu["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
+
+    auto use_proc = lookup(env_map, env_vars::USE_PROCESS_SAMPLING);
+    auto cpu_freq = lookup(env_map, env_vars::CPU_FREQ);
+    if(use_proc && is_truthy(*use_proc) && cpu_freq && is_truthy(*cpu_freq))
+    {
+        cpu["enabled"]                    = true;
+        cpu["metrics"]["freq"]["enabled"] = true;
     }
 
-    // --- Domains: ROCm ---
-    if(auto v = get_val(env_vars::ROCM_DOMAINS))
+    if(auto metrics = lookup(env_map, env_vars::CPU_METRICS))
     {
-        config["domains"]["rocm"]["enabled"] = true;
-        std::istringstream ss(*v);
-        std::string        token;
-        while(std::getline(ss, token, ','))
-        {
-            auto start = token.find_first_not_of(" \t");
-            auto end   = token.find_last_not_of(" \t");
-            if(start != std::string::npos)
-            {
-                token = token.substr(start, end - start + 1);
-                config["domains"]["rocm"]["api_domains"][token]["enabled"] = true;
-            }
-        }
+        cpu["enabled"] = true;
+        csv_to_json_enabled_flags(cpu["metrics"], *metrics);
     }
+}
 
-    if(auto v = get_val(env_vars::ROCM_GROUP_BY_QUEUE))
-        config["domains"]["rocm"]["group_by_queue"]["enabled"] = is_truthy(*v);
+void
+export_domain_parallel(nlohmann::json&                           config,
+                       const std::map<std::string, std::string>& env_map)
+{
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 6> runtimes{ {
+        { env_vars::USE_MPIP, "mpi" },
+        { env_vars::USE_OMPT, "openmp" },
+        { env_vars::USE_KOKKOSP, "kokkos" },
+        { env_vars::USE_RCCLP, "rccl" },
+        { env_vars::USE_SHMEM, "shmem" },
+        { env_vars::USE_UCX, "ucx" },
+    } };
 
-    // --- Domains: CPU ---
-    if(auto v = get_val(env_vars::CPU_FREQ_ENABLED))
-        config["domains"]["cpu"]["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
+    auto& runtimes_obj = config["domains"]["parallel"]["runtimes"];
+    for(const auto& [env_var, runtime_name] : runtimes)
     {
-        if(is_truthy(*v))
-        {
-            if(auto freq = get_val(env_vars::CPU_FREQ))
-            {
-                if(is_truthy(*freq))
-                {
-                    config["domains"]["cpu"]["enabled"]                    = true;
-                    config["domains"]["cpu"]["metrics"]["freq"]["enabled"] = true;
-                }
-            }
-        }
+        if(auto v = lookup(env_map, env_var))
+            runtimes_obj[std::string{ runtime_name }]["enabled"] = is_truthy(*v);
     }
+}
 
-    // --- Domains: Parallel ---
-    if(auto v = get_val(env_vars::USE_MPIP))
-        config["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_OMPT))
-        config["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_KOKKOSP))
-        config["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_RCCLP))
-        config["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_SHMEM))
-        config["domains"]["parallel"]["runtimes"]["shmem"]["enabled"] = is_truthy(*v);
-    if(auto v = get_val(env_vars::USE_UCX))
-        config["domains"]["parallel"]["runtimes"]["ucx"]["enabled"] = is_truthy(*v);
+void
+export_hardware_counters(nlohmann::json&                           config,
+                         const std::map<std::string, std::string>& env_map)
+{
+    auto& hw = config["hardware_counters"];
 
-    // --- Output ---
+    if(auto v = lookup(env_map, env_vars::ROCM_EVENTS))
+    {
+        hw["enabled"]              = true;
+        hw["rocm_events"]["value"] = *v;
+    }
+    if(auto v = lookup(env_map, env_vars::PAPI_EVENTS))
+    {
+        hw["enabled"]              = true;
+        hw["papi_events"]["value"] = *v;
+    }
+    if(auto v = lookup(env_map, env_vars::GPU_PERF_COUNTERS))
+    {
+        hw["enabled"]                    = true;
+        hw["gpu_perf_counters"]["value"] = *v;
+    }
+    export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
+                   "hardware_counters", "papi_multiplexing");
+}
+}  // namespace
+
+nlohmann::json
+env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
+{
+    nlohmann::json config;
+
+    export_tracing_section(config, env_map);
+
+    export_section_enabled(config, env_map, env_vars::PROFILE, "profiling");
+    export_enabled(config, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
+
+    export_sampling_section(config, env_map);
+
+    export_domain_gpu(config, env_map);
+    export_domain_rocm(config, env_map);
+    export_domain_cpu(config, env_map);
+    export_domain_parallel(config, env_map);
+
     export_string_value(config, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_string_value(config, env_map, env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "output",
+                        "unified_memory_output_path");
     export_enabled(config, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
     export_enabled(config, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
     export_enabled(config, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
     export_enabled(config, env_map, env_vars::USE_PID, "output", "use_pid");
 
-    // --- Hardware counters ---
-    if(auto v = get_val(env_vars::ROCM_EVENTS))
-    {
-        config["hardware_counters"]["enabled"]              = true;
-        config["hardware_counters"]["rocm_events"]["value"] = *v;
-    }
-    if(auto v = get_val(env_vars::PAPI_EVENTS))
-    {
-        config["hardware_counters"]["enabled"]              = true;
-        config["hardware_counters"]["papi_events"]["value"] = *v;
-    }
-    export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
-                   "papi_multiplexing");
+    export_hardware_counters(config, env_map);
 
     // --- Causal profiling ---
     export_section_enabled(config, env_map, env_vars::USE_CAUSAL, "causal");
@@ -839,7 +916,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 
     // --- Advanced ---
     export_int_value(config, env_map, env_vars::VERBOSE, "advanced", "verbose");
-    export_enabled(config, env_map, env_vars::DEBUG, "advanced", "debug");
+    export_enabled(config, env_map, env_vars::DEBUG_MODE, "advanced", "debug");
     export_int_value(config, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
     export_double_value(config, env_map, env_vars::TRACE_DELAY, "advanced",
                         "trace_delay_sec");
@@ -886,6 +963,14 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        in a preset would break config
     //                                        file handling.
     //   ROCPROFSYS_CI                      - Internal CI mode flag.
+    //   ROCPROFSYS_LOG_LEVEL               - Diagnostic logging verbosity for
+    //                                        the profiler itself; controls how
+    //                                        the tool reports its own activity,
+    //                                        not what/how to profile.
+    //   ROCPROFSYS_TMPDIR                  - Base directory for temporary
+    //                                        files; depends on the system's
+    //                                        filesystem layout, not profiling
+    //                                        intent.
 
     return config;
 }

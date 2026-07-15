@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/rocjpeg/docs/conf.py
 
 formats: [htmlzip]
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/rocjpeg/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

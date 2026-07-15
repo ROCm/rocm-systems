@@ -24,7 +24,26 @@
 
 #include "amd_smi/amdsmi.h"
 
+namespace {
+
+auto g_amdsmi_init_ref_count = int32_t(0);
+
+}  // namespace
+
 namespace amd::smi {
+
+bool amdsmi_library_initialized() { return (g_amdsmi_init_ref_count > 0); }
+
+void amdsmi_library_init_ref_acquire() { ++g_amdsmi_init_ref_count; }
+
+bool amdsmi_library_init_ref_release() {
+  if (g_amdsmi_init_ref_count == 0) {
+    return false;
+  }
+
+  --g_amdsmi_init_ref_count;
+  return (g_amdsmi_init_ref_count == 0);
+}
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
   amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;

@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -117,7 +117,7 @@ constexpr uint64 InternalApiPsoHash       = UINT64_MAX;  ///< Default Hash for P
 /// Device::GetProperties, returned in DeviceProperties.engineProperties[].
 enum EngineType : uint32
 {
-    /// Corresponds to the graphics hardware engine (a.k.a. graphcis ring a.k.a 3D).
+    /// Corresponds to the graphics hardware engine (a.k.a. graphics ring a.k.a 3D).
     EngineTypeUniversal,
 
     /// Corresponds to asynchronous compute engines (ACE).
@@ -170,16 +170,9 @@ enum QueueTypeSupport : uint32
 enum class SubEngineType : uint32
 {
     Primary        = 0, // Subqueue that is the queue itself, rather than an ancillary queue.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
     AsyncCompute   = 1, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
     ConstantEngine = 2, // CP constant update engine that runs in parallel with draw engine.
                         // Internal usage only.
-#else
-    ConstantEngine = 1, // CP constant update engine that runs in parallel with draw engine.
-    AsyncCompute   = 2, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
-    Pup            = 3, // Subqueue that is the queue itself but for PUP-style packets, rather than an
-                        // ancillary queue
-#endif
     Count,
 };
 
@@ -451,7 +444,7 @@ struct DirectCaptureInfo
             uint32 preflip              :  1;  ///< Requires pre-flip primary access
             uint32 postflip             :  1;  ///< Requires post-flip primary access. A DirectCapture resource cannot
                                                ///  have pre-flip and post-flip access at the same time
-            uint32 accessDesktop        :  1;  ///< Requires acces to the desktop
+            uint32 accessDesktop        :  1;  ///< Requires access to the desktop
             uint32 shared               :  1;  ///< This resource will be shared between APIs
             uint32 frameGenRatio        :  4;  ///< Frame generation ratio
             uint32 paceGeneratedFrame   :  1;  ///< Requires pacing the generated frames
@@ -464,7 +457,8 @@ struct DirectCaptureInfo
             uint32 initCamera           :  1;  ///< Initialize the DirectCapture resource to access camera matrix
             uint32 requestHudLessImage  :  1;  ///< Request DirectCapture access to HUD less image if available
             uint32 initHudLessImage     :  1;  ///< Initialize the DirectCapture resource to access HUD less image
-            uint32 reserved             : 14;
+            uint32 partialMpoSupport    :  1;  ///< Enable MPO. DirectCapture resource only contains the game's plane
+            uint32 reserved             : 13;
         };
         uint32 u32All;
     } usageFlags;

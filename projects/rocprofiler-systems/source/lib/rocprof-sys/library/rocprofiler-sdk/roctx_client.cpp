@@ -21,6 +21,7 @@
 #include "logger/debug.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -33,22 +34,19 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
-
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_started_ranges{};
-
 namespace
 {
 
+// Synthetic range IDs for roctxRangePush/Pop. Starts at UINT64_MAX and
+// decrements to stay well away from SDK-allocated roctxRangeStart IDs
+// (which count upward from small values).
+std::atomic<std::uint64_t> s_push_range_id{ UINT64_MAX };
+
 int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t, int32_t, uint32_t arg_number,
-                      const void* const, int32_t, const char*                arg_type,
-                      const char* arg_name, const char* arg_value_str, int32_t,
-                      void* data)
+iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
+                      std::uint32_t arg_number, const void* const, std::int32_t,
+                      const char* arg_type, const char* arg_name,
+                      const char* arg_value_str, std::int32_t, void* data)
 {
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
@@ -89,15 +87,6 @@ collect_args(rocprofiler_callback_tracing_record_t record)
 }  // namespace
 
 template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
-: m_config{ roctx_cfg }
-, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
-            roctx_cfg.perfetto_annotations }
-, m_controller{ std::make_shared<control::trace_control>(
-      roctx_cfg.selected_trace_regions) }
-{}
-
-template <typename MarkerWriterPolicy>
 void
 roctx_client<MarkerWriterPolicy>::configure_services(rocprofiler_context_id_t ctx)
 {
@@ -132,9 +121,14 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
     {
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA:
         {
-            const char* name = data->args.roctxRangePushA.message;
-            m_pushed_ranges.push_back({ tim::add_hash_id(name), ts, write_enabled });
-            if(write_enabled)
+            const char*         name = data->args.roctxRangePushA.message;
+            const std::uint64_t range_id =
+                s_push_range_id.fetch_sub(1, std::memory_order_relaxed);
+            m_controller->handle_range_start(range_id, name);
+            const bool pushed_write_enabled = m_controller->should_write_markers();
+            m_pushed_ranges.push_back(
+                { tim::add_hash_id(name), ts, pushed_write_enabled, range_id });
+            if(pushed_write_enabled)
             {
                 m_writer.write_begin(name);
             }
@@ -179,8 +173,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    const uint64_t begin_ts = user_data->value;
-    const auto     args_str = collect_args(record);
+    const std::uint64_t begin_ts = user_data->value;
+    const auto          args_str = collect_args(record);
 
     auto pop_and_write = [&](marker_range_stack_t& stack) {
         auto        range = stack.back();
@@ -204,7 +198,9 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
                 return;
             }
 
+            const auto range_id = m_pushed_ranges.back().range_id;
             pop_and_write(m_pushed_ranges);
+            m_controller->handle_range_stop(range_id);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
@@ -271,12 +267,12 @@ roctx_client<MarkerWriterPolicy>::handle_marker_control(
     if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        m_controller->handle_pause();
+        m_controller->handle_pause(record.thread_id);
     }
     else if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        m_controller->handle_resume();
+        m_controller->handle_resume(record.thread_id);
     }
 }
 

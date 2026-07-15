@@ -25,6 +25,9 @@
 #ifndef LIBRARY_SRC_IPC_BACKEND_HPP_
 #define LIBRARY_SRC_IPC_BACKEND_HPP_
 
+#include <map>
+#include <vector>
+
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp"
@@ -100,13 +103,28 @@ class IPCBackend : public Backend {
   void create_new_team(Team *parent_team,
                        const TeamInfo& team_info_wrt_parent,
                        const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
    * @copydoc Backend::team_destroy(rocshmem_team_t)
    */
   void team_destroy(rocshmem_team_t team) override;
+
+  /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Collective. Restricted to VMM allocations.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Collective.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
 
   /**
    * @brief Accessor for work/sync bases
@@ -168,14 +186,19 @@ class IPCBackend : public Backend {
 
  protected:
    /**
-   * @copydoc Backend::dump_backend_stats()
+   * @copydoc Backend::accumulate_ctx_device_stats()
    */
-  void dump_backend_stats() override;
-
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
   /**
    * @copydoc Backend::reset_backend_stats()
    */
   void reset_backend_stats() override;
+
+
 
   /**
    * @brief Allocates uncacheable host memory for the hdp policy.
@@ -193,6 +216,15 @@ class IPCBackend : public Backend {
    * @brief Allocate and initialize team world.
    */
   void setup_team_world();
+
+  /**
+   * @brief Allocate and initialize team shared.
+   *
+   * In the IPC backend all PEs are on the same node, so TEAM_SHARED
+   * contains the same set of PEs as TEAM_WORLD but uses its own
+   * pool slot and sync/work resources.
+   */
+  void setup_team_shared();
 
   /**
    * @brief Initialize the resources required to support teams
@@ -229,7 +261,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  IPCDefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  IPCDefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -239,7 +271,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
@@ -296,9 +328,40 @@ class IPCBackend : public Backend {
   void cleanup_wrk_sync_buffer();
 
   /**
+   * @brief Allocate the device-visible symmetric-registration table.
+   */
+  void setup_symm_registration();
+
+  /**
+   * @brief Unregister all symmetric buffers and free the registration table.
+   */
+  void cleanup_symm_registration();
+
+  /**
+   * @brief IPC-specific per-registration state.
+   *
+   * The common base/length bookkeeping lives in Backend::symm_buffer_regions;
+   * this map holds the transport-specific state needed to tear a registration
+   * down, keyed by the registered buffer's base address.
+   */
+  struct IpcSymmRecord {
+    int slot{-1};                       // index into the device symm_table
+    char** dev_peer_bases{nullptr};     // device array[num_pes] (published to table)
+    std::vector<char*> peer_bases{};    // host copy[num_pes] (for CloseIpcHandle)
+    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
+  };
+
+  /**
+   * @brief Host-side map of IPC-specific symmetric registration state.
+   */
+  std::map<uintptr_t, IpcSymmRecord> ipc_symm_records_{};
+
+  /**
    * @brief
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
+  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
+                            const TeamInfo& new_team_info_wrt_world,
+                            int num_pes, int my_pe_in_new_team);
 
 };
 

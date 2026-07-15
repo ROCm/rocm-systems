@@ -93,8 +93,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_Negative) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #else
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
@@ -155,8 +154,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #else
   CHECK_IMAGE_SUPPORT
   int devCount = 0;

@@ -34,17 +34,32 @@
 
 namespace gfxip {
 namespace gfx12 {
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+namespace gfx1250 {
+#else
+namespace gfx1200 {
+#endif
 
 class gfx12_cntx_prim {
  public:
   static const uint32_t GFXIP_LEVEL = 12;
   static const uint32_t NUMBER_OF_BLOCKS = LastCounterBlockId + 1;
   static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+  static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 8, regGRBMA_GFX_INDEX);
+#else
+  static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
+#endif
   static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
       REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
   static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
       REG_32B_ADDR(GC, 0, regRLC_PERFMON_CNTL);  // REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
   static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+  static constexpr Register AID_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 8, regAID_PERFMON_CNTL);
+#else
+  static constexpr Register AID_PERFMON_CNTL_ADDR = REG_32B_NULL;
+#endif
 
   static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR =
       REG_32B_ADDR(GC, 0, regCOMPUTE_THREAD_TRACE_ENABLE);
@@ -183,7 +198,17 @@ class gfx12_cntx_prim {
 
   // GRBM SE indexing
   static uint32_t grbm_inst_index_value(const uint32_t& instance_index) {
-    uint32_t grbm_gfx_index = SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, instance_index) |
+    uint32_t instance_index_ = (instance_index & 0xFFFF);
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+    const uint32_t instance_count_ = instance_index >> 16;
+    if (instance_count_) {
+      const uint32_t num_glarb = GlarbaCounterBlockNumInstances;
+      const uint32_t instance_per_glarb = instance_count_ / num_glarb;
+      const uint32_t glarb_index = instance_index_ / instance_per_glarb;
+      instance_index_ = (instance_index_ % instance_per_glarb) | (glarb_index << 4);
+    }
+#endif
+    uint32_t grbm_gfx_index = SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, instance_index_) |
                               SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_BROADCAST_WRITES, 1) |
                               SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_BROADCAST_WRITES, 1);
     return grbm_gfx_index;
@@ -475,7 +500,11 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 0x40); // SQ_TT_WTYPE_INCLUDE_CS_BIT
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE,
+                           1 << 6);  // SQ_TT_WTYPE_INCLUDE_CS_BIT
+    // sq_thread_trace_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK,
+    // EXCLUDE_NONDETAIL_WAVESTART_EXT, 1) |
+    //        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, EXCLUDE_NONDETAIL_ALLOC, 1);
     return sq_thread_trace_mask;
   }
   // not supported in gfx12
@@ -483,7 +512,7 @@ class gfx12_cntx_prim {
 
   // Indicate the different TT messages/tokens that should be enabled/logged
   // Indicate the different TT tokens that specify register operations to be logged
-  static uint32_t sqtt_token_mask_on_value() {
+  static uint32_t sqtt_token_mask_on_value(bool exclude_wait) {
     uint32_t sq_thread_trace_token_mask{0};
     sq_thread_trace_token_mask =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
@@ -492,11 +521,12 @@ class gfx12_cntx_prim {
                            (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
                             SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
                             SQ_TT_TOKEN_MASK_COMP_BIT)) |
+#if GFX12_VARIANT <= GFX12_VARIANT_1201
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, exclude_wait ? 1 : 0) |
+#endif
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE,
                            ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
-                            (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT))) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT,
-                           1);  // // See DEGFX12-10117
+                            (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT)));
     return sq_thread_trace_token_mask;
   }
 
@@ -622,7 +652,9 @@ class gfx12_cntx_prim {
   }
 };
 
+}  // namespace gfx12xx
 }  // namespace gfx12
 }  // namespace gfxip
 
 #endif  // _GFX12_PRIMITIVES_H_
+

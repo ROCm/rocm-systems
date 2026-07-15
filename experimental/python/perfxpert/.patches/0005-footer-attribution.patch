@@ -1,0 +1,15 @@
+diff --git a/packages/opencode/src/cli/ui.ts b/packages/opencode/src/cli/ui.ts
+index c287c2d93..106f03a72 100644
+--- a/packages/opencode/src/cli/ui.ts
++++ b/packages/opencode/src/cli/ui.ts
+@@ -10,6 +10,10 @@ const wordmark = [
+   `▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
+ ]
+ 
++// AMD ROCm PerfXpert footer — surfaced by the perfxpert-code wrapper's
++// status-bar renderer and by any callers embedding opencode.
++export const PERFXPERT_ATTRIBUTION = "AMD ROCm PerfXpert · opencode v1.4.11 (MIT)"
++
+ export const CancelledError = NamedError.create("UICancelledError", z.void())
+ 
+ // AMD ROCm PerfXpert palette — WCAG AA contrast on dark+light terminal bg.

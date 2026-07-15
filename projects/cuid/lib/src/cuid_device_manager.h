@@ -45,6 +45,7 @@ typedef enum {
     AMDCUID_DEVICE_TYPE_SET_CPU       = 1U << AMDCUID_DEVICE_TYPE_CPU,      ///< CPU devices
     AMDCUID_DEVICE_TYPE_SET_GPU       = 1U << AMDCUID_DEVICE_TYPE_GPU,      ///< GPU devices
     AMDCUID_DEVICE_TYPE_SET_NIC       = 1U << AMDCUID_DEVICE_TYPE_NIC,      ///< NIC devices
+    AMDCUID_DEVICE_TYPE_SET_NPU       = 1U << AMDCUID_DEVICE_TYPE_NPU,      ///< NPU devices
     AMDCUID_DEVICE_TYPE_SET_ALL       = -1U                                    ///< All device types
 } amdcuid_device_type_set_t;
 

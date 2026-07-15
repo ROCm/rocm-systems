@@ -1,0 +1,26 @@
+diff --git a/packages/opencode/src/cli/logo.ts b/packages/opencode/src/cli/logo.ts
+index 73b84ce93..9f17697fc 100644
+--- a/packages/opencode/src/cli/logo.ts
++++ b/packages/opencode/src/cli/logo.ts
+@@ -1,8 +1,8 @@
+ // AMD ROCm PerfXpert — GPU Profiling + Optimization Assistant
+ // Built on opencode v1.4.11 (MIT). See NOTICE for third-party attribution.
+ export const logo = {
+-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
+-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
++  left: ["                   ", "█▀▀█ █▀▀█ █▀▀▀ █▀▀▀", "█^^^ █^^^ █___ █^^ ", "█    ▀~~▀ ▀    ▀   "],
++  right: ["                        ", "█  █ █▀▀█ █▀▀█ █▀▀▀ ▀█▀▀", "_██_ █^^^ █^^^ █___ _█__", "█  █ █    ▀~~▀ ▀    _▀__"],
+ }
+ 
+ // AMD ROCm PerfXpert banner — displayed by perfxpert-code wrapper; kept here
+@@ -10,8 +10,8 @@ export const logo = {
+ export const perfxpertBanner = "AMD ROCm PerfXpert — GPU Profiling + Optimization Assistant"
+ 
+ export const go = {
+-  left: ["    ", "█▀▀▀", "█_^█", "▀▀▀▀"],
+-  right: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],
++  left: ["    ", "█▀▀█", "█__█", "█   "],
++  right: ["    ", "█  █", "_██_", "█  █"],
+ }
+ 
+ export const marks = "_^~,"

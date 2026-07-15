@@ -202,7 +202,7 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
   }
   // Allocate the memory for the device handlers on the socket
   std::vector<amdsmi_processor_handle> curr_processor_handles(current_num_devices);
-  getProcessorHandles(&curr_processor_handles[0], current_num_devices);
+  getProcessorHandles(curr_processor_handles.data(), current_num_devices);
 
   if (current_partition == "SPX" || current_partition == "N/A") {
     max_loop = MAX_SPX_PARTITIONS;

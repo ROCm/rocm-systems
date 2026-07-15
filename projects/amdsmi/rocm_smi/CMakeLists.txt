@@ -66,14 +66,3 @@ target_include_directories(
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
-
-## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(
-            TARGET ${ROCM_SMI_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING}
-        )
-    endif()
-endif()

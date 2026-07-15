@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -122,7 +122,7 @@ extern void CopyUtf16String(
 /// @param [in]  dstSize    The length of pDst in bytes.
 /// @param [in]  pBuffer    The arbitrary data blob to turn into a string.
 /// @param [in]  bufferSize The length of pBuffer in bytes.
-/// @param [in]  blockSize  How many bytes to combine into one hexidecimal big endian string.
+/// @param [in]  blockSize  How many bytes to combine into one hexadecimal big endian string.
 ///
 /// @returns The number of bytes from pBuffer that were formatted into pDst.
 extern size_t BytesToStr(

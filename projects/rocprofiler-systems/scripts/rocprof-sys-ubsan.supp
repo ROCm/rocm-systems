@@ -1,0 +1,21 @@
+# UndefinedBehaviorSanitizer runtime suppression file for rocprofiler-systems
+# See: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html#runtime-suppressions
+#
+# Format: <check_type>:<pattern>
+# Only the "vptr" check supports runtime suppressions.
+# Source-level exclusions use -fsanitize-blacklist= at compile time instead.
+#
+# Note: this file is passed via UBSAN_OPTIONS=suppressions= at runtime.
+# Lines starting with '#' are comments. Empty files are valid.
+
+# Dyninst - third-party binary instrumentation framework
+vptr:Dyninst::
+
+# Boost - third-party library
+vptr:boost::
+
+# TBB - Intel Threading Building Blocks
+vptr:tbb::
+
+# timemory - performance analysis toolkit
+vptr:tim::

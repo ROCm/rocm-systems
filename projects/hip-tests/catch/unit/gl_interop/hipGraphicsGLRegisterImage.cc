@@ -18,6 +18,8 @@ constexpr std::array<unsigned int, 5> kFlags{
 }  // anonymous namespace
 
 HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -41,6 +43,8 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
   const int device_count = HipTest::getDeviceCount();
   unsigned int gl_device_count = 0;
@@ -65,6 +69,8 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   GLImageObject tex;

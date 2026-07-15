@@ -29,9 +29,9 @@ namespace rocdecode {
 //! \fn rocParserStatus ROCDECAPI rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *parser_params)
 //! Create video parser object and initialize
 /************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *parser_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle) + ", " + RocDecFmtPtr(parser_params));
     if (parser_handle == nullptr || parser_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -51,7 +51,7 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
         handle = new RocParserHandle(parser_params);
     }
     catch(const std::exception& e) {
-        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + STR(e.what()));
+        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -72,7 +72,7 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
 /************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *packet) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle) + ", " + RocDecFmtPtr(packet));
     if (parser_handle == nullptr || packet == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -84,7 +84,7 @@ rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *pa
     }
     catch(const std::exception& e) {
         roc_parser_handle->CaptureError(e.what());
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -99,7 +99,7 @@ rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *pa
 /************************************************************************************************/
 extern rocDecStatus ROCDECAPI
 rocDecDestroyVideoParser(RocdecVideoParser parser_handle) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle));
     if (parser_handle == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -112,7 +112,7 @@ rocDecDestroyVideoParser(RocdecVideoParser parser_handle) {
     catch(const std::exception& e) {
         roc_parser_handle->CaptureError(e.what());
         delete roc_parser_handle;
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }

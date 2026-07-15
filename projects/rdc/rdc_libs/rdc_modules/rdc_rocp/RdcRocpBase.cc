@@ -126,8 +126,11 @@ rdc_status_t RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field, 
   }
   const std::string& metric_id = field_it->second;
 
+  const uint32_t duration_us = (field == RDC_FI_PROF_SIMD_UTILIZATION)
+                                   ? simd_utilization_duration_us_k
+                                   : collection_duration_us_k;
   try {
-    counter_sampler->sample_counter_values({metric_id}, records, collection_duration_us_k);
+    counter_sampler->sample_counter_values({metric_id}, records, duration_us);
   } catch (const std::exception& e) {
     RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
     return RDC_ST_BAD_PARAMETER;
@@ -443,11 +446,19 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     return RDC_ST_BAD_PARAMETER;
   }
 
+  // Use a longer window for SIMD_UTILIZATION — the 10ms default is too short
+  // for workloads with multi-second compute/idle cycles and produces oscillating
+  // readings. 500ms averages across those cycles for a stable measurement.
+  const bool needs_simd_window = std::any_of(
+      fields.begin(), fields.end(),
+      [](const rdc_gpu_field_t& f) { return f.field_id == RDC_FI_PROF_SIMD_UTILIZATION; });
+  const uint32_t duration_us =
+      needs_simd_window ? simd_utilization_duration_us_k : collection_duration_us_k;
+
   const auto start_time = std::chrono::high_resolution_clock::now();
   if (!metrics_to_sample.empty()) {
     try {
-      counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values,
-                                                    collection_duration_us_k);
+      counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values, duration_us);
     } catch (const std::exception& e) {
       RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
       for (size_t i = 0; i < fields.size(); i++) {

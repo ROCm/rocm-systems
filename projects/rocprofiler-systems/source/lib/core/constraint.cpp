@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
 
-#include <timemory/units.hpp>
-#include <timemory/utility/delimit.hpp>
+#include "common/delimit.hpp"
 
 #include "logger/debug.hpp"
 
@@ -26,8 +27,6 @@ namespace constraint
 {
 namespace
 {
-namespace units = ::tim::units;
-
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
 
@@ -95,7 +94,7 @@ find_clock_identifier(const Tp& _v)
 }
 
 void
-sleep(uint64_t _n)
+sleep(std::uint64_t _n)
 {
     std::this_thread::sleep_for(std::chrono::nanoseconds{ _n });
 }
@@ -108,7 +107,7 @@ get_timespec(clockid_t clock_id) noexcept
     return _ts;
 }
 
-template <typename Tp = uint64_t, typename Precision = std::nano>
+template <typename Tp = std::uint64_t, typename Precision = std::nano>
 Tp
 get_clock_now(clockid_t clock_id) noexcept
 {
@@ -129,12 +128,12 @@ get_clock_now(clockid_t clock_id) noexcept
 stages::stages()
 : init{ [](const spec&) { return get_state() < State::Finalized; } }
 , wait{ [](const spec& _spec) {
-    sleep(std::min<uint64_t>(100 * units::msec, _spec.delay * units::sec));
+    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
     return get_state() < State::Finalized;
 } }
 , start{ [](const spec&) { return get_state() < State::Finalized; } }
 , collect{ [](const spec& _spec) {
-    sleep(std::min<uint64_t>(100 * units::msec, _spec.duration * units::sec));
+    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
     return get_state() < State::Finalized;
 } }
 , stop{ [](const spec&) { return get_state() < State::Finalized; } }
@@ -194,7 +193,8 @@ clock_identifier::as_string() const
 //
 //--------------------------------------------------------------------------------------//
 
-spec::spec(clock_identifier _id, double _delay, double _dur, uint64_t _n, uint64_t _rep)
+spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -202,7 +202,8 @@ spec::spec(clock_identifier _id, double _delay, double _dur, uint64_t _n, uint64
 , clock_id{ std::move(_id) }
 {}
 
-spec::spec(int _clock_id, double _delay, double _dur, uint64_t _n, uint64_t _rep)
+spec::spec(int _clock_id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -210,8 +211,8 @@ spec::spec(int _clock_id, double _delay, double _dur, uint64_t _n, uint64_t _rep
 , clock_id{ find_clock_identifier(_clock_id) }
 {}
 
-spec::spec(const std::string& _clock_id, double _delay, double _dur, uint64_t _n,
-           uint64_t _rep)
+spec::spec(const std::string& _clock_id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -220,15 +221,18 @@ spec::spec(const std::string& _clock_id, double _delay, double _dur, uint64_t _n
 {}
 
 spec::spec(const std::string& _line)
-: spec{ config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-            .value_or("CLOCK_REALTIME"),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0) }
+: spec{
+    config::get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+        .value_or("CLOCK_REALTIME"),
+    config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY }).value_or(0.0),
+    config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+        .value_or(0.0)
+}
 {
-    auto _delim = tim::delimit(_line, ":");
+    auto _delim = rocprofsys::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
     if(_delim.size() > 1) duration = utility::convert<double>(_delim.at(1));
-    if(_delim.size() > 2) repeat = utility::convert<uint64_t>(_delim.at(2));
+    if(_delim.size() > 2) repeat = utility::convert<std::uint64_t>(_delim.at(2));
     if(_delim.size() > 3) clock_id = find_clock_identifier(_delim.at(3));
 }
 
@@ -236,12 +240,12 @@ void
 spec::operator()(const stages& _stages) const
 {
     auto _n = repeat;
-    if(_n < 1) _n = std::numeric_limits<uint64_t>::max();
+    if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
     while(get_state() < State::Active)
         sleep(1 * units::usec);
 
-    for(uint64_t i = 0; i < _n; ++i)
+    for(std::uint64_t i = 0; i < _n; ++i)
     {
         auto _spec = spec{ clock_id, delay, duration, i, repeat };
         auto _wait = [_spec](const auto& _func, auto _dur) {
@@ -290,12 +294,15 @@ get_trace_specs()
 
     {
         auto _delay_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY })
+                .value_or(0.0);
         auto _duration_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
-        auto _clock_v = find_clock_identifier(
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-                .value_or("CLOCK_REALTIME"));
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+                .value_or(0.0);
+        auto _clock_v =
+            find_clock_identifier(config::get_setting_value<std::string>(
+                                      std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+                                      .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
         {
@@ -305,11 +312,11 @@ get_trace_specs()
 
     {
         auto _periods_v =
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
+            config::get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
                 .value_or("");
         if(!_periods_v.empty())
         {
-            for(auto itr : tim::delimit(_periods_v, " ;\t\n"))
+            for(auto itr : rocprofsys::delimit(_periods_v, " ;\t\n"))
                 _v.emplace_back(itr);
         }
     }
@@ -324,12 +331,12 @@ get_trace_stages()
 
     _v.init = [](const spec&) { return get_state() < State::Finalized; };
     _v.wait = [](const spec& _spec) {
-        sleep(std::min<uint64_t>(100 * units::msec, _spec.delay * units::sec));
+        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
         return get_state() < State::Finalized;
     };
     _v.start   = [](const spec&) { return get_state() < State::Finalized; };
     _v.collect = [](const spec& _spec) {
-        sleep(std::min<uint64_t>(100 * units::msec, _spec.duration * units::sec));
+        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
         return get_state() < State::Finalized;
     };
     _v.stop = [](const spec&) { return get_state() < State::Finalized; };

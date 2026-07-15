@@ -158,7 +158,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
         char fd_bdf_str[13];
 
         /* Only check against fdinfo files that contain a bdf */
-        if (sscanf(bdfline.c_str(), "drm-pdev:       %s", &fd_bdf_str[0]) != 1) continue;
+        if (sscanf(bdfline.c_str(), "drm-pdev:       %12s", &fd_bdf_str[0]) != 1) continue;
 
         /* Populate amdsmi_proc_info_t struct only if the bdf in
          * the fdinfo file matches the passed bdf */

@@ -20,11 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/pm4_factory.h"
-#include "def/gfx12_def.h"
-#include "pm4/gfx12_cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/def/gfx12_def.h"
+#include "lib/aqlprofile/pm4/gfx12_cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
 namespace aql_profile
 {
@@ -132,7 +132,7 @@ Gfx12Factory::ConstructTable(const AgentInfo* agent_info)
     }
 }
 
-// Pm4Factory create mathods
+// Pm4Factory create methods
 Pm4Factory*
 Pm4Factory::Gfx12Create(const AgentInfo* agent_info)
 {

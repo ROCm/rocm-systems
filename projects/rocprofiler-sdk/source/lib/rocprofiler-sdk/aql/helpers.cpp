@@ -39,9 +39,12 @@ namespace aql
 hsa_ven_amd_aqlprofile_id_query_t
 get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
 {
-    auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
-    aqlprofile_pmc_profile_t profile   = {.agent = aql_agent, .events = nullptr, .event_count = 0};
-    hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent);
+    if(!aql_agent)
+        return hsa_ven_amd_aqlprofile_id_query_t{.name = nullptr, .id = 0, .instance_count = 0};
+    auto profile =
+        aqlprofile_pmc_profile_t{.agent = *aql_agent, .events = nullptr, .event_count = 0};
+    auto query = hsa_ven_amd_aqlprofile_id_query_t{metric.block().c_str(), 0, 0};
     if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
         ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", metric);
@@ -53,9 +56,10 @@ get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
 uint32_t
 get_block_counters(rocprofiler_agent_id_t agent, const aqlprofile_pmc_event_t& event)
 {
-    auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
-    aqlprofile_pmc_profile_t query     = {.agent = aql_agent, .events = &event, .event_count = 1};
-    uint32_t                 max_block_counters = 0;
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent);
+    if(!aql_agent) return 0;
+    auto query = aqlprofile_pmc_profile_t{.agent = *aql_agent, .events = &event, .event_count = 1};
+    uint32_t max_block_counters = 0;
     if(aqlprofile_get_pmc_info(&query, AQLPROFILE_INFO_BLOCK_COUNTERS, &max_block_counters) !=
        HSA_STATUS_SUCCESS)
     {

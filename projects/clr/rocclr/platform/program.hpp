@@ -36,7 +36,7 @@ namespace amd {
  */
 
 //! A kernel function symbol
-class Symbol : public HeapObject {
+class Symbol {
  public:
   typedef std::unordered_map<const Device*, const device::Kernel*> devicekernels_t;
 

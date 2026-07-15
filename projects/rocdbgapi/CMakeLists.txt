@@ -119,6 +119,15 @@ else()
   endif()
 endif()
 
+# Define this before amd-dbgapi.h is generated.  amd-dbgapi.h.in uses
+# this to define the right export/import decorators in amd-dbgapi.h
+# for clients to use.
+if(NOT BUILD_SHARED_LIBS)
+  set(AMD_DBGAPI_STATIC_LIB "1")
+else()
+  set(AMD_DBGAPI_STATIC_LIB "0")
+endif()
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/include/amd-dbgapi.h.in
   ${CMAKE_CURRENT_BINARY_DIR}/include/amd-dbgapi/amd-dbgapi.h @ONLY)
@@ -411,8 +420,7 @@ if(DEFINED ENV{ROCM_BUILD_ID})
   # ROCM_BUILD_ID is set by the ROCm-CI build environment.
   set(build_info $ENV{ROCM_BUILD_ID})
 else()
-  string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
-  set(build_info developer-build-${NOW})
+  set(build_info developer-build)
 
   if(DEFINED ENV{USER})
     set(build_info ${build_info}-$ENV{USER})
@@ -630,7 +638,7 @@ cpack_add_component(
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
   # set input and output files
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/doxygen/cmake_setting/Doxyfile.in)
   set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
 
   # request to configure the file

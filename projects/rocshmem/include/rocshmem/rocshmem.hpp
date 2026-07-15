@@ -35,6 +35,7 @@
 #include "rocshmem_COLL.hpp"
 #include "rocshmem_P2P_SYNC.hpp"
 #include "rocshmem_RMA_X.hpp"
+#include "rocshmem_TILE.hpp"
 #if defined(HAVE_EXTERNAL_MPI)
 #include <mpi.h>
 #endif
@@ -55,7 +56,11 @@
 
 namespace rocshmem {
 
-constexpr char VERSION[] = "3.3.0";
+#define ROCSHMEM_MAJOR_VERSION 1
+#define ROCSHMEM_MINOR_VERSION 4
+#define ROCSHMEM_MAX_NAME_LEN  64
+
+constexpr char VERSION[] = ROCSHMEM_VERSION;
 
 /******************************************************************************
  **************************** HOST INTERFACE **********************************
@@ -219,12 +224,132 @@ __host__ void rocshmem_finalize();
 __host__ void *rocshmem_malloc(size_t size);
 
 /**
+ * @brief Allocate memory of \p size bytes from the symmetric heap with the
+ * requested \p alignment. This is a collective operation and must be called by
+ * all PEs with identical \p alignment and \p size arguments.
+ *
+ * The returned pointer (and, by symmetry, every peer's pointer for the same
+ * collective call) is aligned to \p alignment bytes.
+ *
+ * Constraints on @p alignment (matching OpenSHMEM ``shmem_align`` and POSIX
+ * ``posix_memalign`` semantics):
+ *   - \p alignment must be a power of two.
+ *   - \p alignment must be a multiple of ``sizeof(void *)``.
+ *
+ *   In practice, any power of two that is at least ``sizeof(void *)`` (i.e.
+ *   \c 8 on a 64-bit build) satisfies both rules. Therefore the smallest
+ *   accepted value is ``sizeof(void *)`` and accepted values are
+ *   ``sizeof(void *), 2*sizeof(void *), 4*sizeof(void *), ...``.
+ *
+ *   If \p alignment violates either rule (including \c 0, \c 1, \c 2, \c 4 on
+ *   64-bit, or any non power-of-two), this routine returns \c NULL and emits
+ *   a warning. The collective barrier is still entered so other PEs do not
+ *   deadlock.
+ *
+ *   \p alignment values less than or equal to the default symmetric-heap
+ *   alignment (128 bytes) yield a 128-byte aligned pointer (identical to
+ *   ::rocshmem_malloc).
+ *
+ * @param[in] alignment Required pointer alignment in bytes. Must be a power
+ *                      of two and a multiple of ``sizeof(void *)``.
+ * @param[in] size      Memory allocation size in bytes.
+ *
+ * @return A pointer to the allocated memory on the symmetric heap, or
+ *         \c NULL if \p alignment is invalid or the allocation cannot be
+ *         satisfied.
+ */
+__host__ void *rocshmem_align(size_t alignment, size_t size);
+
+/**
+ * @brief Allocate memory for an array of \p count elements of \p size bytes
+ * each from the symmetric heap and zero-initialize the allocation. This is a
+ * collective operation and must be called by all PEs with identical \p count
+ * and \p size arguments.
+ *
+ * Mirrors OpenSHMEM ``shmem_calloc`` semantics: the returned buffer holds
+ * ``count * size`` bytes, every byte set to ``0``. The pointer satisfies the
+ * same default symmetric-heap alignment as ::rocshmem_malloc.
+ *
+ * Returns ``NULL`` when:
+ *   - \p count is \c 0,
+ *   - \p size is \c 0,
+ *   - ``count * size`` would overflow ``size_t`` (a warning is emitted in
+ *     this case), or
+ *   - the underlying allocation cannot be satisfied.
+ *
+ * The collective barrier is still entered on the NULL-return paths so that
+ * other PEs do not deadlock.
+ *
+ * @param[in] count Number of elements to allocate.
+ * @param[in] size  Size of each element in bytes.
+ *
+ * @return A pointer to the zero-initialized allocation on the symmetric
+ *         heap, or \c NULL on the failure conditions described above.
+ */
+__host__ void *rocshmem_calloc(size_t count, size_t size);
+
+/**
  * @brief Free a memory allocation from the symmetric heap.
  * This is a collective operation and must be called by all PEs.
  *
  * @param[in] ptr Pointer to previously allocated memory on the symmetric heap.
  */
 __host__ void rocshmem_free(void *ptr);
+
+/**
+ * @brief Registers a non-symmetric buffer
+ *
+ * @param[in] addr Pointer to previously allocated user memory
+ * @param[in] length Length of addr
+ */
+__host__ int rocshmem_buffer_register(void *addr, size_t length);
+
+/**
+ * @brief Deregisters previously registered user memory
+ *
+ * @param[in] addr Pointer to previously registered memory
+ */
+__host__ int rocshmem_buffer_unregister(void *addr);
+
+/**
+ * @brief Deregisters all previously registered user memory
+ */
+__host__ void rocshmem_buffer_unregister_all();
+
+/**
+ * @brief Registers a symmetric user buffer so it can be used as the remote
+ * target of RMA operations.
+ *
+ * Unlike rocshmem_buffer_register(), this is a *collective* operation that
+ * must be called by all PEs with a buffer of the same length. The call maps
+ * the user's buffer to a fresh rocSHMEM-managed virtual address and returns
+ * it; that returned address (not @p addr) is what the caller must use as the
+ * symmetric target for RMA routines and must pass to
+ * rocshmem_buffer_unregister_symmetric().
+ *
+ * @note This routine is currently restricted to memory allocated through the
+ *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing
+ *       a non-VMM pointer returns nullptr.
+ *
+ * @param[in] addr   Pointer to previously allocated VMM memory.
+ * @param[in] length Length of addr in bytes.
+ *
+ * @return The rocSHMEM-managed symmetric address on success, nullptr otherwise.
+ */
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length);
+
+/**
+ * @brief Deregisters a previously registered symmetric user buffer.
+ *
+ * This is a collective operation that must be called by all PEs that
+ * participated in the matching rocshmem_buffer_register_symmetric() call.
+ *
+ * @param[in] addr The symmetric address returned by
+ *                 rocshmem_buffer_register_symmetric().
+ *
+ * @return ROCSHMEM_SUCCESS on success, ROCSHMEM_ERROR otherwise.
+ */
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr);
 
 /**
  * @brief Query for the number of PEs.
@@ -239,6 +364,38 @@ __host__ int rocshmem_n_pes();
  * @return PE ID of the caller.
  */
 __host__ int rocshmem_my_pe();
+
+/**
+ * @brief Query the OpenSHMEM specification version this library implements.
+ *
+ * @param[out] major  ROCSHMEM_MAJOR_VERSION.
+ * @param[out] minor  ROCSHMEM_MINOR_VERSION.
+ */
+__host__ void rocshmem_info_get_version(int *major, int *minor);
+
+/**
+ * @brief Returns the vendor-defined string identifying this library.
+ *
+ * Copies ROCSHMEM_VENDOR_STRING into @p name. The caller must provide
+ * a buffer of at least ROCSHMEM_MAX_NAME_LEN bytes.
+ *
+ * @param[out] name  Buffer to receive the vendor string.
+ */
+__host__ void rocshmem_info_get_name(char *name);
+
+/**
+ * @brief Returns the vendor-specific library version of rocSHMEM.
+ *
+ * Writes ROCSHMEM_VENDOR_MAJOR_VERSION into @p major,
+ * ROCSHMEM_VENDOR_MINOR_VERSION into @p minor, and
+ * ROCSHMEM_VENDOR_PATCH_VERSION into @p patch.
+ *
+ * @param[out] major  Vendor major version.
+ * @param[out] minor  Vendor minor version.
+ * @param[out] patch  Vendor patch version.
+ */
+__host__ void rocshmem_vendor_get_version_info(int *major, int *minor,
+                                               int *patch);
 
 /**
  * @brief Creates an OpenSHMEM context.
@@ -292,6 +449,33 @@ __host__ int rocshmem_team_n_pes(rocshmem_team_t team);
 __host__ int rocshmem_team_my_pe(rocshmem_team_t team);
 
 /**
+ * @brief Splits a parent team into two sets of non-overlapping teams based on a
+ *        2D Cartesian decomposition. Must be called by all PEs in the parent team.
+ *        After the split, each of the x-axis teams will contain all the PEs with the same
+ *        y-coordinate, and each of the y-axis teams will contain all the PEs with
+ *        the same x-coordinate.
+ *
+ * @param[in] parent_team    The team to be split.
+ * @param[in] xrange         Number of PEs per row.
+ * @param[in] xaxis_config   Pointer to a team configuration struct for the x-axis.
+ * @param[in] xaxis_mask     Bitmask representing the set of configuration parameters
+ *                           to use from @p xaxis_config. A zero mask indicates all fields use defaults.
+ * @param[out] xaxis_team    Output handle for the calling PE's x-axis team.
+ * @param[in] yaxis_config   Pointer to a team configuration struct for the y-axis.
+ * @param[in] yaxis_mask     Bitmask representing the set of configuration parameters
+ *                           to use from @p yaxis_config. A zero mask indicates all fields use defaults.
+ * @param[out] yaxis_team    Output handle for the calling PE's y-axis team.
+ *
+ * @return Zero on success; non-zero on failure.
+ */
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
+                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
+                                    rocshmem_team_t *xaxis_team, 
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+                                    rocshmem_team_t *yaxis_team);
+
+
+/**
  * @brief Create a new a team of PEs. Must be called by all PEs
  * in the parent team.
  *
@@ -327,10 +511,11 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  * is undefined. This call will destroy only the shareable contexts
  * created from the referenced team.
  *
- * @param[in] team The team to destroy. The behavior is undefined if
- *                 the input team is ROCSHMEM_TEAM_WORLD or any other
- *                 invalid team. If the input is ROCSHMEM_TEAM_INVALID,
- *                 this function will not perform any operation.
+ * @param[in] team The team to destroy.
+ *                 ROCSHMEM_TEAM_INVALID, ROCSHMEM_TEAM_WORLD, and
+ *                 ROCSHMEM_TEAM_SHARED are silently ignored (no-op).
+ *                 Passing a handle that was already destroyed or
+ *                 never created results in undefined behavior.
  *
  * @return None.
  */
@@ -360,6 +545,15 @@ __host__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 __host__ void rocshmem_quiet();
 
 /**
+ * @brief enqueues a quiet operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_quiet_on_stream(hipStream_t stream);
+
+/**
  * @brief perform a collective barrier between all PEs in the system.
  * The caller is blocked until the barrier is resolved.
  *
@@ -368,11 +562,63 @@ __host__ void rocshmem_quiet();
 __host__ void rocshmem_barrier_all();
 
 /**
+ * @brief perform a collective barrier across all PEs in \p team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the barrier.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier(rocshmem_team_t team);
+
+/**
  * @brief enqueues a collective barrier on given stream.
  *
  * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a collective barrier across all PEs in \p team on given
+ * stream.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team    Team participating in the barrier.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream);
+
+/**
+ * @brief enqueues a sync_all operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a team-scoped sync across all PEs in \p team on given stream.
+ *
+ * In contrast with rocshmem_barrier_on_stream, rocshmem_team_sync_on_stream
+ * only ensures completion and visibility of previously issued memory stores and
+ * does not ensure completion of remote memory updates issued via OpenSHMEM
+ * routines. The sync is stream-ordered. Passing ROCSHMEM_TEAM_INVALID is a
+ * no-op (nothing is enqueued).
+ *
+ * @param[in] team    Team participating in the sync.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream);
 
 /**
  * @brief enqueues an alltoall collective operation on given stream.
@@ -497,6 +743,22 @@ __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
  * @return void
  */
 __host__ void rocshmem_sync_all();
+
+/**
+ * @brief registers the arrival of a PE at a team-scoped sync.
+ * The caller is blocked until synchronization is resolved across \p team.
+ *
+ * In contrast with rocshmem_barrier, rocshmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the sync.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync(rocshmem_team_t team);
 
 /**
  * @brief allows any PE to force the termination of an entire program.

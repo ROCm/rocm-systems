@@ -46,6 +46,16 @@ TEST_F(HipFileStatsApi, CreateContextInvalidTarget)
     EXPECT_EQ(context, nullptr);
 }
 
+TEST_F(HipFileStatsApi, CreateContextNoSYS_pidfd_open)
+{
+    StrictMock<MSys> msys{};
+    EXPECT_CALL(msys, pidfd_open)
+        .WillOnce(testing::Throw(std::system_error(ENOSYS, std::generic_category())));
+    hipFileStatsContext_t *context;
+    EXPECT_EQ(hipFileStatsCreateContext(&context, 1234), hipFileStatsTargetProcessNotAccessible);
+    EXPECT_EQ(context, nullptr);
+}
+
 TEST_F(HipFileStatsApi, ConnectToTargetProcessInvalidArgument)
 {
     EXPECT_EQ(hipFileStatsConnectToTargetProcess(nullptr), hipFileStatsInvalidArgument);

@@ -12,8 +12,6 @@
 
 struct info_type : info_type_base
 {
-    TIMEMORY_DEFAULT_OBJECT(info_type)
-
     template <typename... Args>
     info_type(Args&&... _args)
     : info_type_base{ std::forward<Args>(_args)... }

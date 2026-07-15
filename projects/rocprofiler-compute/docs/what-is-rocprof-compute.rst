@@ -7,12 +7,12 @@ What is ROCm Compute Profiler?
 ******************************
 
 ROCm Compute Profiler is a kernel-level profiling tool for machine learning and high
-performance computing (HPC) workloads running on AMD Instinct™ accelerators.
+performance computing (HPC) workloads running on AMD Instinct™ GPUs.
 
-AMD Instinct MI-series accelerators are data center-class GPUs designed for
+AMD Instinct MI-Series GPUs are data center-class GPUs designed for
 compute and have some graphics capabilities disabled or removed.
 ROCm Compute Profiler primarily targets use with
-:doc:`accelerators in the MI300, MI200, and MI100 families <rocm:conceptual/gpu-arch>`.
+:doc:`GPUs in the AMD Instinct MI300, MI200, and MI100 Series <rocm:conceptual/gpu-arch>`.
 Development is in progress to support Radeon™ (RDNA) GPUs.
 
 ROCm Compute Profiler is built on top of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` to
@@ -38,8 +38,8 @@ comma-separated-values format for further
 micro-benchmarks to acquire hierarchical roofline data. The roofline model is
 not available on accelerators pre-MI200.
 
-ROCm Compute Profiler standalone GUI analyzer
----------------------------------------------
+ROCm Compute Profiler standalone GUI analyzer (experimental)
+-------------------------------------------------------------
 
 ROCm Compute Profiler provides a :doc:`standalone GUI <how-to/analyze/standalone-gui>` to
 enable basic performance analysis.
@@ -59,7 +59,7 @@ The following list describes ROCm Compute Profiler's features at a high level.
 
 * :doc:`Support for AMD Instinct MI300, MI200, and MI100 accelerators <reference/compatible-accelerators>`
 
-* :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>`
+* :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>` (experimental)
 
 * :ref:`Filtering <filtering>` to reduce profiling time
 

@@ -14,7 +14,12 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.selective_regions]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.selective_regions,
+    pytest.mark.timeout(120),
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # Fixtures
@@ -48,6 +53,7 @@ def no_marker_env() -> dict[str, str]:
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 @pytest.mark.parametrize("marker_api", ["enabled", "disabled"])
+@pytest.mark.class_name("pause-resume")
 class TestPauseResume(RocprofsysTest):
     """Tests for roctxProfilerPause/Resume without region filtering.
 
@@ -79,10 +85,9 @@ class TestPauseResume(RocprofsysTest):
 
         result = self.run_test(
             mode,
-            "pause_resume",
+            "pause-resume",
             env=env,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_perfetto(
@@ -100,6 +105,8 @@ class TestPauseResume(RocprofsysTest):
 
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+@pytest.mark.parametrize("marker_style", ["start_stop", "push_pop"])
+@pytest.mark.class_name("selective-region")
 class TestSelectiveRegion(RocprofsysTest):
     """Tests for selective region tracing without pause/resume.
 
@@ -109,22 +116,25 @@ class TestSelectiveRegion(RocprofsysTest):
         Region3: CodeBlock_E,
         Region1: CodeBlock_F,
         CodeBlock_G (outside)
+
+    Both roctxRangeStartA/Stop (start_stop) and roctxRangePushA/Pop (push_pop)
+    marker styles are tested — expected kernel presence is identical for both.
     """
 
-    def test_no_filter(self, mode, selective_region_env):
+    def test_no_filter(self, mode, marker_style, selective_region_env):
         """No ROCPROFSYS_SELECTED_REGIONS — all regions traced."""
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=selective_region_env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_perfetto(
             result,
             subtest_name="All kernels present",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=[
                 "CodeBlock_A",
                 "CodeBlock_B",
@@ -142,7 +152,7 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region1", "Region2", "Region3"],
         )
 
-    def test_region_1_filter(self, mode, selective_region_env):
+    def test_region_1_filter(self, mode, marker_style, selective_region_env):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
 
         Region1 spans: CodeBlock_B, CodeBlock_C (nested Region2), CodeBlock_D,
@@ -153,16 +163,16 @@ class TestSelectiveRegion(RocprofsysTest):
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_perfetto(
             result,
             subtest_name="Region1 filtered kernels",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )
@@ -174,7 +184,7 @@ class TestSelectiveRegion(RocprofsysTest):
             fail_regex=["Region3"],
         )
 
-    def test_region_2_and_3_filter(self, mode, selective_region_env):
+    def test_region_2_and_3_filter(self, mode, marker_style, selective_region_env):
         """ROCPROFSYS_SELECTED_REGIONS='Region2,Region3' — only Region2+3 content traced.
 
         Region2 spans: CodeBlock_C (nested inside Region1)
@@ -185,16 +195,16 @@ class TestSelectiveRegion(RocprofsysTest):
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region2,Region3"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_perfetto(
             result,
             subtest_name="Region2+3 filtered kernels",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_C", "CodeBlock_E"],
             fail_regex=[
                 "CodeBlock_A",
@@ -219,14 +229,16 @@ class TestSelectiveRegion(RocprofsysTest):
 
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+@pytest.mark.parametrize("marker_style", ["start_stop", "push_pop"])
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param("selective_region_pause_1", id="inside"),
-        pytest.param("selective_region_pause_2", id="before"),
-        pytest.param("selective_region_pause_3", id="outside"),
+        pytest.param("selective-region-pause-1", id="inside"),
+        pytest.param("selective-region-pause-2", id="before"),
+        pytest.param("selective-region-pause-3", id="outside"),
     ],
 )
+@pytest.mark.class_name("selective-region-pause")
 class TestSelectiveRegionPause(RocprofsysTest):
     """Tests for pause/resume interaction with selective region filtering.
 
@@ -243,28 +255,31 @@ class TestSelectiveRegionPause(RocprofsysTest):
     Target 3: Pause occurs INSIDE the region, resume occurs OUTSIDE after region stop.
         Code flow: Region1 start, CodeBlock_A, pause, CodeBlock_C,
         Region1 stop, CodeBlock_D, resume
+
+    Both roctxRangeStartA/Stop (start_stop) and roctxRangePushA/Pop (push_pop)
+    marker styles are tested — expected kernel presence is identical for both.
     """
 
-    def test_no_filter(self, mode, target, selective_region_env):
+    def test_no_filter(self, mode, target, marker_style, selective_region_env):
         """Without filter, pause/resume apply globally."""
         result = self.run_test(
             mode,
             target,
             env=selective_region_env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside region (no filter) kernels"
             pass_regex = ["CodeBlock_Z", "CodeBlock_A", "CodeBlock_C", "CodeBlock_D"]
             fail_regex = ["CodeBlock_B"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before region (no filter) kernels"
             pass_regex = ["CodeBlock_C", "CodeBlock_D"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_A", "CodeBlock_B"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside, resume outside (no filter) kernels"
             pass_regex = ["CodeBlock_A"]
             fail_regex = ["CodeBlock_C", "CodeBlock_D"]
@@ -276,14 +291,26 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=pass_regex,
             fail_regex=fail_regex,
         )
-        self.assert_perfetto(
-            result,
-            subtest_name=f"{subtest_name} markers",
-            categories=["rocm_marker_api"],
-            pass_regex=["Region1"],
-        )
+        if target == "selective-region-pause-2":
+            # Region1 is pushed while paused (pause fires before the range start),
+            # so the begin-marker is never written.
+            self.assert_perfetto(
+                result,
+                subtest_name=f"{subtest_name} markers absent",
+                categories=["rocm_marker_api"],
+                fail_regex=["Region1"],
+            )
+        else:
+            # Scenarios 1 and 3: Region1 is pushed before the pause fires,
+            # so the begin-marker is written and Region1 is visible.
+            self.assert_perfetto(
+                result,
+                subtest_name=f"{subtest_name} markers",
+                categories=["rocm_marker_api"],
+                pass_regex=["Region1"],
+            )
 
-    def test_filtered(self, mode, target, selective_region_env):
+    def test_filtered(self, mode, target, marker_style, selective_region_env):
         """With Region1 filter: region filtering combined with pause/resume."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
@@ -291,20 +318,20 @@ class TestSelectiveRegionPause(RocprofsysTest):
             mode,
             target,
             env=env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside Region1 filtered kernels"
             pass_regex = ["CodeBlock_A", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_B", "CodeBlock_D"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before Region1 filtered kernels"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside Region1, resume outside filtered kernels"
             pass_regex = ["CodeBlock_A"]
             fail_regex = ["CodeBlock_C", "CodeBlock_D"]
@@ -323,7 +350,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=["Region1"],
         )
 
-    def test_no_marker(self, mode, target, no_marker_env):
+    def test_no_marker(self, mode, target, marker_style, no_marker_env):
         """With Region1 filter but no marker_api: pause/resume ignored."""
         env = no_marker_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
@@ -331,20 +358,20 @@ class TestSelectiveRegionPause(RocprofsysTest):
             mode,
             target,
             env=env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_C"]
             fail_regex = ["CodeBlock_D"]
@@ -364,6 +391,8 @@ class TestSelectiveRegionPause(RocprofsysTest):
 
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+@pytest.mark.parametrize("marker_style", ["start_stop", "push_pop"])
+@pytest.mark.class_name("selective-region-no-marker")
 class TestSelectiveRegionNoMarker(RocprofsysTest):
     """Tests for region filtering with ConditionB only (no marker_api).
 
@@ -376,24 +405,27 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
         Region3: CodeBlock_E,
         Region1: CodeBlock_F,
         CodeBlock_G (outside)
+
+    Both roctxRangeStartA/Stop (start_stop) and roctxRangePushA/Pop (push_pop)
+    marker styles are tested — expected kernel presence is identical for both.
     """
 
-    def test_region_1_filter(self, mode, no_marker_env):
+    def test_region_1_filter(self, mode, marker_style, no_marker_env):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' without marker_api."""
         env = no_marker_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
+            run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_perfetto(
             result,
             subtest_name="Region1 filtered kernels (no marker_api)",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )

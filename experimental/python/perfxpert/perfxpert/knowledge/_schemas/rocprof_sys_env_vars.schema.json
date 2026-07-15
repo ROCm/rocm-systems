@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["name", "description"],
+    "properties": {
+      "name": {"type": "string"},
+      "description": {"type": "string"},
+      "default": {"type": ["string", "number", "boolean", "null"]},
+      "values": {"type": "array", "items": {"type": "string"}},
+      "tool": {"type": "string", "enum": ["rocprof-sys", "rocprofv3", "hip", "rocm"]},
+      "requires_beta": {"type": "boolean"}
+    },
+    "additionalProperties": false
+  }
+}

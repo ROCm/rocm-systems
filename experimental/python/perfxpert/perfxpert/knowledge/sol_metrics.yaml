@@ -1,0 +1,37 @@
+# Speed-of-Light (SOL) metric definitions.
+# Ref: llm-reference-guide.md lines 1351-1366.
+
+- name: VALU_UTIL
+  description: "Vector ALU utilization vs peak"
+  unit: percent
+  high_threshold: 0.80
+  medium_threshold: 0.50
+
+- name: MFMA_UTIL
+  description: "MFMA unit utilization (matmul kernels)"
+  unit: percent
+  high_threshold: 0.50
+  medium_threshold: 0.25
+
+- name: HBM_UTIL
+  description: "HBM bandwidth utilization vs peak"
+  unit: percent
+  high_threshold: 0.80
+  medium_threshold: 0.50
+
+- name: L2_UTIL
+  description: "L2 cache bandwidth utilization"
+  unit: percent
+  high_threshold: 0.80
+  medium_threshold: 0.50
+
+- name: OCCUPANCY
+  description: "Wave occupancy (waves-per-CU vs max)"
+  unit: percent
+  high_threshold: 0.75
+  medium_threshold: 0.50
+
+# Phase-10 Feature F — MFMA vs VALU ratio lives in
+# `knowledge/matrix_meter.yaml` to preserve the "sol_metrics is a list"
+# schema contract. The Compute Specialist cross-references it via
+# `fence/compute_specialist.md::Matrix Meter`.

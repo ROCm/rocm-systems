@@ -9,6 +9,8 @@ split pipeline.
 import hashlib
 import os
 import shutil
+import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -29,8 +31,8 @@ from rocm_kpack.wheel_splitter import (
     generate_record,
     generate_wheel_file,
     parse_wheel_identity,
+    zip_wheel,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -244,6 +246,19 @@ class TestGenerateDeviceMetadata:
         # gfx12_0 becomes gfx12-0 in dist name (underscore to hyphen)
         assert "Name: amd-torch-device-gfx12-0" in metadata
 
+    def test_gfx11_sub_family_level(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(identity, "gfx110x", "amd-torch-device", [])
+        assert "Name: amd-torch-device-gfx110x" in metadata
+        assert "Summary: AMD device kernels (RDNA3)" in metadata
+
     def test_with_device_requires_dist(self):
         identity = WheelIdentity(
             name="torch",
@@ -277,6 +292,37 @@ class TestGenerateDeviceMetadata:
             ["some-dep-@GFXARCH@ >= 2.0"],
         )
         assert "Requires-Dist: some-dep-gfx1100 >= 2.0" in metadata
+
+    def test_gfxarch_dep_dropped_for_family(self):
+        # @GFXARCH@-templated deps name per-target packages (e.g.
+        # rocm-sdk-device-<target>) which only exist for TARGET-level
+        # bundles. Family/sub-family device wheels are co-installed with a
+        # target wheel that already carries those deps, so the line must be
+        # dropped here.
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.13",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.13.dist-info",
+        )
+        family_metadata = generate_device_metadata(
+            identity,
+            "gfx11",
+            "amd-torch-device",
+            ["rocm-sdk-device-@GFXARCH@ == 7.13", "static-dep == 1.0"],
+        )
+        assert "rocm-sdk-device" not in family_metadata
+        assert "Requires-Dist: static-dep == 1.0" in family_metadata
+
+        sub_family_metadata = generate_device_metadata(
+            identity,
+            "gfx12_0",
+            "amd-torch-device",
+            ["rocm-sdk-device-@GFXARCH@ == 7.13"],
+        )
+        assert "rocm-sdk-device" not in sub_family_metadata
 
 
 class TestArchToBundleKey:
@@ -313,7 +359,13 @@ class TestBundleKeyToDistName:
         )
 
     def test_sub_family_level(self):
-        # Underscore in bundle key becomes hyphen in dist name
+        assert (
+            _bundle_key_to_dist_name("amd-torch-device", "gfx110x")
+            == "amd-torch-device-gfx110x"
+        )
+
+    def test_structural_sub_family_level(self):
+        # Underscore in bundle key becomes hyphen in dist name.
         assert (
             _bundle_key_to_dist_name("amd-torch-device", "gfx12_0")
             == "amd-torch-device-gfx12-0"
@@ -386,12 +438,12 @@ class TestRewriteHostMetadata:
         splitter._rewrite_host_metadata(staging, identity, {"gfx942"})
 
         metadata = (staging / identity.dist_info_name / "METADATA").read_text()
-        assert "Provides-Extra: gfx942" in metadata
+        assert "Provides-Extra: device-gfx942" in metadata
         assert (
-            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "gfx942"'
+            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "device-gfx942"'
             in metadata
         )
-        assert "Provides-Extra: all" in metadata
+        assert "Provides-Extra: device-all" in metadata
 
     def test_classic_has_no_variant_markers(self, tmp_path: Path):
         staging, identity = self._make_host_staging(tmp_path)
@@ -417,27 +469,46 @@ class TestRewriteHostMetadata:
     def test_chain_with_family_wheel(self, tmp_path: Path):
         staging, identity = self._make_host_staging(tmp_path)
         splitter = self._make_splitter()
-        # gfx1100 chain: gfx1100 -> gfx11_0 -> gfx11
+        # gfx1100 chain: gfx1100 -> gfx110x -> gfx11
         # If gfx11 and gfx1100 both have device wheels:
         splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx11"})
 
         metadata = (staging / identity.dist_info_name / "METADATA").read_text()
         # Both should appear as deps under the gfx1100 extra
         assert (
-            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "gfx1100"'
+            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-gfx1100"'
             in metadata
         )
         assert (
-            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "gfx1100"'
+            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "device-gfx1100"'
             in metadata
         )
-        # "all" should include both
+        # "device-all" should include both
         assert (
-            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "all"'
+            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "device-all"'
             in metadata
         )
         assert (
-            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "all"'
+            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-all"'
+            in metadata
+        )
+
+    def test_chain_with_gfx110x_wheel(self, tmp_path: Path):
+        staging, identity = self._make_host_staging(tmp_path)
+        splitter = self._make_splitter()
+        splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx110x"})
+
+        metadata = (staging / identity.dist_info_name / "METADATA").read_text()
+        assert (
+            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-all"'
             in metadata
         )
 
@@ -450,11 +521,11 @@ class TestRewriteHostMetadata:
 
         metadata = (staging / identity.dist_info_name / "METADATA").read_text()
         # No target-level extras since gfx11 is a family
-        assert "Provides-Extra: gfx11" not in metadata
-        # But "all" should still include it
-        assert "Provides-Extra: all" in metadata
+        assert "Provides-Extra: device-gfx11" not in metadata
+        # But "device-all" should still include it
+        assert "Provides-Extra: device-all" in metadata
         assert (
-            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "all"'
+            'Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1; extra == "device-all"'
             in metadata
         )
 
@@ -481,8 +552,8 @@ class TestRewriteHostMetadata:
         header_section, body_section = header_body
         # All injected headers must be in the header section, not the body
         assert "Requires-Dist: rocm-bootstrap" in header_section
-        assert "Provides-Extra: gfx942" in header_section
-        assert "Provides-Extra: all" in header_section
+        assert "Provides-Extra: device-gfx942" in header_section
+        assert "Provides-Extra: device-all" in header_section
         # Body should still contain the description
         assert "description body" in body_section
 
@@ -501,10 +572,10 @@ class TestVariantWheel:
             "Name: torch\n"
             "Version: 2.10.0+rocm7.1\n"
             "Requires-Dist: rocm-bootstrap\n"
-            "Provides-Extra: gfx942\n"
-            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "gfx942"\n'
-            "Provides-Extra: all\n"
-            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "all"\n'
+            "Provides-Extra: device-gfx942\n"
+            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "device-gfx942"\n'
+            "Provides-Extra: device-all\n"
+            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "device-all"\n'
             "\n"
             "Description body.\n"
         )
@@ -542,9 +613,9 @@ class TestVariantWheel:
 
         metadata = (staging / identity.dist_info_name / "METADATA").read_text()
         # Should have the extras line AND the variant marker line
-        assert 'extra == "gfx942"' in metadata
+        assert 'extra == "device-gfx942"' in metadata
         assert ('"amd :: gfx_arch :: gfx942" in variant_properties') in metadata
-        # "all" extra should NOT get variant markers
+        # "device-all" extra should NOT get variant markers
         assert '"amd :: gfx_arch :: all"' not in metadata
 
     def test_variant_json(self, tmp_path: Path):
@@ -582,7 +653,7 @@ class TestVariantWheel:
         # Check METADATA has variant markers
         metadata = (variant_path / identity.dist_info_name / "METADATA").read_text()
         assert "variant_properties" in metadata
-        assert 'extra == "gfx942"' in metadata
+        assert 'extra == "device-gfx942"' in metadata
 
         # Check variant.json exists
         variant_json = variant_path / identity.dist_info_name / "variant.json"
@@ -637,6 +708,73 @@ class TestGenerateRecord:
         test_line = [l for l in lines if "test.py" in l][0]
         assert f"sha256={expected_hash}" in test_line
         assert f",{len(test_content)}" in test_line
+
+
+class TestWheelArchivePermissions:
+    def test_extract_and_repack_preserves_exact_executable_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from rocm_kpack.binutils import Toolchain
+
+        input_wheel = tmp_path / "input.whl"
+        executable_path = "torch/bin/torch_shm_manager"
+        plain_path = "torch/__init__.py"
+        extracted_root = input_wheel.parent / (input_wheel.stem + ".tmp_extract")
+        chmod_calls: dict[str, int] = {}
+        path_type = type(tmp_path)
+        original_chmod = path_type.chmod
+
+        def recording_chmod(self: Path, mode: int) -> None:
+            chmod_calls[self.relative_to(extracted_root).as_posix()] = mode
+            if os.name != "nt":
+                original_chmod(self, mode)
+
+        with zipfile.ZipFile(input_wheel, "w") as zf:
+            executable_info = zipfile.ZipInfo(executable_path)
+            executable_info.external_attr = (stat.S_IFREG | 0o751) << 16
+            zf.writestr(executable_info, b"#!/bin/sh\n")
+
+            plain_info = zipfile.ZipInfo(plain_path)
+            plain_info.external_attr = (stat.S_IFREG | 0o640) << 16
+            zf.writestr(plain_info, b"# torch\n")
+
+        monkeypatch.setattr(path_type, "chmod", recording_chmod)
+
+        splitter = WheelSplitter(
+            device_package_prefix="amd-torch-device",
+            overlay_root="torch/",
+            toolchain=Toolchain(),
+        )
+        extracted_dir, is_temporary = splitter._resolve_input(input_wheel)
+        assert is_temporary
+
+        try:
+            extracted_executable = extracted_dir / executable_path
+            if os.name != "nt":
+                assert stat.S_IMODE(extracted_executable.stat().st_mode) == 0o751
+                assert (
+                    stat.S_IMODE((extracted_dir / plain_path).stat().st_mode) == 0o640
+                )
+
+            output_wheel = tmp_path / "output.whl"
+            zip_wheel(extracted_dir, output_wheel)
+        finally:
+            shutil.rmtree(extracted_dir)
+
+        assert chmod_calls[executable_path] == 0o751
+        assert chmod_calls[plain_path] == 0o640
+
+        if os.name == "nt":
+            return
+
+        with zipfile.ZipFile(output_wheel, "r") as zf:
+            output_executable_mode = stat.S_IMODE(
+                zf.getinfo(executable_path).external_attr >> 16
+            )
+            output_plain_mode = stat.S_IMODE(zf.getinfo(plain_path).external_attr >> 16)
+
+        assert output_executable_mode == 0o751
+        assert output_plain_mode == 0o640
 
 
 class TestKpackSearchPattern:

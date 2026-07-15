@@ -55,7 +55,7 @@ public:
         hipError_t hip_status = hipSuccess;
         hip_status = hipMemcpyDtoH((void *)hstPtr, data_buf, buf_size);
         if (hip_status != hipSuccess) {
-            std::cerr << "ERROR: hipMemcpyDtoH failed! (" << hip_status << ")" << std::endl;
+            RocVideoDecCriticalLog("hipMemcpyDtoH failed! (" + ROCVIDEODEC_TOSTR(hip_status) + ")");
             delete [] hstPtr;
             return;
         }
@@ -80,7 +80,7 @@ public:
             hipError_t hip_status = hipSuccess;
             hip_status = hipMemcpyDtoH((void *)hst_ptr, surf_mem, output_image_size);
             if (hip_status != hipSuccess) {
-                std::cerr << "ERROR: hipMemcpyDtoH failed! (" << hip_status << ")" << std::endl;
+                RocVideoDecCriticalLog("hipMemcpyDtoH failed! (" + ROCVIDEODEC_TOSTR(hip_status) + ")");
                 delete [] hst_ptr;
                 return;
             }
@@ -88,11 +88,11 @@ public:
             hst_ptr = static_cast<uint8_t *> (surf_mem);
 
         if (hst_ptr == nullptr) {
-            ROCDEC_ERR("Null surface pointer.");
+            RocVideoDecCriticalLog("Null surface pointer.");
             return;
         }
 
-        // Need to covert interleaved planar to stacked planar, assuming 4:2:0 chroma sampling.
+        // Need to convert interleaved planar to stacked planar, assuming 4:2:0 chroma sampling.
         uint8_t *stacked_ptr = new uint8_t [output_image_size];
         uint8_t *tmp_hst_ptr = hst_ptr;
         int output_stride =  surf_info->output_pitch;

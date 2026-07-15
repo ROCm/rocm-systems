@@ -34,6 +34,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <queue>
 #include <unordered_map>
 
 extern char** environ;
@@ -44,8 +45,21 @@ namespace rocattach
 {
 namespace
 {
-using session_t      = rocprofiler::rocattach::PTraceSession;
-using session_list_t = std::map<int, session_t>;
+using session_t = rocprofiler::rocattach::PTraceSession;
+
+struct pid_entry_t
+{
+    explicit pid_entry_t(pid_t tid)
+    : session(tid)
+    {}
+    session_t session;
+    // Non-empty only for tree-attach root PIDs. Holds the ordered list of PIDs
+    // successfully attached by rocattach_attach_tree() for this root. Consumed
+    // (and cleared) by the corresponding rocattach_detach_tree() call.
+    std::vector<pid_t> tree_pids;
+};
+
+using session_list_t = std::map<int, pid_entry_t>;
 
 #define ROCATTACH_STATUS_STRING(CODE, MSG)                                                         \
     template <>                                                                                    \
@@ -96,7 +110,6 @@ initialize_logging()
 {
     auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
     common::init_logging("ROCATTACH", logging_cfg);
-    FLAGS_colorlogtostderr = true;
 }
 
 session_list_t*
@@ -188,6 +201,7 @@ build_environment_buffer()
     return environment_buffer;
 }
 
+// Returns the TID of the 'rocp-bg-attach' thread if found, or -1 if not found
 pid_t
 resolve_attach_tid(pid_t pid)
 {
@@ -209,15 +223,24 @@ resolve_attach_tid(pid_t pid)
         }
     }
 
-    ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not find 'rocp-bg-attach' thread in "
-                 << task_dir << ", falling back to pid " << pid;
-    return pid;
+    if(ec)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to scan " << task_dir
+                   << " for 'rocp-bg-attach' thread: " << ec.message();
+    }
+    else
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not find 'rocp-bg-attach' thread in "
+                   << task_dir;
+    }
+
+    return -1;
 }
 
 rocattach_status_t
 setup(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
                << pid;
@@ -235,10 +258,21 @@ setup(int pid)
         }
 
         auto target_tid = resolve_attach_tid(pid);
+
+        if(target_tid < 0)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Cannot attach to process " << pid
+                       << ": 'rocp-bg-attach' thread not found. The target process does not "
+                          "appear to have attach support enabled. Start the target with "
+                          "ROCP_TOOL_ATTACH=1, or use a rocprofiler-register build configured "
+                          "with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON.";
+            return ROCATTACH_STATUS_ERROR;
+        }
+
         ROCP_INFO << "[rocprofiler-sdk-rocattach] Attaching to PID " << pid
                   << " via background thread TID " << target_tid;
         sessions->emplace(pid, target_tid);
-        session = &(sessions->at(pid));
+        session = &(sessions->at(pid).session);
     }
     auto status = ROCATTACH_STATUS_SUCCESS;
 
@@ -262,10 +296,15 @@ setup(int pid)
         return status;
     }
 
-    // Build and write tool library path to target process
-    auto tool_lib_path_env =
-        rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY", "librocprofiler-sdk-tool.so");
-    const char* tool_lib_path = tool_lib_path_env.c_str();
+    // Build and write tool library path to target process. Do not honor the
+    // user-controllable ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution
+    // context (setuid/setgid, file capabilities, etc.), so an unprivileged user
+    // cannot cause a privileged attach helper to inject an arbitrary library.
+    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
+                                        ? std::string{"librocprofiler-sdk-tool.so"}
+                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
+                                                                "librocprofiler-sdk-tool.so");
+    const char* tool_lib_path     = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
 
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
@@ -330,10 +369,41 @@ setup(int pid)
     return ROCATTACH_STATUS_SUCCESS;
 }
 
+// Collect all PIDs in the process tree rooted at root_pid (BFS via /proc).
+// Returns root_pid plus all descendant PIDs. Enumerates children for every thread
+// since children can be spawned via clone() from any thread.
+std::vector<pid_t>
+collect_process_tree(pid_t root_pid)
+{
+    std::vector<pid_t> result;
+    std::queue<pid_t>  worklist;
+    worklist.push(root_pid);
+
+    while(!worklist.empty())
+    {
+        pid_t pid = worklist.front();
+        worklist.pop();
+        result.push_back(pid);
+
+        auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        {
+            if(!entry.is_directory()) continue;
+            auto          children_path = entry.path() / "children";
+            std::ifstream children_file(children_path);
+            pid_t         child_pid;
+            while(children_file >> child_pid)
+                worklist.push(child_pid);
+        }
+    }
+    return result;
+}
+
 rocattach_status_t
 teardown(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_detach function called "
                   "for pid "
                << pid;
@@ -350,7 +420,7 @@ teardown(int pid)
             return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
         }
 
-        session = &(sessions->at(pid));
+        session = &(sessions->at(pid).session);
     }
     auto status = ROCATTACH_STATUS_SUCCESS;
 
@@ -399,6 +469,57 @@ teardown(int pid)
 ROCATTACH_EXTERN_C_INIT
 
 rocattach_status_t
+rocattach_attach_tree(int root_pid)
+{
+    rocprofiler::rocattach::initialize_logging();
+
+    if(!rocprofiler::rocattach::PTraceSession::is_supported())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-attach] rocattach is not supported on this platform.";
+        return ROCATTACH_STATUS_ERROR_NOT_SUPPORTED;
+    }
+
+    auto pids = rocprofiler::rocattach::collect_process_tree(root_pid);
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] Found " << pids.size()
+              << " process(es) in tree rooted at pid " << root_pid;
+
+    std::vector<pid_t> attached_pids;
+    auto               last_status = ROCATTACH_STATUS_SUCCESS;
+    for(pid_t pid : pids)
+    {
+        auto status = rocprofiler::rocattach::setup(pid);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree failed for pid " << pid
+                       << " with error code " << status << ", continuing with remaining processes";
+            last_status = status;
+        }
+        else
+        {
+            attached_pids.push_back(pid);
+        }
+    }
+
+    {
+        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
+        auto  it       = sessions->find(root_pid);
+        if(it != sessions->end())
+        {
+            it->second.tree_pids = std::move(attached_pids);
+        }
+        else
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree could not record tree "
+                          "session for root pid "
+                       << root_pid;
+        }
+    }
+
+    return last_status;
+}
+
+rocattach_status_t
 rocattach_attach(int pid)
 {
     rocprofiler::rocattach::initialize_logging();
@@ -417,6 +538,48 @@ rocattach_attach(int pid)
         return status;
     }
     return ROCATTACH_STATUS_SUCCESS;
+}
+
+rocattach_status_t
+rocattach_detach_tree(int root_pid)
+{
+    rocprofiler::rocattach::initialize_logging();
+
+    // Retrieve the PID list recorded by rocattach_attach_tree() from the root's map entry.
+    // Using the recorded list (rather than re-enumerating /proc) ensures we detach exactly
+    // the processes that were attached, no more and no less.
+    std::vector<pid_t> pids;
+    {
+        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
+        auto  it       = sessions->find(root_pid);
+        if(it == sessions->end() || it->second.tree_pids.empty())
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree called for root pid "
+                       << root_pid << " which has no recorded tree attachment session.";
+            return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        pids = std::move(it->second.tree_pids);
+        // If root_pid was not successfully attached it won't be in pids, meaning teardown()
+        // won't erase its entry. Remove it here to avoid leaving an orphan in the map.
+        if(pids.empty() || pids.front() != root_pid) sessions->erase(it);
+    }
+
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach_tree detaching " << pids.size()
+              << " process(es) for root pid " << root_pid;
+
+    auto last_status = ROCATTACH_STATUS_SUCCESS;
+    for(pid_t pid : pids)
+    {
+        auto status = rocprofiler::rocattach::teardown(pid);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree failed for pid " << pid
+                       << " with error code " << status << ", continuing with remaining processes";
+            last_status = status;
+        }
+    }
+    return last_status;
 }
 
 rocattach_status_t

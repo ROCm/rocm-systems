@@ -69,7 +69,7 @@ list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################
@@ -78,6 +78,6 @@ endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)

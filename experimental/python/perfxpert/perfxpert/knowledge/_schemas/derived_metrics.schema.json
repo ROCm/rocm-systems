@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["name", "components", "formula", "unit"],
+    "properties": {
+      "name": {"type": "string"},
+      "components": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string"}
+      },
+      "formula": {"type": "string"},
+      "unit": {"type": "string"},
+      "hw_counter_cost": {"type": "integer", "minimum": 1},
+      "block": {"type": "string"},
+      "description": {"type": "string"}
+    },
+    "additionalProperties": false
+  }
+}

@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/gfx11_factory.h"
-#include "def/gfx11_def.h"
+#include "lib/aqlprofile/core/gfx11_factory.h"
+#include "lib/aqlprofile/def/gfx11_def.h"
 
 namespace aql_profile
 {

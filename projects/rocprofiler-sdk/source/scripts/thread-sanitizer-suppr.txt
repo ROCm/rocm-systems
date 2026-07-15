@@ -22,8 +22,6 @@ mutex:libhsa-runtime64.so
 # unlock of an unlocked mutex (or by a wrong thread)
 mutex:librocm_smi64.so
 
-# google logging
-race:google::LogMessageTime::CalcGmtOffset
 race:tzset_internal
 
 # bug in libtsan.so.0 which thinks there is a

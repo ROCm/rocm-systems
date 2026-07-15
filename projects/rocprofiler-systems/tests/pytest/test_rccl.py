@@ -69,13 +69,8 @@ RCCL_TARGETS = [
 ]
 
 
-@pytest.mark.parametrize(
-    "rccl_target",
-    RCCL_TARGETS,
-    ids=[t.replace("_", "-") for t in RCCL_TARGETS],
-)
 class TestRCCL(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -87,7 +82,7 @@ class TestRCCL(RocprofsysTest):
         "return",
         "args",
     ]
-    RUNTIME_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS = [
         "-e",
         "-v",
         "1",
@@ -131,16 +126,21 @@ class TestRCCL(RocprofsysTest):
             pytest.param("runtime_instrument", marks=pytest.mark.slow),
         ],
     )
+    @pytest.mark.parametrize(
+        "rccl_target",
+        RCCL_TARGETS,
+        ids=[t.replace("_", "-") for t in RCCL_TARGETS],
+    )
     def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
         result = self.run_test(
             mode,
             rccl_target,
             env=rccl_env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             run_args=self.RUN_ARGS,
-            timeout=300,
-            mpi_ranks=1,
+            launcher="mpi",
+            num_procs=1,
         )
         self.assert_regex(result)
         if mode == "sys_run":

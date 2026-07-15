@@ -30,7 +30,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiInitFlagsT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
     AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
     AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
-    AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, ProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
+    AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, AmdsmiProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
 };
 
 // Re-export all the struct type

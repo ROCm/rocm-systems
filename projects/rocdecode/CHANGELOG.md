@@ -2,7 +2,27 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.8.0
+## (Unreleased) rocDecode 1.8.1
+
+### Added
+
+* Invalid video size handling for AVC/HEVC.
+
+### Resolved issues
+
+* Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
+
+## rocDecode 1.8.0 for ROCm 7.13
+
+### Added
+
+* Logging improvement: Added function entry and exit logs (at Info log level).
+* Logging improvement: Added duration to function exit logs and optimized log message formatting to reduce runtime overhead.
+* Logging improvement: Merged all logger instances into one global instance.
+* Logging improvement: Unified logging format in utility classes with core library logging format.
+* Logging improvement: Moved debug logging from a compile-time switch to the runtime logger level controlled by ROCDEC_LOG_LEVEL (debug = 4).
+* Feature: support for user set output surface format.
+* Graceful handling of VUI syntax errors for AVC and HEVC.
 
 ### Changed
 
@@ -14,12 +34,6 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Simplified libva version check (single `>= 1.22` requirement).
 * Cleaned up CMake error messages.
 
-### Added
-
-* Logging improvement: Added function entry and exit logs (at Info log level).
-* Logging improvement: Added duration to function exit logs and optimized log message formatting to reduce runtime overhead.
-* Logging improvement: Merged all logger instances into one global instance.
-* Feature: support for user set output surface format.
 
 ## rocDecode 1.7.0 for ROCm 7.2.1
 
@@ -100,7 +114,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * The new bitstream reader feature. The bitstream reader contains built-in stream file parsers, including an elementary stream file parser and an IVF container file parser. It can parse AVC/HEVC/AV1 elementary stream files and AV1 IVF container files. Additional format support can be added in the future.
 * VP9 decode support.
 * More CTests: VP9 test and tests on video decode raw sample.
-* Two new samples, videodecoderaw and videodecodepicfiles, have been added. videodecoderaw uses the bitstream reader instead of the FFMPEG demuxer to get picture data, and videodecodepicfiles shows how to decode an elementary video stream stored in multiple files with each file containing bitstream data of a coded picutre
+* Two new samples, videodecoderaw and videodecodepicfiles, have been added. videodecoderaw uses the bitstream reader instead of the FFMPEG demuxer to get picture data, and videodecodepicfiles shows how to decode an elementary video stream stored in multiple files with each file containing bitstream data of a coded picture
 
 ### Changed
 

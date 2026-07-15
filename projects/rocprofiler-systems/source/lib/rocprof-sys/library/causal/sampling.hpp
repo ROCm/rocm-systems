@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -18,7 +18,7 @@ namespace causal
 namespace sampling
 {
 std::set<int>
-get_signal_types(int64_t _tid);
+get_signal_types(std::int64_t _tid);
 
 void
 block_samples();
@@ -32,10 +32,16 @@ block_backtrace_samples();
 void
 unblock_backtrace_samples();
 
+template <typename Tp>
+concept sampling_scope = std::is_same_v<Tp, tim::scope::thread_scope> ||
+                         std::is_same_v<Tp, tim::scope::process_scope>;
+
 template <typename Tp = tim::scope::thread_scope>
+    requires sampling_scope<Tp>
 void pause(Tp = {});
 
 template <typename Tp = tim::scope::thread_scope>
+    requires sampling_scope<Tp>
 void resume(Tp = {});
 
 void block_signals(std::set<int> = {});

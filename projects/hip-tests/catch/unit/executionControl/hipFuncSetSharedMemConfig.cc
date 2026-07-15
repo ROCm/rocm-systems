@@ -85,8 +85,7 @@ HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #endif
 
   HIP_CHECK_ERROR(

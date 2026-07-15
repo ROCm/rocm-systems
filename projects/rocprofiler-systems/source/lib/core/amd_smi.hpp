@@ -3,22 +3,12 @@
 
 #include "core/timemory.hpp"
 
-#include <amd_smi/amdsmi.h>
+// AMD SMI feature flags are owned by the backend layer (single source of truth):
+//   AMD_SMI_SDMA_SUPPORTED -> backends/amd_smi/sdma_feature.hpp
+//   AINIC_SUPPORTED        -> backends/amd_smi/ainic_feature.hpp
 
-// AMD-SMI >= 26.3 supports NIC APIs and SDMA usage
-#if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                                     \
-    (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
-#    if ROCPROFSYS_USE_AINIC > 0
-#        define AINIC_SUPPORTED 1
-#    endif
-#    define AMD_SMI_SDMA_SUPPORTED 1
-#endif
-
-namespace rocprofsys
-{
-namespace amd_smi
+namespace rocprofsys::amd_smi
 {
 void
 config_settings(const std::shared_ptr<settings>&);
-}  // namespace amd_smi
-}  // namespace rocprofsys
+}  // namespace rocprofsys::amd_smi

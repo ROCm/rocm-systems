@@ -1,0 +1,63 @@
+# memory_patterns — unified-memory + multi-level memory signatures used
+# by the Memory Specialist.
+#
+# Phase-10 Features C (unified memory) and E (multi-level memory chain).
+
+version: 1
+
+unified_memory:
+  - id: htod_paging_hotspot
+    name: "CPU-resident GPU-accessed pages"
+    description: >
+      Repeated HtoD/DtoH transfers of the same buffer indicate the page is
+      being kicked between CPU + GPU. Pin with hipHostMalloc (non-coherent)
+      or promote to a persistent device allocation.
+    detector: unified_memory.analyze_paging
+    threshold:
+      paging_events_ge: 1
+    recommend:
+      - "hipMemAdviseSetPreferredLocation(devPtr, hipMemAdviseSetPreferredLocation)"
+      - "Pin host buffers with hipHostMalloc + hipHostMallocNonCoherent"
+      - "For repeated HtoD of same buffer — upload once at init"
+
+  - id: mi300x_cross_die_traffic
+    name: "MI300X cross-die (XCD<->XCD) fabric traffic"
+    description: >
+      DtoD traffic crossing XCD boundaries pays a ~30 ns per-access penalty
+      versus in-die HBM. Large (>= 1 GiB) cross-die totals are flagged.
+    detector: unified_memory.analyze_paging
+    arch: gfx942
+    threshold:
+      cross_die_bytes_ge: 1073741824   # 1 GiB
+    recommend:
+      - "Partition with ROCR_VISIBLE_DEVICES to keep hot tensors in-die"
+      - "Use RCCL groupings that keep collectives within a single XCD"
+      - "torch.cuda.set_device() explicitly pins tensor allocation"
+
+multi_level_memory_chain:
+  description: >
+    Multi-level bandwidth signature (HBM -> L2 -> L1 -> LDS). Each level's
+    classifier lives in an existing tool; we document *when* each is the
+    dominant bottleneck so the Memory Specialist can pick the right rung.
+  levels:
+    - level: HBM
+      classifier: metrics.compute_hbm_bandwidth
+      bottleneck_when: "hbm_util >= 0.80 and l2_hit_rate < 0.60"
+      recommend: [coalesce_access, prefetch, pinned_host]
+    - level: L2
+      classifier: metrics.compute_l2_hit_rate
+      bottleneck_when: "0.40 <= l2_hit_rate < 0.70 and hbm_util < 0.60"
+      recommend: [cache_blocking, reuse_promotion]
+    - level: L1
+      classifier: metrics.compute_l1_miss_rate
+      bottleneck_when: "l1_miss_rate >= 0.50"
+      recommend: [tile_sizing, lds_stage]
+    - level: LDS
+      classifier: memory.classify_cache_performance
+      bottleneck_when: "lds_bank_conflict_pct >= 0.10"
+      recommend: [pad_lds_rows, swizzle_indices]
+
+notes: |
+  Combine detectors — a kernel that is L2-hit-rate healthy but still HBM
+  saturated is likely write-dominated; check TCC_WRITE_sum before
+  recommending cache blocking.

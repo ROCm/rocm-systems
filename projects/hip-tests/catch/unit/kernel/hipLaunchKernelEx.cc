@@ -127,8 +127,7 @@ __global__ void normalKernel(int* output, int totalThreads) {
  */
 HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
   int blockSize = 16;
   int totalThreads = 64;
@@ -197,8 +196,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
 
 HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
   int blockSize = 16;
   int totalThreads = 64;
@@ -320,8 +318,7 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
  */
 HIP_TEST_CASE(Unit_hipLaunchKernelEx_Functional) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
   std::string api_type = GENERATE("hipLaunchKernelEx", "hipLaunchKernelExC");
   if (api_type == "hipLaunchKernelEx") {
@@ -352,8 +349,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_Functional) {
  */
 HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   hipLaunchConfig_t config = {};
@@ -424,8 +420,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
  */
 HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   hipLaunchConfig_t config = {};
@@ -487,8 +482,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
  */
 HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   hipLaunchConfig_t config = {};

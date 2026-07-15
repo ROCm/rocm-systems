@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: runtime/docs/conf.py
+   configuration: projects/rocr-runtime/runtime/docs/conf.py
 
 formats: [htmlzip, pdf, epub]
 
 python:
    install:
-   - requirements: runtime/docs/sphinx/requirements.txt
+   - requirements: projects/rocr-runtime/runtime/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

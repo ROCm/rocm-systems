@@ -287,10 +287,16 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         }
         out_struct.dimensions_instances       = counters::get_static_ptr_array(instances);
         out_struct.dimensions_instances_count = instances.size();
-        out_struct.size                       = sizeof(rocprofiler_counter_info_v1_t);
         return true;
     };
 
+    auto spm_info = [&](auto& out_struct) {
+        if(const auto* metric_ptr = common::get_val(id_map, static_cast<uint64_t>(base_metric_id)))
+        {
+            auto agent_id          = counters::get_first_agent_for_metric(counter_id);
+            out_struct.spm_support = has_spm_support(*metric_ptr, agent_id);
+        }
+    };
     switch(version)
     {
         case ROCPROFILER_COUNTER_INFO_VERSION_0:
@@ -304,6 +310,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         case ROCPROFILER_COUNTER_INFO_VERSION_1:
         {
             auto& _out_struct = *static_cast<rocprofiler_counter_info_v1_t*>(info);
+            common::init_public_api_struct(_out_struct);
 
             if(!base_info(_out_struct)) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
@@ -313,6 +320,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
             if(!dim_info(_out_struct, agent_id)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
             if(!dim_permutations(_out_struct)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
+            spm_info(_out_struct);
 
             return ROCPROFILER_STATUS_SUCCESS;
         }

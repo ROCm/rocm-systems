@@ -1,25 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+
 #include <cstring>
 #include <vector>
 #include <memory>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "../logger.h"
-#include "../pm4_factory.h"
-// Define static members
-bool aql_profile::Pm4Factory::concurrent_create_mode_ = false;
-bool aql_profile::Pm4Factory::spm_kfd_mode_           = false;
-// Pm4Factory::mutex_t Pm4Factory::mutex_;
-aql_profile::Pm4Factory::instances_t* aql_profile::Pm4Factory::instances_ = nullptr;
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
+extern "C" int
+aql_profile_v2_c_compatibility_test(void);
 
 namespace aql_profile_v2_tests
 {
@@ -457,6 +450,11 @@ TEST_F(AqlProfileV2Test, DefaultInvalidValues)
     EXPECT_EQ(max_event.flags.raw, UINT32_MAX);
 }
 
+TEST_F(AqlProfileV2Test, CCompatibilityTranslationUnit)
+{
+    EXPECT_EQ(aql_profile_v2_c_compatibility_test(), 0);
+}
+
 // Mock callback functions for testing
 class CallbackMock
 {
@@ -625,4 +623,33 @@ int         AqlProfileV2ApiTest::callback_call_count_ = 0;
 int         AqlProfileV2ApiTest::last_callback_id_    = -1;
 std::string AqlProfileV2ApiTest::last_callback_name_  = "";
 
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_NullCallback)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_InvalidAgent)
+{
+    aqlprofile_agent_handle_t agent{};
+    agent.handle = 99999;
+
+    aqlprofile_spm_available_configurations_cb_t cb =
+        [](const aqlprofile_spm_available_configuration_t*, size_t, void*) -> hsa_status_t {
+        return HSA_STATUS_SUCCESS;
+    };
+
+    EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, cb, nullptr),
+              HSA_STATUS_ERROR_INVALID_AGENT);
+}
 }  // namespace aql_profile_v2_tests

@@ -55,7 +55,7 @@ jobs:
             echo "sha=$GITHUB_SHA" >> $GITHUB_OUTPUT
           fi
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-compute
@@ -73,9 +73,11 @@ jobs:
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Install Python
         uses: actions/setup-python@v5
@@ -96,7 +98,7 @@ jobs:
           cd build
           make package_source
       - name: Archive tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tarball-testing
           path: projects/rocprofiler-compute/build/rocprofiler-compute-*.tar.gz
@@ -123,9 +125,11 @@ jobs:
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Python dependency installs
         run: |

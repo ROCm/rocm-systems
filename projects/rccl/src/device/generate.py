@@ -76,12 +76,10 @@ def paste(sep, *args):
   return sep.join(x for x in args if x is not None)
 
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
-is_colltrace       = 1 if sys.argv[3] == "ON" else 0
-# sys.argv[4] reserved (was ENABLE_MSCCL_KERNEL; MSCCL device kernels removed)
-is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
-is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
+is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
+is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
 
-func_pattern = sys.argv[7:8]
+func_pattern = sys.argv[6:7]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -371,11 +369,11 @@ def get_arch_guard(fn):
   cond = None
 
   if fn.proto == "LL128" and fn.acc == "1":
-      cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
-      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
-      cond = "defined(__gfx942__) || defined(__gfx950__)"
+      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
 
   return cond
 
@@ -400,23 +398,26 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
   out = f.write
 
-  if is_ifc: func_declaration = "__device__ void"
-  else: func_declaration = "__device__ __attribute__((noinline)) void"
-
+  # Plain forward declarations; noinline (device-linker only) is controlled
+  # solely by DEFINE_ncclDevFunc in common.h.
   for fn in primary_funcs:
     sym = paste("_", "ncclDevFunc", *fn)
     guard = get_arch_guard(fn)
     if guard:
-      out("#if %s\n%s %s();\n#endif\n" % (guard, func_declaration, sym))
+      out("#if %s\n__device__ void %s();\n#endif\n" % (guard, sym))
     else:
-      out("%s %s();\n" % (func_declaration, sym))
+      out("__device__ void %s();\n" % sym)
   out("\n")
 
   index = {val: None for val in all_unrolls}
+
+  # Function-pointer table. Only the builds that dispatch through it at RUNTIME
+  # emit it: the device-linker build and the legacy indirect-function-call build.
+  out("#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
-    out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
+    out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
     for fn in primary_funcs:
       if fn.unroll != unroll: continue
       sym = paste("_", "ncclDevFunc", *fn)
@@ -428,12 +429,17 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       index[unroll] += 1
     out("nullptr};\n")
     out("\n")
+  out("#endif // USE_INDIRECT_FUNCTION_CALL || RCCL_DEVICE_LINKER\n\n")
 
   if not is_ifc:
+    # Pure-RDC dispatch: a compile-time binary search whose leaves call each
+    # ncclDevFunc_* DIRECTLY BY NAME -- no function-pointer table is referenced,
+    # so nothing is address-taken.
+    out("#if !defined(USE_INDIRECT_FUNCTION_CALL) && !defined(RCCL_DEVICE_LINKER)\n")
     for unroll in all_unrolls:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
-          "  static __forceinline__ __device__ __host__\n"
+          "  static __forceinline__ __device__\n"
           f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
           "    constexpr unsigned short m = f + (l - f) / 2;\n"
           f"    return (funcIndex < m)\n"
@@ -441,39 +447,27 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
           "  }\n"
           "};\n\n")
-
-      out(f"template<unsigned short f>\n"
-          f"struct Caller{unroll}<f, f + 1> {{\n"
-          "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
-          f"    ncclDevFuncTable_{unroll}[f]();\n"
-          "  }\n"
-          "};\n\n")
-
-      # emit NCCL_CALL_FUNCTIONS_<unroll> wrapper using last index value
+      unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
+      for i, fn in enumerate(unroll_fns):
+        sym = paste("_", "ncclDevFunc", *fn)
+        guard = get_arch_guard(fn)
+        spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
+        if guard:
+          out(f"#if {guard}\n")
+          out(f"{spec} {{ {sym}(); }} }};\n")
+          out("#else\n")
+          # Arch-guarded-out slot: the function does not exist for this arch.
+          # Trap instead of a silent no-op so an out-of-range/inconsistent funcId
+          # fails fast, matching the nullptr entries of the function-pointer table.
+          out(f"{spec} {{ __builtin_trap(); }} }};\n")
+          out("#endif\n")
+        else:
+          out(f"{spec} {{ {sym}(); }} }};\n")
+      out("\n")
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
-      out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex);\n")
+      out(f"  Caller{unroll}<0, {len(unroll_fns)}>::call{unroll}(funcIndex);\n")
       out("}\n\n")
-
-# Generate <gensrc>/device_table.cpp
-if is_colltrace:
-  with open(os.path.join(gensrc, "device_table.cpp"), "w") as f:
-    print("-- Generating %s" % os.path.join(gensrc, "device_table.cpp"))
-
-    out = f.write
-    out('#include "nccl_common.h"\n#include "device.h"\n')
-    out("\n")
-
-    seen_fns = set()
-    out("const char* funcNames[] = {\n")
-    for fn in primary_funcs:
-      fn_no_unroll = (fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline)
-      if fn_no_unroll not in seen_fns:
-        out('   "%s",\n' % paste("_", "ncclDevFunc", *fn_no_unroll))
-        seen_fns.add(fn_no_unroll)
-    for ty in all_tys:
-      out(f'   "ncclDevFunc_OneRankReduce_PreMulSum_{ty}",\n')
-    out("};\n")
+    out("#endif // !USE_INDIRECT_FUNCTION_CALL && !RCCL_DEVICE_LINKER\n")
 
 # Generate <gensrc>/host_table.cpp
 with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
@@ -610,3 +604,76 @@ for name in name_to_funcs.keys():
       if guard: 
         out("#endif\n")
 
+################################################################################
+# Generate per-function specialized kernel .cpp files for the parallel build.
+# Each file contains one device function + a kernel wrapper that calls it,
+# enabling the compiler to optimize the device function in kernel context
+# (LDS allocation, barriers, etc.) while keeping it as a separate linkable symbol.
+
+specialized_dir = os.path.join(gensrc, "specialized")
+if not os.path.exists(specialized_dir):
+  os.makedirs(specialized_dir)
+else:
+  for name in os.listdir(specialized_dir):
+    os.remove(os.path.join(specialized_dir, name))
+
+specialized_filelist = []
+for fn in primary_funcs:
+  if fn.coll == "Nop":
+    continue
+  sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+  func_name = "ncclDevFunc_" + sym
+  lower_coll = coll_camel_to_lower[fn.coll]
+  guard = get_arch_guard(fn)
+
+  filename = "specialized_%s.cpp" % sym.lower()
+  filepath = os.path.join(specialized_dir, filename)
+  specialized_filelist.append((filename, func_name, guard, fn))
+
+  with open(filepath, "w") as f:
+    out = f.write
+    out('#include "common.h"\n')
+    out('#include "%s.h"\n\n' % lower_coll)
+    if guard:
+      out("#if %s\n" % guard)
+    out(
+      "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
+      "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n\n"
+      "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
+      "__global__ void ncclDevKernel_{sym}_Specialized(\n"
+      "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
+      "  ncclShmemPerWarp[0].x = 0;\n"
+      "  {func_name}();\n"
+      "}}\n"
+      .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
+              ty_cxx=ty_to_cxx[fn.ty], algo=(fn.algo or "RING"),
+              proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline,
+              unroll=fn.unroll, func_name=func_name)
+    )
+    if guard:
+      out("#endif\n")
+
+# Sort specialized files so the heaviest kernels appear first in build.ninja.
+# Ninja breaks scheduling ties by edge ID (= rule order in the manifest), so
+# putting slow kernels first ensures they start early and don't form a long tail.
+_ty_cost  = {t: (0 if t in ("f8e4m3", "f8e5m2") else 1) for t in all_tys}
+_proto_cost = {"SIMPLE": 0, "LL": 1, "LL128": 2}
+_algo_cost  = {"TREE": 0, "RING": 1, "PAT": 2}
+
+def _compile_cost_key(entry):
+  fn = entry[3]  # Fn object stashed as 4th element
+  return (
+    _ty_cost.get(fn.ty, 1),
+    _proto_cost.get(fn.proto, 1),
+    _algo_cost.get(fn.algo, 1),
+    -int(fn.unroll),
+  )
+
+specialized_filelist.sort(key=_compile_cost_key)
+
+# Write the list of specialized files for CMake consumption
+with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
+  for filename, func_name, guard, _ in specialized_filelist:
+    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+
+print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))

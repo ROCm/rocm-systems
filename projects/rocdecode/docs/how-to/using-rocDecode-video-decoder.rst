@@ -6,7 +6,7 @@
 Using the rocDecode RocVideoDecoder
 ********************************************************************
 
-rocDecode provides two methods fpr decoding a video stream: using the rocDecode RocVideoDecoder on the GPU or using the FFmpeg decoder on the CPU. 
+rocDecode provides two methods for decoding a video stream: using the rocDecode RocVideoDecoder on the GPU or using the FFmpeg decoder on the CPU. 
 
 
 This topic covers how to decode a video stream using the RocVideoDecoder class in |roc_video_dec|_. The RocVideoDecode class provides high-level calls to the core APIs in the |apifolder|_ of the rocDecode GitHub repository. For information about the core APIs, see :doc:`Using the rocDecode core APIs <../reference/rocDecode-core-APIs>`.
@@ -117,6 +117,16 @@ The reconfiguration parameters need to be defined prior to entering the decoding
     viddec.SetReconfigParams(&reconfig_params);
 
 In the decode loop, the demultiplexed coded picture is passed to ``DecodeFrame``. Once the frame is decoded and processed, it is released with ``ReleaseFrame``. 
+
+.. note:: 
+
+    To run the sample, you'll need to set the ``ROCM_PATH`` environment variable to point to the location of your ROCm installation, then set ``LD_PRELOAD`` and ``LIBVA_DRIVERS_PATH`` to point to the ROCm systems libraries and drivers:
+
+    .. code:: shell
+
+        export LD_PRELOAD=$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2
+
+        export LIBVA_DRIVERS_PATH=$ROCM_PATH/lib/rocm_sysdeps/lib/
 
 .. |videodecode| replace:: ``videodecode.cpp``
 .. _videodecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecode/videodecode.cpp

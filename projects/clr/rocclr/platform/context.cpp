@@ -55,9 +55,15 @@ Context::~Context() {
 
   // Loop through all devices
   for (const auto& it : devices_) {
-    // Dissociate OCL context with any external device
-    if (info_.flags_ & (GLDeviceKhr | D3D10DeviceKhr | D3D11DeviceKhr)) {
-      it->unbindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY);
+    // Dissociate OCL context with any external device.
+    // D3D10/D3D11 interop requires amd::Context* (this); GL uses the API context handle.
+    if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr)) {
+      uint d3dFlags = info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr);
+      it->unbindExternalDevice(d3dFlags, info_.hDev_, this, VALIDATE_ONLY);
+    }
+    if (info_.flags_ & GLDeviceKhr) {
+      uint glFlags = info_.flags_ & GLDeviceKhr;
+      it->unbindExternalDevice(glFlags, info_.hDev_, info_.hCtx_, VALIDATE_ONLY);
     }
 
     // Notify device about context destroy
@@ -250,8 +256,20 @@ int Context::create(const intptr_t* properties) {
                       D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
     // Loop through all devices
     for (const auto& it : devices_) {
-      if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
-        result = CL_INVALID_VALUE;
+      // D3D10/D3D11 interop requires amd::Context* (this) as the context pointer so that
+      // extension objects can be cached per-ID3D11Device inside the OpenCL context.
+      // GL and D3D9 interop use the API-level context handle stored in info_.hCtx_.
+      if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr)) {
+        uint d3dFlags = info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr);
+        if (!it->bindExternalDevice(d3dFlags, info_.hDev_, this, VALIDATE_ONLY)) {
+          result = CL_INVALID_VALUE;
+        }
+      }
+      if (info_.flags_ & (GLDeviceKhr | D3D9DeviceKhr | D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
+        uint glFlags = info_.flags_ & (GLDeviceKhr | D3D9DeviceKhr | D3D9DeviceEXKhr | D3D9DeviceVAKhr);
+        if (!it->bindExternalDevice(glFlags, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
+          result = CL_INVALID_VALUE;
+        }
       }
     }
   }
@@ -350,10 +368,18 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
 
 void Context::svmFree(void* ptr) const {
   amd::ScopedLock lock(&ctxLock_);
+  // Atomically remove from map before any device frees the GPU VA.
+  // This prevents a concurrent allocation from reusing the same VA and being
+  // wrongly freed by a subsequent device iteration (MGPU race).
+  // The actual HSA free (release) is deferred until after all devices have
+  // iterated, so KFD cannot reuse the VA during the loop.
+  amd::Memory* svmMem = amd::MemObjMap::FindAndRemoveMemObj(ptr);
   for (const auto& dev : svmAllocDevice_) {
-    dev->svmFree(ptr);
+    dev->svmFree(ptr);  // FindMemObj returns nullptr → no-op for GPU path
   }
-  return;
+  if (svmMem != nullptr) {
+    svmMem->release();
+  }
 }
 
 bool Context::containsDevice(const Device* device) const {

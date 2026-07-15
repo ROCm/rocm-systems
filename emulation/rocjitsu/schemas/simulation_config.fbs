@@ -1,0 +1,225 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
+// FlatBuffers schema for AMDGPU simulation configuration.
+// Used for both JSON config parsing and binary serialization.
+
+namespace rocjitsu.fb;
+
+/// Configuration for a single compute unit.
+table ComputeUnitConfig {
+  num_wf_slots: uint32;   // Number of hardware wavefront slots (contexts).
+  sgprs_per_wf: uint32;   // Scalar GPRs per wavefront.
+  vgprs_per_wf: uint32;   // Vector GPRs per wavefront.
+  lds_size_kb: uint32;    // Local Data Share size in kilobytes.
+  functional_quantum: uint32;  // Max instructions per advance() in FUNCTIONAL mode (0 = unbounded).
+}
+
+/// Configuration for a command processor.
+table CommandProcessorConfig {
+  max_queued_packets: uint32;   // Maximum packets that can be queued (0 = unlimited).
+}
+
+/// Configuration for a shader engine.
+table ShaderEngineConfig {
+  num_compute_units: uint32;       // Number of CUs in this shader engine.
+  compute_unit: ComputeUnitConfig; // Shared CU configuration for all CUs.
+}
+
+/// Configuration for an Accelerator Complex Die (XCD).
+table XcdConfig {
+  num_shader_engines: uint32;        // Number of shader engines in this XCD.
+  shader_engine: ShaderEngineConfig; // Shared SE configuration for all SEs.
+  command_processor: CommandProcessorConfig;
+}
+
+/// Configuration for GPU memory.
+table GpuMemoryConfig {
+  size_mb: uint32;              // Memory size in megabytes (for future limits).
+  memory_side_cache_mb: uint32; // Memory-side cache size in MB (0 = disabled).
+}
+
+/// KFD device identity and topology properties for sysfs generation.
+/// These values are written to /sys/class/kfd/kfd/topology/nodes/<N>/properties
+/// and consumed by ROCR, HIP, rocprofiler, and AMD SMI for GPU discovery.
+///
+/// Reference sources for field values:
+///   - KFD topology kernel driver: drivers/gpu/drm/amd/amdkfd/kfd_topology.c
+///   - ROCR libhsakmt parsing: projects/rocr-runtime/libhsakmt/src/topology.c
+///   - ROCR type definitions: projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmttypes.h
+///   - PCI device IDs: https://pci-ids.ucw.cz/read/PC/1002 (vendor 0x1002 = AMD)
+///   - GFX target versions: projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
+///   - Real hardware values: `cat /sys/class/kfd/kfd/topology/nodes/*/properties` on a system
+///     with the target GPU installed.
+///
+/// \NPI new GPU: add a configs/<gpu>.json that fills in these identity fields for the new device.
+table KfdDeviceInfo {
+  gpu_id: uint32;                  // KFD GPU ID (e.g., 0x9500 for gfx950).
+  gfx_target_version: uint32;     // Packed GFX version (e.g., 90500 for gfx950).
+  vendor_id: uint32 = 4098;       // PCI vendor ID (0x1002 = AMD).
+  device_id: uint32;              // PCI device ID (from pci-ids.ucw.cz).
+  family_id: uint32;              // GPU family (from amdgpu_drv.c AMDGPU_FAMILY_*).
+  unique_id: uint64;              // Globally unique GPU identifier (PSP-generated on real HW).
+  marketing_name: string;         // Human-readable name (e.g., "AMD Instinct MI350X").
+  drm_render_minor: uint32 = 128; // DRM render device minor number.
+  revision_id: uint32 = 0;        // amdgpu adev->rev_id; KFD capability ASIC revision bits.
+  pci_revision_id: uint32 = 0;    // PCI config-space revision from DRM sysfs device/revision.
+
+  // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
+  simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
+  max_waves_per_simd: uint32 = 10;
+  num_shader_engines: uint32;    // KFD array_count: total shader arrays, not libdrm SE count.
+  num_shader_arrays_per_engine: uint32 = 1;
+  num_cu_per_sh: uint32;
+  simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
+  wave_front_size: uint32 = 64;  // 64 for CDNA, 32 for RDNA.
+  max_slots_scratch_cu: uint32 = 32;
+
+  // Memory (from kfd_topology.c and amdgpu_amdkfd.c)
+  local_mem_size: uint64;         // VRAM size in bytes.
+  lds_size_kb: uint32 = 64;      // 64 for CDNA1/2, 128 for CDNA3/4 and RDNA2+.
+  mem_width: uint32 = 4096;      // HBM interface width in bits.
+  mem_clk_max: uint32 = 1200;    // Max memory clock (MHz).
+
+  // Caches (from kfd_topology.c kfd_fill_cache_non_crat_info)
+  l1_size_kb: uint32 = 32;
+  l1_line_size: uint32 = 128;
+  l1_assoc: uint32 = 4;
+  l2_size_kb: uint32 = 4096;
+  l2_line_size: uint32 = 128;
+  l2_assoc: uint32 = 16;
+
+  // Engines and queues (from kfd_topology.c and amdgpu_amdkfd.c)
+  num_sdma_engines: uint32 = 2;
+  num_sdma_xgmi_engines: uint32 = 0;
+  num_cp_queues: uint32 = 128;
+  max_engine_clk_fcompute: uint32 = 2100; // MHz
+
+  // PCI topology (from kfd_topology.c, used by RCCL for busId uniqueness)
+  location_id: uint32 = 768;  // PCI BDF: 0x0300 = bus 3, dev 0, func 0.
+  hive_id: uint64 = 0;        // XGMI hive ID (shared by GPUs in same node).
+  domain: uint32 = 0;         // PCI domain.
+  vram_type: uint32 = 6;      // AMDGPU_VRAM_TYPE_* (6 = HBM, 9 = GDDR6).
+
+  // KFD debugger API (from kfd_sysfs.h HSA_CAP_*/HSA_DBG_* bits). 0 = auto-compute
+  // from gfx_target_version (see rocjitsu::default_capability_for/debug_prop_for).
+  capability: uint32 = 0;
+  capability2: uint32 = 0;
+  debug_prop: uint64 = 0;
+}
+
+/// Top-level AMDGPU configuration.
+table AmdgpuConfig {
+  num_xcds: uint32;              // Number of Accelerator Complex Dies.
+  num_iods: uint32;              // Number of I/O Dies (0 = no IOD modeling).
+  xcd: XcdConfig;                // Shared XCD configuration for all XCDs.
+  memory: GpuMemoryConfig;
+  device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
+  num_gpus: uint32 = 1;          // Number of simulated GPU instances.
+}
+
+/// DBT guest-GPU discovery mode.
+///
+/// When enabled, the KFD interposer does not start the simulated VM. Instead it
+/// forwards real host-GPU KFD ioctls to /dev/kfd and appends one synthetic guest
+/// GPU to the topology seen by ROCR. HSA hooks then map execution-facing calls
+/// from the guest agent to the host agent and translate guest code objects to
+/// host code objects before loading them.
+table DbtGuestConfig {
+  enabled: bool = false;          // Enables GuestKfd discovery mode.
+  guest_isa: string;              // Guest ISA advertised by the synthetic agent, e.g. "gfx950".
+  host_isa: string;               // Host ISA used for execution and DBT output, e.g. "gfx942".
+  host_gpu_id: uint32 = 0;        // Preferred host KFD topology gpu_id, not HIP ordinal/node id; 0 matches topology to host_isa.
+  log_level: int32 = 0;           // DBT hook logging: 0 off, 1 info, 2 verbose, 3 debug.
+  signal_backtrace: bool = false; // Install a best-effort crash backtrace handler in the HSA hook.
+  guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
+}
+
+/// A dispatch packet describing a kernel launch.
+table DispatchConfig {
+  kernel_entry_pc: uint64;          // Byte address of kernel entry point.
+  workgroup_count: uint32;         // Number of workgroups to dispatch.
+  wfs_per_workgroup: uint32;      // Wavefronts per workgroup.
+  sgprs_per_wf: uint32;          // Scalar GPRs per wavefront.
+  vgprs_per_wf: uint32;          // Vector GPRs per wavefront.
+}
+
+/// A program binary and its dispatch configuration.
+table ProgramConfig {
+  binary_path: string;             // Path to the kernel binary file.
+  base_addr: uint64;              // Base address to load the binary at.
+  dispatches: [DispatchConfig];    // Dispatch packets to enqueue after loading.
+}
+
+/// Virtual machine hardware model configuration.
+table VirtualMachineConfig {
+  arch: string;                // ISA architecture identifier (e.g., "cdna3", "rv64i").
+  gpu: AmdgpuConfig;           // AMDGPU hardware configuration.
+  programs: [ProgramConfig];   // Programs to load and dispatch.
+}
+
+// ---------------------------------------------------------------------------
+// Declarative topology definition tables.
+// ---------------------------------------------------------------------------
+
+/// Key-value pair for component configuration.
+table ConfigEntry {
+  key: string;
+  value: string;    // All values as strings, parsed by the factory.
+}
+
+/// Port definition for dynamic ports.
+table PortDef {
+  name: string;
+  direction: string;   // "in" or "out".
+  protocol: string;    // "untyped", "memory_req", "memory_resp", "dispatch", etc.
+}
+
+/// Component definition (recursive for hierarchy).
+table ComponentDef {
+  name: string;             // Name or range pattern like "xcd[0:7]".
+  type: string;             // Registry type: "compute_unit", "l2_cache", etc.
+  config: [ConfigEntry];    // Component-specific parameters.
+  children: [ComponentDef]; // Child components (recursive).
+  ports: [PortDef];         // Optional dynamic ports.
+}
+
+/// Range variable for link pattern expansion.
+table ForRange {
+  var_name: string;   // Variable name: "i", "j", "k".
+  start: uint32;      // Range start (inclusive).
+  end: uint32;        // Range end (exclusive).
+}
+
+/// Link definition (direct or pattern-based).
+table LinkDef {
+  src: string;              // Direct source: "soc.xcd0.l2.hbm_out".
+  dst: string;              // Direct destination.
+  pattern: string;          // Pattern: "soc.xcd[i].l2 -> soc.iod[i/4].msc".
+  for_ranges: [ForRange];   // Loop variables.
+  where_expr: string;       // Filter: "i != j".
+  latency: uint32 = 1;
+  weight: uint32 = 1;
+}
+
+/// Top-level topology definition.
+table TopologyDef {
+  root: ComponentDef;
+  links: [LinkDef];
+}
+
+// ---------------------------------------------------------------------------
+// Top-level simulation configuration.
+// ---------------------------------------------------------------------------
+
+/// Top-level simulation configuration.
+table SimulationConfig {
+  max_ticks: uint64;             // Maximum simulation ticks before halting.
+  num_threads: uint32;           // Number of simulation threads (partitions).
+  exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
+  vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
+  topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
+  dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
+}
+
+root_type SimulationConfig;

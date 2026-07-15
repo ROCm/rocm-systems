@@ -20,26 +20,63 @@ Definitions
 
 **Profile Config**: A configuration to specify the counters to be collected on an agent. This must be supplied to various counter collection APIs to initiate collection of counter data. Profiles are agent-specific and can't be used on different agents.
 
-**Counter ID**: Unique Id (per-architecture) that specifies the counter. The counter Id can be used to fetch counter information such as its name or expression.
+**Counter ID**: Unique Id (per-architecture) that specifies the counter. The counter Id can be used to fetch counter information, such as its name or expression.
 
 **Instance ID**: Unique record Id that encodes the counter Id and dimension for a collected value.
 
-**Dimension**: Dimensions help to provide context to the raw counter values by specifying the hardware register that is the source of counter collection such as a shader engine. All counter values have dimension data encoded in their instance Id, which allows you to extract the values for individual dimensions using functions in the counter interface. The following dimensions are supported:
+**Dimension**: Dimensions help to provide context to the raw counter values by identifying *which* physical hardware unit produced a given value. A single counter is usually replicated across many hardware units (for example, one copy per shader engine), so a single counter produces multiple values per collection. Each value is tagged with a coordinate in one or more dimensions, and this coordinate is encoded into the value's instance Id. You can extract the coordinate for an individual dimension using functions in the counter interface (see :ref:`querying_counter_dimensions`).
 
-.. code-block:: c
+The following dimensions are supported:
 
-    ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
-    ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
-    ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
-    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension (note: this field is not set externally)
-    ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
-    ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
-    ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register
+.. list-table::
+    :header-rows: 1
+    :widths: 30 15 55
 
-Using the Counter Collection Service
+    * - Dimension
+      - Hardware unit
+      - Meaning
+    * - ``ROCPROFILER_DIMENSION_XCC``
+      - XCD / XCC
+      - Index of the Accelerator Complex Die (XCD, sometimes called the XCC) that produced the value. Only present on GPUs that expose more than one compute die to a single agent (for example, the MI300 series). On single-die agents (for example, MI200, where each die is a separate agent) this dimension is absent.
+    * - ``ROCPROFILER_DIMENSION_AID``
+      - AID
+      - Index of the Accelerator Interconnect/IO Die (AID). Present only on multi-die accelerators that expose IO-die-level blocks (for example, the MI300 series). Typically applies to memory- and IO-related blocks.
+    * - ``ROCPROFILER_DIMENSION_SHADER_ENGINE``
+      - Shader Engine (SE)
+      - Index of the shader engine within a die. Most compute (SQ/GRBM-class) counters are replicated per shader engine.
+    * - ``ROCPROFILER_DIMENSION_SHADER_ARRAY``
+      - Shader Array (SA)
+      - Index of the shader array within a shader engine. A shader engine contains one or more shader arrays.
+    * - ``ROCPROFILER_DIMENSION_WGP``
+      - Workgroup Processor (WGP) / CU
+      - Index of the compute unit within a shader array. Named after the RDNA Workgroup Processor (a WGP groups two CUs); on CDNA parts (MI-series) this indexes the compute unit (CU). Present only for counters collected at CU/WGP granularity.
+    * - ``ROCPROFILER_DIMENSION_INSTANCE``
+      - Block instance
+      - Generic per-block instance index used when a block has multiple hardware instances that do not map onto the named geometric dimensions above (for example, multiple memory channels or multiple copies of a fixed-function block). Also used for constant (non-hardware) counters, which report a single instance.
+    * - ``ROCPROFILER_DIMENSION_AGENT``
+      - Agent
+      - Internal use only. This dimension is not set externally and should not be supplied by tools.
+
+.. note::
+    The set of dimensions that applies to a counter is **not** fixed by the SDK and is **not** the same for every architecture or every counter. The dimensions (and the size/extent of each dimension) are determined at runtime for the specific agent and the specific counter, based on the hardware block the counter reads from. For example:
+
+    - ``ROCPROFILER_DIMENSION_XCC`` appears only on multi-XCD agents such as the MI300 series; it does not appear on MI200.
+    - ``ROCPROFILER_DIMENSION_WGP`` appears only for counters collected at CU/WGP granularity.
+    - The extent of ``ROCPROFILER_DIMENSION_SHADER_ENGINE`` (the number of shader engines) differs between architectures.
+
+    Because of this, you should always **query the dimensions of a counter at runtime** rather than assuming a fixed set (see :ref:`querying_counter_dimensions`). When a counter does not have a given dimension, that dimension's coordinate is encoded as ``0`` for every value. As a result, ``reduce`` on an absent dimension is a no-op, but ``select`` on an absent dimension only matches index ``0`` (selecting any non-zero index drops all values for that counter).
+
+.. _querying_counter_dimensions:
+
+Querying counter dimensions
++++++++++++++++++++++++++++
+
+Dimensions depend on the counter and the specific agent it is collected on. To discover which dimensions a counter has (and their sizes), query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. This call does not take an agent Id; it selects a representative agent of that counter's architecture internally and reports the dimensions for that agent. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above).
+
+Using the counter collection service
 ------------------------------------
 
-The setup for dispatch and device counting is similar with only minor changes needed to adapt code from one to another. Here are the steps required to configure the counter collection services:
+The setup for dispatch and device counting is similar, with only minor changes needed to adapt code from one to another. Here are the steps required to configure the counter collection services:
 
 tool_init() setup
 +++++++++++++++++++
@@ -61,7 +98,7 @@ Similar to tracing services, you must create a context and a buffer to collect t
                         "buffer creation failed");
 
 
-After creating a context and buffer to store results in ``tool_init``, it is highly recommended but not mandatory for you to construct the profiles for each agent, containing the counters for collection. Profile creation should be avoided in the time critical dispatch counting callback as it involves validating if the counters can be collected on the agent. After profile setup, you can set up the collection service for dispatch or device counting. To set up either dispatch or device counting (only one can be used at a time), use:
+After creating a context and buffer to store results in ``tool_init``, it's highly recommended but not mandatory for you to construct the profiles for each agent, containing the counters for collection. Avoid profile creation in the time critical dispatch counting callback as it involves validating if the counters can be collected on the agent. After profile setup, you can set up the collection service for dispatch or device counting. To set up either dispatch or device counting (only one can be used at a time), use:
 
 .. code-block:: cpp
 
@@ -81,7 +118,7 @@ After creating a context and buffer to store results in ``tool_init``, it is hig
                      "Could not setup buffered service");
 
 
-Profile Setup
+Profile setup
 -------------
 
 1. The first step in constructing a counter collection profile is to find the GPU agents on the machine. You must create a profile for each set of counters to be collected on every agent on the machine. You can use ``rocprofiler_query_available_agents`` to find agents on the system. The following example collects all GPU agents on the device and stores them in the vector agents:
@@ -141,7 +178,7 @@ Profile Setup
                          static_cast<void*>(&gpu_counters)),
                      "Could not fetch supported counters");
 
-3. ``rocprofiler_counter_id_t`` is a handle to a counter. To fetch information about the counter such as its name, use ``rocprofiler_query_counter_info``:
+3. ``rocprofiler_counter_id_t`` is a handle to a counter. To fetch information about the counter, such as its name, use ``rocprofiler_query_counter_info``:
 
 .. code-block:: cpp
 
@@ -173,12 +210,12 @@ Profile Setup
 .. note::
     Points to note on profile behavior:
 
-    - Profile created is *only valid* for the agent it was created for.
+    - The created profile is valid only for the agent it was created for.
     - Profiles are immutable. To collect a new counter set, construct a new profile.
     - A single profile can be used multiple times on the same agent.
-    - Counter Ids supplied to ``rocprofiler_create_counter_config`` are *agent-specific* and can't be used to construct profiles for other agents.
+    - Counter Ids supplied to ``rocprofiler_create_counter_config`` are agent-specific and can't be used to construct profiles for other agents.
 
-Dispatch Counting Callback
+Dispatch counting callback
 --------------------------
 
 When a kernel is dispatched, a dispatch callback is issued to the tool to allow selection of counters to be collected for the dispatch by supplying a profile.
@@ -191,9 +228,9 @@ When a kernel is dispatched, a dispatch callback is issued to the tool to allow 
                       rocprofiler_user_data_t* user_data,
                       void* /*callback_data_args*/)
 
-``dispatch_data`` contains information about the dispatch being launched such as its name. ``config`` is used by the tool to specify the profile, which allows counter collection for the dispatch. If no profile is supplied, no counters are collected for this dispatch. ``user_data`` contains user data supplied to ``rocprofiler_configure_buffered_dispatch_profile_counting_service``.
+``dispatch_data`` contains information about the dispatch being launched, such as its name. ``config`` is used by the tool to specify the profile, which allows counter collection for the dispatch. If no profile is supplied, no counters are collected for this dispatch. ``user_data`` contains user data supplied to ``rocprofiler_configure_buffered_dispatch_profile_counting_service``.
 
-Agent Set Profile Callback
+Agent set profile callback
 --------------------------
 
 This callback is invoked after the context starts and allows the tool to specify the profile to be used.
@@ -211,7 +248,7 @@ The profile to be used for this agent is specified by calling ``set_config(agent
 Buffered callback
 ++++++++++++++++++
 
-Data from collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and device counting except that some data such as kernel launch Ids is not available in device counting mode. Here is a sample iteration to print out counter collection data:
+Data from the collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and device counting except that some data, such as kernel launch Ids is not available in the device counting mode. Here is a sample iteration to print counter collection data:
 
 .. code-block:: cpp
 
@@ -250,7 +287,7 @@ Data from collected counter values is returned through a buffered callback. The 
         }
     }
 
-Counter Definitions
+Counter definitions
 -------------------
 
 Counters are defined in yaml format in the ``config.yaml`` file. The counter definition has the following format:
@@ -268,14 +305,14 @@ Counters are defined in yaml format in the ``config.yaml`` file. The counter def
            ...
       description:      # Description of the counter
 
-You can separately define the counters for different architectures as shown in the preceding example for gfx90a and gfx1010. If two or more architectures share the same block, event, or expression definition, they can be specified together using "/" delimiter ("gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined and can't have block or event defined.
+You can separately define the counters for different architectures, such as gfx90a and gfx1010, as shown in the preceding example. If two or more architectures share the same block, event, or expression definition, they can be specified together using "/" delimiter, for example, "gfx90a/gfx1010:". Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined and can't have block or event defined.
 
-Firmware Restrictions
+Firmware restrictions
 ---------------------
 
-ROCprofiler-SDK supports firmware version restrictions to ensure counter collection operates on devices with compatible firmware. This helps prevent issues that may arise from using outdated firmware versions that could cause device instability or incorrect counter data.
+ROCprofiler-SDK follows firmware version restrictions to ensure that counter collection operates on devices with compatible firmware. This helps prevent issues that might arise from using outdated firmware versions that could cause device instability or incorrect counter data.
 
-Firmware Restrictions in Counter Definitions File
+Firmware restrictions in counter definitions file
 ++++++++++++++++++++++++++++++++++++++++++++++++++
 
 Firmware restrictions are defined alongside counter definitions in the ``config.yaml`` file. The combined file uses the following schema:
@@ -285,7 +322,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
     rocprofiler-sdk:
       # Counter definitions schema version
       counters-schema-version: 1
-      
+
       # Counter definitions
       counters:
         - name: ALUStalledByLDS
@@ -294,10 +331,10 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
           definitions:
             - architectures: ["gfx908", "gfx90a"]
               expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
-      
+
       # Required: Firmware restrictions schema version
       fw_restriction_schema_version: 1
-      
+
       # List of firmware restrictions
       firmware_restrictions:
         # Example: CP/MEC firmware restrictions
@@ -308,8 +345,8 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
             - "gfx908"
             - "gfx90a"
             - "gfx940"
-        
-        # Example: SDMA firmware restrictions  
+
+        # Example: SDMA firmware restrictions
         - firmware_type: SDMA
           min_version: 150
           reason: "SDMA firmware below 150 causes system instability and data corruption"
@@ -318,28 +355,28 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
             - "gfx1100"
             - "gfx1101"
 
-**Schema Elements:**
+**Schema elements:**
 
-- ``fw_restriction_schema_version``: Required integer specifying the schema version (currently 1)
-- ``firmware_restrictions``: Array of restriction objects with the following fields:
+- ``fw_restriction_schema_version`` (required): Integer specifying the schema version (currently 1).
+- ``firmware_restrictions``: Array of restriction objects consisting of the following fields:
 
-  - ``firmware_type`` (required): Type of firmware being restricted. Supported types:
-    
-    - ``CP`` or ``MEC``: Command Processor/MicroEngine Compute firmware
+  - ``firmware_type`` (required): Type of firmware being restricted. Supported types include:
+
+    - ``CP`` or ``MEC``: Command Processor or MicroEngine Compute firmware
     - ``SDMA``: System DMA firmware
-    
-  - ``min_version`` (required): Minimum firmware version required (integer)
-  - ``reason`` (optional): Human-readable explanation for the restriction
-  - ``affected_architectures`` (optional): Array of GPU architecture names (e.g., "gfx940", "gfx942") that must meet this restriction. If empty, the restriction applies to all architectures.
 
-Counter Definitions File Location
+  - ``min_version`` (required): Integer specifying the minimum firmware version.
+  - ``reason`` (optional): Human-readable explanation for the restriction.
+  - ``affected_architectures`` (optional): Array of GPU architecture names, such as "gfx940" and "gfx942" liable to meet this restriction. If empty, the restriction applies to all the architectures.
+
+Counter definitions file location
 ++++++++++++++++++++++++++++++++++
 
 The firmware restrictions are located within the counter definitions file using the following search order:
 
-1. **Environment Variable**: If the ``ROCPROFILER_METRICS_PATH`` environment variable is set, ROCprofiler-SDK will look for ``config.yaml`` in that directory.
+1. **Environment variable**: If the ``ROCPROFILER_METRICS_PATH`` environment variable is set, ROCprofiler-SDK looks for ``config.yaml`` in that directory.
 
-2. **Installation Path**: If no environment variable is set, ROCprofiler-SDK searches in the installation directory at ``<install_path>/share/rocprofiler-sdk/config.yaml``.
+2. **Installation path**: If no environment variable is set, ROCprofiler-SDK searches in the installation directory at ``<install_path>/share/rocprofiler-sdk/config.yaml``.
 
 **Example:**
 
@@ -347,12 +384,12 @@ The firmware restrictions are located within the counter definitions file using 
 
     # Set custom counter definitions path
     export ROCPROFILER_METRICS_PATH=/path/to/custom/counters/
-    
+
     # ROCprofiler-SDK will now look for:
     # /path/to/custom/counters/config.yaml
     # (which contains both counter definitions and firmware restrictions)
 
-Derived Metrics
+Derived metrics
 ---------------
 
 Derived metrics are expressions performing computation on collected hardware metrics. These expressions produce result similar to a real hardware counter.
@@ -365,18 +402,18 @@ Derived metrics are expressions performing computation on collected hardware met
           expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
       description: Percentage of the time that GUI is active
 
-In the preceding example, ``GPU_UTIL`` is a derived metric that uses a mathematic expression to calculate the utilization rate of the GPU using values of two GRBM hardware counters ``GRBM_GUI_ACTIVE`` and ``GRBM_COUNT``. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions such as reduce and accumulate.
+In the preceding example, ``GPU_UTIL`` is a derived metric that uses a mathematical expression to calculate the GPU utilization rate using values of two GRBM hardware counters ``GRBM_GUI_ACTIVE`` and ``GRBM_COUNT``. Expressions support the standard set of math operators (/,*,-,+) and a set of special functions such as, reduce() and accumulate().
 
-Reduce Function
+Reduce function
 ++++++++++++++++
 
 .. code-block:: yaml
 
     Expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
 
-The reduce function reduces counter values across all dimensions such as shader engine, SIMD, and so on, to produce a single output value. This helps to collect and compare values across the entire device. Here are the common reduction operations:
+The reduce() function reduces counter values across all dimensions, such as shader engine, SIMD, and so on, to produce a single output value. This helps to collect and compare values across the entire device. Here are the common reduction operations:
 
-- ``sum``: Sums to create a single output. For example, ``reduce(GL2C_HIT,sum)`` sums all ``GL2C_HIT`` hardware register values.
+- ``sum``: Sums all values to create a single output. For example, ``reduce(GL2C_HIT,sum)`` sums all ``GL2C_HIT`` hardware register values.
 - ``avr``: Calculates the average across all dimensions.
 - ``min``: Selects minimum value across all dimensions.
 - ``max``: Selects the maximum value across all dimensions.
@@ -385,11 +422,9 @@ The reduce function reduces counter values across all dimensions such as shader 
 
     expression: reduce(X,sum,[DIMENSION_XCC])
 
-Reduce() also supports dimension wise reduction, when provided dimensions in 3rd parameter. In the expression above, if ``X`` has two dimensions ``DIMENSION_XCC``, ``DIMENSION_SHADER_ARRAY``, and ``DIMENSION_WGP``, the reduce happens across counter values where ``DIMENSION_SHADER_ARRAY`` and ``DIMENSION_WGP`` dimensions are same as shown below.
+Reduce() also supports dimension-wise reduction, when dimension is provided as the third parameter. In the preceding expression, if ``X`` has dimensions ``DIMENSION_XCC``, ``DIMENSION_SHADER_ARRAY``, and ``DIMENSION_WGP``, the reduce is performed across the counter values where ``DIMENSION_SHADER_ARRAY`` and ``DIMENSION_WGP`` dimensions are same, as shown here:
 
-Let's say DIM sizes of XCC, SHADER_ARRAY(SH), WGP be 2, 4, 4 respectively.
-
-Raw Counter Data in 3D space:
+Assuming the DIM sizes of XCC, SHADER_ARRAY(SH), and WGP to be 2, 4, and 4 respectively, the raw counter data in the 3D space is:
 
 #### XCC[0]:
 
@@ -413,7 +448,7 @@ Raw Counter Data in 3D space:
     | SH[2] |   9  |   10 |   11 |   12 |
     | SH[3] |   13 |   14 |   15 |   16 |
 
-Reducing XCC dim with sum, results to 2D space with only WGP and SH.
+Reducing XCC[dim] with sum, results to 2D space with only WGP and SH:
 
 .. code-block:: text
 
@@ -424,7 +459,7 @@ Reducing XCC dim with sum, results to 2D space with only WGP and SH.
     | SH[2] |  18  |   20 |   22 |   24 |
     | SH[3] |  26  |   28 |   30 |   32 |
 
-similarly, for ``reduce(X,sum,[DIMENSION_XCC,DIMENSION_SHADER_ARRAY])`` results in only WGP dimension.
+similarly, ``reduce(X,sum,[DIMENSION_XCC,DIMENSION_SHADER_ARRAY])`` results in only WGP dimension:
 
 .. code-block:: text
 
@@ -432,18 +467,23 @@ similarly, for ``reduce(X,sum,[DIMENSION_XCC,DIMENSION_SHADER_ARRAY])`` results 
     |-------|------|------|------|------|
     |       |  56  |  64  |  72  |  80  |
 
-Select Function
+Select function
 ++++++++++++++++
 
 .. code-block:: yaml
 
     expression: select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])
 
-select() only returns counter values which match the dimension indexes provided by the user in expression. This operation is to allow a user to state they only want to select specific dimensions index. Supported dimensions include ``DIMENSION_XCC, DIMENSION_AID, DIMENSION_SHADER_ENGINE, DIMENSION_AGENT, DIMENSION_SHADER_ARRAY, DIMENSION_WGP, DIMENSION_INSTANCE``. For example ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` gives counter values which are from DIMENSION_XCC= 0 and DIMENSION_SHADER_ENGINE= 2 for Y Metric.
+The select() function returns only the counter values matching the dimension indices provided in the expression. This operation helps the user select specific dimension's index. Supported dimensions include ``DIMENSION_XCC``, ``DIMENSION_AID``, ``DIMENSION_SHADER_ENGINE``, ``DIMENSION_AGENT``, ``DIMENSION_SHADER_ARRAY``, ``DIMENSION_WGP``, and ``DIMENSION_INSTANCE``. For example ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` provides counter values from DIMENSION_XCC= 0 and DIMENSION_SHADER_ENGINE= 2 for Y Metric.
 
-Let's say Y has XCC, SHADER_ENGINE (SE), WGP dimensions with sizes 2, 4, 4 respectively.
+.. note::
+    Points to note on ``select`` arguments:
 
-Raw Counter Data in 3D space:
+    - **Number of dimensions**: There is no fixed limit of one or two. The examples show one and two dimensions only for brevity. You may constrain as many distinct dimensions as the counter actually has, up to all of the user-visible dimensions listed above. Each dimension may appear at most once in the argument list. To find out which dimensions a counter has, see :ref:`querying_counter_dimensions`.
+    - **Single index per dimension**: Each dimension takes exactly one index in square brackets (for example, ``DIMENSION_XCC=[0]``). A comma-separated list (for example, ``DIMENSION_XCC=[0,1]``) and range syntax (for example, ``[0:1]``) are **not** supported and raise a runtime error. To keep several indices, apply ``select`` for each index separately.
+    - **Index limits**: Each index must be non-negative and fit within the number of bits allocated to the dimension: ``DIMENSION_XCC``, ``DIMENSION_AID``, ``DIMENSION_SHADER_ENGINE``, ``DIMENSION_SHADER_ARRAY``, and ``DIMENSION_WGP`` use 6 bits (indices ``0``-``63``), while ``DIMENSION_INSTANCE`` uses 10 bits (indices ``0``-``1023``). The index must also be within the actual extent of that dimension for the counter.
+
+Assuming that Y has XCC, SHADER_ENGINE (SE), and WGP dimensions with sizes 2, 4, and 4 respectively, the raw counter data in the 3D space is:
 
 #### XCC[0]:
 
@@ -467,7 +507,7 @@ Raw Counter Data in 3D space:
     | SE[2] |   25 |   26 |   27 |   28 |
     | SE[3] |   29 |   30 |   31 |   32 |
 
-Selecting at XCC=0 results to 2D space with WGP and SH dimensions, as shown below.
+Selecting XCC=0 results in a 2D space with WGP and SH dimensions, as shown here:
 
 .. code-block:: text
 
@@ -478,7 +518,7 @@ Selecting at XCC=0 results to 2D space with WGP and SH dimensions, as shown belo
     | SE[2] |   9  |   10 |   11 |   12 |
     | SE[3] |   13 |   14 |   15 |   16 |
 
-similarly, for ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` results in only WGP dimension with XCC=0 and SE=2.
+Similarly, ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` results in only WGP dimension with XCC=0 and SE=2.
 
 .. code-block:: text
 
@@ -486,18 +526,18 @@ similarly, for ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` re
     |-------|------|------|------|------|
     |       |  9   |  10  |  11  |  12  |
 
-Accumulate Function
+Accumulate function
 -------------------
 
 .. code-block:: yaml
 
     Expression: accumulate(<basic_level_counter>, <resolution>)
 
-- The accumulate function sums the values of a basic level counter over the specified number of cycles. The ``resolution`` parameter allows you to control the frequency of the following summing operation:
+The accumulate() function sums the values of a basic level counter over the specified number of cycles. The ``resolution`` parameter helps to control the frequency of the following summing operations:
 
-  - ``HIGH_RES``: Sums up the basic level counter every clock cycle. Captures the value every cycle for higher accuracy, which helps in fine-grained analysis.
-  - ``LOW_RES``: Sums up the basic level counter every four clock cycles. Reduces the data points and provides less detailed summing, which helps in reducing data volume.
-  - ``NONE``: Does nothing and is equivalent to collecting basic level counter. Outputs the value of the basic level counter without performing any summing operation.
+- ``HIGH_RES``: Sums up the basic level counter every clock cycle. Captures the value every cycle for higher accuracy, supporting fine-grained analysis.
+- ``LOW_RES``: Sums up the basic level counter every four clock cycles. Reduces the data points and provides less detailed summing, helping reduce the data volume.
+- ``NONE``: Does nothing and is equivalent to collecting basic level counter. Outputs the value of the basic level counter without performing any summing operation.
 
 **Example:**
 
@@ -509,14 +549,14 @@ Accumulate Function
           expression: accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
       description: Mean occupancy per compute unit.
 
-<metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
+      <metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
 
-- ``MeanOccupancyPerCU``: In the preceding example, the ``MeanOccupancyPerCU`` metric calculates the mean occupancy per compute unit. It uses the accumulate function with ``HIGH_RES`` to sum the ``SQ_LEVEL_WAVES`` counter every clock cycle. This sum is then divided by the maximum value of GRBM_GUI_ACTIVE and the number of compute units ``CU_NUM`` to derive the mean occupancy.
+``MeanOccupancyPerCU``: In the preceding example, the ``MeanOccupancyPerCU`` metric calculates the mean occupancy per compute unit. It uses the accumulate() function with ``HIGH_RES`` to sum up the ``SQ_LEVEL_WAVES`` counter every clock cycle. This sum is then divided by the maximum value of ``GRBM_GUI_ACTIVE`` and the number of compute units ``CU_NUM`` to derive the mean occupancy.
 
-Kernel Serialization
---------------------
+Kernel serialization
+---------------------
 
-Counter collection in *dispatch counting* mode requires serialized execution of kernels on a target device. Kernel serialization isolates kernel executions, which helps to collect performance counter data. However, for applications requiring two kernels to execute on the same device simultaneously (co-dependent kernels), kernel serialization leads to deadlock in dispatch counter collection mode. To avoid deadlock in such applications, opt for any of the following options:
+Counter collection in dispatch counting mode requires serialized execution of kernels on a target device. Kernel serialization isolates kernel executions, helping to collect performance counter data. However, for applications requiring two kernels to execute on the same device simultaneously (co-dependent kernels), kernel serialization leads to deadlock in dispatch counter collection mode. To avoid deadlock in such applications, opt for any of the following options:
 
 - Avoid co-dependent kernels in application.
 

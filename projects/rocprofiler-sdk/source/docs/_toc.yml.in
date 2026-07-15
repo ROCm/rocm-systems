@@ -8,16 +8,21 @@ root: index
 subtrees:
   - caption: Install
     entries:
-    - file: install/installation
+    - file: install/install
+      title: Install ROCprofiler-SDK
+    - file: install/build
+      title: Build from source
   - caption: Quick Reference
     entries:
-    - file: quick_guide
-      title: ROCprofiler-SDK Quick Reference Guide
+    - file: quick-reference/quick_guide
+      title: Quick reference guide
+    - file: quick-reference/rocprofv3-cli-options
   - caption: How to
     entries:
-    - file: how-to/samples
-      title: Samples
     - file: how-to/using-rocprofv3
+    - file: how-to/advanced-rocprofv3-options
+    - file: how-to/kernel-naming-filtering
+    - file: how-to/rocprofv3-io-options
     - file: how-to/using-rocprofv3-avail
     - file: how-to/using-rocprofv3-process-attachment
     - file: how-to/using-rocpd-output-format
@@ -25,11 +30,17 @@ subtrees:
     - file: how-to/using-rocprofv3-with-mpi
     - file: how-to/using-rocprofv3-with-openmp
     - file: how-to/using-pc-sampling
+    - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
+    - file: how-to/using-spm
+    - file: how-to/samples
+      title: Samples
   - caption: API reference
     entries:
     - file: api-reference/tool_library
       title: Tool library
+    - file: api-reference/tool_library_environment
+      title: Tool library environment variables
     - file: api-reference/intercept_table
       title: Runtime intercept tables
     - file: api-reference/process_attachment
@@ -44,6 +55,8 @@ subtrees:
       title: PC sampling
     - file: api-reference/thread_trace
       title: Thread trace and ROCprof Trace Decoder
+    - file: api-reference/spm
+      title: Streaming Performance Monitor (SPM)
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:

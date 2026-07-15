@@ -57,6 +57,9 @@ __host__ ROHostContext::ROHostContext(Backend *backend, [[maybe_unused]] long op
   ipcImpl_.ipc_bases = ipc_bases;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
+  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
+
 }
 
 __host__ ROHostContext::~ROHostContext() {
@@ -117,6 +120,10 @@ __host__ void ROHostContext::sync_all() {
   host_interface->sync_all(context_window_info);
 }
 
+__host__ void ROHostContext::sync(rocshmem_team_t team) {
+  host_interface->sync(team, context_window_info);
+}
+
 __host__ void ROHostContext::barrier_all() {
 
   host_interface->fence(context_window_info);
@@ -124,9 +131,37 @@ __host__ void ROHostContext::barrier_all() {
   host_interface->barrier_for_sync();
 }
 
+__host__ void ROHostContext::barrier(rocshmem_team_t team) {
+  host_interface->barrier(team, context_window_info);
+}
+
 __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
 
   host_interface->barrier_all_on_stream(stream);
+}
+
+__host__ void ROHostContext::barrier_on_stream(rocshmem_team_t team,
+                                               hipStream_t stream) {
+  host_interface->barrier_on_stream(team, stream);
+}
+
+__host__ void ROHostContext::quiet_on_stream(hipStream_t stream) {
+  LOG_TRACE("RO backend: quiet_on_stream");
+
+  host_interface->quiet_on_stream(stream);
+}
+
+__host__ void ROHostContext::sync_all_on_stream(hipStream_t stream) {
+  LOG_TRACE("ro_net_host_sync_all_on_stream");
+
+  host_interface->sync_all_on_stream(stream);
+}
+
+__host__ void ROHostContext::sync_on_stream(rocshmem_team_t team,
+                                            hipStream_t stream) {
+  LOG_TRACE("ro_net_host_sync_on_stream");
+
+  host_interface->sync_on_stream(team, stream);
 }
 
 __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,
@@ -158,6 +193,7 @@ __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
+  LOG_TRACE("RO backend: putmem_on_stream (pe=%d, size=%zu)", pe, nelems);
 
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }

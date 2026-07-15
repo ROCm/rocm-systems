@@ -60,15 +60,8 @@ TeamBroadcastmemOnStreamTester::TeamBroadcastmemOnStreamTester(TesterArguments a
   int total_bytes = num_bytes_wg * num_teams;
   buf_size = total_bytes;
 
-  source_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  dest_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
+  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size));
 
   team_world_dup.resize(num_teams);
 
@@ -88,8 +81,8 @@ TeamBroadcastmemOnStreamTester::~TeamBroadcastmemOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
 }
 
 void TeamBroadcastmemOnStreamTester::preLaunchKernel() {
@@ -210,19 +203,10 @@ void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize
 }
 
 void TeamBroadcastmemOnStreamTester::verifyResults(size_t size) {
-  // Verify correctness: after broadcast, non-root PEs receive the broadcast
-  // data Root PE's dest buffer is NOT modified (per OpenSHMEM/rocSHMEM spec)
+  // Verify correctness: after broadcast, all PEs receive the broadcast data
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     int idx = wg_id * size;
-    int expected_value;
-
-    if (my_pe == pe_root) {
-      // Root PE's dest buffer should remain unchanged (0xAA)
-      expected_value = 0xAA;
-    } else {
-      // Non-root PEs should have received the broadcast value
-      expected_value = (pe_root + 1) * 100 + wg_id;
-    }
+    int expected_value = (pe_root + 1) * 100 + wg_id;
 
     for (size_t k = 0; k < size; k++) {
       if (static_cast<unsigned char>(dest_buf[idx + k]) !=

@@ -180,11 +180,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int
       HIP_CHECK(hipFree(X_d));
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

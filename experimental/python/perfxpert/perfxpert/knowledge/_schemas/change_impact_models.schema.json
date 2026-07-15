@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "description": "Change-impact prediction models — Phase 10. Each entry predicts a speedup bracket for a single named optimization technique, derived from measured case studies in proven_optimizations.yaml.",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "applies_to",
+      "required_metrics",
+      "model",
+      "speedup_bounds",
+      "confidence",
+      "source_citation",
+      "failure_modes"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]+$",
+        "description": "Stable lowercase snake_case identifier. Becomes change_type argument on predict_change_impact."
+      },
+      "applies_to": {
+        "type": "object",
+        "description": "Precondition filter — technique only applies when the kernel matches.",
+        "properties": {
+          "kernel_class": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Allowed kernel-class labels (e.g. compute_bound_valu)."
+          },
+          "regime": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["compute", "memory", "balanced", "latency"]},
+            "description": "Allowed roofline regimes."
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_metrics": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Metric names that must be present on the baseline run for a prediction to be computed. Missing required metric => confidence=0 + tier-2 rationale."
+      },
+      "model": {
+        "type": "object",
+        "description": "Symbolic model used to derive a point estimate. Not evaluated — documentation only.",
+        "additionalProperties": {"type": "string"}
+      },
+      "speedup_bounds": {
+        "type": "object",
+        "required": ["lo", "hi"],
+        "properties": {
+          "lo": {"type": "number", "minimum": 1.0, "maximum": 50.0},
+          "hi": {"type": "number", "minimum": 1.0, "maximum": 50.0}
+        },
+        "additionalProperties": false,
+        "description": "Catalog hi/lo (raw). predict_change_impact multiplies hi by 0.85 at emit time (conservative bracket)."
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "source_citation": {
+        "type": "string",
+        "description": "Provenance — usually 'knowledge/proven_optimizations.yaml#<id>'."
+      },
+      "failure_modes": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    }
+  }
+}

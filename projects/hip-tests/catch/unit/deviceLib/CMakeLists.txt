@@ -69,10 +69,12 @@ set(AMD_TEST_SRC
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
-    # fp8_e8m0.cc # TODO, reenable it, disabling this test due to failure seen on TheRock,
+    fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
     memcpy_async.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC

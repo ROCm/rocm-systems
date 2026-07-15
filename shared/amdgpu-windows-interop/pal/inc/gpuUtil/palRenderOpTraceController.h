@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -60,9 +60,6 @@ constexpr char        RenderOpTraceControllerName[]  = "renderop";
 class RenderOpTraceController : public ITraceController
 {
 public:
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 896
-    using RenderOp = GpuUtil::RenderOp;
-#endif
     RenderOpTraceController(Pal::IPlatform* pPlatform, Pal::IDevice* pDevice);
     virtual ~RenderOpTraceController();
 
@@ -71,19 +68,12 @@ public:
 
     virtual void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig) override;
     virtual Pal::Result OnTraceRequested() override;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     virtual Pal::Result OnPreparationGpuWork(Pal::uint32 gpuIndex, Pal::ICmdBuffer** ppCmdBuf) override;
-#endif
     virtual Pal::Result OnBeginGpuWork(Pal::uint32 gpuIndex, Pal::ICmdBuffer** ppCmdBuffer) override;
     virtual Pal::Result OnEndGpuWork(Pal::uint32 gpuIndex, Pal::ICmdBuffer** ppCmdBuffer) override;
     virtual Pal::Result OnEndPostambleGpuWork(
         Pal::uint32       gpuIndex,
         Pal::ICmdBuffer** ppCmdBuffer) override;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 896
-    void RecordRenderOp(Pal::IQueue* pQueue, RenderOp renderOp);
-#endif
 
     void FinishTrace();
 
@@ -142,9 +132,7 @@ private:
 
     Util::Mutex           m_renderOpLock;          // Lock over UpdateFrame/OnFrameUpdated
     Pal::IQueue*          m_pQueue;                // The queue being used to submit Begin/End GPU trace command buffers
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     Pal::ICmdBuffer*      m_pCmdBufTracePrepare;   // Command buffer for recording during the prep phase
-#endif
     Pal::ICmdBuffer*      m_pCmdBufTraceBegin;     // Command buffer to submit Trace Begin
     Pal::ICmdBuffer*      m_pCmdBufTraceEnd;       // Command buffer to submit Trace End
     Pal::ICmdBuffer*      m_pCmdBufPostambleEnd;   // Command buffer to submit Postamble End

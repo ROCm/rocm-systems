@@ -3,6 +3,8 @@
 
 #include "rocprof-sys/library/components/shmem_gotcha.hpp"
 
+#include "common/env_vars.hpp"
+
 #include <algorithm>
 #include <cstdlib>
 #include <functional>
@@ -122,7 +124,7 @@ struct MockedCategoryRegion
     }
 
     template <typename... Args>
-    static void stop(std::string_view name, Args&&...)
+    static void stop(std::string_view, Args&&...)
     {
         FAIL() << "Unexpected call of category_region::stop";
     }
@@ -143,6 +145,17 @@ struct MockedCategoryRegion
     }
 };
 
+struct MockGotchaBundle
+{
+    MockedSHMEMGotcha instance;
+
+    template <typename>
+    MockedSHMEMGotcha* get()
+    {
+        return &instance;
+    }
+};
+
 struct MockedSHMEMPolicy
 {
     using gotcha_data     = MockedGotchaData;
@@ -150,6 +163,7 @@ struct MockedSHMEMPolicy
     using category_region = MockedCategoryRegion;
     using shmem_bundle_t  = void;
     using shmem_gotcha_t  = MockedSHMEMGotcha;
+    using gotcha_bundle_t = MockGotchaBundle;
 };
 
 using shmem_gotcha_under_test_t = rocprofsys::component::shmem_gotcha<MockedSHMEMPolicy>;
@@ -168,8 +182,8 @@ protected:
 
     void TearDown() override
     {
-        unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
-        unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
+        unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
+        unsetenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST);
         test_globals::g_shmem_gotcha_gmock.reset();
         test_globals::g_comm_data_gmock.reset();
         test_globals::g_category_region_gmock.reset();
@@ -185,8 +199,8 @@ TEST_F(shmem_gotcha_test, test_static_labels)
 
 TEST_F(shmem_gotcha_test, test_component_lifecycle)
 {
-    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "", 1);
-    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
+    setenv(rocprofsys::env_vars::SHMEM_REJECT_LIST, "", 1);
+    setenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST, "all", 1);
     std::function<void()> initializer;
 
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_is_running())
@@ -400,8 +414,8 @@ TEST_F(shmem_gotcha_test, test_expand_tokens_to_apis)
 
 TEST_F(shmem_gotcha_test, test_configure_function_names)
 {
-    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
-    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
+    unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
+    setenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST, "all", 1);
     std::function<void()>    initializer;
     std::vector<std::string> configured_names;
 
@@ -451,8 +465,8 @@ TEST_F(shmem_gotcha_test, test_get_reject_list_assignable_and_invokable)
 
 TEST_F(shmem_gotcha_test, test_reject_list_excludes_from_configure)
 {
-    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "shmem_init,shmem_finalize", 1);
-    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
+    setenv(rocprofsys::env_vars::SHMEM_REJECT_LIST, "shmem_init,shmem_finalize", 1);
+    setenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST, "all", 1);
 
     std::function<void()>    initializer;
     std::vector<std::string> configured_names;
@@ -483,14 +497,14 @@ TEST_F(shmem_gotcha_test, test_reject_list_excludes_from_configure)
         std::find(configured_names.begin(), configured_names.end(), "shmem_finalize"));
     EXPECT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS - 2));
 
-    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
-    unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
+    unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
+    unsetenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST);
 }
 
 TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
 {
-    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "", 1);
-    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "shmem_put32,shmem_get32", 1);
+    setenv(rocprofsys::env_vars::SHMEM_REJECT_LIST, "", 1);
+    setenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST, "shmem_put32,shmem_get32", 1);
 
     std::function<void()>    initializer;
     std::vector<std::string> configured_names;
@@ -520,8 +534,8 @@ TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
     EXPECT_NE(configured_names.end(),
               std::find(configured_names.begin(), configured_names.end(), "shmem_get32"));
 
-    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
-    unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
+    unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
+    unsetenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST);
 }
 
 TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
@@ -533,7 +547,7 @@ TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
 
 TEST_F(shmem_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [this](const std::string& tool_id) {
+    auto test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)

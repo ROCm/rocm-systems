@@ -1312,12 +1312,10 @@ TEST(evatuate_ast, evaluate_select)
         }
         for(auto& dim_pair : dims)
         {
-            size_t  bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-            int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+            uint64_t mask = get_dim_mask(dim_pair.first);
             for(auto& rec : a)
             {
-                rec.id = rec.id | mask;
-                rec.id = rec.id ^ mask;
+                rec.id = (rec.id | mask) ^ mask;
             }
         }
         return a;
@@ -1421,8 +1419,6 @@ TEST(evaluate_ast, counter_reduction_dimension)
 {
     using namespace rocprofiler::counters;
 
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-
     auto get_base_rec_id = [](uint64_t counter_id) {
         rocprofiler_counter_instance_id_t base_id = 0;
         set_counter_in_rec(base_id, {.handle = counter_id});
@@ -1435,10 +1431,8 @@ TEST(evaluate_ast, counter_reduction_dimension)
         std::vector<rocprofiler_record_counter_t>                 result;
         for(auto rec : a)
         {
-            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << (bit_length * 0);
-
-            rec.id = rec.id | mask_dim;
-            rec.id = rec.id ^ mask_dim;
+            uint64_t mask = get_dim_mask(ROCPROFILER_DIMENSION_XCC);
+            rec.id        = (rec.id | mask) ^ mask;
             if(groups_dim.find(rec.id) == groups_dim.end())
             {
                 groups_dim[rec.id] = rec;

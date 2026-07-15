@@ -1,0 +1,411 @@
+name: build-test-hipfile
+run-name: Build, test, and analyze hipFile
+
+env:
+  AIS_GHA_CMD_FILES_DOCKER_DIR: /root/github
+  AIS_INPUT_BUILD_ID: ${{ inputs.build_id }}
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
+  AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
+  AIS_INPUT_PLATFORM: ${{ inputs.platform }}
+  AIS_MOUNT_PATH: /mnt/ais/ext4
+  AIS_PKG_MGR: >-
+    ${{
+      startsWith(inputs.platform, 'rocky') && 'dnf' ||
+      inputs.platform == 'suse' && 'zypper' ||
+      inputs.platform == 'ubuntu' && 'apt'
+    }}
+  AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
+  AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  # Code coverage report only vetted to work for amdclang++ on Ubuntu
+  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
+  AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
+
+on:
+  workflow_call:
+    inputs:
+      build_id:
+        default: 9999
+        description: "Number assigned by the build orchestrator"
+        required: false
+        type: number
+      ci_image:
+        required: true
+        type: string
+      cxx_compiler:
+        required: true
+        type: string
+      cxx_standard:
+        required: false
+        type: number
+        default: 20
+      generate_coverage:
+        default: true
+        description: "Allow coverage to be generated"
+        required: false
+        type: boolean
+      job_designator:
+        description: "Qualifies the type of job building hipFile"
+        required: false
+        type: string
+      platform:
+        required: true
+        type: string
+      rocm_version:
+        description: "Target ROCm MAJOR.MINOR.PATCH Version"
+        required: true
+        type: string
+      upload_artifacts:
+        default: false
+        description: "Upload binaries and the build tree as artifacts to GitHub"
+        type: boolean
+    outputs:
+      ais_hipfile_pkg_dev_filename:
+        description: "Filename for the hipFile development DEB/RPM package"
+        value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename:
+        description: "Filename for the hipFile runtime DEB/RPM package"
+        value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_filename }}
+      ais_hipfile_pkg_version:
+        description: "Version for the hipFile DEB/RPM packages"
+        value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_version }}
+      ci_image:
+        description: "Echo ci_image for downstream jobs to consume"
+        value: ${{ inputs.ci_image }}
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  compile_on_AMD:
+    name: compile_on_AMD (${{ inputs.cxx_compiler }} C++${{ inputs.cxx_standard}})
+    outputs:
+      ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+      ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
+      ais_hipfile_pkg_version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Set early AIS CI environment variables
+        # ROCm Build Environment Args
+        # - JOB_DESIGNATOR
+        # - BUILD_ID
+        # - SLES_BUILD_ID_PREFIX (will be instead be set in SUSE based DOCKERFILE's)
+        # - CPACK_<TYPE>_PACKAGE_RELEASE (made up of the above)
+        # - ROCM_VERSION (set in DOCKERFILE)
+        # See: https://github.com/ROCm/ROCm/blob/8aa43d132f0d541eb5303dc532f5931cb80ad87a/tools/rocm-build/envsetup.sh#L25-L42
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+          echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+      - name: Set AIS CI container name
+        # We should expect that there are multiple instances of this job with different cxx_compilers.
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Detach the container and run separate commands to it.
+      # Thus we can make separate explicit steps in the Github CI
+      # as if we were able to parameterize the container image in the first place.
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${AIS_GHA_CMD_FILES_DIR}:${AIS_GHA_CMD_FILES_DOCKER_DIR}" \
+            -v "${AIS_MOUNT_PATH}:/mnt/ais-fs" \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository and create build directories
+        # Single quotes necessary to ensure string/command substitutions happen
+        # in the container and not on the host.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+              mkdir -p /ais/build/hipfile /ais/build/hipfile-release
+            '
+      - name: Generate build files for hipFile targeting the AMD platform (${{ inputs.cxx_compiler }})
+        # ${SLES_BUILD_ID} is mentioned for all platforms to match current ROCm build implementation.
+        run: |
+          docker exec \
+            -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
+            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
+            -e "BUILD_ID=${AIS_INPUT_BUILD_ID}" \
+            -e "JOB_DESIGNATOR=${AIS_INPUT_JOB_DESIGNATOR}" \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              # Embed compiler+standard in the package release so the per-combo
+              # artifacts (named after the package filename) stay unique.
+              _AIS_CXX_TAG="${_AIS_SAFE_COMPILER_NAME}.cxx${_AIS_INPUT_CXX_STANDARD}"
+              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}~$(source /etc/os-release && echo ${VERSION_ID})"
+              export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}"
+              cmake \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DCMAKE_CXX_FLAGS="-Werror" \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DAIS_BUILD_DOCS=ON \
+                -DAIS_USE_CODE_COVERAGE=${{ env.AIS_USE_CODE_COVERAGE == 'true' && 'ON' || 'OFF' }} \
+                -DROCM_VERSION="${ROCM_VERSION}" \
+                -DAIS_CAPABLE_DIR=/mnt/ais-fs \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Build hipFile for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Test hipFile for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ctest -V -L "unit" --parallel
+            '
+      # Release build for signal only: configure, build, and unit-test in a
+      # separate directory. The Debug build above remains the one that is
+      # packaged, install-tested, and handed to the downstream system tests.
+      # Packaging/coverage for Release is intentionally out of scope here.
+      - name: Generate Release build files for hipFile (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -t \
+            -w /ais/build/hipfile-release \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DCMAKE_CXX_FLAGS="-Werror" \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DROCM_VERSION="${ROCM_VERSION}" \
+                -DAIS_CAPABLE_DIR=/mnt/ais-fs \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Build hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile-release \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Test hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile-release \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ctest -V -L "unit" --parallel
+            '
+      - name: Generate coverage summary (${{ inputs.cxx_compiler }})
+        if: ${{ env.AIS_USE_CODE_COVERAGE == 'true' }}
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              export PATH="/opt/rocm/llvm/bin:${PATH}"
+              ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh
+              printf "# Code Coverage\n"
+              printf "\`\`\`\n"
+              cat coverage-report.txt
+              printf "\`\`\`\n"
+            ' >> ${GITHUB_STEP_SUMMARY}
+      - name: Create hipFile package
+        run: |
+          docker exec \
+            -e "_AIS_PKG_TYPE=${AIS_PKG_TYPE}" \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cpack -G "${_AIS_PKG_TYPE}"
+            '
+      # CI is unable to peer into CMake to capture this data ahead of time.
+      # We should only produce a single package so we can use a glob pattern
+      # to complete the relative path to select the package.
+      # For now, hardcode the glob pattern to the default DEV release package name.
+      # (We will also hardcode arch as well.)
+      - name: Capture package metadata
+        id: pkg-metadata
+        run: |
+          docker exec \
+            -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              shopt -s nullglob
+              AIS_HIPFILE_PKG_DEV_FILENAME="$(echo hipfile-de{v,vel}{-,_}[0-9]*.{deb,rpm})"
+              AIS_HIPFILE_PKG_FILENAME="$(echo hipfile{-,_}[0-9]*.{deb,rpm})"
+              echo "AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
+              echo "AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
+              echo "AIS_HIPFILE_PKG_VERSION=$(
+                ${{
+                  env.AIS_PKG_TYPE == 'DEB' &&
+                  'dpkg-deb -f "${AIS_HIPFILE_PKG_FILENAME}" "Version"' ||
+                  'rpm -qp --qf "%{VERSION}" "${AIS_HIPFILE_PKG_FILENAME}"'
+                }}
+              )" >> "${AIS_GITHUB_OUTPUT}"
+            '
+      # This information will be nice to have for debugging CPack configuration
+      - name: Print package metadata for debugging
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              echo "Runtime Package:"
+              ${{
+                format(
+                  env.AIS_PKG_TYPE == 'DEB' &&
+                    'dpkg-deb -I "{0}" && dpkg-deb -c "{0}"' ||
+                    'rpm -qpil --requires "{0}"',
+                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME
+                )
+              }}
+              echo -e "\n\nDevelopment Package:"
+              ${{
+                format(
+                  env.AIS_PKG_TYPE == 'DEB' &&
+                    'dpkg-deb -I "{0}" && dpkg-deb -c "{0}"' ||
+                    'rpm -qpil --requires "{0}"',
+                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME
+                )
+              }}
+            '
+      - name: Validate metadata was stored correctly
+        run: |
+          echo "hipFile package dev filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}"
+          echo "hipFile package filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}"
+          echo "hipFile package version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}"
+          if [[ -z "${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}" ]]; then exit 1; fi
+      - name: Test installing the hipFile package.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ${{
+                format(
+                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
+                    'echo "Unknown platform."; exit 1',
+                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME,
+                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME
+                )
+              }}
+            '
+      - name: Copy hipFile packages out of the container
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          docker cp \
+            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}" \
+            ${GITHUB_WORKSPACE}
+          docker cp \
+            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}" \
+            ${GITHUB_WORKSPACE}
+      - name: Upload development hipFile Package as an Artifact
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+          path: ${{ format('{0}/{1}', github.workspace, steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME) }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Upload runtime hipFile Package as an Artifact
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
+          path: ${{ format('{0}/{1}', github.workspace, steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME) }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      # CTestTestfiles.cmake hardcodes the absolute path of the GTest executables
+      # in the build directory. CTest relies on this metadata for execution. It is not
+      # trivial to modify this metadata, otherwise an installable test package could be
+      # used. For now, reuse the build directory.
+      - name: Copy hipFile build directory out of the container
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          docker cp \
+            "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir
+      # Trim build intermediates the self-hosted system-test job doesn't need
+      # before uploading. ctest only needs the test executables, runtime *.so's
+      # and the CTestTestfile.cmake chain -- not the *.o (CMakeFiles/), the
+      # FetchContent source/subbuild trees, or the coverage data the build job
+      # already consumed.
+      - name: Prune build directory before upload
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -name CMakeFiles -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -path '*/_deps/*' \( -name '*-src' -o -name '*-subbuild' \) -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*.gcno' -o -name '*.gcda' -o -name 'coverage-*.txt' \) -delete
+      - name: Upload hipFile build directory as an artifact
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.rocm_version }}-${{ inputs.cxx_compiler }}-cxx${{ inputs.cxx_standard }}
+          path: ${{ github.workspace }}/hipfile-build-dir
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+      - name: Clean CMake build directories
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              rm -rf hipfile hipfile-release
+            '
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi

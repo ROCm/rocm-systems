@@ -1365,11 +1365,8 @@ amdgcn_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -1381,9 +1378,7 @@ amdgcn_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
@@ -2569,6 +2564,9 @@ public:
     const agent_t &agent, uint32_t compute_tmpring_size_register,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 
+  std::vector<agent_t::aperture_t>
+  get_apertures (const os_agent_info_t &info) const override;
+
 protected:
   void simulate_instruction_fixup (wave_t & /* wave  */) const override
   {
@@ -3418,6 +3416,41 @@ gfx9_architecture_t::scratch_memory_region (
   return { xcc_scratch_base + offset, wavesize };
 }
 
+std::vector<agent_t::aperture_t>
+gfx9_architecture_t::get_apertures (const os_agent_info_t &info) const
+{
+  /* We need to find the local and private_lane address spaces.  In a
+     future change, where address spaces are global, we won't need to do
+     this anymore.  */
+  const address_space_t *local = find_if (
+    [] (const address_space_t &address_space)
+    { return address_space.kind () == address_space_t::kind_t::local; });
+
+  const address_space_t *private_lane = find_if (
+    [] (const address_space_t &address_space)
+    {
+      return address_space.kind ()
+             == address_space_t::kind_t::private_swizzled;
+    });
+
+  dbgapi_assert (local != nullptr && private_lane != nullptr);
+
+  return std::vector<agent_t::aperture_t>{
+    { info.local_address_aperture_base,
+      info.local_address_aperture_limit,
+      *local,
+      { local->id () } },
+    { info.private_address_aperture_base,
+      info.private_address_aperture_limit,
+      *private_lane,
+      { private_lane->id () } },
+    { 0,
+      static_cast<amd_dbgapi_global_address_t> (-1),
+      address_space_t::global (),
+      { address_space_t::global ().id () } }
+  };
+}
+
 /* Generic gfx9 architecture.  */
 
 class gfx9_generic_t final : public gfx9_architecture_t
@@ -3902,11 +3935,8 @@ gfx9_4_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -3918,9 +3948,7 @@ gfx9_4_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
@@ -5601,11 +5629,8 @@ gfx11_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
 
   uint32_t trapsts;
   wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit in TRAPSTS.  */
       auto trapsts_bit = convert_exception (single_exception);
       if (trapsts_bit != 0)
@@ -5617,9 +5642,7 @@ gfx11_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
 
   return unhandled_exceptions;
@@ -6559,11 +6582,8 @@ gfx12_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
   uint32_t excp_flag_priv_reg, excp_flag_user_reg;
   wave.read_register (amdgpu_regnum_t::excp_flag_priv, &excp_flag_priv_reg);
   wave.read_register (amdgpu_regnum_t::excp_flag_user, &excp_flag_user_reg);
-  while (mask != 0)
+  utils::for_each_flag (mask, [&] (exception_mask_t single_exception)
     {
-      /* Get the lowest bit that is set.  */
-      auto single_exception = mask ^ (mask & (mask - 1));
-
       /* For each exception, set or clear the corresponding bit.  */
       auto excp_flag_priv_bit = convert_priv_exception (single_exception);
       auto excp_flag_user_bit = convert_user_exception (single_exception);
@@ -6585,9 +6605,7 @@ gfx12_architecture_t::set_exceptions (wave_t &wave, exception_mask_t mask,
         }
       else
         unhandled_exceptions |= single_exception;
-
-      mask ^= single_exception;
-    }
+    });
   wave.write_register (amdgpu_regnum_t::excp_flag_priv, excp_flag_priv_reg);
   wave.write_register (amdgpu_regnum_t::excp_flag_user, excp_flag_user_reg);
 
@@ -7062,6 +7080,9 @@ gfx12_architecture_t::write_pseudo_register (const wave_t &wave,
       wave.read_register (amdgpu_regnum_t::state_priv, &state_priv_reg);
       wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
 
+      memcpy (reinterpret_cast<std::byte *> (&state_priv_reg) + offset, value,
+              value_size);
+
       ttmp6 &= ~ttmp6_saved_status_halt_mask;
       if (state_priv_reg & sq_wave_state_priv_halt_mask)
         ttmp6 |= ttmp6_saved_status_halt_mask;
@@ -7346,8 +7367,8 @@ gfx12_architecture_t::cwsr_record_t::group_ids () const
   coordinates[0] = ttmp9;
   if (ttmp8 & ttmp8_grid_yz_valid)
     {
-      coordinates[1] = ttmp7 & utils::bit_mask<uint32_t> (0, 15);
-      coordinates[2] = (ttmp7 & utils::bit_mask<uint32_t> (16, 31)) >> 16;
+      coordinates[1] = utils::bit_extract (ttmp7, 0, 15);
+      coordinates[2] = utils::bit_extract (ttmp7, 16, 31);
     }
 
   return coordinates;
@@ -7366,7 +7387,7 @@ gfx12_architecture_t::cwsr_record_t::position_in_group () const
 
   agent ().read_agent_memory (ttmp8_address, &ttmp8);
 
-  return utils::narrow<uint32_t> ((ttmp8 & utils::bit_mask (25, 29)) >> 25);
+  return utils::bit_extract (ttmp8, 25, 29);
 }
 
 size_t
@@ -7701,11 +7722,56 @@ protected:
                         const instruction_t &instruction) const override;
 
 public:
+  std::vector<agent_t::aperture_t>
+  get_apertures (const os_agent_info_t &info) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
 
 private:
   register_class_t &get_register_class (const char *class_name);
 };
+
+std::vector<agent_t::aperture_t>
+gfx12_5_architecture_t::get_apertures (const os_agent_info_t &info) const
+{
+  /* We need to find the local and private_lane address spaces.  In a
+     future change, where address spaces are global, we won't need to do
+     this anymore.  */
+  const address_space_t *local = find_if (
+    [] (const address_space_t &address_space)
+    { return address_space.kind () == address_space_t::kind_t::local; });
+
+  const address_space_t *private_lane = find_if (
+    [] (const address_space_t &address_space)
+    {
+      return address_space.kind ()
+             == address_space_t::kind_t::private_swizzled;
+    });
+
+  const address_space_t *global_lane = find_if (
+    [] (const address_space_t &address_space)
+    {
+      return address_space.kind () == address_space_t::kind_t::global_swizzled;
+    },
+    /* all  */ true);
+
+  dbgapi_assert (local != nullptr && private_lane != nullptr
+                 && global_lane != nullptr);
+
+  return std::vector<agent_t::aperture_t>{
+    { info.local_address_aperture_base,
+      info.local_address_aperture_limit,
+      *local,
+      { local->id () } },
+    { info.private_address_aperture_base,
+      info.private_address_aperture_limit,
+      *global_lane,
+      { private_lane->id (), global_lane->id () } },
+    { 0,
+      static_cast<amd_dbgapi_global_address_t> (-1),
+      address_space_t::global (),
+      { address_space_t::global ().id () } }
+  };
+}
 
 register_class_t &
 gfx12_5_architecture_t::get_register_class (const char *class_name)
@@ -7722,6 +7788,28 @@ gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
                                                 std::string target_triple)
   : gfx12_architecture_t (e_machine, target_triple)
 {
+  /* Create address space.  */
+
+  /* Get the private address space for constructing the
+     global swizzled address space.  */
+  const address_space_t *private_lane = nullptr;
+  for (const auto &address_space : range<address_space_t> ())
+    if (address_space.kind ()
+        == agent_address_space_t::kind_t::private_swizzled)
+      {
+        private_lane = &address_space;
+        break;
+      }
+  dbgapi_assert (private_lane != nullptr);
+
+  create<global_swizzled_address_space_t> (
+    "global_swizzled",
+    /* interleave_size  */ sizeof (uint32_t),
+    /* va_address_size  */ 57u,
+    static_cast<const private_swizzled_address_space_t &> (*private_lane));
+
+  /* Create register classes.  */
+
   auto &sys_regs = get_register_class ("system");
   auto &vec_regs = get_register_class ("vector");
   auto &gen_regs = get_register_class ("general");

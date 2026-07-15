@@ -8,10 +8,13 @@
  * @file TestChecks.hpp
  * @brief Centralized test error checking and logging macros
  *
- * Provides all test-related macros for error checking, logging, and assertions:
- * - MPI error checking (MPICHECK with 3 overload variants)
+ * Common (always available):
+ * - HIP error checking (HIP_CHECK, HIP_EXPECT, HIP_TEST_CHECK_GTEST_FAIL,
+ *                        HIPCHECK, HIP_TEST_CHECK)
  * - NCCL error checking (RCCL_TEST_CHECK, RCCL_TEST_CHECK_GTEST_FAIL)
- * - HIP error checking (HIPCHECK, HIP_TEST_CHECK, HIP_TEST_CHECK_GTEST_FAIL)
+ *
+ * MPI-only (requires MPI_TESTS_ENABLED):
+ * - MPI error checking (MPICHECK with 3 overload variants)
  * - MPI-aware assertions (ASSERT_MPI_*)
  * - Debug logging (TEST_WARN, TEST_INFO, TEST_ABORT, TEST_TRACE)
  */
@@ -19,66 +22,135 @@
 #ifndef RCCL_TEST_CHECKS_HPP
 #define RCCL_TEST_CHECKS_HPP
 
-#ifdef MPI_TESTS_ENABLED
+// ============================================================================
+// Common macros — available to all test binaries (no MPI dependency)
+// ============================================================================
 
 #include "gtest/gtest.h"
 #include <cstdio>
-#include <cstring>
 #include <hip/hip_runtime.h>
-#include <mpi.h>
 #include <rccl/rccl.h>
-#include "utils.h" // For RCCL's getHostName utility
 
-// Forward declaration of MPIEnvironment class (defined in MPIEnvironment.hpp)
-class MPIEnvironment;
+// HIP Error Checking Macros (GTest-native)
 
-// Forward declarations for helper functions
-extern int         rcclTestDebugLevel;
-inline int         getTestDebugLevel();
-inline int         getTestMpiRank();
-inline const char* getTestHostname();
-inline bool        isMultiNodeTest();
+/**
+ * @def HIP_CHECK
+ * @brief Fatal HIP assertion for test bodies and void-returning helpers
+ *
+ * Consumes the [[nodiscard]] hipError_t and fails the current test on error.
+ * Uses ASSERT_EQ internally, so it aborts the current function on failure.
+ *
+ * @note Not suitable for destructors (use HIP_EXPECT there)
+ */
+#ifndef HIP_CHECK
+#define HIP_CHECK(cmd) ASSERT_EQ((cmd), hipSuccess)
+#endif
 
-// Helper function implementations
-inline int getTestDebugLevel()
-{
-    return rcclTestDebugLevel;
-}
+/**
+ * @def HIP_EXPECT
+ * @brief Non-fatal HIP check safe for destructors and non-void contexts
+ *
+ * Reports failure but continues execution.  Use in destructors where
+ * fatal assertions (ASSERT_*) must not be used.
+ */
+#ifndef HIP_EXPECT
+#define HIP_EXPECT(cmd) EXPECT_EQ((cmd), hipSuccess)
+#endif
 
-inline int getTestMpiRank()
-{
-    int rank = -1;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    return rank;
-}
+/**
+ * @def HIP_TEST_CHECK_GTEST_FAIL
+ * @brief HIP error checking for GTest test bodies with detailed error output
+ *
+ * Checks HIP function calls and fails the test if an error occurs.
+ * Use in TEST_F/TEST_P test bodies.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Prints error with file/line to stdout
+ * - Calls FAIL() to mark test as failed
+ *
+ * @note For infrastructure code, use HIPCHECK or HIP_TEST_CHECK instead
+ */
+#define HIP_TEST_CHECK_GTEST_FAIL(cmd)                                                       \
+    do                                                                                       \
+    {                                                                                        \
+        hipError_t err = cmd;                                                                \
+        if(err != hipSuccess)                                                                \
+        {                                                                                    \
+            printf("HIP Error at %s:%d - %s\n", __FILE__, __LINE__, hipGetErrorString(err)); \
+            FAIL() << "HIP Error: " << hipGetErrorString(err);                               \
+        }                                                                                    \
+    }                                                                                        \
+    while(0)
 
-inline const char* getTestHostname()
-{
-    static char hostname[256] = {0};
-    static bool initialized   = false;
+// HIP Error Checking Macros (return-based, for ncclResult_t-returning functions)
 
-    if(!initialized)
-    {
-        // Use RCCL's getHostName utility to get short hostname (delimited by '.')
-        if(getHostName(hostname, sizeof(hostname), '.') != ncclSuccess)
-        {
-            strncpy(hostname, "unknown", sizeof(hostname) - 1);
-        }
-        initialized = true;
-    }
-    return hostname;
-}
+/**
+ * @def HIP_TEST_CHECK
+ * @brief HIP error checking macro for test infrastructure code
+ *
+ * Checks HIP function calls and returns ncclUnhandledCudaError if failed.
+ * Use in test setup/teardown and infrastructure code that returns ncclResult_t.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Logs error to stderr
+ * - Returns ncclUnhandledCudaError to caller
+ *
+ * @note Requires enclosing function to return ncclResult_t
+ * @note For test bodies, use HIP_CHECK or HIP_TEST_CHECK_GTEST_FAIL instead
+ */
+#define HIP_TEST_CHECK(cmd)                                      \
+    do                                                           \
+    {                                                            \
+        hipError_t err = cmd;                                    \
+        if(err != hipSuccess)                                    \
+        {                                                        \
+            fprintf(stderr,                                      \
+                    "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
+                    __FILE__,                                    \
+                    __LINE__,                                    \
+                    hipGetErrorString(err),                      \
+                    static_cast<int>(err));                      \
+            return ncclUnhandledCudaError;                       \
+        }                                                        \
+    }                                                            \
+    while(0)
 
-// Forward declaration of helper function to access MPIEnvironment state
-// (Defined in MPIEnvironment.cpp to avoid circular dependency)
-int getMPIEnvironmentCachedMultiNodeResult();
-
-inline bool isMultiNodeTest()
-{
-    // Return cached result from global environment
-    // If not yet computed (== -1), assume single node to be safe
-    return getMPIEnvironmentCachedMultiNodeResult() == 1;
-}
+/**
+ * @def HIPCHECK
+ * @brief HIP error checking macro (library-style)
+ *
+ * Similar to RCCL library's CUDACHECK macro. Returns ncclUnhandledCudaError on error.
+ * Use in any code that returns ncclResult_t.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Logs error to stderr
+ * - Returns ncclUnhandledCudaError to caller
+ *
+ * @note Requires enclosing function to return ncclResult_t
+ * @note For GTest test bodies, use HIP_CHECK or HIP_TEST_CHECK_GTEST_FAIL instead
+ * @note This mirrors the library's CUDACHECK behavior
+ */
+#ifndef HIPCHECK
+    #define HIPCHECK(cmd)                                            \
+        do                                                           \
+        {                                                            \
+            hipError_t err = cmd;                                    \
+            if(err != hipSuccess)                                    \
+            {                                                        \
+                fprintf(stderr,                                      \
+                        "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
+                        __FILE__,                                    \
+                        __LINE__,                                    \
+                        hipGetErrorString(err),                      \
+                        static_cast<int>(err));                      \
+                return ncclUnhandledCudaError;                       \
+            }                                                        \
+        }                                                            \
+        while(0)
+#endif // HIPCHECK
 
 // NCCL Error Checking Macros
 
@@ -138,100 +210,66 @@ inline bool isMultiNodeTest()
     }                                                                                          \
     while(0)
 
-// HIP Error Checking Macros
+// ============================================================================
+// MPI-only macros — require MPI_TESTS_ENABLED
+// ============================================================================
 
-/**
- * @def HIP_TEST_CHECK
- * @brief HIP error checking macro for test infrastructure code
- *
- * Checks HIP function calls and returns ncclUnhandledCudaError if failed.
- * Use in test setup/teardown and infrastructure code that returns ncclResult_t.
- *
- * Behavior:
- * - Checks HIP function result
- * - Logs error to stderr
- * - Returns ncclUnhandledCudaError to caller
- *
- * @note Requires enclosing function to return ncclResult_t
- * @note For test bodies, use HIP_TEST_CHECK_GTEST_FAIL instead
- */
-#define HIP_TEST_CHECK(cmd)                                      \
-    do                                                           \
-    {                                                            \
-        hipError_t err = cmd;                                    \
-        if(err != hipSuccess)                                    \
-        {                                                        \
-            fprintf(stderr,                                      \
-                    "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
-                    __FILE__,                                    \
-                    __LINE__,                                    \
-                    hipGetErrorString(err),                      \
-                    static_cast<int>(err));                      \
-            return ncclUnhandledCudaError;                       \
-        }                                                        \
-    }                                                            \
-    while(0)
+#ifdef MPI_TESTS_ENABLED
 
-/**
- * @def HIPCHECK
- * @brief HIP error checking macro (library-style)
- *
- * Similar to RCCL library's CUDACHECK macro. Returns ncclUnhandledCudaError on error.
- * Use in any code that returns ncclResult_t.
- *
- * Behavior:
- * - Checks HIP function result
- * - Logs error to stderr
- * - Returns ncclUnhandledCudaError to caller
- *
- * @note Requires enclosing function to return ncclResult_t
- * @note For GTest test bodies, use HIP_TEST_CHECK_GTEST_FAIL instead
- * @note This mirrors the library's CUDACHECK behavior
- */
-#ifndef HIPCHECK
-    #define HIPCHECK(cmd)                                            \
-        do                                                           \
-        {                                                            \
-            hipError_t err = cmd;                                    \
-            if(err != hipSuccess)                                    \
-            {                                                        \
-                fprintf(stderr,                                      \
-                        "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
-                        __FILE__,                                    \
-                        __LINE__,                                    \
-                        hipGetErrorString(err),                      \
-                        static_cast<int>(err));                      \
-                return ncclUnhandledCudaError;                       \
-            }                                                        \
-        }                                                            \
-        while(0)
-#endif // HIPCHECK
+#include <cstring>
+#include <mpi.h>
+#include "utils.h" // For RCCL's getHostName utility
 
-/**
- * @def HIP_TEST_CHECK_GTEST_FAIL
- * @brief HIP error checking for GTest test bodies
- *
- * Checks HIP function calls and fails the test if an error occurs.
- * Use in TEST_F/TEST_P test bodies.
- *
- * Behavior:
- * - Checks HIP function result
- * - Prints error to stdout
- * - Calls FAIL() to mark test as failed
- *
- * @note For infrastructure code, use HIPCHECK or HIP_TEST_CHECK instead
- */
-#define HIP_TEST_CHECK_GTEST_FAIL(cmd)                                                       \
-    do                                                                                       \
-    {                                                                                        \
-        hipError_t err = cmd;                                                                \
-        if(err != hipSuccess)                                                                \
-        {                                                                                    \
-            printf("HIP Error at %s:%d - %s\n", __FILE__, __LINE__, hipGetErrorString(err)); \
-            FAIL() << "HIP Error: " << hipGetErrorString(err);                               \
-        }                                                                                    \
-    }                                                                                        \
-    while(0)
+// Forward declaration of MPIEnvironment class (defined in MPIEnvironment.hpp)
+class MPIEnvironment;
+
+// Forward declarations for helper functions
+extern int         rcclTestDebugLevel;
+inline int         getTestDebugLevel();
+inline int         getTestMpiRank();
+inline const char* getTestHostname();
+inline bool        isMultiNodeTest();
+
+// Helper function implementations
+inline int getTestDebugLevel()
+{
+    return rcclTestDebugLevel;
+}
+
+inline int getTestMpiRank()
+{
+    int rank = -1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    return rank;
+}
+
+inline const char* getTestHostname()
+{
+    static char hostname[256] = {0};
+    static bool initialized   = false;
+
+    if(!initialized)
+    {
+        // Use RCCL's getHostName utility to get short hostname (delimited by '.')
+        if(getHostName(hostname, sizeof(hostname), '.') != ncclSuccess)
+        {
+            strncpy(hostname, "unknown", sizeof(hostname) - 1);
+        }
+        initialized = true;
+    }
+    return hostname;
+}
+
+// Forward declaration of helper function to access MPIEnvironment state
+// (Defined in MPIEnvironment.cpp to avoid circular dependency)
+int getMPIEnvironmentCachedMultiNodeResult();
+
+inline bool isMultiNodeTest()
+{
+    // Return cached result from global environment
+    // If not yet computed (== -1), assume single node to be safe
+    return getMPIEnvironmentCachedMultiNodeResult() == 1;
+}
 
 // Debug Logging Macros (TEST_*)
 

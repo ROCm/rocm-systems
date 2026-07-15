@@ -155,6 +155,63 @@ enum class AMDGpuMetricAttributeId_t {
   GFX_BELOW_HOST_LIMIT_THM_ACC,
   GFX_LOW_UTILIZATION_ACC,
   GFX_BELOW_HOST_LIMIT_TOTAL_ACC,
+  TEMPERATURE_HBM,
+  TEMPERATURE_MID,
+  TEMPERATURE_AID,
+  TEMPERATURE_XCD,
+  LABEL_VERSION,
+  NODE_ID,
+  NODE_TEMP_RETIMER,
+  NODE_TEMP_IBC,
+  NODE_TEMP_IBC_2,
+  NODE_TEMP_VDD18_VR,
+  NODE_TEMP_04_HBM_B_VR,
+  NODE_TEMP_04_HBM_D_VR,
+  VR_TEMP_VDDCR_SOCIO_A,
+  VR_TEMP_VDDCR_SOCIO_C,
+  VR_TEMP_VDDCR_X0,
+  VR_TEMP_VDDCR_X1,
+  VR_TEMP_VDDIO_HBM_B,
+  VR_TEMP_VDDIO_HBM_D,
+  VR_TEMP_VDDIO_04_HBM_B,
+  VR_TEMP_VDDIO_04_HBM_D,
+  VR_TEMP_VDDCR_HBM_B,
+  VR_TEMP_VDDCR_HBM_D,
+  VR_TEMP_VDDCR_075_HBM_B,
+  VR_TEMP_VDDCR_075_HBM_D,
+  VR_TEMP_VDDIO_11_GTA_A,
+  VR_TEMP_VDDIO_11_GTA_C,
+  VR_TEMP_VDDAN_075_GTA_A,
+  VR_TEMP_VDDAN_075_GTA_C,
+  VR_TEMP_VDDCR_075_UCIE,
+  VR_TEMP_VDDIO_065_UCIEAA,
+  VR_TEMP_VDDIO_065_UCIEAM_A,
+  VR_TEMP_VDDIO_065_UCIEAM_C,
+  VR_TEMP_VDDAN_075,
+  SYSTEM_TEMP_UBB_FPGA,
+  SYSTEM_TEMP_UBB_FRONT,
+  SYSTEM_TEMP_UBB_BACK,
+  SYSTEM_TEMP_UBB_OAM7,
+  SYSTEM_TEMP_UBB_IBC,
+  SYSTEM_TEMP_UBB_UFPGA,
+  SYSTEM_TEMP_UBB_OAM1,
+  SYSTEM_TEMP_OAM_0_1_HSC,
+  SYSTEM_TEMP_OAM_2_3_HSC,
+  SYSTEM_TEMP_OAM_4_5_HSC,
+  SYSTEM_TEMP_OAM_6_7_HSC,
+  SYSTEM_TEMP_UBB_FPGA_0V72_VR,
+  SYSTEM_TEMP_UBB_FPGA_3V3_VR,
+  SYSTEM_TEMP_RETIMER_0_1_2_3_1V2_VR,
+  SYSTEM_TEMP_RETIMER_4_5_6_7_1V2_VR,
+  SYSTEM_TEMP_RETIMER_0_1_0V9_VR,
+  SYSTEM_TEMP_RETIMER_4_5_0V9_VR,
+  SYSTEM_TEMP_RETIMER_2_3_0V9_VR,
+  SYSTEM_TEMP_RETIMER_6_7_0V9_VR,
+  SYSTEM_TEMP_OAM_0_1_2_3_3V3_VR,
+  SYSTEM_TEMP_OAM_4_5_6_7_3V3_VR,
+  SYSTEM_TEMP_IBC_HSC,
+  SYSTEM_TEMP_IBC,
+  MAX,
 };
 
 struct AMDGpuDynamicTranslationTextInfo_t {
@@ -253,6 +310,14 @@ static const auto AMDGpuMetricAttributeIdToString = AMDGpuMetricAttributeIdTrans
      {"GFX_LOW_UTILIZATION_ACC", "Accumulator for GFX low utilization"}},
     {AMDGpuMetricAttributeId_t::GFX_BELOW_HOST_LIMIT_TOTAL_ACC,
      {"GFX_BELOW_HOST_LIMIT_TOTAL_ACC", "Total accumulator for GFX below host limit"}},
+    {AMDGpuMetricAttributeId_t::TEMPERATURE_HBM,
+     {"TEMPERATURE_HBM", "Temperature of High Bandwidth Memory"}},
+    {AMDGpuMetricAttributeId_t::TEMPERATURE_MID,
+     {"TEMPERATURE_MID", "MID (Multimedia IO Die) temperature"}},
+    {AMDGpuMetricAttributeId_t::TEMPERATURE_AID,
+     {"TEMPERATURE_AID", "AID (Active Interposer Die) temperature"}},
+    {AMDGpuMetricAttributeId_t::TEMPERATURE_XCD,
+     {"TEMPERATURE_XCD", "XCD (Accelerator Compute Die) temperature"}},
 };
 
 /*
@@ -731,7 +796,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Accumulation Counter", "Counter for accumulated metrics",
              details::AMDGpuMetricAttributeId_t::ACCUMULATION_COUNTER,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -1073,7 +1138,44 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
              details::AMDGpuMetricAttributeId_t::GFX_BELOW_HOST_LIMIT_TOTAL_ACC,
              details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
-         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}}};
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::TEMPERATURE_HBM,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "Temperature HBM", "Temperature of High Bandwidth Memory",
+             details::AMDGpuMetricAttributeId_t::TEMPERATURE_HBM,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT16,
+             details::AMDGpuMetricUnitType_t::CELSIUS),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::TEMPERATURE_MID,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "Temperature MID", "MID (Multimedia IO Die) temperature measurement",
+             details::AMDGpuMetricAttributeId_t::TEMPERATURE_MID,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT16,
+             details::AMDGpuMetricUnitType_t::CELSIUS),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::TEMPERATURE_AID,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "Temperature AID", "AID (Active Interposer Die) temperature",
+             details::AMDGpuMetricAttributeId_t::TEMPERATURE_AID,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT16,
+             details::AMDGpuMetricUnitType_t::CELSIUS),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::TEMPERATURE_XCD,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "Temperature XCD", "XCD (Accelerator Compute Die) temperature",
+             details::AMDGpuMetricAttributeId_t::TEMPERATURE_XCD,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT16,
+             details::AMDGpuMetricUnitType_t::CELSIUS),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+};
 
 using AMDGpuDynamicMetricsOffsetMap_t = std::map<std::uint64_t, std::uint32_t>;
 using AMDGpuDynamicMetricsOffsetIt_t = AMDGpuDynamicMetricsOffsetMap_t::const_iterator;

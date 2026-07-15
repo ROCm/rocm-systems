@@ -43,7 +43,7 @@ colon = ":"
 header = "any C(any, func, unit) py(any, func, unit)"
 
 
-def Print(cond, msg, end=None):
+def Print(cond, msg, ending=None, sysout=sys.stdout):
     if isinstance(cond, str):  # Check verbose level
         if cond in verbose_choices:
             cond_num = verbose_choices.index(cond)
@@ -52,10 +52,10 @@ def Print(cond, msg, end=None):
     elif not cond:  # Check cond
         return
 
-    if end == None:
-        print(msg)
+    if ending == None:
+        print(msg, file=sysout)
     else:
-        print(msg, end)
+        print(msg, end=ending, file=sysout)
     return
 
 
@@ -115,7 +115,9 @@ def ReadAmdsmiHeader(file_content):
 
         end_block_pos = file_content.find(f"{close_parenthesis};", start_block_pos)
         if end_block_pos == -1:
-            Print("ERROR", f"Could not find func definition end, {start_block_pos}")
+            Print(
+                "ERROR", f"Could not find func definition end, {start_block_pos}", sysout=sys.stderr
+            )
             break
 
         end_pos = file_content.rfind(open_parenthesis, start_block_pos, end_block_pos)
@@ -123,7 +125,11 @@ def ReadAmdsmiHeader(file_content):
         func_name = file_content[start_pos:end_pos].strip()
         api_map[func_name] = 0
 
-    return api_map
+    sorted_map = {}
+    sorted_keys = sorted(api_map.keys())
+    for key in sorted_keys:
+        sorted_map[key] = api_map[key]
+    return sorted_map
 
 
 def Find_Name(line, start, name_start, name_end, cof):
@@ -150,42 +156,61 @@ def ReadTestingInput(file_contents):
     api_map = {}
     api_support_map = {}
 
+    fc = {}
+    lines = []
+    # Create content that only contains API name and status
+    # This eliminates any statements between API name and status
     for file_name in file_contents:
+        for line in file_contents[file_name]:
+            if "### amdsmi_" in line or "AMDSMI API" in line:
+                lines.append(line)
+        fc[file_name] = lines
+
+    for file_name in fc:
+        len_file_contents = len(file_contents[file_name])
         api_map[file_name] = {}
         for index, line in enumerate(file_contents[file_name]):
             # Finding API name
             func_name = Find_Name(line, "### amdsmi_", "amdsmi_", open_parenthesis, False)
-            if func_name:
-                if func_name in api_map[file_name]:
-                    api_map[file_name][func_name] += 1
-                else:
-                    api_map[file_name][func_name] = 1
+            if func_name == None:
+                continue
 
-                # Finding API that are Not Supported
+            if func_name in api_map[file_name]:
+                api_map[file_name][func_name] += 1
+            else:
+                api_map[file_name][func_name] = 1
+
+            # Finding APIs that are Not Supported
+            # An API must have at least one SUCCESS to be supported
+            if index + 1 < len_file_contents:
                 line = file_contents[file_name][index + 1]
-                status = Find_Name(line, "AMDSMI API Returned", "AMDSMI_", colon, True)
-                if status:
-                    if func_name in api_support_map and api_support_map[func_name]:
-                        # Once API is supported, it cannot be unsupported
-                        api_support_map[func_name] += 1
-                        pass
-                    else:
-                        # API is not supported
-                        if any(status in value for value in not_supported_error_codes):
-                            api_support_map[func_name] = 0
+            else:
+                line = ""
+            status = Find_Name(line, "AMDSMI API Returned", "AMDSMI_", colon, True)
+            if status:
+                if func_name in api_support_map:
+                    if api_support_map[func_name] > 0:
+                        api_support_map[func_name] += 1  # API is already supported
+                    elif not any(status in value for value in not_supported_error_codes):
+                        if status == "AMDSMI_STATUS_SUCCESS":
+                            api_support_map[func_name] = 1  # API is now supported
                 else:
-                    # API is supported
-                    api_support_map[func_name] = 1
-
+                    supported = not any(status in value for value in not_supported_error_codes)
+                    if supported and status == "AMDSMI_STATUS_SUCCESS":
+                        api_support_map[func_name] = 1  # API is supported
+                    else:
+                        api_support_map[func_name] = 0  # API is not supported
+            else:
+                api_support_map[func_name] = 1  # API is supported if there is no status by default
     return (api_map, api_support_map)
 
 
 def Main(amdsmi, file_names):
     amdsmi_path, file_paths, missing_file_paths = Check_Inputs(amdsmi, file_names)
     if not amdsmi_path:
-        Print("WARNING", f"Missing header, {amdsmi}")
+        Print("WARNING", f"Missing header, {amdsmi}", sysout=sys.stderr)
     for key, file_path in missing_file_paths.items():
-        Print("WARNING", f"Missing file, {key}={file_path}")
+        Print("WARNING", f"Missing file, {key}={file_path}", sysout=sys.stderr)
 
     if amdsmi_path:
         Print("INFO", f"Using header, {amdsmi_path}")
@@ -193,7 +218,7 @@ def Main(amdsmi, file_names):
         Print("INFO", f"Using file, {key}={file_path}")
 
     if not amdsmi_path and not len(file_paths):
-        Print("ERROR", "No header or log files found, exiting script")
+        Print("ERROR", "No header or log files found, exiting script", sysout=sys.stderr)
         return 1
 
     # Header file is stored as a string
@@ -224,7 +249,7 @@ def Main(amdsmi, file_names):
         if len(api_map[file_name]):
             found = True
     if not found:
-        Print("ERROR", "No testing APIs found")
+        Print("ERROR", "No testing APIs found", sysout=sys.stderr)
         return 1
     for file_name in api_map:
         Print("DEBUG", f"Tested {file_name} funcs = {len(api_map[file_name])}")
@@ -234,6 +259,97 @@ def Main(amdsmi, file_names):
     if not args.output_dir.exists():
         args.output_dir.mkdir(parents=True)
 
+    # Initialize
+    for func_name in amdsmi_map:
+        amdsmi_map[func_name] = {
+            "tested": 0,
+            "c_unit_test": 0,
+            "c_integration": 0,
+            "py_unit_test": 0,
+            "py_integration": 0,
+        }
+    # api_map[file_name][func_name] = number_times_called
+    for file_name in api_map:
+        for func_name in api_map[file_name]:
+            if func_name not in amdsmi_map:
+                Print(
+                    "ERROR",
+                    f"func {func_name}() in {file_name} tested but not in amdsmi.h",
+                    sysout=sys.stderr,
+                )
+                continue
+            amdsmi_map[func_name]["tested"] += 1
+            amdsmi_map[func_name][file_name] = 1
+
+    api_summary = []
+    msg = f"API, Tested, c_unit_test, c_integration, py_unit_test, py_integration"
+    api_summary.append(msg)
+    for func_name, tests_map in amdsmi_map.items():
+        msg = f"{func_name}, {tests_map['tested']}, {tests_map['c_unit_test']}, {tests_map['c_integration']}, {tests_map['py_unit_test']}, {tests_map['py_integration']}"
+        api_summary.append(msg)
+    api_summary.append("")
+    api_summary = "\n".join(api_summary)
+    api_summary_csv = pathlib.Path(args.output_dir / "_api_summary.csv")
+    api_summary_csv.write_text(api_summary)
+
+    # Get information about each test component
+    c_any_total = 0
+    c_unit_test_total = 0
+    c_integration_total = 0
+    py_any_total = 0
+    py_unit_test_total = 0
+    py_integration_total = 0
+    any_total = 0
+    unit_test_total = 0
+    integration_total = 0
+    api_missing = []
+    api_tested = []
+    for func_name, values in amdsmi_map.items():
+        c_any = 0
+        py_any = 0
+        if values["tested"]:
+            if values["c_unit_test"] or values["c_integration"]:
+                c_any = 1
+                c_any_total += 1
+                if values["c_unit_test"]:
+                    c_unit_test_total += 1
+                if values["c_integration"]:
+                    c_integration_total += 1
+
+            if values["py_unit_test"] or values["py_integration"]:
+                py_any = 1
+                py_any_total += 1
+                if values["py_unit_test"]:
+                    py_unit_test_total += 1
+                if values["py_integration"]:
+                    py_integration_total += 1
+
+            if values["c_integration"] or values["py_integration"]:
+                integration_total += 1
+
+            if values["c_unit_test"] or values["py_unit_test"]:
+                unit_test_total += 1
+
+            if (
+                values["c_unit_test"]
+                or values["c_integration"]
+                or values["py_unit_test"]
+                or values["py_integration"]
+            ):
+                any_total += 1
+
+        if values["tested"] == 0:
+            api_missing.append(func_name)
+            Print("DEBUG", f"Missing:", ending="")
+        else:
+            api_tested.append(func_name)
+            Print("DEBUG", f" Tested:", ending="")
+        Print(
+            "DEBUG",
+            f" {func_name}: C(any={c_any} unit={values['c_unit_test']} int={values['c_integration']}) py(any={py_any} unit={values['py_unit_test']} int={values['py_integration']})",
+        )
+
+    # Create summary report
     api_summary_support = []
     if len(api_support_map):
         sorted_map = {}
@@ -249,107 +365,27 @@ def Main(amdsmi, file_names):
             else:
                 num_not_supported += 1
 
-        api_summary_support.append(f"API Not Supported: {num_not_supported}")
-        for func_name, supported in sorted_map.items():
-            if not supported:
-                api_summary_support.append(f"\t{func_name}()")
-        api_summary_support.append(f"API Supported: {num_supported}")
+        api_summary_support.append(f"APIs Supported: {num_supported}")
         for func_name, supported in sorted_map.items():
             if supported:
                 api_summary_support.append(f"\t{func_name}()")
-        api_summary_support.append(f"API Not Supported: {num_not_supported}")
-        api_summary_support.append(f"API     Supported: {num_supported}")
-        api_summary_support.append(f"API         Total: {len(sorted_map)}")
+        api_summary_support.append(f"\nAPIs Not Supported: {num_not_supported}")
+        for func_name, supported in sorted_map.items():
+            if not supported:
+                api_summary_support.append(f"\t{func_name}()")
+        api_summary_support.append(f"\nAPIs   Missing: {len(api_missing)}")
+        for func_name in api_missing:
+            api_summary_support.append(f"\t{func_name}()")
+        api_summary_support.append(f"\nAPI Summary")
+        api_summary_support.append(f"Not Supported: {num_not_supported:>3d}")
+        api_summary_support.append(f"    Supported: {num_supported:>3d}")
+        api_summary_support.append(f"      Missing: {len(api_missing):>3d}")
+        api_summary_support.append(f"        Total: {len(sorted_map) + len(api_missing):>3d}")
     api_summary_support = "\n".join(api_summary_support)
     api_summary_support_txt = pathlib.Path(args.output_dir / "_api_summary_support.txt")
     api_summary_support_txt.write_text(api_summary_support)
 
-    # Initialize
-    for func_name in amdsmi_map:
-        amdsmi_map[func_name] = {
-            "tested": 0,
-            "c_unit_test": 0,
-            "c_integration": 0,
-            "py_unit_test": 0,
-            "py_integration": 0,
-        }
-    # api_map[file_name][func_name] = number_times_called
-    for file_name in api_map:
-        for func_name in api_map[file_name]:
-            amdsmi_map[func_name]["tested"] += 1
-            amdsmi_map[func_name][file_name] = 1
-
-    api_summary = []
-    msg = f"API, Tested, c_unit_test, c_integration, py_unit_test, py_integration"
-    api_summary.append(msg)
-    for func_name, tests_map in amdsmi_map.items():
-        msg = f"{func_name}, {tests_map['tested']}, {tests_map['c_unit_test']}, {tests_map['c_integration']}, {tests_map['py_unit_test']}, {tests_map['py_integration']}"
-        api_summary.append(msg)
-    api_summary.append("")
-    api_summary = "\n".join(api_summary)
-    api_summary_csv = pathlib.Path(args.output_dir / "_api_summary.csv")
-    api_summary_csv.write_text(api_summary)
-
-    c_unit_test_total = 0
-    c_integration_total = 0
-    c_any_total = 0
-    py_unit_test_total = 0
-    py_integration_total = 0
-    py_any_total = 0
-    any_total = 0
-    integration_total = 0
-    unit_test_total = 0
-    for func_name, values in amdsmi_map.items():
-        tested = values["tested"]
-        if tested:
-            c_unit_test = values["c_unit_test"]
-            c_integration = values["c_integration"]
-            c_any = 0
-            if c_unit_test or c_integration:
-                c_any = 1
-                c_any_total += 1
-                if c_unit_test:
-                    c_unit_test_total += 1
-                if c_integration:
-                    c_integration_total += 1
-
-            py_unit_test = values["py_unit_test"]
-            py_integration = values["py_integration"]
-            py_any = 0
-            if py_unit_test or py_integration:
-                py_any = 1
-                py_any_total += 1
-                if py_unit_test:
-                    py_unit_test_total += 1
-                if py_integration:
-                    py_integration_total += 1
-
-            if c_integration or py_integration:
-                integration_total += 1
-
-            if c_unit_test or py_unit_test:
-                unit_test_total += 1
-
-            if c_unit_test or c_integration or py_unit_test or py_integration:
-                any_total += 1
-
-            if tested == 0:
-                Print("DEBUG", f"Missing:", end="")
-            else:
-                Print("DEBUG", f"  Found:", end="")
-            Print(
-                "DEBUG",
-                f" {func_name}: C(any={c_any} unit={c_unit_test} int={c_integration}) py(any={py_any} unit={py_unit_test} int={py_integration})",
-            )
-
-    # Summary Table
-    #
-    # API          Test(%)                    Func(%)                  Unit(%)
-    # C      c_any_total(XX.X)  c_integration_total(XX.X)  c_unit_test_total(XX.X)
-    # Py    py_any_total(XX.X) py_integration_total(XX.X) py_unit_test_total(XX.X)
-    # Total    any_total(XX.X)    integration_total(XX.X)    unit_test_total(XX.X)
-    #
-    # Total API's: <Num>
+    # Create summary table
     api_summary_table = []
 
     c_any_total_percent = (c_any_total / num_api) * 100
@@ -364,108 +400,13 @@ def Main(amdsmi, file_names):
     unit_test_total_percent = (unit_test_total / num_api) * 100
     integration_total_percent = (integration_total / num_api) * 100
 
-    def PrintLine(val1, num1, val2, num2, val3, num3, val4, num4):
-        return f"{val1:^{num1}s} {val2:^{num2}s} {val3:^{num3}s} {val4:^{num4}s}"
-
-    def PrintLine2(
-        val,
-        num,
-        val1a,
-        num1a,
-        val1b,
-        num1b,
-        val1c,
-        num1c,
-        val2a,
-        num2a,
-        val2b,
-        num2b,
-        val2c,
-        num2c,
-        val3a,
-        num3a,
-        val3b,
-        num3b,
-        val3c,
-        num3c,
-    ):
-        return f"{val:^{num}} {val1a:{num1a}s}{val1b:{num1b}d}({val1c:{num1c}f}) {val2a:{num2a}s}{val2b:{num2b}d}({val2c:{num2c}f}) {val3a:{num3a}s}{val3b:{num3b}d}({val3c:{num3c}f})"
-
-    size_d = 3
-    size_f = 4.1
-    space1 = 5
-    space2 = 1
-    space3 = 11
-    msg = PrintLine("API", space1, "Test(%)", space3, "Unit(%)", space3, "Func(%)", space3)
+    msg = f"{'API':^5s} {'Test':>5s}({'%':^5s}) {'Unit':>5s}({'%':^5s}) {'Func':>5s}({'%':^5s})"
     api_summary_table.append(msg)
-    msg = PrintLine2(
-        "C",
-        space1,
-        " ",
-        space2,
-        c_any_total,
-        size_d,
-        c_any_total_percent,
-        size_f,
-        " ",
-        space2,
-        c_unit_test_total,
-        size_d,
-        c_unit_test_total_percent,
-        size_f,
-        " ",
-        space2,
-        c_integration_total,
-        size_d,
-        c_integration_total_percent,
-        size_f,
-    )
+    msg = f"{'C':^5s} {c_any_total:>5d}({c_any_total_percent:>5.1f}) {c_unit_test_total:>5d}({c_unit_test_total_percent:>5.1f}) {c_integration_total:>5d}({c_integration_total_percent:>5.1f})"
     api_summary_table.append(msg)
-    msg = PrintLine2(
-        "Py",
-        space1,
-        " ",
-        space2,
-        py_any_total,
-        size_d,
-        py_any_total_percent,
-        size_f,
-        " ",
-        space2,
-        py_unit_test_total,
-        size_d,
-        py_unit_test_total_percent,
-        size_f,
-        " ",
-        space2,
-        py_integration_total,
-        size_d,
-        py_integration_total_percent,
-        size_f,
-    )
+    msg = f"{'Py':^5s} {py_any_total:>5d}({py_any_total_percent:>5.1f}) {py_unit_test_total:>5d}({py_unit_test_total_percent:>5.1f}) {py_integration_total:>5d}({py_integration_total_percent:>5.1f})"
     api_summary_table.append(msg)
-    msg = PrintLine2(
-        "Total",
-        space1,
-        " ",
-        space2,
-        any_total,
-        size_d,
-        any_total_percent,
-        size_f,
-        " ",
-        space2,
-        unit_test_total,
-        size_d,
-        unit_test_total_percent,
-        size_f,
-        " ",
-        space2,
-        integration_total,
-        size_d,
-        integration_total_percent,
-        size_f,
-    )
+    msg = f"{'Total':^5s} {any_total:>5d}({any_total_percent:>5.1f}) {unit_test_total:>5d}({unit_test_total_percent:>5.1f}) {integration_total:>5d}({integration_total_percent:>5.1f})"
     api_summary_table.append(msg)
     api_summary_table.append(f"Num APIs: {num_api}")
     api_summary_table.append("")
@@ -473,7 +414,6 @@ def Main(amdsmi, file_names):
     api_summary_table = "\n".join(api_summary_table)
     api_summary_table_txt = pathlib.Path(args.output_dir / "_api_summary_table.txt")
     api_summary_table_txt.write_text(api_summary_table)
-
     return 0
 
 
@@ -560,7 +500,6 @@ def Parse_Command_Line(cmds=None):
     args.file_names["c_integration"] = args.c_integration
     args.file_names["py_unit_test"] = args.py_unit_test
     args.file_names["py_integration"] = args.py_integration
-
     return args
 
 

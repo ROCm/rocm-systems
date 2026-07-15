@@ -9,7 +9,7 @@ Functions that return ``hipFileError_t`` in C return a
 
 from libc.errno cimport errno
 from libc.string cimport memset
-from libc.stdint cimport uintptr_t
+from libc.stdint cimport int64_t, uintptr_t
 
 cimport hipfile._chipfile as _c
 
@@ -96,7 +96,9 @@ def is_hipfile_err(int err_code):
 
 def hipfile_errstr(int err_code):
     """Equivalent of the ``HIPFILE_ERRSTR`` C macro."""
-    cdef const char *s = _c.hipFileGetOpErrorString(<_c.hipFileOpError_t>abs(err_code))
+    cdef const char *s
+    with nogil:
+        s = _c.hipFileGetOpErrorString(<_c.hipFileOpError_t>abs(err_code))
     if s == NULL:
         return ""
     return s.decode("utf-8")
@@ -120,7 +122,9 @@ def hip_drv_err(tuple err):
 
 def hipFileGetOpErrorString(int status):
     """Wrapper for ``hipFileGetOpErrorString``."""
-    cdef const char *s = _c.hipFileGetOpErrorString(<_c.hipFileOpError_t>status)
+    cdef const char *s
+    with nogil:
+        s = _c.hipFileGetOpErrorString(<_c.hipFileOpError_t>status)
     if s == NULL:
         return ""
     return s.decode("utf-8")
@@ -132,17 +136,26 @@ def hipFileGetOpErrorString(int status):
 
 def hipFileDriverOpen():
     """Wrapper for ``hipFileDriverOpen``."""
-    return _err(_c.hipFileDriverOpen())
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileDriverOpen()
+    return _err(e)
 
 
 def hipFileDriverClose():
     """Wrapper for ``hipFileDriverClose``."""
-    return _err(_c.hipFileDriverClose())
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileDriverClose()
+    return _err(e)
 
 
 def hipFileUseCount():
     """Wrapper for ``hipFileUseCount``."""
-    return <int>_c.hipFileUseCount()
+    cdef int64_t count
+    with nogil:
+        count = _c.hipFileUseCount()
+    return <int>count
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +168,9 @@ def hipFileGetVersion():
     Returns ``((major, minor, patch), error_tuple)``.
     """
     cdef unsigned major = 0, minor = 0, patch = 0
-    cdef _c.hipFileError_t e = _c.hipFileGetVersion(&major, &minor, &patch)
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileGetVersion(&major, &minor, &patch)
     return ((major, minor, patch), _err(e))
 
 
@@ -178,19 +193,22 @@ def hipFileHandleRegister(uintptr_t handle_value, int handle_type):
     """
     cdef _c.hipFileHandle_t fh = NULL
     cdef _c.hipFileDescr_t descr
-    memset(&descr, 0, sizeof(descr))
-    descr.type = <_c.hipFileFileHandleType_t>handle_type
-    if handle_type == <int>_c.hipFileHandleTypeOpaqueWin32:
-        descr.hFile = <void *>handle_value
-    else:
-        descr.fd = <int>handle_value
-    cdef _c.hipFileError_t e = _c.hipFileHandleRegister(&fh, &descr)
+    cdef _c.hipFileError_t e
+    with nogil:
+        memset(&descr, 0, sizeof(descr))
+        descr.type = <_c.hipFileFileHandleType_t>handle_type
+        if handle_type == <int>_c.hipFileHandleTypeOpaqueWin32:
+            descr.hFile = <void *>handle_value
+        else:
+            descr.fd = <int>handle_value
+        e = _c.hipFileHandleRegister(&fh, &descr)
     return (<uintptr_t>fh, _err(e))
 
 
 def hipFileHandleDeregister(uintptr_t handle):
     """Wrapper for ``hipFileHandleDeregister``."""
-    _c.hipFileHandleDeregister(<_c.hipFileHandle_t>handle)
+    with nogil:
+        _c.hipFileHandleDeregister(<_c.hipFileHandle_t>handle)
 
 
 # ---------------------------------------------------------------------------
@@ -199,12 +217,18 @@ def hipFileHandleDeregister(uintptr_t handle):
 
 def hipFileBufRegister(uintptr_t buffer_base, size_t length, int flags=0):
     """Wrapper for ``hipFileBufRegister``."""
-    return _err(_c.hipFileBufRegister(<const void *>buffer_base, length, flags))
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileBufRegister(<const void *>buffer_base, length, flags)
+    return _err(e)
 
 
 def hipFileBufDeregister(uintptr_t buffer_base):
     """Wrapper for ``hipFileBufDeregister``."""
-    return _err(_c.hipFileBufDeregister(<const void *>buffer_base))
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileBufDeregister(<const void *>buffer_base)
+    return _err(e)
 
 
 # ---------------------------------------------------------------------------
@@ -222,14 +246,16 @@ def hipFileRead(uintptr_t handle, uintptr_t buffer_base, size_t size,
         ``-hipFileHipDriverError``, ``extra = hipError_t`` from
         ``hipPeekAtLastError()``, otherwise ``extra = 0``
     """
-    cdef ssize_t ret = _c.hipFileRead(<_c.hipFileHandle_t>handle,
-                                      <void *>buffer_base, size,
-                                      file_offset, buffer_offset)
+    cdef ssize_t ret
     cdef int extra = 0
-    if ret == -1:
-        extra = errno
-    elif ret == -<int>_c.hipFileHipDriverError:
-        extra = <int>_c.hipPeekAtLastError()
+    with nogil:
+        ret = _c.hipFileRead(<_c.hipFileHandle_t>handle,
+                             <void *>buffer_base, size,
+                             file_offset, buffer_offset)
+        if ret == -1:
+            extra = errno
+        elif ret == -<int>_c.hipFileHipDriverError:
+            extra = <int>_c.hipPeekAtLastError()
     return (ret, extra)
 
 
@@ -244,14 +270,16 @@ def hipFileWrite(uintptr_t handle, uintptr_t buffer_base, size_t size,
         ``-hipFileHipDriverError``, ``extra = hipError_t`` from
         ``hipPeekAtLastError()``, otherwise ``extra = 0``
     """
-    cdef ssize_t ret = _c.hipFileWrite(<_c.hipFileHandle_t>handle,
-                                       <const void *>buffer_base, size,
-                                       file_offset, buffer_offset)
+    cdef ssize_t ret
     cdef int extra = 0
-    if ret == -1:
-        extra = errno
-    elif ret == -<int>_c.hipFileHipDriverError:
-        extra = <int>_c.hipPeekAtLastError()
+    with nogil:
+        ret = _c.hipFileWrite(<_c.hipFileHandle_t>handle,
+                              <const void *>buffer_base, size,
+                              file_offset, buffer_offset)
+        if ret == -1:
+            extra = errno
+        elif ret == -<int>_c.hipFileHipDriverError:
+            extra = <int>_c.hipPeekAtLastError()
     return (ret, extra)
 
 
@@ -265,8 +293,10 @@ def hipFileDriverGetProperties():
     Returns ``(props_dict, error_tuple)``.
     """
     cdef _c.hipFileDriverProps_t props
-    memset(&props, 0, sizeof(props))
-    cdef _c.hipFileError_t e = _c.hipFileDriverGetProperties(&props)
+    cdef _c.hipFileError_t e
+    with nogil:
+        memset(&props, 0, sizeof(props))
+        e = _c.hipFileDriverGetProperties(&props)
     d = {
         "nvfs_major_version":        props.nvfs_major_version,
         "nvfs_minor_version":        props.nvfs_minor_version,

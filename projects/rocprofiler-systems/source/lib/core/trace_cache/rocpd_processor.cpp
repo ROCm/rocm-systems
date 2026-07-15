@@ -13,6 +13,8 @@
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#include "common/units.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -206,7 +208,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_mas.thread_id);
-    auto agent_primary_key = std::optional<uint64_t>{};
+    auto agent_primary_key = std::optional<std::uint64_t>{};
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
@@ -365,18 +367,25 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                   enabled.bits.mm_activity, m.mm_activity);
     insert_scalar(trait::name<category::amd_smi_temp>::value,
                   info::format_track_name<category::amd_smi_temp>(),
-                  enabled.bits.hotspot_temperature, m.hotspot_temperature);
+                  enabled.bits.hotspot_temperature || enabled.bits.edge_temperature,
+                  enabled.bits.hotspot_temperature ? m.hotspot_temperature
+                                                   : m.edge_temperature);
     insert_scalar(trait::name<category::amd_smi_power>::value,
                   info::format_track_name<category::amd_smi_power>(),
                   enabled.bits.current_socket_power || enabled.bits.average_socket_power,
-                  enabled.bits.current_socket_power ? m.current_socket_power
-                                                    : m.average_socket_power);
+                  pmc::collectors::gpu::select_socket_power(enabled, m));
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
                   enabled.bits.memory_usage, m.memory_usage / units::megabyte);
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
+    insert_scalar(trait::name<category::amd_smi_gfx_clock>::value,
+                  info::format_track_name<category::amd_smi_gfx_clock>(),
+                  enabled.bits.gfx_clock, m.gfx_clock_mhz);
+    insert_scalar(trait::name<category::amd_smi_mem_clock>::value,
+                  info::format_track_name<category::amd_smi_mem_clock>(),
+                  enabled.bits.mem_clock, m.mem_clock_mhz);
 
     auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
                                   const auto& format_name) {
@@ -386,6 +395,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
             const auto& arr = get_array(m.xcp_stats[xcp]);
             for(size_t i = 0; i < arr.size(); ++i)
             {
+                if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
+                    continue;
                 auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
                 insert_metric(true, name.c_str(), name.c_str(), arr[i]);
             }
@@ -410,8 +421,9 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         if(!is_enabled) return;
         for(size_t i = 0; i < arr.size(); ++i)
         {
-            auto suffix     = "_" + std::to_string(i);
-            auto pmc_name   = std::string(base_name) + suffix;
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
+
+            auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
 
             LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
@@ -483,7 +495,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
             .base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
-                             uint64_t value) {
+                             std::uint64_t value) {
         if(!enabled) return;
 
         LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
@@ -515,10 +527,52 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     insert_metric(enabled.bits.tx_rdma_cnp_pkts,
                   trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                   "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
+    insert_metric(enabled.bits.tx_rdma_ack_timeout,
+                  trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                  "ainic_tx_rdma_ack_timeout", m.tx_rdma_ack_timeout);
+    insert_metric(enabled.bits.resp_tx_pkt_seq_err,
+                  trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                  "ainic_resp_tx_pkt_seq_err", m.resp_tx_pkt_seq_err);
+    insert_metric(enabled.bits.req_rx_pkt_seq_err,
+                  trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                  "ainic_req_rx_pkt_seq_err", m.req_rx_pkt_seq_err);
+    insert_metric(enabled.bits.req_rx_impl_nak_seq_err,
+                  trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+                  "ainic_req_rx_impl_nak_seq_err", m.req_rx_impl_nak_seq_err);
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
+rocpd_processor_t::handle(
+    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
+{
+    if(_gpu_perf_counter.entries.empty()) return;
+
+    const auto* _name            = "rocm_counter_collection";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    auto base_id =
+        m_agent_manager
+            ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
+            .base_id;
+
+    for(const auto& entry : _gpu_perf_counter.entries)
+    {
+        auto name_info = m_metadata->find_gpu_perf_counter_by_id(
+            _gpu_perf_counter.device_id, entry.counter_id);
+        if(!name_info) continue;
+
+        const auto& info = name_info->get();
+
+        m_data_processor->insert_pmc_event(event_id, base_id, info.pmc_info_name.c_str(),
+                                           entry.value);
+        m_data_processor->insert_sample(info.track_name.c_str(),
+                                        _gpu_perf_counter.timestamp, event_id);
+    }
+}
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample)
 {
     struct core_freq_sample
     {
@@ -526,7 +580,13 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
         float  value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    struct core_load_sample
+    {
+        size_t id;
+        double value;
+    };
+
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -542,50 +602,107 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
         return result;
     };
 
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
+        std::vector<core_load_sample> result;
+        size_t                        offset = 0;
+
+        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
+        {
+            core_load_sample core_sample;
+            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            result.push_back(core_sample);
+        }
+        return result;
+    };
+
     const auto* _name            = trait::name<category::cpu_freq>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    auto device_id = 0;
+    const auto device_id = static_cast<size_t>(_cpu_pmc_sample.device_id);
 
     auto base_id =
         m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU).base_id;
 
     auto insert_event_and_sample = [&](const char* name, double value) {
         m_data_processor->insert_pmc_event(event_id, base_id, name, value);
-        m_data_processor->insert_sample(name, _cpu_freq_sample.timestamp, event_id);
+        m_data_processor->insert_sample(name, _cpu_pmc_sample.timestamp, event_id);
     };
 
-    insert_event_and_sample(trait::name<category::process_page>::value,
-                            static_cast<double>(_cpu_freq_sample.page_rss) /
-                                units::megabyte);
-    insert_event_and_sample(trait::name<category::process_virt>::value,
-                            static_cast<double>(_cpu_freq_sample.virt_mem_usage) /
-                                units::megabyte);
-    insert_event_and_sample(trait::name<category::process_peak>::value,
-                            static_cast<double>(_cpu_freq_sample.peak_rss) /
-                                units::megabyte);
-    insert_event_and_sample(trait::name<category::process_context_switch>::value,
-                            _cpu_freq_sample.context_switch_count);
-    insert_event_and_sample(trait::name<category::process_page_fault>::value,
-                            _cpu_freq_sample.page_faults);
-    insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            static_cast<double>(_cpu_freq_sample.user_mode_time) /
-                                units::sec);
-    insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            static_cast<double>(_cpu_freq_sample.kernel_mode_time) /
-                                units::sec);
+    const auto& _em = _cpu_pmc_sample.enabled_metric;
 
-    auto get_track_name = [](const auto& cpu_id) {
-        return std::string(trait::name<category::cpu_freq>::value) + " [" +
-               std::to_string(cpu_id) + "]";
-    };
+    // Process-level metrics are global — emit once from the lowest selected socket
+    static auto s_process_device_id = device_id;
+    const bool  is_process_owner    = (device_id == s_process_device_id);
 
-    auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
-    for(const auto& core : core_freq_samples)
+    if(is_process_owner)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(),
-                                static_cast<double>(core.value));
+        if(_em.bits.page_rss)
+            insert_event_and_sample(
+                trait::name<category::process_page>::value,
+                static_cast<double>(_cpu_pmc_sample.process_data.page_rss) /
+                    units::megabyte);
+
+        if(_em.bits.virt_mem)
+            insert_event_and_sample(
+                trait::name<category::process_virt>::value,
+                static_cast<double>(_cpu_pmc_sample.process_data.virt_mem) /
+                    units::megabyte);
+
+        if(_em.bits.peak_rss)
+            insert_event_and_sample(
+                trait::name<category::process_peak>::value,
+                static_cast<double>(_cpu_pmc_sample.process_data.peak_rss) /
+                    units::megabyte);
+
+        if(_em.bits.ctx_switches)
+            insert_event_and_sample(trait::name<category::process_context_switch>::value,
+                                    _cpu_pmc_sample.process_data.context_switches);
+
+        if(_em.bits.page_faults)
+            insert_event_and_sample(trait::name<category::process_page_fault>::value,
+                                    _cpu_pmc_sample.process_data.page_faults);
+
+        if(_em.bits.user_time)
+            insert_event_and_sample(
+                trait::name<category::process_user_mode_time>::value,
+                static_cast<double>(_cpu_pmc_sample.process_data.user_mode_time) /
+                    units::sec);
+
+        if(_em.bits.kernel_time)
+            insert_event_and_sample(
+                trait::name<category::process_kernel_mode_time>::value,
+                static_cast<double>(_cpu_pmc_sample.process_data.kernel_mode_time) /
+                    units::sec);
+    }
+
+    if(_em.bits.frequency)
+    {
+        auto get_freq_track_name = [device_id](const auto& cpu_id) {
+            return std::string(trait::name<category::cpu_freq>::value) + " [" +
+                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
+        };
+
+        const auto core_freq_samples = deserialize_freqs(_cpu_pmc_sample.freqs);
+        for(const auto& core : core_freq_samples)
+            insert_event_and_sample(get_freq_track_name(core.id).c_str(),
+                                    static_cast<double>(core.value));
+    }
+
+    if(_em.bits.load)
+    {
+        auto get_load_track_name = [device_id](const auto& cpu_id) {
+            return std::string(trait::name<category::cpu_load>::value) + " [" +
+                   std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
+        };
+
+        const auto core_load_samples = deserialize_loads(_cpu_pmc_sample.loads);
+        for(const auto& core : core_load_samples)
+            insert_event_and_sample(get_load_track_name(core.id).c_str(),
+                                    static_cast<double>(core.value));
     }
 }
 

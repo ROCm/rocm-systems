@@ -12,6 +12,7 @@
 #include "core.h"
 #include "xml.h"
 #include "net.h"
+#include "os.h"
 #include "archinfo.h"
 #include <string.h>
 
@@ -37,18 +38,21 @@
 #define MI200_XGMI_WIDTH 36.0
 #define GFX94X_XGMI_WIDTH 48.0
 #define GFX95X_XGMI_WIDTH 48.0
+#define GFX125X_XGMI_WIDTH 64.0  // placeholder — revisit with measured hardware data
 
 // Intel CPU convert GPU P2P traffic into 64B PCI TLPs, so GPU
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw*6/5)
 
-#define NCCL_TOPO_NODE_TYPES 6
+#define NCCL_TOPO_NODE_TYPES 8
 #define GPU 0
 #define PCI 1
 #define NVS 2
 #define CPU 3 // Actually NUMA domains
 #define NIC 4
 #define NET 5
+#define GIN 6
+#define DEV 7
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -64,46 +68,6 @@ extern const char* topoNodeTypeStr[];
 #define LINK_SYS 9
 #define LINK_NET 10
 extern const char* topoLinkTypeStr[];
-
-// Local (myself)
-#define PATH_LOC 0
-
-// Connection traversing NVLink
-#define PATH_NVL 1
-
-// Connection through NVLink using an intermediate GPU
-#define PATH_NVB 2
-
-// Connection through C2C
-#define PATH_C2C 3
-
-// Connection traversing at most a single PCIe bridge
-#define PATH_PIX 4
-
-// Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
-#define PATH_PXB 5
-
-// Connection between a GPU and a NIC using the C2C connection to the CPU and the PCIe connection to the NIC
-#define PATH_P2C 6
-
-// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network send/recv operations.
-#define PATH_PXN 7
-
-// Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
-#define PATH_PHB 8
-
-// Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
-#define PATH_SYS 9
-
-// Connection through the network
-#define PATH_NET 10
-
-// New type of path which should precede PATH_PIX
-#define PATH_PORT PATH_NVL
-
-// Disconnected
-#define PATH_DIS 11
-extern const char* topoPathTypeStr[];
 
 extern int64_t ncclParamPxnC2c();
 
@@ -131,6 +95,8 @@ struct ncclTopoLinkList {
 #define NCCL_TOPO_ID_LOCAL_ID(id) (id & NCCL_TOPO_ID_LOCAL_ID_MASK)
 #define NCCL_TOPO_LOCAL_NIC_ID(numaid, busid) (((int64_t)numaid << 56) + busid)
 #define NCCL_TOPO_ID(systemid, localid) (((int64_t)systemid << 56) + (localid & NCCL_TOPO_ID_LOCAL_ID_MASK))
+#define NCCL_TOPO_GPU_LOCAL_RANK_SHIFT 40
+#define NCCL_TOPO_GPU_LOCAL_ID(busId, localRankOnDev) ((((uint64_t)(localRankOnDev)) << 40) | ((busId) & ((((uint64_t)1)<<40)-1)))
 
 #define RCCL_TOPO_CR8G      1
 #define RCCL_TOPO_4P2H_ROME 2
@@ -138,6 +104,12 @@ struct ncclTopoLinkList {
 #define RCCL_TOPO_16P1H     8
 #define RCCL_TOPO_FORCE_INTRA 16
 #define RCCL_TOPO_XGMI_ALL  32
+
+/* Rome preset graph: index into romeTopoModels[] in rome_models.cc, or sentinel below. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE (-1)
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_GIO_COLUMBA (1000000)
+/* parse4H4P() applies rome_model_68 directly; this tags the preset, not romeTopoModels[]. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
 
 
 #define GCN_ARCH_NAME_LEN 16
@@ -155,9 +127,18 @@ struct ncclTopoNode {
       char gcn[GCN_ARCH_NAME_LEN];
       hipDeviceArch_t arch;
       int cu;
+      struct ncclTopoNode* parent; // parent DEV node
     }gpu;
     struct {
+      uint64_t device;  // Same as pci.device, a combination of vendor, device, subsystem_vendor and subsystem_device
+      int dev; // NVML dev number
+      int cudaCompCap;
+      int gdrSupport;
+      char gcn[GCN_ARCH_NAME_LEN]; // RCCL: GCN arch mirrored from the device's GPU rank, used for XGMI link BW
+    }dev;
+    struct {
       int dev; // Plugin dev number
+      uint64_t pciId;
       uint64_t asic;
       int port;
       float bw;
@@ -172,7 +153,7 @@ struct ncclTopoNode {
       int arch;
       int vendor;
       int model;
-      cpu_set_t affinity;
+      ncclAffinity affinity;
     }cpu;
     struct {
       uint64_t device;
@@ -215,6 +196,11 @@ struct ncclTopoSystem {
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
   bool useRailOptimizedTrees;
+  int inter;
+  /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
+  int romeTopoModelIdx;
+  /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
+  bool skipPresetTopoMatching;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
@@ -230,8 +216,11 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
 
 struct ncclTopoNetInfo {
   bool coll;
+  bool gin;
+  bool net;
   // communicator-specific information
   int netPluginIndex;
+  int maxDevsPerNic;
   bool dmaBufSupport;
   // NIC fusion
   int mergeLevel;
@@ -256,6 +245,7 @@ ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclT
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw);
 
 void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
 
@@ -282,15 +272,16 @@ static ncclResult_t ncclTopoRankToIndex(struct ncclTopoSystem* system, int rank,
   return ncclInternalError;
 }
 
-static ncclResult_t ncclTopoDevToRank(struct ncclTopoSystem* system, int dev, int* rank) {
+static ncclResult_t ncclTopoDevToRank(struct ncclTopoSystem* system, int systemId, int dev, bool warn, int* rank) {
   *rank = -1;
   for (int i=0; i<system->nodes[GPU].count; i++) {
-    if (NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[i].id) != system->systemId) continue; // Only consider GPUs on our node
+    if (NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[i].id) != systemId) continue; // Only consider GPUs on the given node
     if (system->nodes[GPU].nodes[i].gpu.dev == dev) {
       *rank = system->nodes[GPU].nodes[i].gpu.rank;
       return ncclSuccess;
     }
   }
+  if (warn) WARN("ncclTopoDevToRank could not find rank for nvml dev %d in systemId %d", dev, systemId);
   return ncclInternalError;
 }
 
@@ -316,6 +307,8 @@ static float ncclTopoXGMISpeed(const char* gcn) {
     return GFX94X_XGMI_WIDTH;
   else if (IsArchMatch(gcn, "gfx95"))
     return GFX95X_XGMI_WIDTH;
+  else if (IsArchMatch(gcn, "gfx1250"))
+    return GFX125X_XGMI_WIDTH;
   else
     return VEGA_XGMI_WIDTH;
 }

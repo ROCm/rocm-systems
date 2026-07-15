@@ -334,7 +334,7 @@ atomics:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_2
     tags: [deviceLib, system]

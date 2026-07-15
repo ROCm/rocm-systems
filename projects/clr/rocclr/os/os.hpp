@@ -49,6 +49,8 @@ class Os : AllStatic {
 
   // Closes the file Handle
   static bool CloseFileHandle(FileDesc fdesc);
+  // Duplicates the file Handle. Returns FDescInit() on failure.
+  static FileDesc DupFileHandle(FileDesc fdesc);
   // Given a valid file name, returns file descriptor and file size
   static bool GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr);
 
@@ -163,6 +165,7 @@ class Os : AllStatic {
 
   //! NUMA related settings
   inline static void setPreferredNumaNode(uint32_t node);
+  static void resetPreferredNumaNode();
 
   // File/Path helper routines:
   //
@@ -300,6 +303,9 @@ static constexpr uint32_t kBitsPerUInt64 = 8 * sizeof(uint64_t);
 //! Get the NUMA node ID of the current thread
 uint32_t getCurrentNumaNode();
 
+//! Restore the current thread affinity if it was changed by the runtime
+bool resetThreadAffinity();
+
 /*! \brief Manage Numa policy.
  *
  *  \note Works in Linux only, dummy in Windows.
@@ -341,6 +347,8 @@ public:
   ~NumaNode();
   //! Apply the CPU affinity mask of the node onto the current thread
   bool SchedSetAffinity();
+  //! Apply this node's CPU affinity only if the current thread mask is not app-restricted
+  bool SchedSetAffinityIfAllowed();
 private:
   uint32_t node_index_; //! Index of the Numa node
   void* affinity_ = nullptr;  //!< Affinity mask of logical CPUs on this node
@@ -354,7 +362,13 @@ private:
 inline void Os::setPreferredNumaNode(uint32_t node) {
   if (AMD_CPU_AFFINITY) {
     numa::NumaNode numaNode(node);
-    numaNode.SchedSetAffinity();
+    numaNode.SchedSetAffinityIfAllowed();
+  }
+}
+
+inline void Os::resetPreferredNumaNode() {
+  if (AMD_CPU_AFFINITY) {
+    numa::resetThreadAffinity();
   }
 }
 

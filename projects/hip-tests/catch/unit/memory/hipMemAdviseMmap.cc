@@ -63,6 +63,6 @@ HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
     close(fd);
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 }

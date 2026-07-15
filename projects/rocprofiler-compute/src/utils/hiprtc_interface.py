@@ -13,7 +13,11 @@ from ctypes import (
     c_void_p,
 )
 
-_lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libhiprtc.so")
+from utils.utils_common import resolve_rocm_library_path
+
+_lib = ctypes.CDLL(
+    resolve_rocm_library_path(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libhiprtc.so")
+)
 
 
 _lib.hiprtcCreateProgram.restype = c_int

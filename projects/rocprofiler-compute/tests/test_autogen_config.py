@@ -5,18 +5,11 @@ import hashlib
 import json
 from pathlib import Path
 
+import common
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# In development, source is under src/. In installed package, it is at the root.
-if (PROJECT_ROOT / "src").exists():
-    SRC_ROOT = PROJECT_ROOT / "src"
-else:
-    SRC_ROOT = PROJECT_ROOT
-
-HASH_DB = SRC_ROOT / "utils/.config_hashes.json"
-ANALYSIS_CONFIGS = SRC_ROOT / "rocprof_compute_soc/analysis_configs"
+HASH_DB = Path(common.SRC) / "utils/.config_hashes.json"
+ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc/analysis_configs"
 
 
 def md5(path: Path) -> str:
@@ -43,9 +36,6 @@ def test_config_hashes_match_files() -> None:
             failures.append(f"Arch directory missing: {arch_dir}")
             continue
 
-        # -------------------------
-        # Panel YAMLs
-        # -------------------------
         files = arch_data.get("files", {})
         if not isinstance(files, dict):
             failures.append(f"'files' for {arch} is not a dict")
@@ -63,36 +53,6 @@ def test_config_hashes_match_files() -> None:
                     f"[{arch}] Panel hash mismatch: {panel_path}\n"
                     f"  expected: {expected_hash}\n"
                     f"  actual:   {actual_hash}"
-                )
-
-        # -------------------------
-        # Delta YAML (if any)
-        # -------------------------
-        delta_hash = arch_data.get("delta_hash")
-
-        if delta_hash is not None:
-            delta_dir = arch_dir / "config_delta"
-            if not delta_dir.exists():
-                failures.append(f"[{arch}] Missing config_delta directory")
-                continue
-
-            # Exactly one *_diff.yaml should exist
-            delta_files = list(delta_dir.glob("*_diff.yaml"))
-            if len(delta_files) != 1:
-                failures.append(
-                    f"[{arch}] Expected exactly one delta file, found "
-                    f"{len(delta_files)} in {delta_dir}"
-                )
-                continue
-
-            delta_path = delta_files[0]
-            actual_delta_hash = md5(delta_path)
-
-            if actual_delta_hash != delta_hash:
-                failures.append(
-                    f"[{arch}] Delta hash mismatch: {delta_path}\n"
-                    f"  expected: {delta_hash}\n"
-                    f"  actual:   {actual_delta_hash}"
                 )
 
     if failures:

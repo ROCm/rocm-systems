@@ -178,7 +178,7 @@ test-rocprof-sys-sample()
     verbose-run which rocprof-sys-sample
     verbose-run ldd $(which rocprof-sys-sample)
     verbose-run rocprof-sys-sample --help
-    verbose-run rocprof-sys-sample --cputime 100 --realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
+    verbose-run rocprof-sys-sample --sample-cputime 100 --sample-realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
 }
 
 test-rocprof-sys-python()

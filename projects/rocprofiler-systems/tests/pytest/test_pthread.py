@@ -58,8 +58,6 @@ class TestPthreads(RocprofsysTest):
         r"\|_pthread_mutex_lock .* 1000 .*"
         r"\|_pthread_mutex_unlock .* 1000 .*"
         r"\|_pthread_mutex_lock .* 1000 .*"
-        r"\|_pthread_mutex_unlock .* 1000 .*"
-        r"\|_pthread_mutex_lock .* 1000 .*"
         r"\|_pthread_mutex_unlock .* 1000"
     ]
     OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX = [
@@ -68,7 +66,7 @@ class TestPthreads(RocprofsysTest):
         r"pthread_mutex_unlock (.*) 4000"
     ]
 
-    TIMEMORY_REWRITE_ARGS = [
+    TIMEMORY_BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -88,15 +86,15 @@ class TestPthreads(RocprofsysTest):
             mode,
             "parallel-overhead-locks",
             env=pthread_env,
-            rewrite_args=["-e", "-i", "256"],
-            runtime_args=["-e", "-i", "256"],
+            binary_rewrite_args=["-e", "-i", "256"],
+            runtime_instrument_args=["-e", "-i", "256"],
             run_args=["30", "4", "1000"],
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=self.OVERHEAD_LOCKS_PASS_REGEX,
-            runtime_pass_regex=self.OVERHEAD_LOCKS_PASS_REGEX,
+            binary_rewrite_pass_regex=self.OVERHEAD_LOCKS_PASS_REGEX,
+            runtime_instrument_pass_regex=self.OVERHEAD_LOCKS_PASS_REGEX,
         )
 
     @pytest.mark.parametrize(
@@ -107,11 +105,11 @@ class TestPthreads(RocprofsysTest):
             mode,
             "parallel-overhead-locks",
             env=pthread_timemory_env,
-            rewrite_args=self.TIMEMORY_REWRITE_ARGS,
+            binary_rewrite_args=self.TIMEMORY_BINARY_REWRITE_ARGS,
             run_args=["10", "4", "1000"],
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=self.OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX,
+            binary_rewrite_pass_regex=self.OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX,
         )

@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
@@ -41,8 +41,6 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
         indexes_max               = gotcha_capacity - 1,
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(blocking_gotcha)
-
     // string id for component
     static std::string label();
     static std::string description();
@@ -53,8 +51,8 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
     static void shutdown();
 
     template <size_t Idx, typename Ret, typename... Args>
-    std::enable_if_t<(Idx <= maybe_post_block_max_idx), Ret> operator()(
-        gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
+        requires(Idx <= maybe_post_block_max_idx)
+    Ret operator()(gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
 
     int operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
                    const sigset_t*, int*) const noexcept;

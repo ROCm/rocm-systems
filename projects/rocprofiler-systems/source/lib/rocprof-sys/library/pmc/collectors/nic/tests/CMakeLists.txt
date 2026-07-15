@@ -5,12 +5,17 @@ add_library(pmc-nic-collector-tests OBJECT test_nic_device.cpp)
 
 target_link_libraries(
     pmc-nic-collector-tests
-    PUBLIC
-        rocprofiler-systems-pmc-library
+    PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
+        rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems::rocprofiler-systems-compile-definitions
 )
+
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(pmc-nic-collector-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
+endif()
 
 target_include_directories(
     pmc-nic-collector-tests

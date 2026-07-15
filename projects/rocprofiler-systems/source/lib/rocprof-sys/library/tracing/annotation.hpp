@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/operations/types/get.hpp>
@@ -39,12 +40,12 @@ using annotation_value_type_t = typename annotation_value_type<Idx>::type;
 
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_CSTR, const char*)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_SIZE_T, size_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT16, int16_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT32, int32_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT64, int64_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT16, uint16_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT32, uint32_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT64, uint64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT16, std::int16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT32, std::int32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT64, std::int64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT16, std::uint16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT32, std::uint32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT64, std::uint64_t)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT32, float)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT64, double)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
@@ -52,13 +53,11 @@ ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
 #undef ROCPROFSYS_DEFINE_ANNOTATION_TYPE
 
 template <typename Np, typename Tp>
+    requires(!std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
+                           rocprofsys_annotation_t>::value)
 auto
-add_perfetto_annotation(
-    perfetto_event_context_t& ctx, Np&& _name, Tp&& _val, int64_t _idx = -1,
-    std::enable_if_t<
-        !std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
-                      rocprofsys_annotation_t>::value,
-        int> = 0)
+add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
+                        std::int64_t _idx = -1)
 {
     using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
     using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
@@ -94,7 +93,7 @@ add_perfetto_annotation(
     }
     else if constexpr(std::is_enum<value_type>::value)
     {
-        _get_dbg()->set_int_value(static_cast<int64_t>(_val));
+        _get_dbg()->set_int_value(static_cast<std::int64_t>(_val));
     }
     else if constexpr(std::is_floating_point<value_type>::value)
     {
@@ -113,9 +112,9 @@ add_perfetto_annotation(
     }
     else if constexpr(std::is_pointer<value_type>::value)
     {
-        _get_dbg()->set_pointer_value(reinterpret_cast<uint64_t>(_val));
+        _get_dbg()->set_pointer_value(reinterpret_cast<std::uint64_t>(_val));
     }
-    else if constexpr(concepts::can_stringify<value_type>::value)
+    else if constexpr(concepts::string_like<value_type>)
     {
         _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
@@ -202,42 +201,30 @@ using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t
 template <typename Tp>
 struct annotate<perfetto_event_context_t, Tp>
 {
-    TIMEMORY_DEFAULT_OBJECT(annotate)
-
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {
-        return sfinae(obj, 0, _ctx);
+        if constexpr(requires { obj.annotate(_ctx); })
+        {
+            return obj.annotate(_ctx);
+        }
+        else
+        {
+            using value_type = typename Tp::value_type;
+            if constexpr(!std::is_void_v<value_type>)
+            {
+                auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
+                for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+                {
+                    auto&& _label = std::get<1>(_obj_data).at(i);
+                    auto&& _value = std::get<2>(_obj_data).at(i);
+                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
+                }
+            }
+            (void) _ctx;
+        }
     }
 
 private:
-    //  If the component has a annotate(...) member function
-    template <typename T>
-    static auto sfinae(T&                        obj, int,
-                       perfetto_event_context_t& _ctx) -> decltype(obj.annotate(_ctx))
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        return obj.annotate(_ctx);
-    }
-
-    //  If the component does not have a annotate(...) member function
-    template <typename T>
-    static void sfinae(T& obj, long, perfetto_event_context_t& _ctx)
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        using value_type = typename T::value_type;
-        if constexpr(!std::is_void<value_type>::value)
-        {
-            auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
-            for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
-            {
-                auto&& _label = std::get<1>(_obj_data).at(i);
-                auto&& _value = std::get<2>(_obj_data).at(i);
-                ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
-            }
-        }
-        (void) _ctx;
-    }
-
     template <typename T, typename DataT>
     static auto sfinae_data(T& obj, int)
         -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
@@ -267,8 +254,6 @@ template <typename Tp>
 struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
 {
     using base_type = annotate<perfetto_event_context_t, Tp>;
-
-    TIMEMORY_DEFAULT_OBJECT(perfetto_annotate)
 
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {

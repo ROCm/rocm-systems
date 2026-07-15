@@ -41,3 +41,12 @@ if(USE_HEAP_DEVICE_VMM_POSIX)
       hip_allocator_vmm_posix.cpp
   )
 endif()
+
+# Add VMM Fabric allocator for ROCm 7.14+ with AMD SMI fabric support
+if(USE_HEAP_DEVICE_VMM_FABRIC AND HAVE_AMDSMI_GPU_FABRIC_INFO)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      hip_allocator_vmm_fabric.cpp
+  )
+endif()

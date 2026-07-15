@@ -33,7 +33,7 @@ When the `AMDSMI_DRY_RUN` environment variable is set to `1`:
 #### Bash/Shell:
 ```bash
 export AMDSMI_DRY_RUN=1
-amd-smi set --vram-carveout 2 --gpu 0  # Simulates setting VRAM carveout to index 2
+amd-smi set --mem-carveout 2 --gpu 0  # Simulates setting VRAM carveout to index 2
 ```
 
 #### Python:
@@ -136,7 +136,7 @@ cd build/tests/amd_smi_test
 - ✅ JSON and CSV output formats
 - ✅ Help text
 
-**Note:** Write operations (--vram-carveout in set, --gtt in set/reset) are not tested in automated CLI tests to avoid requiring root permissions and system reboots. Use DRY_RUN mode for testing these operations.
+**Note:** Write operations (--mem-carveout in set, --gtt in set/reset) are not tested in automated CLI tests to avoid requiring root permissions and system reboots. Use DRY_RUN mode for testing these operations.
 
 **Running Python CLI Tests:**
 ```bash
@@ -163,7 +163,7 @@ For testing actual write operations that modify system configuration:
 amd-smi static --mem-carveout
 
 # Change VRAM carveout to index 2 (example) for GPU 0
-sudo amd-smi set --vram-carveout 2 --gpu 0
+sudo amd-smi set --mem-carveout 2 --gpu 0
 
 # Reboot required
 sudo reboot
@@ -222,7 +222,7 @@ sudo reboot
 ```bash
 $ export AMDSMI_DRY_RUN=1
 
-$ amd-smi set --vram-carveout 2 --gpu 0
+$ amd-smi set --mem-carveout 2 --gpu 0
 [DRY_RUN] Would write UMA carveout index 2 to /sys/class/drm/card0/device/uma/carveout
 Successfully set VRAM carveout to [2] (4 GB). Reboot required for changes to take effect.
 

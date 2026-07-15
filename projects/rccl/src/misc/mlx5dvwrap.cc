@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "mlx5/mlx5dvwrap.h"
 #include <sys/types.h>
@@ -42,6 +43,15 @@ ncclResult_t wrap_mlx5dv_symbols(void) {
   } \
   return ncclSuccess;
 
+#define MLX5DV_INT_CHECK_RET_ERRNO(container, internal_name, call, success_retval, name) \
+  CHECK_NOT_NULL(container, internal_name); \
+  int ret = container.call; \
+  if (ret != success_retval) { \
+    WARN("NET/MLX5: Call to " name " failed with error %s", strerror(errno)); \
+    return ncclSystemError; \
+  } \
+  return ncclSuccess;
+
 bool wrap_mlx5dv_is_supported(struct ibv_device *device) {
   if (mlx5dvSymbols.mlx5dv_internal_is_supported == NULL) {
     return 0;
@@ -70,4 +80,15 @@ struct ibv_mr * wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t off
     return NULL;
   }
   return mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
+}
+
+ncclResult_t wrap_mlx5dv_query_device(struct ibv_context *ctx_in, struct mlx5dv_context *attrs_out) {
+  MLX5DV_INT_CHECK_RET_ERRNO(mlx5dvSymbols, mlx5dv_internal_query_device, mlx5dv_internal_query_device(ctx_in, attrs_out), 0, "mlx5dv_query_device");
+}
+
+struct ibv_qp *wrap_mlx5dv_create_qp(struct ibv_context *context, struct ibv_qp_init_attr_ex *qp_attr, struct mlx5dv_qp_init_attr *mlx5_qp_attr) {
+  if (mlx5dvSymbols.mlx5dv_internal_create_qp == NULL) {
+    return 0;
+  }
+  return mlx5dvSymbols.mlx5dv_internal_create_qp(context, qp_attr, mlx5_qp_attr);
 }

@@ -49,7 +49,7 @@ public:
     using parent_type   = PTL::TaskManager;
     using task_type     = PTL::PackagedTask<void>;
 
-    TaskGroup();
+    TaskGroup(size_t pool_size = 1);
     ~TaskGroup() override;
 
     TaskGroup(const TaskGroup&)     = delete;
@@ -58,14 +58,17 @@ public:
     TaskGroup& operator=(TaskGroup&&) noexcept = delete;
 
     void exec(std::function<void()>&&);
-    void wait();
-    void join();
+    void async(std::function<void()>&&);
+    void wait(bool async_only = false);
+    void join(bool async_only = false);
 
 private:
     std::mutex                             m_mutex           = {};
+    std::atomic<uint64_t>                  m_tasks_count     = 0;
     thread_pool_t*                         m_pool            = nullptr;
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
+    std::atomic<bool>                      m_async_only      = true;
 };
 
 using task_group_t = TaskGroup;
@@ -87,5 +90,12 @@ create_callback_thread();
 
 // returns the task group for the given callback thread identifier
 task_group_t* get_task_group(rocprofiler_callback_thread_t);
+
+// returns a task group with the given pool size
+std::unique_ptr<task_group_t>
+create_task_group(size_t pool_size = 1);
+
+task_group_t*
+create_task_group(void* addr, size_t pool_size = 1);
 }  // namespace internal_threading
 }  // namespace rocprofiler

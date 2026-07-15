@@ -87,6 +87,7 @@ class AmdSmiException(Exception):
         self.message = ""
         self.output_format = ""
         self.device_type = ""
+        self.value = 0
 
     def __str__(self):
         # Return message according to the current output format

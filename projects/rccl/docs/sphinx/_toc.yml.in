@@ -8,11 +8,11 @@ subtrees:
 - caption: Install
   entries:
   - file: install/installation
-    title: Installation guide
-  - file: install/docker-install
-    title: Running RCCL using Docker
+    title: Install RCCL
   - file: install/building-installing
-    title: Building and installing from source
+    title: Build from source
+  - file: install/docker-install
+    title: Run RCCL using Docker
 
 - caption: How to
   entries:
@@ -20,15 +20,17 @@ subtrees:
     title: Using the RCCL Tuner plugin
   - file: how-to/using-nccl
     title: Using the NCCL Net plugin
+  - file: how-to/fault-tolerance
+    title: Fault tolerance in RCCL
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
   - file: how-to/rccl-usage-tips
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-tuner/example
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example
     title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-net/example
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example
     title: NCCL Net plugin examples
 
 - caption: API reference
@@ -36,6 +38,8 @@ subtrees:
   - file: api-reference/library-specification
     title: Library specification
   - file: api-reference/api-library
+  - file: api-reference/data-type-support
+    title: Precision support
   - file: api-reference/env-variables
     title: Environment variables
 

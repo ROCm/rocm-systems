@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 #include "libpyrocprofsys.hpp"
+#include "common/env_vars.hpp"
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
 #include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/user.h"
 
+#include "common/environment.hpp"
+#include <spdlog/fmt/fmt.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
-#include <timemory/environment.hpp>
+// Provides inline tim::get_env<bool>/<std::string> specialization definitions before
+// mpl/policy.hpp pulls in mpl/type_traits.hpp, which calls get_env<bool> via
+// TIMEMORY_REPORT_ENV_QUERY. libpyrocprofsys.so does not link against timemory-cxx-static
+// so it cannot rely on librocprof-sys.so exporting these symbols.
+#include <timemory/environment/definition.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
@@ -111,7 +118,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+            rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
         "Initialize rocprofsys");
@@ -124,7 +131,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             _is_initialized = true;
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+            rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};
             for(auto&& itr : _v)
@@ -135,7 +142,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(!_cmd_line.empty())
             {
                 _cmd_line = _cmd_line.substr(_cmd_line.find_first_not_of(' '));
-                tim::set_env("ROCPROFSYS_COMMAND_LINE", _cmd_line, 0);
+                rocprofsys::set_env(rocprofsys::env_vars::COMMAND_LINE, _cmd_line, 0);
             }
             rocprofsys_init("trace", false, _cmd.c_str());
         },
@@ -155,17 +162,16 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     pycoverage::generate(omni);
     pyuser::generate(omni);
 
-    auto _python_path = tim::get_env("ROCPROFSYS_PATH", std::string{}, false);
+    auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
-    if(!_python_path.empty()) _libpath = TIMEMORY_JOIN("/", _python_path, _libpath);
+    if(!_python_path.empty()) _libpath = fmt::format("{}/{}", _python_path, _libpath);
     // permit env override if default path fails/is wrong
-    _libpath = tim::get_env("ROCPROFSYS_DL_LIBRARY", _libpath);
+    _libpath = rocprofsys::get_env(rocprofsys::env_vars::DL_LIBRARY, _libpath);
     // this is necessary when building with -static-libstdc++
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
-        auto _msg =
-            TIMEMORY_JOIN("", "dlopen(\"", _libpath, "\", RTLD_NOW | RTLD_GLOBAL)");
+        auto _msg = fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -182,7 +188,7 @@ namespace pyprofile
 using profiler_t           = std::function<void()>;
 using profiler_vec_t       = std::vector<profiler_t>;
 using profiler_label_map_t = std::unordered_map<std::string, profiler_vec_t>;
-using profiler_index_map_t = std::unordered_map<uint32_t, profiler_label_map_t>;
+using profiler_index_map_t = std::unordered_map<std::uint32_t, profiler_label_map_t>;
 using strset_t             = std::unordered_set<std::string>;
 using note_t               = rocprofsys_annotation_t;
 using annotations_t        = std::array<note_t, 6>;
@@ -196,7 +202,7 @@ strset_t default_exclude_filenames = { "(encoder|decoder|threading).py$", "^<.*>
 auto&
 get_paused()
 {
-    static thread_local int64_t _v = 0;
+    static thread_local std::int64_t _v = 0;
     return _v;
 }
 //
@@ -210,10 +216,10 @@ struct config
     bool                    include_filename   = false;
     bool                    full_filepath      = false;
     bool                    annotate_trace     = false;
-    int32_t                 ignore_stack_depth = 0;
-    int32_t                 base_stack_depth   = -1;
-    int32_t                 verbose            = 0;
-    int64_t                 depth_tracker      = 0;
+    std::int32_t            ignore_stack_depth = 0;
+    std::int32_t            base_stack_depth   = -1;
+    std::int32_t            verbose            = 0;
+    std::int64_t            depth_tracker      = 0;
     std::string             base_module_path   = {};
     strset_t                restrict_functions = {};
     strset_t                restrict_filenames = {};
@@ -235,8 +241,8 @@ get_config()
 {
     static auto*              _instance    = new config{};
     static thread_local auto* _tl_instance = []() {
-        static std::atomic<uint32_t> _count{ 0 };
-        auto                         _cnt = _count++;
+        static std::atomic<std::uint32_t> _count{ 0 };
+        auto                              _cnt = _count++;
         if(_cnt == 0) return _instance;
 
         auto* _tmp               = new config{};
@@ -386,15 +392,15 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         if(_config.include_filename)
         {
             if(_config.full_filepath)
-                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_fullpath)));
+                _funcname.append(fmt::format("[{}", _fullpath));
             else
-                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_filename)));
+                _funcname.append(fmt::format("[{}", _filename));
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
-            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame), ']'));
+            _funcname.append(fmt::format(":{}]", get_frame_lineno(frame)));
         else if(_config.include_line)
-            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame)));
+            _funcname.append(fmt::format(":{}", get_frame_lineno(frame)));
         else if(_config.include_filename)
             _funcname += "]";
         return _funcname;
@@ -625,7 +631,7 @@ generate(py::module& _pymod)
         "annotate_trace", bool,
         "Add detailed annotations to the trace about the executing function",
         get_config().annotate_trace)
-    CONFIGURATION_PROPERTY("verbosity", int32_t, "Verbosity of the logging",
+    CONFIGURATION_PROPERTY("verbosity", std::int32_t, "Verbosity of the logging",
                            get_config().verbose)
 
     static auto _get_strset = [](const strset_t& _targ) {
@@ -809,8 +815,8 @@ generate(py::module& _pymod)
             ar->finishNode();
             ar->finishNode();
         }
-        _name = TIMEMORY_JOIN(
-            '.', std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"), "json");
+        _name = fmt::format(
+            "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
         if(tim::filepath::open(ofs, _name))
         {
@@ -820,8 +826,7 @@ generate(py::module& _pymod)
         }
         else
         {
-            throw std::runtime_error(
-                TIMEMORY_JOIN("", "Error opening coverage output file: ", _name));
+            throw std::runtime_error("Error opening coverage output file: " + _name);
         }
     };
 

@@ -55,9 +55,6 @@ data_ready_callback(void*                                client_callback_data,
                     hsa_ven_amd_pcs_data_copy_callback_t data_copy_callback,
                     void*                                hsa_callback_data);
 
-extern atomic_pc_sampling_service_t&
-get_active_pc_sampling_service();
-
 }  // namespace hsa
 }  // namespace pc_sampling
 }  // namespace rocprofiler

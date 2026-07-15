@@ -47,14 +47,14 @@ HevcVideoParser::~HevcVideoParser() {
 }
 
 rocDecStatus HevcVideoParser::Initialize(RocdecParserParams *p_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_params));
     rocDecStatus ret = RocVideoParser::Initialize(p_params);
     FunctionExitLog(g_rocdec_logger);
     return ret;
 }
 
 rocDecStatus HevcVideoParser::UnInitialize() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     //todo:: do any uninitialization here
     slice_info_list_.clear();
     slice_info_list_.shrink_to_fit();
@@ -65,11 +65,12 @@ rocDecStatus HevcVideoParser::UnInitialize() {
 }
 
 rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_data));
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, STR("Parser failed!"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Parser failed!"));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -96,7 +97,7 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, STR("Failed to decode!"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -128,7 +129,7 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 }
 
 int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(sps_data));
     video_format_params_.codec = rocDecVideoCodec_HEVC;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -167,7 +168,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
             break;
         }
         default:
-            ErrorLog(g_rocdec_logger, STR("Error: Sequence Callback function - Chroma Format is not supported"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: Sequence Callback function - Chroma Format is not supported"));
             return PARSER_FAIL;
     }
     if(sps_data->conformance_window_flag) {
@@ -184,7 +185,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
     
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     // Table E-1.
     static const Rational hevc_sar[] = {
         {0, 0}, // unspecified
@@ -236,7 +237,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
 }
 
 void HevcVideoParser::SendSeiMsgPayload() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     sei_message_info_params_.sei_message_count = sei_message_count_;
     sei_message_info_params_.sei_message = sei_message_list_.data();
     sei_message_info_params_.sei_data = (void*)sei_payload_buf_;
@@ -248,7 +249,7 @@ void HevcVideoParser::SendSeiMsgPayload() {
 }
 
 int HevcVideoParser::SendPicForDecode() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int i, j, ref_idx, buf_idx;
     HevcSeqParamSet *sps_ptr = &sps_list_[active_sps_id_];
     HevcPicParamSet *pps_ptr = &pps_list_[active_pps_id_];
@@ -269,7 +270,7 @@ int HevcVideoParser::SendPicForDecode() {
     dec_pic_params_.intra_pic_flag = slice_info_list_[0].slice_header.slice_type == HEVC_SLICE_TYPE_I ? 1 : 0;
 
     // Todo: field_pic_flag, bottom_field_flag, second_field, ref_pic_flag, and intra_pic_flag seems to be associated with AVC/H.264.
-    // Do we need them for general purpose? Reomve if not.
+    // Do we need them for general purpose? Remove if not.
 
     // Fill picture parameters
     RocdecHevcPicParams *pic_param_ptr = &dec_pic_params_.pic_params.hevc;
@@ -436,7 +437,7 @@ int HevcVideoParser::SendPicForDecode() {
                     }
                 }
                 if (j == 15) {
-                    ErrorLog(g_rocdec_logger, "Could not find matching pic in ref_frames list. The slice type is P/B, and the idx from the ref_pic_list_0_ is: " + TOSTR(idx));
+                    ErrorLog(g_rocdec_logger, "Could not find matching pic in ref_frames list. The slice type is P/B, and the idx from the ref_pic_list_0_ is: " + ROCDEC_TOSTR(idx));
                     FunctionExitLog(g_rocdec_logger);
                     return PARSER_FAIL;
                 } else {
@@ -454,7 +455,7 @@ int HevcVideoParser::SendPicForDecode() {
                         }
                     }
                     if (j == 15) {
-                        ErrorLog(g_rocdec_logger, "Could not find matching pic in ref_frames list. The slice type is B, and the idx from the ref_pic_list_1_ is: " + TOSTR(idx));
+                        ErrorLog(g_rocdec_logger, "Could not find matching pic in ref_frames list. The slice type is B, and the idx from the ref_pic_list_1_ is: " + ROCDEC_TOSTR(idx));
                         FunctionExitLog(g_rocdec_logger);
                         return PARSER_FAIL;
                     } else {
@@ -541,9 +542,9 @@ int HevcVideoParser::SendPicForDecode() {
         }
     }
 
-#if DBGINFO
-    PrintVappiBufInfo();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVappiBufInfo();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -556,7 +557,7 @@ int HevcVideoParser::SendPicForDecode() {
 }
 
 ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t pic_data_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
     ParserResult ret2;
 
@@ -574,7 +575,7 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
     do {
         ret = GetNalUnit();
         if (ret == PARSER_NOT_FOUND) {
-            ErrorLog(g_rocdec_logger, STR("Error: no start code found in the frame data."));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             FunctionExitLog(g_rocdec_logger);
             return ret;
         }
@@ -670,7 +671,7 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                         // Get POC. 8.3.1.
                         CalculateCurrPoc();
 
-                        // Locate a free buffer for the current picutre in decode buffer pool before output picture marking (C.5.2.2)
+                        // Locate a free buffer for the current picture in decode buffer pool before output picture marking (C.5.2.2)
                         if (FindFreeInDecBufPool() != PARSER_OK) {
                             FunctionExitLog(g_rocdec_logger);
                             return PARSER_FAIL;
@@ -698,9 +699,9 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                             return PARSER_FAIL;
                         }
 
-#if DBGINFO
-                        PrintDpb();
-#endif // DBGINFO
+                        if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+                            PrintDpb();
+                        }
                     }
                     num_slices_++;
                     break;
@@ -766,7 +767,7 @@ void HevcVideoParser::ParsePtl(HevcProfileTierLevel *ptl, bool profile_present_f
         ptl->general_frame_only_constraint_flag = Parser::GetBit(nalu, offset);
         // ReadBits is limited to 32
         offset += 44; // skip 44 bits
-        // Todo: add constrant flags parsing for higher profiles when needed
+        // Todo: add constraint flags parsing for higher profiles when needed
     }
 
     ptl->general_level_idc = Parser::ReadBits(nalu, offset, 8);
@@ -793,7 +794,7 @@ void HevcVideoParser::ParsePtl(HevcProfileTierLevel *ptl, bool profile_present_f
             ptl->sub_layer_frame_only_constraint_flag[i] = Parser::GetBit(nalu, offset);
             // ReadBits is limited to 32
             offset += 44;  // skip 44 bits
-            // Todo: add constrant flags parsing for higher profiles when needed
+            // Todo: add constraint flags parsing for higher profiles when needed
         }
         if (ptl->sub_layer_level_present_flag[i]) {
             ptl->sub_layer_level_idc[i] = Parser::ReadBits(nalu, offset, 8);
@@ -813,7 +814,7 @@ void HevcVideoParser::ParseSubLayerHrdParameters(HevcSubLayerHrdParameters *sub_
     }
 }
 
-ParserResult HevcVideoParser::ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size,size_t &offset) {
+ParserResult HevcVideoParser::ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset) {
     if (common_inf_present_flag) {
         hrd->nal_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
         hrd->vcl_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
@@ -1214,14 +1215,23 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
             vui->colour_primaries = Parser::ReadBits(nalu, offset, 8);
             vui->transfer_characteristics = Parser::ReadBits(nalu, offset, 8);
             vui->matrix_coeffs = Parser::ReadBits(nalu, offset, 8);
+        } else {
+            vui->colour_primaries = 2;           // Unspecified
+            vui->transfer_characteristics = 2;   // Unspecified
+            vui->matrix_coeffs = 2;              // Unspecified
         }
+    } else {
+        vui->video_format = 5;                   // Unspecified
+        vui->colour_primaries = 2;               // Unspecified
+        vui->transfer_characteristics = 2;       // Unspecified
+        vui->matrix_coeffs = 2;                  // Unspecified
     }
     vui->chroma_loc_info_present_flag = Parser::GetBit(nalu, offset);
     if (vui->chroma_loc_info_present_flag) {
         vui->chroma_sample_loc_type_top_field = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_top_field", vui->chroma_sample_loc_type_top_field, 0, 5);
+        CHECK_RANGE_AND_SET_DEFAULT("chroma_sample_loc_type_top_field", vui->chroma_sample_loc_type_top_field, 0, 5, 0);
         vui->chroma_sample_loc_type_bottom_field = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_bottom_field", vui->chroma_sample_loc_type_bottom_field, 0, 5);
+        CHECK_RANGE_AND_SET_DEFAULT("chroma_sample_loc_type_bottom_field", vui->chroma_sample_loc_type_bottom_field, 0, 5, 0);
     }
     vui->neutral_chroma_indication_flag = Parser::GetBit(nalu, offset);
     vui->field_seq_flag = Parser::GetBit(nalu, offset);
@@ -1232,12 +1242,22 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         vui->def_disp_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         uint32_t left_offset = sps_ptr->conf_win_left_offset + vui->def_disp_win_left_offset;
         uint32_t right_offset = sps_ptr->conf_win_right_offset + vui->def_disp_win_right_offset;
-        CHECK_ALLOWED_MAX("SubWidthC * (leftOffset + rightOffset)", sub_width_c_ * (left_offset + right_offset), sps_ptr->pic_width_in_luma_samples - 1);
+        uint64_t data = static_cast<uint64_t>(sub_width_c_) * (left_offset + right_offset);
+        if (data > sps_ptr->pic_width_in_luma_samples - 1) {
+            ErrorLog(g_rocdec_logger, "SubWidthC * (leftOffset + rightOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(data) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_width_in_luma_samples - 1) + ". Using default value: 0");
+            vui->def_disp_win_left_offset = 0;
+            vui->def_disp_win_right_offset = 0;
+        }
         vui->def_disp_win_top_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         vui->def_disp_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         uint32_t top_offset = sps_ptr->conf_win_top_offset + vui->def_disp_win_top_offset;
         uint32_t bottom_offset = sps_ptr->conf_win_bottom_offset + vui->def_disp_win_bottom_offset;
-        CHECK_ALLOWED_MAX("SubHeightC * (topOffset + bottomOffset)", sub_height_c_ * (top_offset + bottom_offset), sps_ptr->pic_height_in_luma_samples);
+        data = static_cast<uint64_t>(sub_height_c_) * (top_offset + bottom_offset);
+        if (data > sps_ptr->pic_height_in_luma_samples) {
+            ErrorLog(g_rocdec_logger, "SubHeightC * (topOffset + bottomOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(data) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_height_in_luma_samples) + ". Using default value: 0");
+            vui->def_disp_win_top_offset = 0;
+            vui->def_disp_win_bottom_offset = 0;
+        }
     }
     vui->vui_timing_info_present_flag = Parser::GetBit(nalu, offset);
     if (vui->vui_timing_info_present_flag) {
@@ -1249,8 +1269,9 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         }
         vui->vui_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
         if (vui->vui_hrd_parameters_present_flag) {
-            ParserResult ret;
-            if ((ret = ParseHrdParameters(&vui->hrd_parameters, 1, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset)) != PARSER_OK) {
+            ParserResult ret = ParseHrdParameters(&vui->hrd_parameters, 1, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset);
+            if (ret != PARSER_OK) {
+                ErrorLog(g_rocdec_logger, "Failed to parse HRD parameters in VUI.");
                 return ret;
             }
         }
@@ -1261,21 +1282,27 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         vui->motion_vectors_over_pic_boundaries_flag = Parser::GetBit(nalu, offset);
         vui->restricted_ref_pic_lists_flag = Parser::GetBit(nalu, offset);
         vui->min_spatial_segmentation_idc = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("min_spatial_segmentation_idc", vui->min_spatial_segmentation_idc, 0, 4095);
+        CHECK_RANGE_AND_SET_DEFAULT("min_spatial_segmentation_idc", vui->min_spatial_segmentation_idc, 0, 4095, 0);
         vui->max_bytes_per_pic_denom = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("max_bytes_per_pic_denom", vui->max_bytes_per_pic_denom, 0, 16);
+        CHECK_RANGE_AND_SET_DEFAULT("max_bytes_per_pic_denom", vui->max_bytes_per_pic_denom, 0, 16, 2);
         vui->max_bits_per_min_cu_denom = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("max_bits_per_min_cu_denom", vui->max_bits_per_min_cu_denom, 0, 16);
+        CHECK_RANGE_AND_SET_DEFAULT("max_bits_per_min_cu_denom", vui->max_bits_per_min_cu_denom, 0, 16, 1);
         vui->log2_max_mv_length_horizontal = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("log2_max_mv_length_horizontal", vui->log2_max_mv_length_horizontal, 0, 16);
+        CHECK_RANGE_AND_SET_DEFAULT("log2_max_mv_length_horizontal", vui->log2_max_mv_length_horizontal, 0, 16, 15);
         vui->log2_max_mv_length_vertical = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("log2_max_mv_length_vertical", vui->log2_max_mv_length_vertical, 0, 15);
+        CHECK_RANGE_AND_SET_DEFAULT("log2_max_mv_length_vertical", vui->log2_max_mv_length_vertical, 0, 15, 15);
+    } else {
+        vui->motion_vectors_over_pic_boundaries_flag = 1;
+        vui->max_bytes_per_pic_denom = 2;
+        vui->max_bits_per_min_cu_denom = 1;
+        vui->log2_max_mv_length_horizontal = 15;
+        vui->log2_max_mv_length_vertical = 15;
     }
     return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(nalu) + ", " + ROCDEC_TOSTR(size));
     size_t offset = 0; // current bit offset
     uint32_t vps_id = Parser::ReadBits(nalu, offset, 4);
     HevcVideoParamSet *p_vps = &vps_list_[vps_id];
@@ -1343,15 +1370,15 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     p_vps->vps_extension_flag = Parser::GetBit(nalu, offset);
     p_vps->is_received = 1;
 
-#if DBGINFO
-    PrintVps(p_vps);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVps(p_vps);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(nalu) + ", " + ROCDEC_TOSTR(size));
     ParserResult ret = PARSER_OK;
     HevcSeqParamSet *sps_ptr = nullptr;
     size_t offset = 0;
@@ -1401,24 +1428,30 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         }
     }
     sps_ptr->pic_width_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
+    // Maximum picture width in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
+    CHECK_ALLOWED_RANGE("pic_width_in_luma_samples", sps_ptr->pic_width_in_luma_samples, 1u, 16888u);
     sps_ptr->pic_height_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
+    // Maximum picture height in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
+    CHECK_ALLOWED_RANGE("pic_height_in_luma_samples", sps_ptr->pic_height_in_luma_samples, 1u, 16888u);
+    // Maximum picture size in luma samples is 35651584 for HEVC Level 6.2 (Annex A.4 MaxLumaPs.)
+    CHECK_ALLOWED_MAX("pic_width_in_luma_samples * pic_height_in_luma_samples", static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) * sps_ptr->pic_height_in_luma_samples, 35651584u);
     sps_ptr->conformance_window_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->conformance_window_flag) {
         sps_ptr->conf_win_left_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_top_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_MAX("SubWidthC * (conf_win_left_offset + conf_win_right_offset)", sub_width_c_ * (sps_ptr->conf_win_left_offset + sps_ptr->conf_win_right_offset), sps_ptr->pic_width_in_luma_samples - 1);
-        CHECK_ALLOWED_MAX("SubHeightC * (conf_win_top_offset + conf_win_bottom_offset)", sub_height_c_ * (sps_ptr->conf_win_top_offset + sps_ptr->conf_win_bottom_offset), sps_ptr->pic_width_in_luma_samples - 1);
+        CHECK_ALLOWED_MAX("SubWidthC * (conf_win_left_offset + conf_win_right_offset)", static_cast<uint64_t>(sub_width_c_) * (static_cast<uint64_t>(sps_ptr->conf_win_left_offset) + sps_ptr->conf_win_right_offset), static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) - 1);
+        CHECK_ALLOWED_MAX("SubHeightC * (conf_win_top_offset + conf_win_bottom_offset)", static_cast<uint64_t>(sub_height_c_) * (static_cast<uint64_t>(sps_ptr->conf_win_top_offset) + sps_ptr->conf_win_bottom_offset), static_cast<uint64_t>(sps_ptr->pic_height_in_luma_samples) - 1);
     }
     sps_ptr->bit_depth_luma_minus8 = Parser::ExpGolomb::ReadUe(nalu, offset);
     if ( sps_ptr->bit_depth_luma_minus8 != 0 && sps_ptr->bit_depth_luma_minus8 != 2) {
-        ErrorLog(g_rocdec_logger, "bit_depth_luma_minus8 = " + TOSTR(sps_ptr->bit_depth_luma_minus8) + " is not supported");
+        ErrorLog(g_rocdec_logger, "bit_depth_luma_minus8 = " + ROCDEC_TOSTR(sps_ptr->bit_depth_luma_minus8) + " is not supported");
         return PARSER_OUT_OF_RANGE;
     }
     sps_ptr->bit_depth_chroma_minus8 = Parser::ExpGolomb::ReadUe(nalu, offset);
     if ( sps_ptr->bit_depth_chroma_minus8 != 0 && sps_ptr->bit_depth_chroma_minus8 != 2) {
-        ErrorLog(g_rocdec_logger, "bit_depth_chroma_minus8 = " + TOSTR(sps_ptr->bit_depth_chroma_minus8) + " is not supported");
+        ErrorLog(g_rocdec_logger, "bit_depth_chroma_minus8 = " + ROCDEC_TOSTR(sps_ptr->bit_depth_chroma_minus8) + " is not supported");
         return PARSER_OUT_OF_RANGE;
     }
     sps_ptr->log2_max_pic_order_cnt_lsb_minus4 = Parser::ExpGolomb::ReadUe(nalu, offset);
@@ -1483,7 +1516,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 = Parser::ExpGolomb::ReadUe(nalu, offset);
         //CHECK_ALLOWED_RANGE("log2_min_pcm_luma_coding_block_size", sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(min_cb_log2_size_y, 5), std::min(ctb_log2_size_y_, 5));
         if ((sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) < std::min(min_cb_log2_size_y, 5) || (sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) > std::min(ctb_log2_size_y_, 5)) {
-            ErrorLog(g_rocdec_logger, "log2_min_pcm_luma_coding_block_size = " + TOSTR(sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) + " not in allowed range: " + TOSTR(std::min(min_cb_log2_size_y, 5)) + ", " + TOSTR(std::min(ctb_log2_size_y_, 5)));
+            ErrorLog(g_rocdec_logger, "log2_min_pcm_luma_coding_block_size = " + ROCDEC_TOSTR(sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) + " not in allowed range: " + ROCDEC_TOSTR(std::min(min_cb_log2_size_y, 5)) + ", " + ROCDEC_TOSTR(std::min(ctb_log2_size_y_, 5)));
         }
         sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
         CHECK_ALLOWED_MAX("log2_max_ipcm_cb_size_y", sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size + sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(ctb_log2_size_y_, 5));
@@ -1514,23 +1547,26 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     sps_ptr->strong_intra_smoothing_enabled_flag = Parser::GetBit(nalu, offset);
     sps_ptr->vui_parameters_present_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->vui_parameters_present_flag) {
-        //vui_parameters()
-        if((ret = ParseVui(sps_ptr, nalu, size, offset)) != PARSER_OK) {
-            return ret;
+        // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters
+        // are not necessary for decoding.
+        if ((ret = ParseVui(sps_ptr, nalu, size, offset)) != PARSER_OK) {
+            ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters.");
         }
     }
-    sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
+    if (ret == PARSER_OK) {
+        sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
+    }
     sps_ptr->is_received = 1;
 
-#if DBGINFO
-    PrintSps(sps_ptr);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSps(sps_ptr);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(nalu) + ", " + ROCDEC_TOSTR(size));
     int i;
     size_t offset = 0;
     uint32_t pps_id = Parser::ExpGolomb::ReadUe(nalu, offset);
@@ -1668,15 +1704,15 @@ ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     }
 
     pps_ptr->is_received = 1;
-#if DBGINFO
-    PrintPps(pps_ptr);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintPps(pps_ptr);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcSliceSegHeader *p_slice_header) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(nalu) + ", " + ROCDEC_TOSTR(size) + ", " + RocDecFmtPtr(p_slice_header));
     HevcPicParamSet *pps_ptr = nullptr;
     HevcSeqParamSet *sps_ptr = nullptr;
     size_t offset = 0;
@@ -1993,7 +2029,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
         p_slice_header->is_received = 1;
         memcpy(&slice_header_copy_, p_slice_header, sizeof(HevcSliceSegHeader));
     } else {
-        //dependant slice
+        //dependent slice
         if (!slice_header_copy_.is_received) {
             return PARSER_WRONG_STATE;
         }
@@ -2037,9 +2073,9 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     }
 #endif
 
-#if DBGINFO
-    PrintSliceSegHeader(p_slice_header);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSliceSegHeader(p_slice_header);
+    }
 
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
@@ -2389,7 +2425,7 @@ int HevcVideoParser::MarkOutputPictures() {
                 if (dpb_buffer_.dpb_fullness > 0) {
                     dpb_buffer_.dpb_fullness--;
                 } else {
-                    ErrorLog(g_rocdec_logger, "Invalid DPB buffer fullness:" + TOSTR(dpb_buffer_.dpb_fullness));
+                    ErrorLog(g_rocdec_logger, "Invalid DPB buffer fullness:" + ROCDEC_TOSTR(dpb_buffer_.dpb_fullness));
                     return PARSER_FAIL;
                 }
             }
@@ -2450,7 +2486,7 @@ ParserResult HevcVideoParser::FindFreeInDpbAndMark() {
         }
     }
     if (index == dpb_buffer_.dpb_size) {
-        ErrorLog(g_rocdec_logger, "Error! DPB buffer overflow! Fullness = " + TOSTR(dpb_buffer_.dpb_fullness));
+        ErrorLog(g_rocdec_logger, "Error! DPB buffer overflow! Fullness = " + ROCDEC_TOSTR(dpb_buffer_.dpb_fullness));
         return PARSER_NOT_FOUND;
     }
 
@@ -2509,7 +2545,7 @@ int HevcVideoParser::BumpPicFromDpb() {
         }
     }
     if (min_poc_pic_idx >= HEVC_MAX_DPB_FRAMES) {
-        // No picture that is needed for ouput is found
+        // No picture that is needed for output is found
         return PARSER_OK;
     }
 
@@ -2542,7 +2578,6 @@ int HevcVideoParser::BumpPicFromDpb() {
     return PARSER_OK;
 }
 
-#if DBGINFO
 void HevcVideoParser::PrintVps(HevcVideoParamSet *vps_ptr) {
     MSG("=== hevc_video_parameter_set_t ===");
     MSG("vps_video_parameter_set_id               = " <<  vps_ptr->vps_video_parameter_set_id);
@@ -3000,4 +3035,3 @@ void HevcVideoParser::PrintVappiBufInfo() {
         MSG("");
     }
 }
-#endif // DBGINFO

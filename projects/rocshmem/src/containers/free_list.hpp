@@ -33,18 +33,19 @@
 namespace rocshmem {
 
 // Forward declaration of the proxy.
-template <typename ALLOCATOR, typename TYPE>
+template <typename TYPE>
 class FreeListProxy;
 
 /*****************************************************************************
  ******************************* FREE LIST ***********************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOC = HIPDefaultFinegrainedAllocator>
+template <typename TYPE>
 class FreeList {
-  friend class FreeListProxy<ALLOC, TYPE>;
+  template <typename T>
+  friend class FreeListProxy;
 
-  using MutexProxyType = ABQLBlockMutexProxy<ALLOC>;
+  using MutexProxyType = ABQLBlockMutexProxy;
   using MutexType = ABQLBlockMutex;
 
   struct Node {
@@ -105,7 +106,7 @@ class FreeList {
    *
    * @param alloc Allocator to use for free list nodes allocations.
    */
-  explicit FreeList(const ALLOC& alloc = ALLOC());
+  explicit FreeList(const MemoryAllocator& alloc = *get_default_allocator());
 
   /**
    * @brief Constructs a FreeList object with contents from a range of elements
@@ -118,7 +119,7 @@ class FreeList {
    * free list.
    */
   template <class InputIt>
-  FreeList(InputIt first, InputIt last, const ALLOC& alloc = ALLOC());
+  FreeList(InputIt first, InputIt last, const MemoryAllocator& alloc = *get_default_allocator());
 
   /**
    * @brief Pushes a range of elements defined by [`first`, `last`).
@@ -256,16 +257,18 @@ class FreeList {
   MutexProxyType mutex_;
 };
 
-template <typename ALLOCATOR, typename TYPE>
+template <typename TYPE>
 class FreeListProxy {
-  using FreeListT = FreeList<TYPE, ALLOCATOR>;
-  using ProxyT = DeviceProxy<ALLOCATOR, FreeListT>;
+  using FreeListT = FreeList<TYPE>;
+  using ProxyT = DeviceProxy<HIPAllocator, FreeListT>;
 
  public:
   __host__ __device__ FreeListT* get() { return proxy_.get(); }
 
-  FreeListProxy(size_t num_elems = 1) : proxy_{num_elems} {
-    new (proxy_.get()) FreeListT();
+  explicit FreeListProxy(const MemoryAllocator& alloc = HIPAllocator(),
+                         size_t num_elems = 1)
+      : allocator_{alloc}, proxy_{num_elems} {
+    new (proxy_.get()) FreeListT(allocator_);
   }
 
   FreeListProxy(const FreeListProxy& other) = delete;
@@ -283,6 +286,7 @@ class FreeListProxy {
   }
 
  private:
+  MemoryAllocator allocator_{};
   ProxyT proxy_{};
 };
 }  // namespace rocshmem

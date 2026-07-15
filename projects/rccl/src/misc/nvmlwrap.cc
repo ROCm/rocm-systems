@@ -1,12 +1,14 @@
 /*************************************************************************
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "nvmlwrap.h"
 #include "checks.h"
 #include "debug.h"
+#include "os.h"
 
 #include <initializer_list>
 #include <memory>
@@ -19,7 +21,6 @@ ncclNvmlDevicePairInfo ncclNvmlDevicePairs[ncclNvmlMaxDevices][ncclNvmlMaxDevice
 #if NCCL_NVML_DIRECT
   #define NCCL_NVML_FN(name, rettype, arglist) constexpr rettype(*pfn_##name)arglist = name;
 #else
-  #include <dlfcn.h>
   #define NCCL_NVML_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
 #endif
 
@@ -70,10 +71,10 @@ ncclResult_t ncclNvmlEnsureInitialized() {
 
   #if !NCCL_NVML_DIRECT
   if (pfn_nvmlInit == nullptr) {
-    void *libhandle = dlopen("libnvidia-ml.so.1", RTLD_NOW);
-    if (libhandle == nullptr) {
-      WARN("Failed to open libnvidia-ml.so.1");
-      initResult = ncclSystemError;
+    ncclOsLibraryHandle libhandle;
+    ncclResult_t openRes = ncclOsNvmlOpen(&libhandle);
+    if (openRes != ncclSuccess) {
+      initResult = openRes;
       return initResult;
     }
 
@@ -101,9 +102,10 @@ ncclResult_t ncclNvmlEnsureInitialized() {
       {(void**)&pfn_nvmlSystemGetConfComputeState, "nvmlSystemGetConfComputeState"},
       {(void**)&pfn_nvmlSystemGetConfComputeSettings, "nvmlSystemGetConfComputeSettings"}
     };
-    for(Symbol sym: symbols) {
-      *sym.ppfn = dlsym(libhandle, sym.name);
+    for (Symbol sym : symbols) {
+      *sym.ppfn = ncclOsDlsym(libhandle, sym.name);
     }
+
     // Coverity complains that we never dlclose this object, but that's
     // deliberate, since we want the loaded object to remain in memory until
     // the process terminates, so that we can use its code.

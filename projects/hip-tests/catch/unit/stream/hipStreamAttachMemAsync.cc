@@ -14,6 +14,8 @@ __device__ __managed__ int var = 0;
 enum class StreamAttachTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
   hipStream_t stream{nullptr};
 
   auto streamType =
@@ -30,7 +32,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
   SECTION("Invalid Resource Handle") {
     int definitelyNotAManagedVariable = 0;
     HIP_CHECK_ERROR(
-        hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(&definitelyNotAManagedVariable),
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&definitelyNotAManagedVariable),
                                 sizeof(int), hipMemAttachSingle),
         hipErrorInvalidValue);
   }
@@ -41,14 +43,14 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
   }
 
   SECTION("Invalid Resource Size") {
-    HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(&var), sizeof(int) - 1,
+    HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&var), sizeof(int) - 1,
                                             hipMemAttachSingle),
                     hipErrorInvalidValue);
   }
 
   SECTION("Invalid Flags") {
     HIP_CHECK_ERROR(
-        hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(&var), sizeof(int) - 1,
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&var), sizeof(int) - 1,
                                 hipMemAttachSingle | hipMemAttachHost | hipMemAttachGlobal),
         hipErrorInvalidValue);
   }
@@ -69,6 +71,8 @@ constexpr size_t size = 1024;
 __device__ __managed__ int m_memory[size];
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
   hipStream_t stream{nullptr};
 
   auto streamType =
@@ -84,7 +88,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
     int* d_memory{nullptr};
     HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
     HIP_CHECK(
-        hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost));
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for command to complete
     HIP_CHECK(hipFree(d_memory));
   }
@@ -95,7 +99,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
     HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
     HIP_CHECK(hipMemset(d_memory, 0, sizeof(int) * size));
     HIP_CHECK(
-        hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost));
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
 
     kernel<<<1, size, 0, stream>>>(d_memory, size);
@@ -112,7 +116,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
   SECTION("Access ManagedMemory") {
     HIP_CHECK(hipMemset(m_memory, 0, sizeof(int) * size));
     HIP_CHECK(
-        hipStreamAttachMemAsync(stream, reinterpret_cast<void*>(m_memory), 0, hipMemAttachHost));
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(m_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
 
     kernel<<<1, size, 0, stream>>>(m_memory, size);

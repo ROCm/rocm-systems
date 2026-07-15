@@ -13,6 +13,7 @@ target_include_directories(
     rocprofiler-sdk-headers
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
@@ -86,8 +87,6 @@ endforeach()
 # atomic library
 #
 # ----------------------------------------------------------------------------------------#
-
-target_link_libraries(rocprofiler-sdk-atomic INTERFACE atomic)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -200,7 +199,7 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf)
+find_package(LibElf QUIET)
 if(LibElf_FOUND)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
 else()
@@ -223,13 +222,18 @@ target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_library(
-    hsa-amd-aqlprofile64_library
-    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-    HINTS ${rocm_version_DIR} ${ROCM_PATH}
-    PATHS ${rocm_version_DIR} ${ROCM_PATH})
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    find_library(
+        hsa-amd-aqlprofile64_library
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile REQUIRED
+        HINTS ${rocm_version_DIR} ${ROCM_PATH}
+        PATHS ${rocm_version_DIR} ${ROCM_PATH})
 
-target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
+    target_compile_definitions(rocprofiler-sdk-aqlprofile-external
+                               INTERFACE ROCPROFILER_EXTERNAL_AQLPROFILE=1)
+    target_link_libraries(rocprofiler-sdk-aqlprofile-external
+                          INTERFACE ${hsa-amd-aqlprofile64_library})
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -359,11 +363,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocDecode)
+find_package(rocdecode)
 
-if(rocDecode_FOUND
-   AND rocDecode_INCLUDE_DIR
-   AND EXISTS "${rocDecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
+if(rocdecode_FOUND
+   AND rocdecode_INCLUDE_DIR
+   AND EXISTS "${rocdecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
     rocprofiler_config_nolink_target(
         rocprofiler-sdk-rocdecode-nolink rocdecode::rocdecode INTERFACE
         ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=1)
@@ -379,11 +383,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocJPEG)
+find_package(rocjpeg)
 
-if(rocJPEG_FOUND
-   AND rocJPEG_INCLUDE_DIR
-   AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
+if(rocjpeg_FOUND
+   AND rocjpeg_INCLUDE_DIR
+   AND EXISTS "${rocjpeg_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
     rocprofiler_config_nolink_target(rocprofiler-sdk-rocjpeg-nolink rocjpeg::rocjpeg
                                      INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=1)
 else()

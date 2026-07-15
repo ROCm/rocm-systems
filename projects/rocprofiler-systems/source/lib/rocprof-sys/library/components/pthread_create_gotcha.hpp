@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
@@ -28,11 +28,11 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 
     struct wrapper_config
     {
-        bool      enable_causal   = false;
-        bool      enable_sampling = false;
-        bool      offset          = false;
-        int64_t   parent_tid      = 0;
-        promise_t promise         = {};
+        bool         enable_causal   = false;
+        bool         enable_sampling = false;
+        bool         offset          = false;
+        std::int64_t parent_tid      = 0;
+        promise_t    promise         = {};
     };
 
     struct wrapper
@@ -48,15 +48,13 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         wrapper_config m_config  = {};
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(pthread_create_gotcha)
-
     // string id for component
     static std::string label() { return "pthread_create_gotcha"; }
 
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
-    static void shutdown(int64_t);
+    static void shutdown(std::int64_t);
 
     static void pause();
     static void resume();

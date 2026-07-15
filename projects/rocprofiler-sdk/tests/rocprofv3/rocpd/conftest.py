@@ -68,24 +68,43 @@ def pytest_addoption(parser):
         help="Path to summary markdown file.",
     )
     parser.addoption(
-        "--summary-kernel-dir",
+        "--summary-kernel-csv",
         action="store",
-        help="Path to KERNEL category summary output directory.",
+        nargs="+",
+        help="Paths to KERNEL category summary CSV files.",
     )
     parser.addoption(
-        "--summary-hip-dir",
+        "--summary-hip-csv",
         action="store",
-        help="Path to HIP category summary output directory.",
+        nargs="+",
+        help="Paths to HIP category summary CSV files.",
     )
     parser.addoption(
-        "--summary-multiple-dir",
+        "--summary-multiple-csv",
         action="store",
-        help="Path to multiple categories summary output directory.",
+        nargs="+",
+        help="Paths to multiple categories summary CSV files.",
     )
     parser.addoption(
-        "--summary-none-dir",
+        "--summary-none-csv",
         action="store",
-        help="Path to NONE category summary output directory.",
+        nargs="+",
+        help="Paths to NONE category summary CSV files.",
+    )
+    parser.addoption(
+        "--csv-input-truncated",
+        action="store",
+        help="Path to truncated kernels summary CSV file.",
+    )
+    parser.addoption(
+        "--csv-input-summary",
+        action="store",
+        help="Path to full kernels summary CSV file.",
+    )
+    parser.addoption(
+        "--csv-input-mangled",
+        action="store",
+        help="Path to mangled kernels summary CSV file.",
     )
 
     pd.set_option("display.width", 2000)
@@ -188,22 +207,75 @@ def summary_data(request):
     return domains
 
 
+# Helper function for CSV file fixtures
+def _get_csv_files(request, option):
+    """Get and validate CSV files from pytest option"""
+    csv_files = request.config.getoption(option)
+
+    if not csv_files:
+        pytest.skip(f"{option} not provided")
+
+    missing = [f for f in csv_files if not os.path.exists(f)]
+    if missing:
+        pytest.fail(f"{option} contains missing files: {missing}")
+
+    return csv_files
+
+
 # Fixtures for region category summary tests
 @pytest.fixture
-def summary_kernel_dir(request):
-    return request.config.getoption("--summary-kernel-dir")
+def summary_kernel_csv_files(request):
+    """Get explicit list of CSV files for kernel summary validation"""
+    return _get_csv_files(request, "--summary-kernel-csv")
 
 
 @pytest.fixture
-def summary_hip_dir(request):
-    return request.config.getoption("--summary-hip-dir")
+def summary_hip_csv_files(request):
+    """Get explicit list of CSV files for HIP summary validation"""
+    return _get_csv_files(request, "--summary-hip-csv")
 
 
 @pytest.fixture
-def summary_multiple_dir(request):
-    return request.config.getoption("--summary-multiple-dir")
+def summary_multiple_csv_files(request):
+    """Get explicit list of CSV files for multiple categories summary validation"""
+    return _get_csv_files(request, "--summary-multiple-csv")
 
 
 @pytest.fixture
-def summary_none_dir(request):
-    return request.config.getoption("--summary-none-dir")
+def summary_none_csv_files(request):
+    """Get explicit list of CSV files for NONE category summary validation"""
+    return _get_csv_files(request, "--summary-none-csv")
+
+
+@pytest.fixture
+def csv_kernels_truncated(request):
+    """Load truncated kernels summary CSV file"""
+    filename = request.config.getoption("--csv-input-truncated")
+    if not filename:
+        pytest.skip("--csv-input-truncated not provided")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    return pd.read_csv(filename)
+
+
+@pytest.fixture
+def csv_kernels_full(request):
+    """Load full kernels summary CSV file from --csv-input-summary option"""
+    filename = request.config.getoption("--csv-input-summary")
+    if not filename:
+        pytest.skip("--csv-input-summary not provided")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+
+    return pd.read_csv(filename)
+
+
+@pytest.fixture
+def csv_kernels_mangled(request):
+    """Load mangled kernels summary CSV file"""
+    filename = request.config.getoption("--csv-input-mangled")
+    if not filename:
+        pytest.skip("--csv-input-mangled not provided")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    return pd.read_csv(filename)

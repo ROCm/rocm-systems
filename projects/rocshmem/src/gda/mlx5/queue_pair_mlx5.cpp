@@ -22,10 +22,12 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "gda/queue_pair.hpp"
 #include "log.hpp"
-#include "containers/free_list_impl.hpp"
+#include "bit.hpp"
+#include "util.hpp"
+
 #include "gda/endian.hpp"
+#include "gda/queue_pair.hpp"
 
 namespace rocshmem {
 
@@ -69,6 +71,11 @@ __device__ static inline void release_lock(uint32_t *lock) {
 
 __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uint8_t lane_id) {
   return static_cast<uint16_t>(sq.post + lane_id);
+}
+
+__device__ static inline uint16_t mlx5_sq_idx(const gda_mlx5_device_sq& sq, uint16_t wqe_idx) {
+  // sq.depth is a power of 2, so just mask off everything above that
+  return wqe_idx & sq.depth_mask;
 }
 
 __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
@@ -174,6 +181,7 @@ __device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t o
   abort();
 }
 
+// precondition: called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
   uint16_t sq_depth = mlx5_sq.depth;
 
@@ -236,7 +244,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
   }
 }
 
-// can be called with all active lanes using any number of different QPs, don't assume anything
+// precondition: called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_quiet() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
@@ -250,17 +258,10 @@ __device__ void QueuePair::mlx5_quiet_single() {
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  /**
-   * since the leader needs to write the first 8 bytes of the LAST WQE to the
-   * doorbell register, it's easier if the LAST thread is the leader; does this
-   * have any performance implications?
-   */
-  // TODO: change the leader to first active lane-id, since leader is already calculated
-  bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
-
-  if (is_leader) {
+__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -269,31 +270,38 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr,
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
+                   static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (is_leader) {
+  if (wf_info.is_pe_group_last) {
     // increment post counter
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     // we are the last thread in the wavefront, so we have the last WQE posted
-    mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    if (ring_db) {
+      mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    }
     // release SQ lock
     release_lock(&mlx5_sq.lock);
   }
 }
 
-// called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
+// precondition: called with all active lanes using different QPs
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+                                                    uint32_t lkey, uintptr_t raddr,
+                                                    uint32_t rkey, uint8_t opcode,
+                                                    bool ring_db) {
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -301,14 +309,12 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
-
-  // can we inline the data into the WQE?
-  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
+                   static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -325,18 +331,13 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
   release_lock(&mlx5_sq.lock);
 }
 
-// can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
-    uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching, ActiveWFInfo &wf_info) {
-  /**
-   * since the leader needs to write the first 8 bytes of the LAST WQE to the
-   * doorbell register, it's easier if the LAST thread is the leader; does this
-   * have any performance implications?
-   */
-  // TODO: change the leader to first active lane-id, since leader is already calculated
-  bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
-  if (is_leader) {
+/* can be called with all active lanes using any number of different QPs, don't assume anything
+ * assumes that `fetching' is constant across all lanes using the same QP
+ * TODO: make `fetching' a template parameter */
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    ActiveWFInfo &wf_info, bool fetching, bool fence) {
+  if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -353,18 +354,21 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
+
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+  if (fence) fm_ce_se |= MLX5_WQE_CTRL_FENCE;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+                   raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (is_leader) {
+  if (wf_info.is_pe_group_last) {
     // increment post and fetching atomic counters
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     if (fetching) {
@@ -374,19 +378,20 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     mlx5_ring_doorbell(mlx5_sq.post, wqe);
     // release SQ lock
     release_lock(&mlx5_sq.lock);
-  }
-
-  if (fetching) {
-    mlx5_quiet();
+    // wait until fetch completes
+    if (fetching) {
+      mlx5_quiet_single();
+    }
   }
 
   return fetching ? *atomic_laddr : 0;
 }
 
-// called with all active lanes using different QPs
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t length,
-    uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching) {
+// precondition: called with all active lanes using different QPs
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
+                                                        uint32_t rkey, uint8_t opcode,
+                                                        int64_t atomic_data, int64_t atomic_cmp,
+                                                        bool fetching, bool fence) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -402,13 +407,16 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
+
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+  if (fence) fm_ce_se |= MLX5_WQE_CTRL_FENCE;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+                   raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -418,11 +426,11 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
   if (fetching) {
     fetching_atomic_idx += 1;
   }
-  // ring doorbell for this WQE (note: need to check this for correctness)
+  // ring doorbell for this WQE
   mlx5_ring_doorbell(mlx5_sq.post, wqe);
   // release SQ lock
   release_lock(&mlx5_sq.lock);
-
+  // wait until fetch completes
   if (fetching) {
     mlx5_quiet_single();
   }

@@ -22,6 +22,11 @@
 
 #pragma once
 
+#if !defined(ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE) ||                                           \
+    ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE != 1
+#    error "This file should not be included directly, use lib/aqlprofile/aqlprofile.hpp instead"
+#endif
+
 #ifdef _WIN32
 #    include <hsa.h>
 #    include <hsa_ven_amd_aqlprofile.h>
@@ -30,7 +35,7 @@
 #    include <hsa/hsa_ven_amd_aqlprofile.h>
 #endif
 
-#include "aqlprofile-sdk/version.h"
+#include "lib/aqlprofile/version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -93,11 +98,11 @@ typedef enum
     AQLPROFILE_BLOCK_NAME_GRBMH,
     AQLPROFILE_BLOCK_NAME_SQG,
 
-    // Blocks reserved for NPI support
-    AQLPROFILE_BLOCK_NAME_RESERVED_6,
-    AQLPROFILE_BLOCK_NAME_RESERVED_7,
-    AQLPROFILE_BLOCK_NAME_RESERVED_8,
-    AQLPROFILE_BLOCK_NAME_RESERVED_9,
+    // New blocks for gc_12_1_x
+    AQLPROFILE_BLOCK_NAME_GLARBA,
+    AQLPROFILE_BLOCK_NAME_GLARBC,
+    AQLPROFILE_BLOCK_NAME_GRBMA,
+    AQLPROFILE_BLOCK_NAME_GC_NHTTLB,
 
     // Add new blocks above
     AQLPROFILE_BLOCKS_NUMBER
@@ -412,7 +417,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
  * @param[in] handle The handle returned from aqlprofile_pmc_create_packets()
  * @param[in] callback CB where the resulting event values are going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -461,7 +466,7 @@ aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
  * @param[in] handle The handle returned from aqlprofile_att_create_packets()
  * @param[in] callback CB where the resulting data is going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -485,7 +490,7 @@ typedef struct
  * @param[out] packets Packets returned by this function to start and stop thread trace
  * @param[in] profile Agent information and extra parameters for thread trace
  * @param[in] callback Memory allocation fn which may request cpu or gpu memory
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -509,11 +514,11 @@ aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
- * @param[inout] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
+ * @param[in,out] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
  * @param[in] handle Created in aqlprofile_att_create_packets()
  * @param[in] shader_engine_id Shader engine to get packets from
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -525,7 +530,7 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
                                   int                            shader_engine_id,
                                   int                            flags);
 
-struct aqlprofile_att_buffer_status_t
+typedef struct aqlprofile_att_buffer_status_t
 {
     uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
     void*    data;        // Read data from, if is full
@@ -534,7 +539,8 @@ struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
-};
+    uint64_t read_offset;
+} aqlprofile_att_buffer_status_t;
 
 /**
  * @brief Fn to retrieve buffer status.
@@ -543,7 +549,7 @@ struct aqlprofile_att_buffer_status_t
  * @param[in] handle What was passed to aqlprofile_att_get_buffer_packets
  * @param[in] shader_engine_id Shader engine (SE) ID
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -568,7 +574,7 @@ typedef hsa_status_t (*aqlprofile_eventname_callback_t)(int id, const char* name
  * @param [in] callback Callback to use for iteration of dimensions
  * @param [in] user_data Data to supply to callback @ref aqlprofile_eventname_callback_t
  * @retval HSA_STATUS_SUCCESS if successful
- * @retval HSA_STATUS_ERROR if error on interation
+ * @retval HSA_STATUS_ERROR if error on iteration
  * @retval OTHERS If @ref aqlprofile_eventname_callback_t returns non-HSA_STATUS_SUCCESS,
  *         that value is returned.
  */
@@ -644,16 +650,15 @@ typedef struct
 
 typedef struct
 {
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+    void*  data;  // Valid until delete_packets() is called. Caller must save contents otherwise.
     size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_TYPE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
+    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,  ///< Sample interval in clock cycles.
+                                                    ///< Must be a multiple of 32.
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
@@ -661,23 +666,29 @@ typedef enum
 
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
 } aqlprofile_spm_parameter_interval_mode_t;
-
-typedef struct aqlprofile_spm_available_configuration_t
-{
-    aqlprofile_spm_parameter_type_t type         = AQLPROFILE_SPM_PARAMETER_TYPE_NONE;
-    uint64_t                        min_interval = 0;
-    uint64_t                        max_interval = 0;
-} aqlprofile_spm_available_configuration_t;
 
 typedef struct
 {
     aqlprofile_spm_parameter_type_t type;
     uint64_t                        value;
 } aqlprofile_spm_parameter_t;
+
+typedef struct aqlprofile_spm_available_configuration_t
+{
+    aqlprofile_spm_parameter_type_t type;
+    union
+    {
+        struct
+        {
+            uint64_t                                 min_interval;
+            uint64_t                                 max_interval;
+            aqlprofile_spm_parameter_interval_mode_t mode;
+        } interval;  // interval in cycles
+    };
+} aqlprofile_spm_available_configuration_t;
 
 /**
  * @brief AQLprofile struct containing information for SPM counter events
@@ -799,14 +810,14 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc,
                                 size_t                              size,
                                 void*                               userdata);
 
-enum aqlprofile_spm_decode_query_t
+typedef enum aqlprofile_spm_decode_query_t
 {
     AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE = 0,
     AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC,
     AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT,
     AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET,
     AQLPROFILE_SPM_DECODE_QUERY_LAST
-};
+} aqlprofile_spm_decode_query_t;
 
 hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
@@ -816,16 +827,36 @@ aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
 
+/**
+ * @brief Callback that provides the available SPM configurations for an agent.
+ *        The config array is only valid for the duration of the callback and
+ *        should not be freed or stored beyond the callback's return.
+ *
+ * @param[in] config     Array of available SPM configurations
+ * @param[in] num_config Number of configurations in the array
+ * @param[in] user_data  User data supplied by ::aqlprofile_spm_query_agent_configurations
+ */
 typedef hsa_status_t (*aqlprofile_spm_available_configurations_cb_t)(
     const aqlprofile_spm_available_configuration_t* config,
     size_t                                          num_config,
     void*                                           user_data);
 
+/**
+ * @brief Query supported SPM configurations for a given agent.
+ *        Supported configurations (e.g. sample interval ranges) are returned
+ *        via the provided callback.
+ *
+ * @param[in] agent    Agent handle to query configurations for
+ * @param[in] cb       Callback in which configurations are returned
+ * @param[in] userdata User data passed back to the callback
+ * @retval HSA_STATUS_SUCCESS                if configurations were successfully queried
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if cb is NULL
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    if agent is not found or does not support SPM
+ */
 hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t                    agent,
-                                        aqlprofile_spm_available_configurations_cb_t cb,
-                                        void*                                        userdata);
-
+aqlprofile_spm_query_agent_configurations(aqlprofile_agent_handle_t                    agent,
+                                          aqlprofile_spm_available_configurations_cb_t cb,
+                                          void*                                        userdata);
 #ifdef __cplusplus
 }
 #endif

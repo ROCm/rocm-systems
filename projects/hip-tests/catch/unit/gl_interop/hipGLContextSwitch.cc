@@ -89,8 +89,9 @@ class GLUTWindow {
     GLenum err = glewInit();
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
-      exit(1);
+      glutDestroyWindow(window_id_);
+      window_id_ = 0;
+      HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
     }
 #endif
   }
@@ -259,8 +260,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Basic) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    // Create first GL context
@@ -303,8 +303,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SeparateContextSetups) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    // Create two contexts
@@ -365,8 +364,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_BackAndForth) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -400,8 +398,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidSwitching) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -431,8 +428,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Patterns) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    std::vector<std::unique_ptr<GLUTWindow>> windows;
@@ -496,8 +492,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    // First context - explicit initialization
@@ -545,8 +540,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -613,8 +607,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SequentialStableContext) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window;
@@ -694,8 +687,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_InterleavedWithSwitch) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -740,8 +732,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidMultiContextSwitching) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    std::vector<std::unique_ptr<GLUTWindow>> windows;
@@ -787,8 +778,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SameContextRepeated) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window;
@@ -813,8 +803,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ReturnToPreviousContext) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -850,8 +839,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ResourceContextAssociation) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -907,8 +895,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DataIntegrity) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -977,8 +964,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AlternatingDataOperations) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1058,8 +1044,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_TextureInterop) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1110,8 +1095,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MixedResources) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1168,8 +1152,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_StreamOperations) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1224,8 +1207,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleStreams) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1286,8 +1268,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
 HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   if (!HipTest::isImageSupported()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
 
   constexpr int kNumContexts = 3;
@@ -1319,8 +1300,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ManyBuffersStress) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1391,8 +1371,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_LongRunningStress) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1439,8 +1418,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegistrationFlags) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window1;
@@ -1488,8 +1466,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ContextDestruction) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    // Create and use first context
@@ -1519,8 +1496,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleDestructionCycles) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    for (int cycle = 0; cycle < kDefaultIterations; ++cycle) {
@@ -1545,8 +1521,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DeviceListTypes) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    const int device_count = HipTest::getDeviceCount();
@@ -1583,8 +1558,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_FirstOperationInitialization) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
-     return;
+     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
    GLUTWindow window;

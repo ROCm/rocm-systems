@@ -1,4 +1,9 @@
-# pylint: disable=C0114,C0115,C0116
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+"""Enumerations mirroring hipFile C types."""
+
 from enum import IntEnum
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611

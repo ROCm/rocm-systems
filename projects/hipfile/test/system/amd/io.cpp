@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <string>
+#include <thread>
 #include <unistd.h>
 
 extern SystemTestOptions test_env;
@@ -113,5 +114,62 @@ INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
                          [](const testing::TestParamInfo<HipFileIo::ParamType> &param_info) {
                              return param_info.param.name;
                          });
+
+struct HipFileIoHipInit : public testing::Test {
+
+    Tmpfile         tmpfile;
+    size_t          tmpfile_size;
+    hipFileHandle_t tmpfile_handle;
+    void           *registered_device_buffer;
+    size_t          registered_device_buffer_size;
+
+    HipFileIoHipInit()
+        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1024 * 1024}, tmpfile_handle{nullptr},
+          registered_device_buffer{nullptr}, registered_device_buffer_size{1024 * 1024}
+    {
+    }
+
+    void SetUp() override
+    {
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(false);
+
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(tmpfile_size)));
+
+        hipFileDescr_t descr{};
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        descr.handle.fd = tmpfile.fd;
+
+        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
+        ASSERT_EQ(hipSuccess, hipMalloc(&registered_device_buffer, registered_device_buffer_size));
+        ASSERT_EQ(HIPFILE_SUCCESS,
+                  hipFileBufRegister(registered_device_buffer, registered_device_buffer_size, 0));
+    }
+
+    void TearDown() override
+    {
+        ASSERT_EQ(HIPFILE_SUCCESS, hipFileBufDeregister(registered_device_buffer));
+        ASSERT_EQ(hipSuccess, hipFree(registered_device_buffer));
+        hipFileHandleDeregister(tmpfile_handle);
+    }
+};
+
+TEST_F(HipFileIoHipInit, spawnedThreadReadRunsWithoutSegfault)
+{
+    size_t  io_size{registered_device_buffer_size};
+    ssize_t res{};
+    std::thread([&]() { res = hipFileRead(tmpfile_handle, registered_device_buffer, io_size, 0, 0); }).join();
+    ASSERT_EQ(io_size, res);
+}
+
+TEST_F(HipFileIoHipInit, spawnedThreadWriteRunsWithoutSegfault)
+{
+    size_t  io_size{registered_device_buffer_size};
+    ssize_t res{};
+    std::thread([&]() {
+        res = hipFileWrite(tmpfile_handle, registered_device_buffer, io_size, 0, 0);
+    }).join();
+    ASSERT_EQ(io_size, res);
+}
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

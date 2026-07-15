@@ -43,9 +43,13 @@ def causal_e2e_env(causal_env) -> dict[str, str]:
 # ====================================================================================== #
 
 
+@pytest.mark.timeout(600)
 class TestCausal(RocprofsysTest):
+    # Use #\d+ instead of #1: when perf backend falls back to timer,
+    # the first experiment is a microsecond no-op baseline that consumes index #1,
+    # so the first user-visible experiment is logged as #2.
     PASS_REGEX = [
-        r"Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz"
     ]
 
     @pytest.mark.parametrize(
@@ -102,7 +106,6 @@ class TestCausal(RocprofsysTest):
             causal_mode=causal_mode,
             run_args=run_args,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
 
@@ -150,11 +153,11 @@ class TestCausal(RocprofsysTest):
             causal_mode=causal_mode,
             run_args=run_args,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
 
 
+@pytest.mark.timeout(600)
 @pytest.mark.causal_e2e
 @pytest.mark.slow  # Upwards of 120 seconds
 @pytest.mark.parametrize(
@@ -174,9 +177,10 @@ class TestCausal(RocprofsysTest):
         ),
     ],
 )
+@pytest.mark.class_name("causal-e2e")
 class TestCausalE2E(RocprofsysTest):
     PASS_REGEX = [
-        r"Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz"
     ]
     RUN_ARGS = ["80", "50", "432525", "100000000"]
 
@@ -240,7 +244,6 @@ class TestCausalE2E(RocprofsysTest):
             run_args=self.RUN_ARGS,
             causal_mode=causal_mode,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
         self.assert_causal_json(

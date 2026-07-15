@@ -90,3 +90,8 @@ rocSHMEM provides leveled logging macros defined in `src/log.hpp`. Use the appro
 - The `LOG_` macros produce a compile error if used in device code (and vice versa for `LOGD_`).
 - Runtime verbosity is controlled by `ROCSHMEM_DEBUG_LEVEL` environment variable (default: `WARN`).
 
+### Comparing performance, quantifying improvements and regressions
+
+Look into `scripts/functional_tests/README-perf_compare.md` for a recipe to build and compare a PR/branch
+and develop and automation to produce regression/improvement statistics and graphs.
+

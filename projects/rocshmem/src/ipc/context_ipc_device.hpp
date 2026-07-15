@@ -140,9 +140,23 @@ class IPCContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
+
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
+
+  __device__ void broadcastmem_wg(rocshmem_team_t team,
+                                void *dest, const void *source, int nelement, int PE_root);
+
+  template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T *source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void *source, int nelement, int PE_root);
 
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
@@ -231,25 +245,163 @@ class IPCContext : public Context {
   __device__ uint64_t signal_fetch_wg(const uint64_t *sig_addr);
   __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
 
+  /**************************************************************************
+   ************************ TILE API METHODS *********************************
+   **************************************************************************/
+
+  // RMA Operations - Type-erased interface
+  __device__ int tile_put(void* dst_data, const void* src_data,
+                          const size_t* dst_strides, const size_t* src_strides,
+                          const size_t* start_coord, const size_t* boundary,
+                          int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_put_wave(void* dst_data, const void* src_data,
+                               const size_t* dst_strides, const size_t* src_strides,
+                               const size_t* start_coord, const size_t* boundary,
+                               int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_put_wg(void* dst_data, const void* src_data,
+                             const size_t* dst_strides, const size_t* src_strides,
+                             const size_t* start_coord, const size_t* boundary,
+                             int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_get(void* dst_data, const void* src_data,
+                          const size_t* dst_strides, const size_t* src_strides,
+                          const size_t* start_coord, const size_t* boundary,
+                          int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_get_wave(void* dst_data, const void* src_data,
+                               const size_t* dst_strides, const size_t* src_strides,
+                               const size_t* start_coord, const size_t* boundary,
+                               int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_get_wg(void* dst_data, const void* src_data,
+                             const size_t* dst_strides, const size_t* src_strides,
+                             const size_t* start_coord, const size_t* boundary,
+                             int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // Collective Allgather - Type-erased interface
+  __device__ int tile_allgather(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                const size_t* dst_strides, const size_t* src_strides,
+                                const size_t* start_coord, const size_t* boundary,
+                                int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int tile_allgather_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                     const size_t* dst_strides, const size_t* src_strides,
+                                     const size_t* start_coord, const size_t* boundary,
+                                     int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int tile_allgather_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                   const size_t* dst_strides, const size_t* src_strides,
+                                   const size_t* start_coord, const size_t* boundary,
+                                   int ndim, size_t element_size, uint64_t flags);
+
+  // Collective Broadcast - Type-erased interface
+  __device__ int tile_broadcast(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                const size_t* dst_strides, const size_t* src_strides,
+                                const size_t* start_coord, const size_t* boundary,
+                                int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int tile_broadcast_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                     const size_t* dst_strides, const size_t* src_strides,
+                                     const size_t* start_coord, const size_t* boundary,
+                                     int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int tile_broadcast_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                   const size_t* dst_strides, const size_t* src_strides,
+                                   const size_t* start_coord, const size_t* boundary,
+                                   int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  // Collective Wait
+  __device__ int tile_collective_wait(rocshmem_team_t team, uint64_t flags);
+
+  // SUM Reductions - Type-erased interface
+  __device__ int tile_sum_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
+  // MAX Reductions - Type-erased interface
+  __device__ int tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
+  // MIN Reductions - Type-erased interface
+  __device__ int tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
  private:
 
   //context class has IpcImpl object (ipcImpl_)
   IpcImpl *ipcImpl{nullptr};
 
   //internal functions used by collective operations
-  template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems, int pe_root,
+  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems, int pe_root,
                                      int pe_start, int stride, int pe_size,
                                      long *p_sync);  // NOLINT(runtime/int)
 
-  template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
                                          int pe_root, int PE_start,
                                          int logPE_stride, int PE_size);  // NOLINT(runtime/int)
 
-  template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
                                          int pe_root);  // NOLINT(runtime/int)
+
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      long *p_sync);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems, 
+                                                 int pe_root, int pe_start, int stride, int pe_size);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src, int nelems, int pe_root);
+
+  template <typename T>
+  __device__ void internal_broadcast_wave(T *dst, const T *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      long *p_sync);
+  
+  template <typename T>
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems, 
+                                                 int pe_root, int pe_start, int stride, int pe_size);
+
+  template <typename T>
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
 
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
@@ -257,6 +409,9 @@ class IPCContext : public Context {
 
   template <typename T>
   __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems);
+  template <typename T>
+  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,

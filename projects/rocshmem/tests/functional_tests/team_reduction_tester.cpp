@@ -114,14 +114,14 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  s_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
-  r_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
+  s_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1), args.local_buf_type);
+  r_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 TeamReductionTester<T1, T2>::~TeamReductionTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
 }
 
 template <typename T1, ROCSHMEM_OP T2>

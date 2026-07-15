@@ -31,6 +31,8 @@
 #include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
 
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -140,16 +142,13 @@ perform_reduction(
     }
 
     std::unordered_map<int64_t, std::vector<rocprofiler_counter_record_t>> rec_groups;
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     for(auto& rec : *input_array)
     {
         for(auto dim : _reduce_dimension_set)
         {
-            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
-
-            rec.id = rec.id | mask_dim;
-            rec.id = rec.id ^ mask_dim;
+            uint64_t mask = get_dim_mask(dim);
+            rec.id        = (rec.id | mask) ^ mask;
         }
         rec_groups[rec.id].push_back(rec);
     }
@@ -173,42 +172,57 @@ perform_reduction(
     return input_array;
 }
 
-int64_t
-get_int_encoded_dimensions_from_string(const std::string& rangeStr)
+/**
+ * @brief Parse dimension selection string to get a single selected index.
+ *
+ * This function parses a string containing a single dimension index value.
+ * Only single index selection is supported (e.g., "5"). Range-based selection
+ * (e.g., "1:4") and multiple values (e.g., "1,2,3") are not supported.
+ *
+ * @param indexStr The string containing the dimension index
+ * @param dim The dimension type for validation
+ * @return size_t The selected dimension index value
+ */
+size_t
+parse_dimension_selection(const std::string&                         indexStr,
+                          rocprofiler_profile_counter_instance_types dim)
 {
-    int64_t            result = 0;
-    std::istringstream iss(rangeStr);
-    std::string        token;
-    size_t             bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+    auto token = sdk::parse::strip(std::string{indexStr}, " \t\n\r");
 
-    while(std::getline(iss, token, ','))
+    if(token.empty())
     {
-        token.erase(std::remove_if(token.begin(), token.end(), ::isspace), token.end());
-
-        size_t dash_pos = token.find(':');
-        if(dash_pos != std::string::npos)
-        {
-            throw std::runtime_error(
-                fmt::format("Range based selection not supported by Dimension API. only select "
-                            "single value for each dimension."));
-            int start = std::stoi(token.substr(0, dash_pos));
-            int end   = std::stoi(token.substr(dash_pos + 1));
-            result |= (1LL << std::min(64, end + 1)) - (1LL << std::max(start, 0));
-        }
-        else
-        {
-            int num = std::stoi(token);
-            if(num < (1 << bit_length))
-            {
-                result |= (1LL << num);
-            }
-            else
-            {
-                throw std::runtime_error(fmt::format("Dimension value exceeds max allowed."));
-            }
-        }
+        throw std::runtime_error(
+            fmt::format("Empty dimension selection for dimension type {}.", static_cast<int>(dim)));
     }
-    return result;
+
+    if(token.find(':') != std::string::npos || token.find(',') != std::string::npos)
+    {
+        throw std::runtime_error(
+            fmt::format("Range or multi-value selection not supported by Dimension API. "
+                        "Only select a single index for each dimension."));
+    }
+
+    auto bit_length = get_dim_bit_length(dim);
+    auto max_value  = (size_t{1} << bit_length) - 1;
+
+    int num = sdk::parse::from_string<int>(token);
+    if(num < 0)
+    {
+        throw std::runtime_error(fmt::format(
+            "Dimension value {} is negative for dimension type {}.", num, static_cast<int>(dim)));
+    }
+
+    auto unum = static_cast<size_t>(num);
+    if(unum > max_value)
+    {
+        throw std::runtime_error(
+            fmt::format("Dimension value {} exceeds max allowed {} for dimension type {}.",
+                        num,
+                        max_value,
+                        static_cast<int>(dim)));
+    }
+
+    return unum;
 }
 
 std::vector<rocprofiler_counter_record_t>*
@@ -216,23 +230,24 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
                   std::vector<rocprofiler_counter_record_t>*                         input_array)
 {
     if(input_array->empty()) return input_array;
+
     for(auto& dim_pair : dimension_map)
     {
-        int64_t encoded_dim_values = get_int_encoded_dimensions_from_string(dim_pair.second);
-        size_t  bit_length         = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-        int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+        size_t   selected_index = parse_dimension_selection(dim_pair.second, dim_pair.first);
+        uint64_t mask           = get_dim_mask(dim_pair.first);
 
         input_array->erase(std::remove_if(input_array->begin(),
                                           input_array->end(),
                                           [&](rocprofiler_counter_record_t& rec) {
-                                              bool should_remove =
-                                                  (encoded_dim_values &
-                                                   (1 << rocprofiler::counters::rec_to_dim_pos(
-                                                        rec.id, dim_pair.first))) == 0;
+                                              size_t dim_val =
+                                                  rec_to_dim_pos(rec.id, dim_pair.first);
+
+                                              bool should_remove = (dim_val != selected_index);
+
                                               if(!should_remove)
                                               {
-                                                  rec.id = rec.id | mask;
-                                                  rec.id = rec.id ^ mask;
+                                                  // Clear the dimension bits in the record
+                                                  rec.id = (rec.id | mask) ^ mask;
                                               }
                                               return should_remove;
                                           }),
@@ -416,7 +431,26 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
                     << fmt::format("Accumulate High_RES/Low_RES only works for counters from SQ "
                                    "block: invalid operation on {} counter.",
                                    _metric.name());
-                _metric.setflags(static_cast<int>(ast.accumulate_op));
+
+                // LOW_RES (quad-cycle integration) is not supported on gfx10 and above.
+                // Redirect to HIGH_RES and warn the user.
+                auto effective_op = ast.accumulate_op;
+                if(effective_op == ACCUMULATE_OP_TYPE::LOW_RESOLUTION)
+                {
+                    const bool is_gfx10_or_later =
+                        (_agent.size() > 3) && (std::atoi(_agent.c_str() + 3) >= 1000);
+
+                    if(is_gfx10_or_later)
+                    {
+                        ROCP_WARNING << fmt::format("LOW_RES accumulation is not supported on {}. "
+                                                    "Redirecting to HIGH_RES for counter {}.",
+                                                    _agent,
+                                                    _metric.name());
+
+                        effective_op = ACCUMULATE_OP_TYPE::HIGH_RESOLUTION;
+                    }
+                }
+                _metric.setflags(static_cast<int>(effective_op));
             }
         } catch(std::exception& e)
         {
@@ -580,7 +614,7 @@ EvaluateAST::get_required_counters(const std::unordered_map<std::string, Evaluat
             return;
         }
 
-        // Derrived Counter
+        // Derived Counter
         const auto* expr_ptr = rocprofiler::common::get_val(asts, _metric.name());
         if(!expr_ptr) throw std::runtime_error("could not find derived counter");
         expr_ptr->get_required_counters(asts, counters);

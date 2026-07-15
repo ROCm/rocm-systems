@@ -7,9 +7,10 @@
 #include "common/join.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <functional>
-#include <string>
+#include <type_traits>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -35,18 +36,18 @@ template <typename FuncT, typename... Args>
 inline auto
 invoke(const char* _name, FuncT&& _func, Args... _args) ROCPROFSYS_HIDDEN_API;
 
-inline int32_t&
+inline std::int32_t&
 get_guard()
 {
-    static thread_local int32_t _v = 0;
+    static thread_local std::int32_t _v = 0;
     return _v;
 }
 
-inline int64_t
+inline std::int64_t
 get_thread_index()
 {
-    static std::atomic<int64_t> _c{ 0 };
-    static thread_local auto    _v = _c++;
+    static std::atomic<std::int64_t> _c{ 0 };
+    static thread_local auto         _v = _c++;
     return _v;
 }
 
@@ -61,7 +62,7 @@ ignore(const char* _name, int _verbose, int _value, const char* _reason, Args...
                 "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) was ignored :: %s\n",
                 getpid(), get_thread_index(), _name,
-                join(QuoteStrings{}, ", ", _args...).c_str(), _reason);
+                join_with_strings_quoted(", ", _args...).c_str(), _reason);
         fflush(stderr);
     }
 }
@@ -81,7 +82,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         // if _lk is ever greater than zero on the same thread, this
         // means a function within the current function is calling
         // our instrumentation so we ignore the call
-        int32_t _lk = get_guard()++;
+        std::int32_t _lk = get_guard()++;
         if(_lk == 0)
         {
             _toggle = !_toggle;
@@ -93,7 +94,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                         "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                         "][%i][%li][%i] %s(%s)\n",
                         getpid(), get_thread_index(), _lk, _name,
-                        join(QuoteStrings{}, ", ", _args...).c_str());
+                        join_with_strings_quoted(", ", _args...).c_str());
                 ROCPROFSYS_COMMON_LIBRARY_LOG_END
                 fflush(stderr);
             }
@@ -107,7 +108,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                     "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                     "][%i][%li] %s(%s) was guarded :: value = %i\n",
                     getpid(), get_thread_index(), _name,
-                    join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
+                    join_with_strings_quoted(", ", _args...).c_str(), _lk);
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
             fflush(stderr);
         }
@@ -119,7 +120,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                 "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) ignored :: null function pointer\n",
                 getpid(), get_thread_index(), _name,
-                join(QuoteStrings{}, ", ", _args...).c_str());
+                join_with_strings_quoted(", ", _args...).c_str());
         ROCPROFSYS_COMMON_LIBRARY_LOG_END
     }
 

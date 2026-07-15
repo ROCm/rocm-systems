@@ -91,7 +91,8 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
     if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$")
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$"
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx1250$")
         # PC sampling is enabled on this architecture.
         set(${_VAR}
             FALSE
@@ -107,6 +108,26 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
         if(ARG_ECHO)
             message(STATUS "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}")
         endif()
+    endif()
+endfunction()
+
+# Checks whether triple buffer is implemented for architecture: MI3xx and gfx12
+function(rocprofiler_sdk_sqtt_triple_buffer_disabled _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
+
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
+
+    rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 gpu-0-gfx-info)
+
+    if("${gpu-0-gfx-info}" MATCHES "^gfx(9[4-5][0-9]|12[0-9][0-9])$")
+        set(${_VAR}
+            FALSE
+            PARENT_SCOPE)
+    else()
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
     endif()
 endfunction()
 

@@ -33,10 +33,15 @@ def thread_limit_env() -> dict[str, str]:
 # ============================================================================
 
 
-# Can't be a fixture as thread_count parametrized value is
-# used at collection time
 def get_thread_limit() -> int:
     """Get the thread limit values for the test."""
+    # ROCPROFSYS_MAX_THREADS may have been explicitly set, so use that if it exists
+    import os
+
+    max_threads = os.getenv("ROCPROFSYS_MAX_THREADS")
+    if max_threads:
+        return int(max_threads)
+
     rocprof_config = get_rocprof_config()
     num_procs = rocprof_config.capabilities.num_procs
     if num_procs < 8:
@@ -69,20 +74,22 @@ def get_thread_limit() -> int:
         get_thread_limit() + 24,
         get_thread_limit(),
     ],
+    ids=["below", "above", "at"],
 )
+@pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
-    RUNTIME_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
+    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
 
+    @pytest.mark.timeout(480)
     def test(self, mode, thread_count, thread_limit_env):
         result = self.run_test(
             mode,
             "thread-limit",
             env=thread_limit_env,
             run_args=["35", "2", str(thread_count)],
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
-            timeout=480,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         thread_limit = get_thread_limit()
         pass_value = thread_count

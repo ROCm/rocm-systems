@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 using namespace aql_profile;
 

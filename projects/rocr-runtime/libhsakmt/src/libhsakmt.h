@@ -33,7 +33,10 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
@@ -41,6 +44,7 @@ extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
+extern int hsakmt_pm4_target_xcc;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -133,10 +137,24 @@ extern int hsakmt_debug_level;
         }                                       \
 })
 
+#define CHECK_CTX(ctx, ret_val) \
+	do { \
+		assert(ctx); \
+		if (!(ctx)) { \
+			pr_err("Expected a non-null ptr for HsaKFDContext"); \
+			return (ret_val); \
+		} \
+	} while (0)
+
 /* Expects gfxv (full) in decimal */
 #define HSA_GET_GFX_VERSION_MAJOR(gfxv)   (((gfxv) / 10000) % 100)
 #define HSA_GET_GFX_VERSION_MINOR(gfxv)   (((gfxv) / 100) % 100)
 #define HSA_GET_GFX_VERSION_STEP(gfxv)    ((gfxv) % 100)
+
+/* Expects gfxv (full) in hexadecimal */
+#define HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv)   (((gfxv) >> 16) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_MINOR(gfxv)   (((gfxv) >> 8) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_STEP(gfxv)    ((gfxv) & 0xff)
 
 /* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
@@ -264,4 +282,15 @@ bool hsakmt_is_forked_child(void);
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
 uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int hsakmt_safe_env_to_int(const char* envvar, int default_val);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

@@ -125,6 +125,9 @@ struct AgentInfo {
 
   // Timestamp frequency for realtime clock
   uint32_t timestamp_freq{0};
+
+  // Number of XCC per AID
+  uint32_t xcc_per_aid{1};
 };
 
 // HSA timer class

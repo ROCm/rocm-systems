@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - TCP_TCP_LATENCY_sum
+  - TCP_TCR_TCP_STALL_CYCLES_sum
+  - TCP_TOTAL_ACCESSES_sum
+  - TCP_TOTAL_ATOMIC_WITHOUT_RET_sum

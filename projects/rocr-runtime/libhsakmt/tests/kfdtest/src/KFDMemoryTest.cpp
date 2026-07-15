@@ -201,7 +201,7 @@ void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
     memFlags.ui32.HostAccess = 1;
 
     for (unsigned i = 0; i < 1<<14; i ++) {
-        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, (i>>5)&1+1, mapNodes);
+        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, ((i>>5)&1)+1, mapNodes);
     }
 
     /* Fill src buffer so shader quits */
@@ -782,8 +782,9 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
  */
 void KFDMemoryTest::LargestSysBufferTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
-        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if (pNodeProps && pNodeProps->Integrated) {
+        LOG() << "Skipping test on APU." << std::endl;
         return;
     }
 
@@ -823,8 +824,9 @@ TEST_F(KFDMemoryTest, LargestSysBufferTest) {
 
 void KFDMemoryTest::LargestVramBufferTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
-        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if (pNodeProps && pNodeProps->Integrated) {
+        LOG() << "Skipping test on APU." << std::endl;
         return;
     }
 
@@ -873,8 +875,9 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
  */
 void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
-        LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if (pNodeProps && pNodeProps->Integrated) {
+        LOG() << "Skipping test on APU." << std::endl;
         return;
     }
 
@@ -1561,7 +1564,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
     // dstBuffer is cpu accessible gtt memory
     HsaMemoryBuffer dstBuffer(PAGE_SIZE, gpuNode);
 
-    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(ScratchCopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
     Dispatch dispatch0(isaBuffer);
     dispatch0.SetArgs(mem0, dstBuffer.As<void*>());

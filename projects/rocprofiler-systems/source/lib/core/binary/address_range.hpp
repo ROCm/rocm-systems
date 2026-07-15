@@ -24,7 +24,11 @@ struct address_range
     uintptr_t low  = std::numeric_limits<uintptr_t>::max();
     uintptr_t high = std::numeric_limits<uintptr_t>::min();
 
-    ROCPROFSYS_DEFAULT_OBJECT(address_range)
+    address_range()                                    = default;
+    address_range(const address_range&)                = default;
+    address_range(address_range&&) noexcept            = default;
+    address_range& operator=(const address_range&)     = default;
+    address_range& operator=(address_range&&) noexcept = default;
 
     explicit address_range(uintptr_t _v);
     address_range(uintptr_t _low, uintptr_t _high);

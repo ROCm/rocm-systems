@@ -129,6 +129,7 @@ namespace envvar {
       BOOTSTRAP,
       REVERSE_OFFLOAD,
       GDA,
+      SDMA,
     };
 
     // env var string prefixes
@@ -139,6 +140,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::BOOTSTRAP> = "ROCSHMEM_BOOTSTRAP";
     template <> inline constexpr const char* prefix<tag::REVERSE_OFFLOAD> = "ROCSHMEM_RO";
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
+    template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
   }  // namespace category
 
   namespace parser {
@@ -308,6 +310,9 @@ namespace envvar {
        *
        * Format: ROCSHMEM_DEBUG_LEVEL=<level>[:<modifier>]*
        * Modifiers: noversion, noenv, noinfo, nowarn, notrace, env:all, env:full
+       * Special opt-in: :stats — print backend API call statistics at finalize via LOG_INFO.
+       *   Requires INFO level to be active (e.g. ROCSHMEM_DEBUG_LEVEL=info:stats).
+       *   Not implied by any verbosity level; must be specified explicitly.
        */
       enum class env_print_mode { MODIFIED, ALL, FULL };
 
@@ -321,6 +326,7 @@ namespace envvar {
         const bool show_warn;
         const bool show_trace;
         const bool show_color;
+        const bool show_stats;
       };
     }  // inline namespace _debug
   }  // namespace types
@@ -390,6 +396,7 @@ namespace envvar {
       const std::string name;
       const std::string doc;
       const value_type default_value;
+    public:
       value_type value;
       bool value_set;
     };
@@ -517,6 +524,15 @@ namespace envvar {
 
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
+
+    /**
+     * @brief Maximum number of symmetric user buffers that can be registered
+     * with rocshmem_buffer_register_symmetric.
+     *
+     * Backend-agnostic; currently consumed by the IPC backend and intended to
+     * be honored by other backends as they gain symmetric-registration support.
+     */
+    extern const var<size_t> max_symm_regions;
   }  // inline namespace _base
 
   namespace bootstrap {
@@ -552,7 +568,16 @@ namespace envvar {
     extern const var<std::string> net_merge_level;
     extern const var<std::string> net_force_merge;
     extern const var<std::string> nic_policy;
+    extern const var<size_t> num_user_buffers;
   }  // namespace gda
+
+  namespace sdma {
+    template <typename T> using var = var<T, category::tag::SDMA>;
+    extern const var<bool> enabled;
+    extern const var<size_t> threshold;
+    extern const var<int32_t> num_channels;
+    extern const var<bool> spread_channels;
+  }  // namespace sdma
 
   /**
    * @brief Print mode for environment variables

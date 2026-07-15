@@ -132,8 +132,14 @@ class NullDevice : public amd::Device {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
   virtual bool virtualFree(void* addr) { return true; }
 
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    return CL_INVALID_OPERATION;
+  }
+  virtual cl_int virtualUnmap(void* va, size_t size) override { return CL_INVALID_OPERATION; }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) {
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) {
     return true;
   }
 
@@ -230,7 +236,7 @@ class Sampler : public device::Sampler {
 //! A GPU device ordinal (physical GPU device)
 class Device : public NullDevice {
  public:
-  struct QueueRecycleInfo : public amd::HeapObject {
+  struct QueueRecycleInfo {
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
@@ -238,6 +244,13 @@ class Device : public NullDevice {
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
         : counter_(1), engineType_(Pal::EngineTypeCompute), index_(0), aql_packet_mgmt_(dev) {}
+
+    // Allocated exclusively via amd::AllocWithTrailing<QueueRecycleInfo>(extSize, ...)
+    // Use extSize == 0 on the path that carries no PAL trailing payload.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+    // Placement new overload required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {
@@ -259,7 +272,7 @@ class Device : public NullDevice {
   };
 
   //! Transfer buffers
-  class XferBuffers : public amd::HeapObject {
+  class XferBuffers {
    public:
     static constexpr size_t MaxXferBufListSize = 8;
 
@@ -302,7 +315,7 @@ class Device : public NullDevice {
     const Device& gpuDevice_;         //!< GPU device object
   };
 
-  struct ScratchBuffer : public amd::HeapObject {
+  struct ScratchBuffer {
     Memory* memObj_;   //!< Memory objects for scratch buffers
     uint64_t offset_;  //!< Offset from the global scratch store
     uint64_t size_;    //!< Scratch buffer size on this queue
@@ -318,7 +331,7 @@ class Device : public NullDevice {
   };
 
 
-  class SrdManager : public amd::HeapObject {
+  class SrdManager {
    public:
     SrdManager(const Device& dev, uint srdSize, uint bufSize)
         : dev_(dev),
@@ -565,9 +578,14 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment);
   virtual bool virtualFree(void* addr);
 
+  //! Direct synchronous map/unmap path
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys);
+  virtual cl_int virtualUnmap(void* va, size_t size);
+
   //! Set/Get memory access set by the app
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice);
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
 

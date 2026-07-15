@@ -9,7 +9,8 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.lulesh]
+# These binaries link against libgomp
+pytestmark = [pytest.mark.lulesh, pytest.mark.openmp]
 
 # =============================================================================
 # Lulesh fixtures
@@ -18,12 +19,13 @@ pytestmark = [pytest.mark.lulesh]
 
 @pytest.fixture
 def lulesh_base_env() -> dict[str, str]:
-    return {
+    env = {
         "ROCPROFSYS_USE_KOKKOSP": "ON",
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_KOKKOSP_PREFIX": "[kokkos]",
     }
+    return env
 
 
 # =============================================================================
@@ -32,7 +34,7 @@ def lulesh_base_env() -> dict[str, str]:
 
 
 # TODO: LULESH_USE_HIP does not currently work properly out of the box, tofix
-@pytest.mark.mpi_optional("lulesh")
+# TODO: LULESH_USE_MPI does not currently work, tofix
 class TestLulesh(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode",
@@ -46,8 +48,17 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "5", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2", "--label", "file", "line", "return", "args"],
-            runtime_args=[
+            binary_rewrite_args=[
+                "-e",
+                "-v",
+                "2",
+                "--label",
+                "file",
+                "line",
+                "return",
+                "args",
+            ],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -59,13 +70,12 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
-            mpi_ranks=8,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
-            runtime_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            binary_rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            runtime_instrument_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
         )
 
     @pytest.mark.baseline
@@ -78,7 +88,6 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            mpi_ranks=8,
         )
         self.assert_regex(result, pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"])
 
@@ -92,8 +101,8 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -105,7 +114,6 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
-            mpi_ranks=8,
         )
         self.assert_regex(result)
 
@@ -120,8 +128,8 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -132,7 +140,6 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "libgomp",
             ],
-            mpi_ranks=8,
         )
         self.assert_regex(result)
 
@@ -148,7 +155,7 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "2", "-s", "20", "-p"],
-            rewrite_args=[
+            binary_rewrite_args=[
                 "-e",
                 "-v",
                 "2",
@@ -157,7 +164,7 @@ class TestLulesh(RocprofsysTest):
                 "--traps",
                 "--allow-overlapping",
             ],
-            runtime_args=[
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -168,10 +175,9 @@ class TestLulesh(RocprofsysTest):
                 "--env",
                 "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock peak_rss",
             ],
-            mpi_ranks=8,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure"],
         )

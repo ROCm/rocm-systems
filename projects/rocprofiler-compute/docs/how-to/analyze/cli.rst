@@ -29,11 +29,17 @@ Walkthrough
 
 1. To begin, generate a high-level analysis report using ROCm Compute Profiler's ``-b`` (or ``--block``) flag.
 
+.. note::
+
+   By default, analyze only evaluates the profiled blocks. Analyze-mode
+   ``-b`` overrides this and might produce missing-counter warnings for blocks
+   whose counters were not collected.
+
 There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.
 * Memory chart: Shows memory transactions and throughput on each cache hierarchical level.
-* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth (on L1/LDS/L2/HBM). When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
+* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth. When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
 
 **System Speed-of-Light:**
 
@@ -92,36 +98,35 @@ There are three high-level GPU analysis views:
       2 -> System Speed-of-Light
               2.1 -> Speed-of-Light
                       2.1.0 -> VALU FLOPs
-                      2.1.1 -> VALU IOPs
-                      2.1.2 -> MFMA FLOPs (BF16)
-                      2.1.3 -> MFMA FLOPs (F16)
-                      2.1.4 -> MFMA FLOPs (F32)
-                      2.1.5 -> MFMA FLOPs (F64)
-                      2.1.6 -> MFMA IOPs (Int8)
-                      2.1.7 -> Active CUs
-                      2.1.8 -> SALU Utilization
-                      2.1.9 -> VALU Utilization
-                      2.1.10 -> MFMA Utilization
-                      2.1.11 -> VMEM Utilization
-                      2.1.12 -> Branch Utilization
-                      2.1.13 -> VALU Active Threads
-                      2.1.14 -> IPC
-                      2.1.15 -> Wavefront Occupancy
-                      2.1.16 -> Theoretical LDS Bandwidth
-                      2.1.17 -> LDS Bank Conflicts/Access
-                      2.1.18 -> vL1D Cache Hit Rate
-                      2.1.19 -> vL1D Cache BW
-                      2.1.20 -> L2 Cache Hit Rate
-                      2.1.21 -> L2 Cache BW
-                       2.1.22 -> L2-Fabric Read BW
-                      2.1.23 -> L2-Fabric Write BW
-                      2.1.24 -> L2-Fabric Read Latency
-                      2.1.25 -> L2-Fabric Write Latency
-                      2.1.26 -> sL1D Cache Hit Rate
-                      2.1.27 -> sL1D Cache BW
-                      2.1.28 -> L1I Hit Rate
-                      2.1.29 -> L1I BW
-                      2.1.30 -> L1I Fetch Latency
+                      2.1.1 -> MFMA FLOPs (BF16)
+                      2.1.2 -> MFMA FLOPs (F16)
+                      2.1.3 -> MFMA FLOPs (F32)
+                      2.1.4 -> MFMA FLOPs (F64)
+                      2.1.5 -> MFMA IOPs (Int8)
+                      2.1.6 -> Active CUs
+                      2.1.7 -> SALU Utilization
+                      2.1.8 -> VALU Utilization
+                      2.1.9 -> MFMA Utilization
+                      2.1.10 -> VMEM Utilization
+                      2.1.11 -> Branch Utilization
+                      2.1.12 -> VALU Active Threads
+                      2.1.13 -> IPC
+                      2.1.14 -> Wavefront Occupancy
+                      2.1.15 -> Theoretical LDS Bandwidth
+                      2.1.16 -> LDS Bank Conflicts/Access
+                      2.1.17 -> vL1D Cache Hit Rate
+                      2.1.18 -> vL1D Cache BW
+                      2.1.19 -> L2 Cache Hit Rate
+                      2.1.20 -> L2 Cache BW
+                      2.1.21 -> L2-Fabric Read BW
+                      2.1.22 -> L2-Fabric Write BW
+                      2.1.23 -> L2-Fabric Read Latency
+                      2.1.24 -> L2-Fabric Write Latency
+                      2.1.25 -> sL1D Cache Hit Rate
+                      2.1.26 -> sL1D Cache BW
+                      2.1.27 -> L1I Hit Rate
+                      2.1.28 -> L1I BW
+                      2.1.29 -> L1I Fetch Latency
       ...
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
@@ -151,65 +156,63 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.1   │ VALU IOPs                 │ 367.0016              │ Giop             │ 22630.4            │ 1.6217194570135745     │
+      │ 2.1.1   │ MFMA FLOPs (BF16)         │ 0.0                   │ Gflop            │ 90521.6            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.2   │ MFMA FLOPs (BF16)         │ 0.0                   │ Gflop            │ 90521.6            │ 0.0                    │
+      │ 2.1.2   │ MFMA FLOPs (F16)          │ 0.0                   │ Gflop            │ 181043.2           │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.3   │ MFMA FLOPs (F16)          │ 0.0                   │ Gflop            │ 181043.2           │ 0.0                    │
+      │ 2.1.3   │ MFMA FLOPs (F32)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.4   │ MFMA FLOPs (F32)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
+      │ 2.1.4   │ MFMA FLOPs (F64)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.5   │ MFMA FLOPs (F64)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
+      │ 2.1.5   │ MFMA IOPs (Int8)          │ 0.0                   │ Giop             │ 181043.2           │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.6   │ MFMA IOPs (Int8)          │ 0.0                   │ Giop             │ 181043.2           │ 0.0                    │
+      │ 2.1.6   │ Active CUs                │ 74                    │ Cus              │ 104                │ 71.15384615384616      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.7   │ Active CUs                │ 74                    │ Cus              │ 104                │ 71.15384615384616      │
+      │ 2.1.7   │ SALU Util                 │ 4.016057506716307     │ Pct              │ 100                │ 4.016057506716307      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.8   │ SALU Util                 │ 4.016057506716307     │ Pct              │ 100                │ 4.016057506716307      │
+      │ 2.1.8   │ VALU Util                 │ 5.737225009594725     │ Pct              │ 100                │ 5.737225009594725      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.9   │ VALU Util                 │ 5.737225009594725     │ Pct              │ 100                │ 5.737225009594725      │
+      │ 2.1.9   │ MFMA Util                 │ 0.0                   │ Pct              │ 100                │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.10  │ MFMA Util                 │ 0.0                   │ Pct              │ 100                │ 0.0                    │
+      │ 2.1.10  │ VALU Active Threads/Wave  │ 64.0                  │ Threads          │ 64                 │ 100.0                  │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.11  │ VALU Active Threads/Wave  │ 64.0                  │ Threads          │ 64                 │ 100.0                  │
+      │ 2.1.11  │ IPC - Issue               │ 1.0                   │ Instr/cycle      │ 5                  │ 20.0                   │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.12  │ IPC - Issue               │ 1.0                   │ Instr/cycle      │ 5                  │ 20.0                   │
+      │ 2.1.12  │ LDS BW                    │ 0.0                   │ Gb/sec           │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.13  │ LDS BW                    │ 0.0                   │ Gb/sec           │ 22630.4            │ 0.0                    │
+      │ 2.1.13  │ LDS Bank Conflict         │                       │ Conflicts/access │ 32                 │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.14  │ LDS Bank Conflict         │                       │ Conflicts/access │ 32                 │                        │
+      │ 2.1.14  │ Instr Cache Hit Rate      │ 99.91306912556854     │ Pct              │ 100                │ 99.91306912556854      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.15  │ Instr Cache Hit Rate      │ 99.91306912556854     │ Pct              │ 100                │ 99.91306912556854      │
+      │ 2.1.15  │ Instr Cache BW            │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.16  │ Instr Cache BW            │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
+      │ 2.1.16  │ Scalar L1D Cache Hit Rate │ 99.81986908342313     │ Pct              │ 100                │ 99.81986908342313      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.17  │ Scalar L1D Cache Hit Rate │ 99.81986908342313     │ Pct              │ 100                │ 99.81986908342313      │
+      │ 2.1.17  │ Scalar L1D Cache BW       │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.18  │ Scalar L1D Cache BW       │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
+      │ 2.1.18  │ Vector L1D Cache Hit Rate │ 50.0                  │ Pct              │ 100                │ 50.0                   │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.19  │ Vector L1D Cache Hit Rate │ 50.0                  │ Pct              │ 100                │ 50.0                   │
+      │ 2.1.19  │ Vector L1D Cache BW       │ 1677.7216             │ Gb/s             │ 11315.199999999999 │ 14.82714932126697      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.20  │ Vector L1D Cache BW       │ 1677.7216             │ Gb/s             │ 11315.199999999999 │ 14.82714932126697      │
+      │ 2.1.20  │ L2 Cache Hit Rate         │ 35.55067615693325     │ Pct              │ 100                │ 35.55067615693325      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.21  │ L2 Cache Hit Rate         │ 35.55067615693325     │ Pct              │ 100                │ 35.55067615693325      │
+      │ 2.1.21  │ L2-Fabric Read BW         │ 419.8496              │ Gb/s             │ 1638.4             │ 25.6255859375          │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.22  │ L2-Fabric Read BW         │ 419.8496              │ Gb/s             │ 1638.4             │ 25.6255859375          │
+      │ 2.1.22  │ L2-Fabric Write BW        │ 293.9456              │ Gb/s             │ 1638.4             │ 17.941015625           │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.23  │ L2-Fabric Write BW        │ 293.9456              │ Gb/s             │ 1638.4             │ 17.941015625           │
+      │ 2.1.23  │ L2-Fabric Read Latency    │ 256.6482321288385     │ Cycles           │                    │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.24  │ L2-Fabric Read Latency    │ 256.6482321288385     │ Cycles           │                    │                        │
+      │ 2.1.24  │ L2-Fabric Write Latency   │ 317.2264255699014     │ Cycles           │                    │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.25  │ L2-Fabric Write Latency   │ 317.2264255699014     │ Cycles           │                    │                        │
+      │ 2.1.25  │ Wave Occupancy            │ 1821.723057333852     │ Wavefronts       │ 3328               │ 54.73927455931046      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.26  │ Wave Occupancy            │ 1821.723057333852     │ Wavefronts       │ 3328               │ 54.73927455931046      │
+      │ 2.1.26  │ Instr Fetch BW            │ 4.174722306564298e-08 │ Gb/s             │ 3046.4             │ 1.3703789084047721e-09 │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.27  │ Instr Fetch BW            │ 4.174722306564298e-08 │ Gb/s             │ 3046.4             │ 1.3703789084047721e-09 │
-      ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.28  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
+      │ 2.1.27  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
       ╘═════════╧═══════════════════════════╧═══════════════════════╧══════════════════╧════════════════════╧════════════════════════╛
 
    Alternatively, use the option ``-b`` (or ``--block``) with block alias(es).
@@ -236,65 +239,63 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.1   │ VALU IOPs                 │ 367.0016              │ Giop             │ 22630.4            │ 1.6217194570135745     │
+      │ 2.1.1   │ MFMA FLOPs (BF16)         │ 0.0                   │ Gflop            │ 90521.6            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.2   │ MFMA FLOPs (BF16)         │ 0.0                   │ Gflop            │ 90521.6            │ 0.0                    │
+      │ 2.1.2   │ MFMA FLOPs (F16)          │ 0.0                   │ Gflop            │ 181043.2           │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.3   │ MFMA FLOPs (F16)          │ 0.0                   │ Gflop            │ 181043.2           │ 0.0                    │
+      │ 2.1.3   │ MFMA FLOPs (F32)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.4   │ MFMA FLOPs (F32)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
+      │ 2.1.4   │ MFMA FLOPs (F64)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.5   │ MFMA FLOPs (F64)          │ 0.0                   │ Gflop            │ 45260.8            │ 0.0                    │
+      │ 2.1.5   │ MFMA IOPs (Int8)          │ 0.0                   │ Giop             │ 181043.2           │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.6   │ MFMA IOPs (Int8)          │ 0.0                   │ Giop             │ 181043.2           │ 0.0                    │
+      │ 2.1.6   │ Active CUs                │ 74                    │ Cus              │ 104                │ 71.15384615384616      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.7   │ Active CUs                │ 74                    │ Cus              │ 104                │ 71.15384615384616      │
+      │ 2.1.7   │ SALU Util                 │ 4.016057506716307     │ Pct              │ 100                │ 4.016057506716307      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.8   │ SALU Util                 │ 4.016057506716307     │ Pct              │ 100                │ 4.016057506716307      │
+      │ 2.1.8   │ VALU Util                 │ 5.737225009594725     │ Pct              │ 100                │ 5.737225009594725      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.9   │ VALU Util                 │ 5.737225009594725     │ Pct              │ 100                │ 5.737225009594725      │
+      │ 2.1.9   │ MFMA Util                 │ 0.0                   │ Pct              │ 100                │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.10  │ MFMA Util                 │ 0.0                   │ Pct              │ 100                │ 0.0                    │
+      │ 2.1.10  │ VALU Active Threads/Wave  │ 64.0                  │ Threads          │ 64                 │ 100.0                  │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.11  │ VALU Active Threads/Wave  │ 64.0                  │ Threads          │ 64                 │ 100.0                  │
+      │ 2.1.11  │ IPC - Issue               │ 1.0                   │ Instr/cycle      │ 5                  │ 20.0                   │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.12  │ IPC - Issue               │ 1.0                   │ Instr/cycle      │ 5                  │ 20.0                   │
+      │ 2.1.12  │ LDS BW                    │ 0.0                   │ Gb/sec           │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.13  │ LDS BW                    │ 0.0                   │ Gb/sec           │ 22630.4            │ 0.0                    │
+      │ 2.1.13  │ LDS Bank Conflict         │                       │ Conflicts/access │ 32                 │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.14  │ LDS Bank Conflict         │                       │ Conflicts/access │ 32                 │                        │
+      │ 2.1.14  │ Instr Cache Hit Rate      │ 99.91306912556854     │ Pct              │ 100                │ 99.91306912556854      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.15  │ Instr Cache Hit Rate      │ 99.91306912556854     │ Pct              │ 100                │ 99.91306912556854      │
+      │ 2.1.15  │ Instr Cache BW            │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.16  │ Instr Cache BW            │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
+      │ 2.1.16  │ Scalar L1D Cache Hit Rate │ 99.81986908342313     │ Pct              │ 100                │ 99.81986908342313      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.17  │ Scalar L1D Cache Hit Rate │ 99.81986908342313     │ Pct              │ 100                │ 99.81986908342313      │
+      │ 2.1.17  │ Scalar L1D Cache BW       │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.18  │ Scalar L1D Cache BW       │ 209.7152              │ Gb/s             │ 6092.8             │ 3.442016806722689      │
+      │ 2.1.18  │ Vector L1D Cache Hit Rate │ 50.0                  │ Pct              │ 100                │ 50.0                   │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.19  │ Vector L1D Cache Hit Rate │ 50.0                  │ Pct              │ 100                │ 50.0                   │
+      │ 2.1.19  │ Vector L1D Cache BW       │ 1677.7216             │ Gb/s             │ 11315.199999999999 │ 14.82714932126697      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.20  │ Vector L1D Cache BW       │ 1677.7216             │ Gb/s             │ 11315.199999999999 │ 14.82714932126697      │
+      │ 2.1.20  │ L2 Cache Hit Rate         │ 35.55067615693325     │ Pct              │ 100                │ 35.55067615693325      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.21  │ L2 Cache Hit Rate         │ 35.55067615693325     │ Pct              │ 100                │ 35.55067615693325      │
+      │ 2.1.21  │ L2-Fabric Read BW         │ 419.8496              │ Gb/s             │ 1638.4             │ 25.6255859375          │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.22  │ L2-Fabric Read BW         │ 419.8496              │ Gb/s             │ 1638.4             │ 25.6255859375          │
+      │ 2.1.22  │ L2-Fabric Write BW        │ 293.9456              │ Gb/s             │ 1638.4             │ 17.941015625           │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.23  │ L2-Fabric Write BW        │ 293.9456              │ Gb/s             │ 1638.4             │ 17.941015625           │
+      │ 2.1.23  │ L2-Fabric Read Latency    │ 256.6482321288385     │ Cycles           │                    │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.24  │ L2-Fabric Read Latency    │ 256.6482321288385     │ Cycles           │                    │                        │
+      │ 2.1.24  │ L2-Fabric Write Latency   │ 317.2264255699014     │ Cycles           │                    │                        │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.25  │ L2-Fabric Write Latency   │ 317.2264255699014     │ Cycles           │                    │                        │
+      │ 2.1.25  │ Wave Occupancy            │ 1821.723057333852     │ Wavefronts       │ 3328               │ 54.73927455931046      │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.26  │ Wave Occupancy            │ 1821.723057333852     │ Wavefronts       │ 3328               │ 54.73927455931046      │
+      │ 2.1.26  │ Instr Fetch BW            │ 4.174722306564298e-08 │ Gb/s             │ 3046.4             │ 1.3703789084047721e-09 │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.27  │ Instr Fetch BW            │ 4.174722306564298e-08 │ Gb/s             │ 3046.4             │ 1.3703789084047721e-09 │
-      ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
-      │ 2.1.28  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
+      │ 2.1.27  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
       ╘═════════╧═══════════════════════════╧═══════════════════════╧══════════════════╧════════════════════╧════════════════════════╛
    .. note::
 
@@ -474,7 +475,9 @@ This generates enhanced roofline output showing per-kernel performance rates and
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
       |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
+      |   │ 4.2.3       │ AI LDS               │         │ Flops/byte │
+      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+      |   │ 4.2.4       │ Performance (GFLOPs) │         │ Gflop/s    │
       |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
 
 The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
@@ -493,6 +496,13 @@ Roofline HTML plots are generated during analyze mode. Profile mode creates
 ``roofline.csv`` containing microbenchmark data, and analyze mode uses this
 data to produce interactive HTML roofline charts.
 
+.. note::
+   Matrix multiplication performance data will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, the cache level data available for analysis is dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+
 Two-step workflow:
 
 .. code-block:: shell-session
@@ -506,14 +516,31 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+   * Multiple data types can be provided with this option in order to isolate and visualize said types in a single plot.
+   * Note: layering more than one data type could create a cluttered plot
 
-Example with multiple options:
+Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+
+Interactive Roofline HTML:
+
+* HTML plots have the ability to select/deselect specific rooflines and cache-level-specific kernels. In the right-hand legend of the plot, click on individual items in the legend once to display or remove the item from the plot. Double-click on an item to make it the only displayed item in the plot; double-click on any item in the legend to reset the plot to display all items.
+* Hovering your mouse on the plot displays a menu in the top right-hand corner of the page which has tools for the following:
+   * Saving the plot as a .png
+   * Zoom, pan, reset scale
+* Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top right-hand corner of the page (described in the above bullet point)
+
+Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+
+.. image:: ../../data/analyze/cli/roofline_html_interact.png
+   :align: center
+   :alt: HTML interactive plot
+   :width: 800
 
 .. _analysis-baseline-comparison:
 
@@ -571,10 +598,11 @@ format is ``stdout``.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``csv`` format:
+   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains multiple csv files representing the data in each metric table in the analysis report.
+   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This will print the analysis report to the terminal as well.
+   * NOTE: This option will disable output of analysis report to terminal.
 
 * ``db`` format:
    * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
@@ -583,7 +611,7 @@ format is ``stdout``.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
-Default file/folder name ``rocprofiler_compute_<uuid>`` can be overriden using ``--output-name <name>`` analyze mode option.
+Default file/folder name ``rocprof_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` format the name is used as the output folder; for ``db`` format the name is used with a ``.db`` suffix.
 
 .. _analysis-database:
 
@@ -653,7 +681,7 @@ Analysis database example
    WARNING Created file: test.db
 
 
-PyTorch Operator Analysis
+PyTorch operator analysis
 =========================
 
 .. warning::
@@ -663,43 +691,83 @@ PyTorch Operator Analysis
 
    These options require ``--experimental``. After profiling with
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
-   use ``rocprof-compute --experimental analyze ...`` with
+   use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 
-Listing All Operators
+List all operators
 ---------------------
 
 Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
+   $ rocprof-compute analyze --experimental --list-torch-operators --path ./workload
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
    Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
-   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
-      ├─ nn.Module.Conv2d.forward
-      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
-      └─ nn.Module.Linear.forward
-         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
+   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+      ├─ torch.nn.functional.conv2d (calls: 20)
+      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
+      ├─ torch.nn.functional.linear (calls: 20)
+      |  └─ gemm (dispatches: 20, total: 15.41 ms)
+      └─ torch.nn.functional.relu (calls: 40)
+         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                         │   Calls │   Dispatches │    Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ nn.Module.Net.forward                            │      10 │           90 │ 42.80 ms │    100.00 │     4.28 ms │ 0.48 ms │ 0.01 ms │ 2.10 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
+   ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
+
+The flat **Operator summary** table below the call tree has one row per
+operator that ran at least one GPU kernel. Time cells auto-switch between
+milliseconds and microseconds per cell; missing values render as ``N/A``.
+
+* **Operator** — full operator path (for example
+  ``aten::matmul/aten::mm``).
+* **Calls** — how many times the operator was invoked. ``N/A`` when the
+  trace did not include ``Context_Id`` information to count invocations.
+* **Dispatches** — how many GPU kernels ran while the operator was on the
+  call stack (kernels launched by operators it called also count).
+* **Total** — total GPU time spent while the operator was on the call
+  stack.
+* **% Total** — share of the workload's total GPU time spent while this
+  operator was on the call stack. Because the same kernel time is counted
+  for an operator and for any operator that called it, the column can add
+  up to more than 100%. ``N/A`` when no GPU time was recorded.
+* **Mean/Call** — average GPU time per call to this operator.
+* **Mean / Min / Max** — per-kernel-dispatch timings across all kernels
+  launched while this operator was on the call stack.
+
+When no operator has any recorded dispatches, the table is replaced by the
+line ``Operator summary: (no operators with recorded dispatches)``.
+
+.. _operator-filtering:
 
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses PurePosixPath glob patterns to select operators.
-Operator hierarchies are ``/``-separated (e.g.
-``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
-using ``PurePosixPath.match()``:
+``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
+operators. Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``); ``*``, ``?``, and
+``[seq]`` cross hierarchy levels, and matching is case-sensitive:
 
 * **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
 * **Exact** — ``torch.nn.functional.relu``
@@ -709,17 +777,84 @@ using ``PurePosixPath.match()``:
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
+   $ rocprof-compute analyze --experimental --torch-operator "*relu" --path ./workload
 
    # Exact match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
+   $ rocprof-compute analyze --experimental --torch-operator torch.nn.functional.relu --path ./workload
 
    # Match all operators (no arguments)
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+   $ rocprof-compute analyze --experimental --torch-operator --path ./workload
 
 **Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "*relu,*conv*,*linear"
+   $ rocprof-compute analyze --experimental \
+       --torch-operator "*relu,*conv*,*linear" --path ./workload
+
+
+Triton operator analysis
+========================
+
+.. warning::
+
+   Triton operator analysis is currently available only in CLI mode and
+   requires ``--experimental``. After profiling with
+   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
+   ``rocprof-compute analyze ... --experimental`` with
+   ``--list-triton-operators`` or ``--triton-operator`` as needed.
+
+Triton kernels can be analyzed similar to PyTorch operators. You can use the
+``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
+same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
+``triton``. As a result, Triton kernels are reported independently even if PyTorch
+operators appear in the same run.
+
+List all captured Triton kernels
+---------------------------------
+
+Display all Triton kernels captured during profiling:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
+
+   ================================================================================
+   Triton Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
+   ================================================================================
+
+   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
+   └─ torch.compile.fused (calls: 1)
+      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
+         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   │ 0                                                                        │         │              │         │           │             │         │         │         │
+   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+
+Filter the Triton kernels
+-------------------------
+
+``--triton-operator`` uses the same shell-style glob matching as
+``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+
+.. code-block:: shell-session
+
+   # Wildcard match
+   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+
+   # Filter multiple kernels (space or comma separated)
+   $ rocprof-compute analyze --experimental \
+       --triton-operator "*matmul*,*softmax*" --path ./workload
+
+.. note::
+
+   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
+   one operator filter per analysis run.

@@ -9,6 +9,7 @@
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <utils.hh>
 
 
 static unsigned threadsPerBlock = 256;
@@ -92,12 +93,123 @@ int test_triple_chevron(size_t N) {
  */
 
 HIP_TEST_CASE(Unit_hipGridLaunch) {
-  size_t N = 4 * 1024 * 1024;
+  size_t N = isQuickLevel() ? 100 * 1024 : 4 * 1024 * 1024;
   SECTION("Test test_gl2") { test_gl2(N); }
 
 #if __HIP__
   SECTION("Test triple_chevron") { test_triple_chevron(N); }
 #endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test case to verify maxGrid limits from device properties.
+ *    - Fetches maxGridSize from hipDeviceProp_t and verifies kernel launch
+ *    - at maximum grid dimensions succeeds.
+ *    - Also verifies that exceeding maxGridSize returns appropriate error codes.
+
+ * Test source
+ * ------------------------
+ *    - catch/unit/kernel/hipGridLaunch.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.5
+ */
+
+__global__ void emptyKernel() {}
+
+TEST_CASE("Unit_hipGridLaunch_MaxGridDim_DeviceProperties") {
+  hipDeviceProp_t deviceProp;
+  int device;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, device));
+
+  unsigned int maxGridX = deviceProp.maxGridSize[0];
+  unsigned int maxGridY = deviceProp.maxGridSize[1];
+  unsigned int maxGridZ = deviceProp.maxGridSize[2];
+
+  INFO("Device: " << deviceProp.name);
+  INFO("maxGridSize[0]: " << maxGridX);
+  INFO("maxGridSize[1]: " << maxGridY);
+  INFO("maxGridSize[2]: " << maxGridZ);
+
+  SECTION("Launch kernel with gridDim.x == maxGridDimX") {
+    hipLaunchKernelGGL(emptyKernel, dim3(maxGridX, 1, 1), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  SECTION("Launch kernel with gridDim.y == maxGridDimY") {
+    hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY, 1), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  SECTION("Launch kernel with gridDim.z == maxGridDimZ") {
+    hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+}
+
+TEST_CASE("Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute") {
+  const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
+  const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
+  const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);
+
+  INFO("maxGridDimX: " << maxGridX);
+  INFO("maxGridDimY: " << maxGridY);
+  INFO("maxGridDimZ: " << maxGridZ);
+
+  SECTION("Launch kernel with gridDim.x == maxGridDimX using attribute") {
+    hipLaunchKernelGGL(emptyKernel, dim3(maxGridX, 1, 1), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  SECTION("Launch kernel with gridDim.y == maxGridDimY using attribute") {
+    hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY, 1), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  SECTION("Launch kernel with gridDim.z == maxGridDimZ using attribute") {
+    hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ), dim3(1, 1, 1), 0, 0);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+}
+
+HIP_TEST_CASE(Unit_hipGridLaunch_ExceedMaxGridDim_Negative) {
+  const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
+  const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
+  const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);
+
+  SECTION("Launch kernel with gridDim.x > maxGridDimX returns error") {
+    // Only test if we can exceed the max (avoid overflow)
+    if (maxGridX < UINT_MAX) {
+      hipLaunchKernelGGL(emptyKernel, dim3(maxGridX + 1, 1, 1), dim3(1, 1, 1), 0, 0);
+      hipError_t err = hipGetLastError();
+      REQUIRE(err == hipErrorInvalidConfiguration);
+    }
+  }
+
+  SECTION("Launch kernel with gridDim.y > maxGridDimY returns error") {
+    if (maxGridY < UINT_MAX) {
+      hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY + 1, 1), dim3(1, 1, 1), 0, 0);
+      hipError_t err = hipGetLastError();
+      REQUIRE(err == hipErrorInvalidConfiguration);
+    }
+  }
+
+  SECTION("Launch kernel with gridDim.z > maxGridDimZ returns error") {
+    if (maxGridZ < UINT_MAX) {
+      hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ + 1), dim3(1, 1, 1), 0, 0);
+      hipError_t err = hipGetLastError();
+      REQUIRE(err == hipErrorInvalidConfiguration);
+    }
+  }
 }
 
 /**

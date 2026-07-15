@@ -71,6 +71,8 @@ result = build("gfx942", True, False)
 - No duplicate code — extract to shared functions
 - No magic numbers or fake estimates
 - Methods < 30 lines, classes < 200 lines (ideally)
+- If a class has 7+ responsibilities → split into focused classes
+- God objects doing everything → multiple focused classes; 100+ line methods → extract helpers
 
 ---
 

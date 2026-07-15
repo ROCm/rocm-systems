@@ -1,5 +1,0 @@
-pmc:  CPF_CPF_TCIU_BUSY CPF_CPF_TCIU_STALL
-
-gpu:
-range:
-kernel:

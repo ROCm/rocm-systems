@@ -206,7 +206,7 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
     elif test_mode == "with-mpi-multiple":
         # With --mpi-ranks 0-1,3 and 4 MPI ranks, ranks 0, 1, and 3 should generate output
-        # Each rank uses a separate output directory (via %env{OMPI_COMM_WORLD_RANK}%)
+        # Each rank uses a separate output directory (via the MPI rank env var)
         # so we should always get exactly 3 files
         expected_files = 3
 
@@ -284,7 +284,7 @@ def test_csv_output_consistency(output_dir, test_mode):
 def test_no_output_for_filtered_ranks(output_dir, test_mode):
     """
     Verify that ranks not in the --mpi-ranks list do not generate output.
-    Since each rank has a separate output directory (via %env{OMPI_COMM_WORLD_RANK}%),
+    Since each rank has a separate output directory (via the MPI rank env var),
     we can check that rank 2's directory doesn't exist or is empty.
     """
 

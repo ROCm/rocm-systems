@@ -68,10 +68,18 @@
 #include "common/common.h"
 #include "common/helper_funcs.h"
 #include "common/hsatimer.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+#ifdef ROCRTST_ASAN
+// Under ASan, each hsa_init consumes significantly more memory due to
+// sanitizer book-keeping.  Reduce the iteration count to avoid
+// HSA_STATUS_ERROR_OUT_OF_RESOURCES.
+static const int NumOfTimes = 100;
+#else
 static const int NumOfTimes = 1000;  // No of times the hsa runtime will be initialized
+#endif
 static const double MaxRefCount = 2147483649;  // Setting to max value to test to INIT_MAX+2 as defined in hsa runtime
 
 #define RET_IF_HSA_ERR(err) { \
@@ -105,6 +113,8 @@ ReferenceCountTest::~ReferenceCountTest(void) {
 // Compare required profile for this test case with what we're actually
 // running on
 void ReferenceCountTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   return;  // hsa runtime initalized in ReferenceCountTest::TestReferenceCount()
 }
 
@@ -160,6 +170,13 @@ void ReferenceCountTest::TestReferenceCount(void) {
 }
 
 void ReferenceCountTest::TestMaxReferenceCount(void) {
+#ifdef ROCRTST_ASAN
+  // Under ASan the 2-billion+ hsa_init loop exhausts resources quickly
+  // due to the sanitizer's memory overhead.  Skip this test.
+  std::cout << "Skipping Max_Reference_Count under ASan (OOM possible)." << std::endl;
+  return;
+#endif
+
   hsa_status_t status;
   // Initialize hsa runtime to maximum allowed  times
   for (int i = 0; i < MaxRefCount; ++i) {
