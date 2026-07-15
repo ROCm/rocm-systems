@@ -610,14 +610,26 @@ class CodeGenerator:
         size_expr: str | None = None,
         inst_sem: InstructionSemantics | None = None,
         literal_operand_type: str | None = None,
+        dynamic_true16_opsel_bit: int | None = None,
     ) -> str | None:
         operand_type = literal_operand_type or opnd.operand_type
         if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
         literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
-        if operand_type == 'OPR_SIMM16':
-            literal_expr = f'({literal_expr} & 0xFFFFu)'
         operand_size = size_expr or opnd.size
+        if dynamic_true16_opsel_bit is not None:
+            display_expr = (
+                f'static_cast<uint16_t>(({literal_expr} >> '
+                f'(((amdgpu::vop3_opsel(inst_) >> {dynamic_true16_opsel_bit}) & 1u) * 16u)) '
+                f'& 0xFFFFu)'
+            )
+            return (
+                f'{opnd.name} = Operand({operand_size}, '
+                f'OperandType::{operand_type}, static_cast<int>({literal_expr}), '
+                f'{display_expr}, true);'
+            )
+        if operand_type == 'OPR_SIMM16' or opnd.size == 16:
+            literal_expr = f'({literal_expr} & 0xFFFFu)'
         if CodeGenerator._literal_operand_uses_f64_high_bits(
             opnd, inst_sem, operand_type
         ):
@@ -6047,6 +6059,15 @@ class CodeGenerator:
                                     operand_size_exprs[opnd.name],
                                     inst_sem,
                                     'OPR_SIMM32',
+                                    (
+                                        _lit_fields.index(opnd.name)
+                                        if opnd.size == 16
+                                        and self.isa_spec.profile.uses_true16_vop3_opsel
+                                        and self.isa_spec.profile.has_src_modifiers(
+                                            enc.enc_name
+                                        )
+                                        else None
+                                    ),
                                 )
                                 assert fixup is not None
                                 ctor_body_parts.append(
@@ -8151,7 +8172,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if t == 'OPR_SIMM32':
                 switch_cases.append(
                     f'case OperandType::{t}: '
-                    f'return std::format("0x{{:x}}", encoding_value_);'
+                    f'return std::format("0x{{:x}}", static_cast<uint32_t>(encoding_value_));'
                 )
             elif t == 'OPR_WAITCNT':
                 wc = self.isa_spec.profile.waitcnt_decode
@@ -8180,6 +8201,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'std::string Operand::name() const {{\n'
             f'if (has_literal64_)\n'
             f'  return std::format("0x{{:x}}", literal64_value_);\n'
+            f'if (has_literal16_display_)\n'
+            f'  return std::format("0x{{:x}}", literal16_display_value_);\n'
             f'{packed_16bit_name_check}'
             f'switch (opr_type_) {{\n'
             f'{switch_body}\n'
@@ -8239,6 +8262,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 'class Operand : public AmdgpuIsaOperand<Isa> {\n'
                 'public:\n'
                 f'{operand_ctor_decl}'
+                '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+                '          uint16_t literal16_display_value, bool has_literal16_display);\n'
                 '  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);\n'
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
@@ -8253,6 +8278,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
                 '  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
                 'private:\n'
+                '  uint16_t literal16_display_value_ = 0;\n'
+                '  bool has_literal16_display_ = false;\n'
                 '  uint64_t literal64_value_ = 0;\n'
                 '  bool has_literal64_ = false;\n'
                 f'{packed_16bit_field}'
@@ -8297,6 +8324,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '}'
             ),
             *packed_16bit_ctor_impl,
+            cgen.Line(
+                'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+                '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
+                '    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),\n'
+                '      literal16_display_value_(literal16_display_value),\n'
+                '      has_literal16_display_(has_literal16_display) {\n'
+                '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                '}'
+            ),
             cgen.Line(
                 'Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)\n'
                 '    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),\n'

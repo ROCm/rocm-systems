@@ -126,6 +126,31 @@ def test_simm64_literals_require_operand_type():
     assert codegen._supports_simm64_literal_operands()
 
 
+def test_generated_literal_fixups_separate_declared_and_dynamic_true16(
+    amdgpu_generated_root: Path,
+):
+    cdna3_vop2 = (amdgpu_generated_root / 'cdna3' / 'vop2.cpp').read_text()
+    madak_start = cdna3_vop2.index('VMadakF16Vop2::VMadakF16Vop2')
+    madak_end = cdna3_vop2.index('void VMadakF16Vop2::execute_impl', madak_start)
+    madak_ctor = cdna3_vop2[madak_start:madak_end]
+    assert 'Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu' in madak_ctor
+
+    rdna4_vop3 = (amdgpu_generated_root / 'rdna4' / 'vop3.cpp').read_text()
+    and_start = rdna4_vop3.index('VAndB16Vop3::VAndB16Vop3')
+    and_end = rdna4_vop3.index('void VAndB16Vop3::implicit_uses', and_start)
+    and_ctor = rdna4_vop3[and_start:and_end]
+    assert (
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)'
+        in and_ctor
+    )
+    assert '((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u' in and_ctor
+    assert '((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u' in and_ctor
+
+    rdna4_operand = (amdgpu_generated_root / 'rdna4' / 'operand.cpp').read_text()
+    assert 'if (has_literal16_display_)' in rdna4_operand
+    assert 'static_cast<uint32_t>(encoding_value_)' in rdna4_operand
+
+
 def test_vop_dpp8_support_is_detected_from_machine_inst_structs():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

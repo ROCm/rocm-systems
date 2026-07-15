@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -58,6 +59,10 @@ constexpr uint32_t S_ENDPGM_GFX11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm
 
 constexpr uint32_t make_sopp(uint32_t op, uint32_t simm16) {
   return (0x17Fu << 23) | ((op & 0x7Fu) << 16) | (simm16 & 0xFFFFu);
+}
+
+constexpr uint32_t make_vop2(uint32_t op, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
+  return ((op & 0x3Fu) << 25) | ((vdst & 0xFFu) << 17) | ((vsrc1 & 0xFFu) << 9) | (src0 & 0x1FFu);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
@@ -135,6 +140,52 @@ TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_waitcnt");
   EXPECT_EQ(inst->disassemble(), "s_waitcnt vmcnt(1) expcnt(0) lgkmcnt(0)");
+}
+
+TEST(CdnaF16DeclaredLiteralDecodeTest, MasksExtensionToDeclaredOperandWidth) {
+  struct Case {
+    rj_code_arch_t arch;
+    uint32_t opcode;
+    const char *mnemonic;
+  };
+  constexpr Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, 36, "v_madmk_f16_e32"},
+      {ROCJITSU_CODE_ARCH_CDNA1, 37, "v_madak_f16_e32"},
+      {ROCJITSU_CODE_ARCH_CDNA2, 36, "v_madmk_f16_e32"},
+      {ROCJITSU_CODE_ARCH_CDNA2, 37, "v_madak_f16_e32"},
+      {ROCJITSU_CODE_ARCH_CDNA3, 36, "v_madmk_f16_e32"},
+      {ROCJITSU_CODE_ARCH_CDNA3, 37, "v_madak_f16_e32"},
+  };
+
+  for (const auto &tc : cases) {
+    const uint32_t words[] = {
+        make_vop2(tc.opcode, /*vdst=*/0, /*vsrc1=*/0, /*src0=*/256),
+        0xDEAD3E00u,
+    };
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), tc.mnemonic);
+
+    bool found_literal = false;
+    for (uint8_t i = 0; i < inst->num_src_operands(); ++i) {
+      const Operand *src = inst->src_operand(i);
+      ASSERT_NE(src, nullptr);
+      if (src->name() != "0x3e00")
+        continue;
+      found_literal = true;
+      EXPECT_EQ(static_cast<uint32_t>(src->encoding_value()), 0x3E00u);
+    }
+    EXPECT_TRUE(found_literal) << tc.mnemonic;
+    EXPECT_NE(inst->disassemble().find("0x3e00"), std::string::npos);
+    EXPECT_EQ(inst->disassemble().find("0x-"), std::string::npos);
+  }
+}
+
+TEST(LiteralDisassemblyTest, Simm32HexUsesUnsignedEncodingBits) {
+  rdna4::Operand literal(32, rdna4::OperandType::OPR_SIMM32, static_cast<int>(0x80000000u));
+  EXPECT_EQ(literal.name(), "0x80000000");
 }
 
 TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOperand) {

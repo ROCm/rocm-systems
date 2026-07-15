@@ -212,17 +212,57 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
     ) == stmt
 
 
-def test_dynamic_true16_simm32_literal_keeps_full_extension_word():
+def test_declared_16bit_simm32_literal_uses_low_half_of_extension_word():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(16, 'OPR_SIMM32'), 'Vop2InstLiteralMachineInst'
+    )
+
+    assert (
+        'literal = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_non_opsel_16bit_retyped_simm32_literal_uses_low_half():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _operand('src0', 'OPR_SRC', size=16),
-        'Vop3InstLiteralMachineInst',
+        'Vop2InstLiteralMachineInst',
         literal_operand_type='OPR_SIMM32',
     )
 
     assert (
         'src0 = Operand(16, OperandType::OPR_SIMM32, '
-        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));'
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
     ) == stmt
+
+
+def test_dynamic_true16_simm32_literal_keeps_raw_and_selected_display_values():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=0,
+    )
+
+    assert (
+        'src0 = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 '
+        '>> (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) & 0xFFFFu), true);'
+    ) == stmt
+
+
+def test_dynamic_true16_display_uses_each_sources_opsel_bit():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=2,
+    )
+
+    assert '((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u' in stmt
 
 
 def test_existing_literal_operand_does_not_need_simm32_fallback_member():
