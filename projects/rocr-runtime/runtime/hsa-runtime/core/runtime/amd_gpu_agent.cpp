@@ -55,7 +55,11 @@
 #include <utility>
 #include <iomanip>
 #include <cmath>
-#include <unistd.h>
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#else
+#include <unistd.h>  // getpid
+#endif
 
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_blit_kernel.h"
@@ -78,6 +82,18 @@
 // Generated header
 #include "amd_trap_handler_v2.h"
 #include "amd_blit_shaders_v2.h"
+
+namespace {
+// Portable process id used only as the SDMA round-robin seed fallback.
+// getpid() is POSIX; MSVC provides _getpid() via <process.h>.
+inline int PortableGetpid() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif
+}
+}  // namespace
 
 #if defined(__linux__)
 // libdrm headers
@@ -964,7 +980,7 @@ void GpuAgent::InitDma() {
         const Flag& rt_flag = core::Runtime::runtime_singleton_->flag();
         const int64_t sdma_seed_off = rt_flag.sdma_seed_offset();
         const uint32_t sdma_seed = (sdma_seed_off >= 0) ? static_cast<uint32_t>(sdma_seed_off)
-                                                        : static_cast<uint32_t>(getpid());
+                                                        : static_cast<uint32_t>(PortableGetpid());
         const char* sdma_seed_src =
             (sdma_seed_off >= 0) ? rt_flag.sdma_seed_source().c_str() : "getpid()";
 
