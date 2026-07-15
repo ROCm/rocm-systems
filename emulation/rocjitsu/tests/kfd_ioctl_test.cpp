@@ -318,9 +318,9 @@ TEST_F(KfdIoctlTest, OpenRefcountSurvivesDupThenPrimaryClose) {
   // SetUp() already performed the primary open().
   EXPECT_EQ(driver_->local_open_ref_count(), 1u);
 
-  // Two dups of the KFD fd.
-  driver_->retain_local_open();
-  driver_->retain_local_open();
+  // Two dups of the KFD fd. Each retain must succeed while the process is live.
+  EXPECT_TRUE(driver_->retain_local_open());
+  EXPECT_TRUE(driver_->retain_local_open());
   EXPECT_EQ(driver_->local_open_ref_count(), 3u);
 
   // Closing the primary fd first must NOT tear the process down.

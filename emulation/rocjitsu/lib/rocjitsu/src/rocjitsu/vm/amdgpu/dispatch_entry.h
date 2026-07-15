@@ -25,6 +25,12 @@ struct WorkgroupCoord {
   uint32_t z = 0;
 };
 
+struct WorkitemCoord {
+  uint32_t x = 0;
+  uint32_t y = 0;
+  uint32_t z = 0;
+};
+
 struct ClusterDispatchShape {
   uint32_t count_x = 0;
   uint32_t count_y = 0;
@@ -52,6 +58,10 @@ struct DispatchEntry {
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
+  // Actual AQL grid extents.
+  uint32_t grid_size_x = 1;
+  uint32_t grid_size_y = 1;
+  uint32_t grid_size_z = 1;
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
@@ -61,6 +71,9 @@ struct DispatchEntry {
   uint32_t cluster_size_x = 1;
   uint32_t cluster_size_y = 1;
   uint32_t cluster_size_z = 1;
+  /// RDNA COMPUTE_PGM_RSRC1.WGP_MODE. When set, the workgroup is placed on
+  /// one of a sibling CU pair and uses their shared WGP LDS backing.
+  bool wgp_mode = false;
   bool enable_wg_id_x = true;
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
@@ -162,28 +175,67 @@ struct DispatchEntry {
   }
 };
 
-inline uint32_t dispatch_workgroup_size(const DispatchEntry &entry) {
-  auto dim = [](uint16_t value) -> uint32_t { return value == 0 ? 1u : value; };
-  return dim(entry.workgroup_size_x) * dim(entry.workgroup_size_y) * dim(entry.workgroup_size_z);
+template <typename T> [[nodiscard]] inline constexpr uint32_t nonzero_dim(T value) {
+  return value == 0 ? 1u : static_cast<uint32_t>(value);
 }
 
-inline uint64_t wave_lane_mask(uint32_t wave_size) {
-  if (wave_size >= 64)
-    return ~0ULL;
-  if (wave_size == 0)
-    return 0;
-  return (1ULL << wave_size) - 1;
+inline constexpr uint32_t kPackedTidMask = 0x3FFu;
+inline constexpr uint32_t kPackedTidYShift = 10;
+inline constexpr uint32_t kPackedTidZShift = 20;
+
+[[nodiscard]] inline constexpr uint32_t pack_workitem_id(WorkitemCoord id,
+                                                         uint32_t component_count) {
+  uint32_t packed = id.x & kPackedTidMask;
+  if (component_count >= 1)
+    packed |= (id.y & kPackedTidMask) << kPackedTidYShift;
+  if (component_count >= 2)
+    packed |= (id.z & kPackedTidMask) << kPackedTidZShift;
+  return packed;
 }
 
-inline uint64_t initial_exec_mask_for_wave(const DispatchEntry &entry, uint32_t wf_index_in_wg,
-                                           uint32_t wave_size) {
-  uint32_t wg_size = dispatch_workgroup_size(entry);
-  uint32_t first_lane = wf_index_in_wg * wave_size;
-  if (first_lane >= wg_size)
-    return 0;
-  uint32_t remaining = wg_size - first_lane;
-  uint32_t active_lanes = remaining < wave_size ? remaining : wave_size;
-  return wave_lane_mask(active_lanes);
+[[nodiscard]] inline WorkitemCoord workitem_local_coord(const DispatchEntry &entry,
+                                                        uint32_t wf_index_in_wg, uint32_t lane,
+                                                        uint32_t wave_size) {
+  const uint32_t workgroup_size_x = nonzero_dim(entry.workgroup_size_x);
+  const uint32_t workgroup_size_y = nonzero_dim(entry.workgroup_size_y);
+  const uint32_t flat_id = wf_index_in_wg * wave_size + lane;
+  return {flat_id % workgroup_size_x, (flat_id / workgroup_size_x) % workgroup_size_y,
+          flat_id / (workgroup_size_x * workgroup_size_y)};
+}
+
+[[nodiscard]] inline uint64_t initial_exec_mask_for_wave(const DispatchEntry &entry,
+                                                         uint32_t global_wg_id,
+                                                         uint32_t wf_index_in_wg,
+                                                         uint32_t wave_size) {
+  assert(wave_size <= 64 && "AMDGPU wave size must not exceed 64 lanes");
+  assert(entry.grid_size_x != 0 && entry.grid_size_y != 0 && entry.grid_size_z != 0 &&
+         "kernel dispatch grid dimensions must be nonzero");
+  const uint32_t relative_wg_id = global_wg_id >= entry.workgroup_id_offset
+                                      ? global_wg_id - entry.workgroup_id_offset
+                                      : global_wg_id;
+  const uint32_t grid_wgs_x = nonzero_dim(entry.grid_wgs_x);
+  const uint32_t grid_wgs_y = nonzero_dim(entry.grid_wgs_y);
+  const uint32_t wg_x = relative_wg_id % grid_wgs_x;
+  const uint32_t wg_y = (relative_wg_id / grid_wgs_x) % grid_wgs_y;
+  const uint32_t wg_z = relative_wg_id / (grid_wgs_x * grid_wgs_y);
+  const uint32_t workgroup_size_x = nonzero_dim(entry.workgroup_size_x);
+  const uint32_t workgroup_size_y = nonzero_dim(entry.workgroup_size_y);
+  const uint32_t workgroup_size_z = nonzero_dim(entry.workgroup_size_z);
+
+  uint64_t mask = 0;
+  const uint32_t lanes = wave_size > 64 ? 64 : wave_size;
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    const WorkitemCoord id = workitem_local_coord(entry, wf_index_in_wg, lane, wave_size);
+    if (id.z >= workgroup_size_z)
+      continue;
+    const uint64_t global_x = static_cast<uint64_t>(wg_x) * workgroup_size_x + id.x;
+    const uint64_t global_y = static_cast<uint64_t>(wg_y) * workgroup_size_y + id.y;
+    const uint64_t global_z = static_cast<uint64_t>(wg_z) * workgroup_size_z + id.z;
+    if (global_x < entry.grid_size_x && global_y < entry.grid_size_y &&
+        global_z < entry.grid_size_z)
+      mask |= 1ULL << lane;
+  }
+  return mask;
 }
 
 /// @brief Per-queue state for the command processor.
