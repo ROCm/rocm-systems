@@ -673,14 +673,14 @@ rocprofsys_init_tooling_hidden(void)
         if(session)
         {
             using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+            using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
 
             session->subscribe(
                 { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
             session->subscribe({ &sampling::pause, &sampling::resume, "sampling" });
             session->subscribe(
                 { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
-            session->subscribe(
-                { &component::ucx_gotcha::pause, &component::ucx_gotcha::resume, "ucx" });
+            session->subscribe({ &ucx_t::pause, &ucx_t::resume, "ucx" });
             session->subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
             session->subscribe({ &component::vaapi_gotcha::pause,
                                  &component::vaapi_gotcha::resume, "vaapi" });
