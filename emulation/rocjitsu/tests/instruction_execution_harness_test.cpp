@@ -235,6 +235,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
   size_t skipped = 0;
   std::vector<std::string_view> unimpl_list;
   std::vector<std::string> decode_fail_list;
+  std::vector<std::string> mnemonic_mismatch_list;
   std::vector<std::string> execution_fail_list;
 
   for (size_t i = 0; i < total; ++i) {
@@ -260,6 +261,13 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     }
     if (!inst) {
       decode_fail_list.emplace_back(te.mnemonic);
+      continue;
+    }
+
+    const std::string_view decoded_mnemonic = inst->mnemonic();
+    if (decoded_mnemonic != te.mnemonic) {
+      mnemonic_mismatch_list.emplace_back(
+          std::string(te.mnemonic).append(" decoded as ").append(decoded_mnemonic));
       continue;
     }
     ++decoded;
@@ -312,6 +320,9 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
   // coverage threshold.
   EXPECT_GT(decoded, 0u) << "No instructions decoded for " << arch_name;
   EXPECT_EQ(decode_fail_list.size(), 0u) << arch_name << " gained decode failures";
+  EXPECT_TRUE(mnemonic_mismatch_list.empty())
+      << arch_name << " encodings decoded as a different instruction: "
+      << ::testing::PrintToString(mnemonic_mismatch_list);
   EXPECT_EQ(execution_fail_list.size(), 0u)
       << arch_name << " failed to execute implemented instructions";
 

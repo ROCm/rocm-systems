@@ -48,16 +48,14 @@ Pre-built configs are in `configs/`:
 }
 ```
 
-The example above is intentionally minimal and single-threaded. Shipped
-multi-XCD KMD configs may set `num_threads` to the number of simulated XCD
-partitions.
+The example above is intentionally minimal and single-threaded.
 
 ### Top-level fields
 
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | PDES engine partitions/worker threads. For partitioned multi-XCD configs this is typically one partition per XCD. |
+| `num_threads` | int | Number of PDES engine partitions/worker threads. |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
