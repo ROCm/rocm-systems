@@ -42,6 +42,25 @@ static constexpr size_t SZ           = N * sizeof(float);
 static constexpr int    KERNEL_ITERS = 4;
 static constexpr int    GRAPH_ITERS  = 4;
 
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // GPU kernels
 // ---------------------------------------------------------------------------
@@ -1915,34 +1934,38 @@ TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
 // ===========================================================================
 // Workload: cross-GPU peer copy (REQUIRES 2 GPUs)
 //
-// First HRR workload that spans two devices. dev0 is memset to a known value and
-// peer-copied to dev1 via hipMemcpyPeer (real generated handler: translates both
-// dst and src through the alloc map, passes the device ids by value); a D2H from
-// dev1 validates the bytes. Replay must recreate the two allocations on the
-// correct devices (hipSetDevice + alloc map) for the peer copy to land.
-// Skips (no-op) on a single-GPU host; the roundtrip driver guards the same way.
+// First HRR workload that spans two devices. src_dev is memset to a known value
+// and peer-copied to dst_dev via hipMemcpyPeer. Replay must recreate the two
+// allocations on the correct devices for the peer copy to land.
+// Skips on hosts without two peer-accessible GPUs; the roundtrip driver guards
+// the same way.
 // Final blob: h[i] == 0x7E7E7E7E.
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
+  int src_dev = 0;
+  int dst_dev = 1;
   int ndev = 0;
-  HIP_CHECK(hipGetDeviceCount(&ndev));
-  if (ndev < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // needs 2 GPUs
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    HIP_SKIP_TEST(ndev < 2 ? HipTest::SkipReason::kFewerThanTwoGpus
+                           : HipTest::SkipReason::kPeerAccessUnavailable);
+  }
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
   constexpr int    VAL = 0x7E7E7E7E;
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(src_dev));
+  HIP_CHECK(hipDeviceEnablePeerAccess(dst_dev, 0));
   int* d0 = nullptr;
   HIP_CHECK(hipMalloc(&d0, SZ));
   HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d0), VAL, N));
   HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(dst_dev));
   int* d1 = nullptr;
   HIP_CHECK(hipMalloc(&d1, SZ));
 
-  // API under test: cross-device peer copy dev0 -> dev1.
-  HIP_CHECK(hipMemcpyPeer(d1, /*dstDev*/ 1, d0, /*srcDev*/ 0, SZ));
+  // API under test: cross-device peer copy src_dev -> dst_dev.
+  HIP_CHECK(hipMemcpyPeer(d1, dst_dev, d0, src_dev, SZ));
   HIP_CHECK(hipDeviceSynchronize());
 
   int* h = new int[N]();
@@ -1950,8 +1973,9 @@ TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
 
   HIP_CHECK(hipFree(d1));
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(src_dev));
   HIP_CHECK(hipFree(d0));
+  HIP_CHECK(hipDeviceDisablePeerAccess(dst_dev));
   delete[] h;
 }
 

@@ -574,6 +574,25 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Env-aware capture + playback helpers (used by the repro roundtrips).
 //
@@ -954,9 +973,13 @@ HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
 }
 
 HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
+  int src_dev = 0;
+  int dst_dev = 1;
   int ndev = 0;
-  HIP_CHECK(hipGetDeviceCount(&ndev));
-  if (ndev < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    HIP_SKIP_TEST(ndev < 2 ? HipTest::SkipReason::kFewerThanTwoGpus
+                           : HipTest::SkipReason::kPeerAccessUnavailable);
+  }
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
   // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
   // must recreate both allocations on their devices and validate the D2H bytes.
