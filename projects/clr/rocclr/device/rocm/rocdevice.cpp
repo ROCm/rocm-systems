@@ -199,8 +199,6 @@ void Device::checkAtomicSupport() {
 }
 
 Device::~Device() {
-  WaitForHsaAsyncHandlersIdle();
-
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
     if ((*mapCache_)[i] != nullptr) {
