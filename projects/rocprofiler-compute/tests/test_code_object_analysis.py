@@ -93,6 +93,7 @@ def test_parse_captures_virtual_address_instruction_and_comment():
         virtual_address=0x2040,
         instruction="v_mov_b32",
         comment="src.cpp:5",
+        kernel_name="kern",
     )
 
 
