@@ -965,6 +965,46 @@ class GpuAgent : public GpuAgentInt {
   //   - Per-XCC mutex serializes XCC thread vs consumer thread for each XCC's buffer
   //   - Consumer thread aggregates data and delivers callbacks when SUM(pending) >= buffer_size
   //   - Callbacks contain data from whichever XCCs have pending samples at threshold time
+
+  // Lock-free MPSC (multi-producer single-consumer) queue for XCC flush notifications.
+  // Multiple XCC flush threads enqueue their IDs; the consumer drains the queue as a wakeup signal.
+  // Aggregation/delivery currently still scans all XCCs when building the staging buffer.
+
+  struct alignas(64) pcs_mpsc_queue_t {
+    static constexpr uint32_t CAPACITY = 64;
+    static constexpr uint32_t EMPTY_SLOT = UINT32_MAX;
+
+    std::atomic<uint32_t> buffer[CAPACITY];
+    alignas(64) std::atomic<uint32_t> write_pos;  // Written by producers; cache-line isolated from buffer
+    alignas(64) uint32_t read_pos;                // Written by consumer only; isolate from write_pos to avoid false sharing
+
+    pcs_mpsc_queue_t() : write_pos(0), read_pos(0) {
+      for (uint32_t i = 0; i < CAPACITY; ++i) {
+        buffer[i].store(EMPTY_SLOT, std::memory_order_relaxed);
+      }
+    }
+
+    // Enqueue XCC ID - called by multiple producer threads (XCC flush threads)
+    // Returns true on success, false if queue is full (should not happen in practice)
+    bool enqueue(uint32_t xcc_id);
+
+    // Try to dequeue an XCC ID - called by single consumer thread
+    // Returns true and sets xcc_id on success, false if queue is empty
+    bool try_dequeue(uint32_t& xcc_id);
+
+    // Check if queue has data - called by consumer to check before sleeping
+    bool has_data() const;
+
+    // Reset queue to empty state - must be called before starting a new session
+    void reset() {
+      for (uint32_t i = 0; i < CAPACITY; ++i) {
+        buffer[i].store(EMPTY_SLOT, std::memory_order_relaxed);
+      }
+      write_pos.store(0, std::memory_order_relaxed);
+      read_pos = 0;
+    }
+  };
+
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC's flush thread
@@ -1009,10 +1049,10 @@ class GpuAgent : public GpuAgentInt {
 
     /* Consumer thread for aggregated callback delivery */
     std::thread consumer_thread;            // Aggregates data and delivers callbacks
-    std::mutex consumer_mutex;              // Protects consumer_cv and pending_flush_count
+    pcs_mpsc_queue_t flush_queue;           // Lock-free queue of XCC IDs with pending data
+    std::mutex consumer_wakeup_mutex;       // Protects consumer_cv (minimal lock for wakeup only)
     std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
     std::atomic<bool> consumer_exit;        // Signal consumer thread to exit
-    std::atomic<uint32_t> pending_flush_count;  // How many XCCs have notified consumer
     std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
 
     pcs::PcsRuntime::PcSamplingSession* session;

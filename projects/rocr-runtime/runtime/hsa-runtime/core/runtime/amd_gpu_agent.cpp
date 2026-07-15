@@ -4143,7 +4143,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
     pcs_data->xcc_data[xcc_id].which_buffer = 0;
   }
   pcs_data->consumer_exit.store(false, std::memory_order_release);
-  pcs_data->pending_flush_count.store(0, std::memory_order_release);
+  pcs_data->flush_queue.reset();  // Clear any stale entries from previous session
 
   struct ThreadData {
     GpuAgent* agent;
@@ -4728,6 +4728,55 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   return HSA_STATUS_SUCCESS;
 }
 
+// Lock-free MPSC Queue Implementation
+// This queue allows XCC flush threads to notify the consumer thread which XCCs
+// have pending data, eliminating the need for a mutex-protected counter.
+// The queue uses fetch_add for concurrent writes and compare_exchange for reads.
+
+bool GpuAgent::pcs_mpsc_queue_t::enqueue(uint32_t xcc_id) {
+  // Reserve a slot using atomic fetch_add
+  uint32_t pos = write_pos.fetch_add(1, std::memory_order_acq_rel);
+  uint32_t slot = pos % CAPACITY;
+
+  // Wait for slot to be empty (should be immediate in normal operation)
+  uint32_t expected = EMPTY_SLOT;
+  int attempts = 0;
+  while (!buffer[slot].compare_exchange_weak(expected, xcc_id,
+                                             std::memory_order_release,
+                                             std::memory_order_relaxed)) {
+    if (++attempts > 100) {
+      std::this_thread::yield();
+    }
+    if (attempts > 10000) {
+      // Queue full - consumer is severely behind. Return failure to avoid hang.
+      return false;
+    }
+    expected = EMPTY_SLOT;
+  }
+  return true;
+}
+
+bool GpuAgent::pcs_mpsc_queue_t::try_dequeue(uint32_t& xcc_id) {
+  uint32_t slot = read_pos % CAPACITY;
+
+  // Read the value from the slot
+  uint32_t val = buffer[slot].load(std::memory_order_acquire);
+  if (val == EMPTY_SLOT) {
+    return false;  // Queue is empty
+  }
+
+  // Mark slot as empty and advance read position
+  buffer[slot].store(EMPTY_SLOT, std::memory_order_release);
+  read_pos++;
+  xcc_id = val;
+  return true;
+}
+
+bool GpuAgent::pcs_mpsc_queue_t::has_data() const {
+  uint32_t slot = read_pos % CAPACITY;
+  return buffer[slot].load(std::memory_order_acquire) != EMPTY_SLOT;
+}
+
 void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
                                       const char* thread_name) {
   try {
@@ -4746,9 +4795,14 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
           done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
       if (val == -1) {
-        // Exit signal received - notify consumer and exit
-        pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-        pcs_data.consumer_cv.notify_one();
+        // Exit signal received - enqueue XCC ID to notify consumer and exit
+        if (!pcs_data.flush_queue.enqueue(xcc_id)) {
+          debug_print("PC Sampling: flush_queue.enqueue failed for XCC %u on exit\n", xcc_id);
+        }
+        {
+          std::lock_guard<std::mutex> lock(pcs_data.consumer_wakeup_mutex);
+          pcs_data.consumer_cv.notify_one();
+        }
         break;
       } else if (val != 0) {
         // Spurious wakeup - continue waiting
@@ -4772,9 +4826,14 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
         }
       }
 
-      // Notify consumer thread that new data is available
-      pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-      pcs_data.consumer_cv.notify_one();
+      // Notify consumer thread that this XCC has new data via lock-free queue
+      if (!pcs_data.flush_queue.enqueue(xcc_id)) {
+        debug_print("PC Sampling: flush_queue.enqueue failed for XCC %u\n", xcc_id);
+      }
+      {
+        std::lock_guard<std::mutex> lock(pcs_data.consumer_wakeup_mutex);
+        pcs_data.consumer_cv.notify_one();
+      }
     }
 
     debug_print("%s (XCC %u)::Exiting\n", thread_name, xcc_id);
@@ -4866,22 +4925,31 @@ void GpuAgent::PcSamplingConsumerThread(pcs_data_t& pcs_data) {
     pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
 
     while (!pcs_data.consumer_exit.load(std::memory_order_acquire)) {
-      // Wait for XCC threads to notify us of new data
+      // Wait for XCC threads to notify us of new data via the MPSC queue
       {
-        std::unique_lock<std::mutex> lock(pcs_data.consumer_mutex);
+        std::unique_lock<std::mutex> lock(pcs_data.consumer_wakeup_mutex);
         pcs_data.consumer_cv.wait(lock, [&pcs_data]() {
-          return pcs_data.pending_flush_count.load(std::memory_order_acquire) > 0 ||
+          return pcs_data.flush_queue.has_data() ||
                  pcs_data.consumer_exit.load(std::memory_order_acquire);
         });
-        // Reset pending count - we'll check all XCCs
-        pcs_data.pending_flush_count.store(0, std::memory_order_release);
       }
 
       if (pcs_data.consumer_exit.load(std::memory_order_acquire)) {
         break;
       }
 
-      // Try to deliver aggregated samples (threshold check is inside)
+      // Drain the queue to clear notifications
+      uint32_t xcc_id;
+      bool had_data = false;
+      while (pcs_data.flush_queue.try_dequeue(xcc_id)) {
+        had_data = true;
+      }
+
+      if (!had_data) {
+        continue;  // Spurious wakeup
+      }
+
+      // Deliver aggregated samples (threshold check is inside)
       PcSamplingDeliverAggregatedSamples(pcs_data, session);
     }
 
