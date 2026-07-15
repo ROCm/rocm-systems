@@ -87,18 +87,20 @@ AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* /*userdata*/)
     CHECK_HSA(aqlprofile_register_agent(&info->handle, &info->info));
 
     aqlprofile_pmc_event_flags_t flags{.raw = 0};
-    aqlprofile_pmc_event_t       grbm{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM};
-    aqlprofile_pmc_event_t sq{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ};
-    aqlprofile_pmc_event_t ta{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA};
-    aqlprofile_pmc_event_t tcp{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP};
-    aqlprofile_pmc_event_t tcc{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC};
-    aqlprofile_pmc_event_t gl2c{
-        .block_index = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C};
+    // clang-format off
+    aqlprofile_pmc_event_t grbm {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM};
+    aqlprofile_pmc_event_t sq   {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ};
+    aqlprofile_pmc_event_t ta   {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA};
+    aqlprofile_pmc_event_t tcp  {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP};
+    aqlprofile_pmc_event_t tcc  {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC};
+    aqlprofile_pmc_event_t gl2c {
+        .block_index = 0, .event_id = 0, .flags = flags, .block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C};
+    // clang-format on
 
     info->add_event(grbm, "GRBM_COUNT", 1, 0);
     info->add_event(grbm, "GRBM_GUI_ACTIVE", 1, 2);
