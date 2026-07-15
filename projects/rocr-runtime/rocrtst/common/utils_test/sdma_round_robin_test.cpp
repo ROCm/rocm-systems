@@ -11,8 +11,9 @@
 
 #include "core/util/flag.h"
 
-// Unit test for the ROCR_SDMA_ROUND_ROBIN environment-variable parsing added to
-// rocr::Flag. rocr::Flag::Refresh() maps the variable onto an SDMA_OVERRIDE
+// Unit test for the ROCR_SDMA_ROUND_ROBIN and ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI
+// environment-variable parsing added to rocr::Flag. rocr::Flag::Refresh() maps
+// each variable onto an SDMA_OVERRIDE
 // tri-state with the rule:
 //   "1"           -> SDMA_ENABLE
 //   "0"           -> SDMA_DISABLE
@@ -33,6 +34,10 @@ rocr::Flag::SDMA_OVERRIDE ParseSdmaRoundRobin(const char* raw) {
 
 rocr::Flag::SDMA_OVERRIDE ParseFromEnv() {
   return ParseSdmaRoundRobin(std::getenv("ROCR_SDMA_ROUND_ROBIN"));
+}
+
+rocr::Flag::SDMA_OVERRIDE ParseFromEnvPcieXgmi() {
+  return ParseSdmaRoundRobin(std::getenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI"));
 }
 
 }  // namespace
@@ -58,4 +63,27 @@ TEST(RocrSdmaRoundRobin, DefaultForUnrecognizedValue) {
   ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN", "yes", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnv());
   unsetenv("ROCR_SDMA_ROUND_ROBIN");
+}
+
+TEST(RocrSdmaRoundRobinPcieXgmi, EnabledWhenOne) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "1", 1));
+  EXPECT_EQ(rocr::Flag::SDMA_ENABLE, ParseFromEnvPcieXgmi());
+  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+}
+
+TEST(RocrSdmaRoundRobinPcieXgmi, DisabledWhenZero) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "0", 1));
+  EXPECT_EQ(rocr::Flag::SDMA_DISABLE, ParseFromEnvPcieXgmi());
+  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+}
+
+TEST(RocrSdmaRoundRobinPcieXgmi, DefaultWhenUnset) {
+  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+  EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnvPcieXgmi());
+}
+
+TEST(RocrSdmaRoundRobinPcieXgmi, DefaultForUnrecognizedValue) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "yes", 1));
+  EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnvPcieXgmi());
+  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
 }

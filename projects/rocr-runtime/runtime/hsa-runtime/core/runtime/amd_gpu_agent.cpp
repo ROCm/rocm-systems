@@ -929,24 +929,37 @@ void GpuAgent::InitDma() {
       }
 
       // gfx942, gfx950 and newer (CDNA in major 9, minor >= 4) expose two
-      // general-purpose SDMA copy engines for host<->device transfers, and
-      // the default reverses
-      // SDMA0/1 for those copies. With ROCR_SDMA_ROUND_ROBIN=1, spread queue
-      // creation across all available SDMA engines using a pid seed so
-      // concurrent processes/streams land on different engines instead of
-      // contending on a single one.
+      // general-purpose (PCIe/paging) SDMA copy engines for host<->device
+      // transfers, and the default reverses SDMA0/1 for those copies.
       //
-      // The benefit depends on the partition mode. In CPX (core-partitioned)
-      // mode each partition is a single XCD that can enable only two SDMA
-      // engines -- one dedicated to H2D and one to D2H -- so there is no spare
-      // engine to round-robin onto and this flag has no effect. In SPX (single
-      // partition) mode the one device spans all XCDs and their SDMA engines,
-      // so host<->device copies can use SDMA engines on otherwise-idle XCDs,
-      // raising aggregate bandwidth. The NumSdmaEngines / NumSdmaXgmiEngines
-      // guards naturally no-op the flag when there is no spare engine.
+      // ROCR_SDMA_ROUND_ROBIN=1 spreads queue creation across the two
+      // PCIe/paging engines (NumSdmaEngines) using a pid seed so concurrent
+      // processes/streams land on different engines instead of contending on a
+      // single one. On these parts both PCIe/paging engines live on the first
+      // XCD/XCC, so this stays within that XCC.
+      //
+      // ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI=1 widens the round-robin to ALL SDMA
+      // engines (NumSdmaEngines PCIe/paging + NumSdmaXgmiEngines xGMI). The
+      // engines are grouped two-per-XCD/XCC, so spreading over the full set
+      // lets concurrent processes/streams reach engines on other XCCs and use
+      // each XCC's own path to host memory, raising aggregate bandwidth in SPX
+      // (single-partition) mode. In CPX (core-partitioned) mode a partition is
+      // a single XCD with no xGMI engines (NumSdmaXgmiEngines == 0), so it
+      // degrades to the two-engine behavior and is a no-op. When both flags are
+      // set the wider PCIE_XGMI behavior takes precedence. The downstream
+      // NumSdmaXgmiEngines guard still forces the default engine pick when no
+      // xGMI engine exists.
       if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
           properties_.NumSdmaEngines > 0) {
-        if (core::Runtime::runtime_singleton_->flag().sdma_round_robin() == Flag::SDMA_ENABLE) {
+        if (core::Runtime::runtime_singleton_->flag().sdma_round_robin_pcie_xgmi() ==
+            Flag::SDMA_ENABLE) {
+          const uint32_t total_eng =
+              properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+          rec_eng = (static_cast<uint32_t>(getpid()) + rec_eng) % total_eng;
+          debug_print("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: queue rec_eng=%u of %u SDMA engines\n",
+                      rec_eng, total_eng);
+        } else if (core::Runtime::runtime_singleton_->flag().sdma_round_robin() ==
+                   Flag::SDMA_ENABLE) {
           rec_eng = (static_cast<uint32_t>(getpid()) + rec_eng) % properties_.NumSdmaEngines;
           debug_print("ROCR_SDMA_ROUND_ROBIN: queue rec_eng=%u of %u SDMA engines\n",
                       rec_eng, properties_.NumSdmaEngines);

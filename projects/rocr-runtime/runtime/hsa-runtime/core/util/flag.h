@@ -127,18 +127,31 @@ class Flag {
     enable_sdma_recommended_eng_ = (var == "0") ? SDMA_DISABLE :
                                    ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
-    // Round-robin distribution of host<->device SDMA copies across all
-    // available SDMA engines. Applies to gfx942, gfx950 and newer. Helps in
-    // SPX (single partition)
-    // mode, where the one device spans all XCDs and their SDMA engines,
-    // letting host<->device copies use engines on otherwise-idle XCDs. Has no
-    // effect in CPX (core-partitioned) mode: each partition is a single XCD
-    // that can enable only two SDMA engines (one H2D + one D2H), so there is
-    // no spare engine to round-robin onto. Opt-in via ROCR_SDMA_ROUND_ROBIN=1;
-    // default keeps the stock engine pick.
+    // Round-robin distribution of host<->device SDMA copies across the
+    // PCIe/paging SDMA engines. Applies to gfx942, gfx950 and newer (CDNA in
+    // major 9, minor >= 4). With a pid seed, concurrent processes/streams pick
+    // among the NumSdmaEngines general-purpose engines instead of contending
+    // on the default single engine. On these parts KFD exposes only two such
+    // engines and both live on the first XCD/XCC, so this stays within that
+    // XCC. Opt-in via ROCR_SDMA_ROUND_ROBIN=1; default keeps the stock pick.
     var = os::GetEnvVar("ROCR_SDMA_ROUND_ROBIN");
     sdma_round_robin_ = (var == "1") ? SDMA_ENABLE :
                         ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
+
+    // Widen the host<->device round-robin to ALL SDMA engines -- the
+    // NumSdmaEngines PCIe/paging engines plus the NumSdmaXgmiEngines xGMI
+    // engines. On gfx942/gfx950 the engines are grouped two-per-XCD/XCC (the
+    // two PCIe/paging engines sit on the first XCC, the xGMI engines on the
+    // remaining XCCs), so spreading over the full set lets concurrent
+    // processes/streams land on engines belonging to different XCCs and use
+    // each XCC's own path to host memory, raising aggregate bandwidth in SPX
+    // (single-partition) mode. In CPX (core-partitioned) mode a partition is a
+    // single XCD with no xGMI engines (NumSdmaXgmiEngines == 0), so this
+    // degrades safely to the two-engine behavior and is a no-op. Opt-in via
+    // ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI=1; default keeps the stock pick.
+    var = os::GetEnvVar("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+    sdma_round_robin_pcie_xgmi_ = (var == "1") ? SDMA_ENABLE :
+                                  ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
@@ -432,6 +445,8 @@ class Flag {
 
   SDMA_OVERRIDE sdma_round_robin() const { return sdma_round_robin_; }
 
+  SDMA_OVERRIDE sdma_round_robin_pcie_xgmi() const { return sdma_round_robin_pcie_xgmi_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -618,6 +633,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
   SDMA_OVERRIDE sdma_round_robin_;
+  SDMA_OVERRIDE sdma_round_robin_pcie_xgmi_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
