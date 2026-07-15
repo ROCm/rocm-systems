@@ -1968,21 +1968,41 @@ TEST(WaitcheckTest, AcceptsStorecntOverflowSizedQueueBeforeProgramEnd) {
   EXPECT_FALSE(report.diagnostics_truncated);
 }
 
-TEST(WaitcheckTest, ReportsKmcntMaxCountForOverflowSizedQueue) {
+TEST(WaitcheckTest, ReportsKmcntZeroForOverflowSizedSmemQueue) {
   std::vector<uint32_t> program;
   append_s_loads(program, kOverflowQueueSize, kOverflowKmcntBaseSgpr, kOverflowKmcntSbase);
   append_inst(program, s_mov_b32(kOverflowKmcntConsumerSgpr, kOverflowKmcntBaseSgpr));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
-  expect_single_overflow_diagnostic(report, WaitCounterKind::Km, WaitcheckAccessKind::Use,
-                                    RegClass::SGPR, kOverflowKmcntBaseSgpr);
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, kOverflowKmcntBaseSgpr);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_wait_kmcnt <= 0"), std::string::npos);
 }
 
-TEST(WaitcheckTest, AcceptsKmcntMaxCountForOldestOverflowSizedQueue) {
+TEST(WaitcheckTest, NonzeroKmcntDoesNotRetireOldestSmemResult) {
   std::vector<uint32_t> program;
   append_s_loads(program, kOverflowQueueSize, kOverflowKmcntBaseSgpr, kOverflowKmcntSbase);
   append_inst(program, sopp(71, kOverflowRequiredCount)); // s_wait_kmcnt 39
+  append_inst(program, s_mov_b32(kOverflowKmcntConsumerSgpr, kOverflowKmcntBaseSgpr));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, KmcntZeroRetiresOverflowSizedSmemQueue) {
+  std::vector<uint32_t> program;
+  append_s_loads(program, kOverflowQueueSize, kOverflowKmcntBaseSgpr, kOverflowKmcntSbase);
+  append_inst(program, sopp(71, 0)); // s_wait_kmcnt 0
   append_inst(program, s_mov_b32(kOverflowKmcntConsumerSgpr, kOverflowKmcntBaseSgpr));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);

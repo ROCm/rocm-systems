@@ -267,6 +267,8 @@ The current analyzer models gfx12 and gfx950 object-visible wait behavior includ
 
 - split `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `samplecnt`, `bvhcnt`, and
   `expcnt` hazards;
+- out-of-order RDNA4 scalar-memory completion, which requires `kmcnt(0)` for
+  dependencies on a particular SMEM result;
 - `s_waitcnt` and combined gfx12 wait encodings;
 - `s_wait_alu` depctr hazards for `depctr_vm_vsrc`, `depctr_va_sdst`,
   `depctr_va_vcc`, and `depctr_sa_sdst`;

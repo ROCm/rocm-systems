@@ -735,6 +735,25 @@ private:
       state.uncertain_order[idx] = false;
   }
 
+  static void apply_kmcnt_wait(PendingState &state, uint32_t count) {
+    if (count == 0) {
+      apply_wait(state, WaitCounterKind::Km, count);
+      return;
+    }
+
+    // RDNA4 scalar-memory requests may return out of order, including relative
+    // to other scalar-memory requests.  A nonzero KMCNT therefore cannot prove
+    // that any particular SMEM destination has retired.  Other KMCNT event
+    // kinds retain the normal counter-order behavior.
+    const size_t idx = counter_index(WaitCounterKind::Km);
+    auto &pending = state.pending[idx];
+    std::erase_if(pending, [count](const PendingEvent &event) {
+      return event.kind != WaitEventKind::Smem && event.min_younger >= count;
+    });
+    if (pending.empty())
+      state.uncertain_order[idx] = false;
+  }
+
   [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
                                                           WaitCounterKind counter) {
     switch (counter) {
@@ -992,7 +1011,7 @@ private:
     } else if (mnemonic == "s_wait_dscnt") {
       apply_memory_wait(state, WaitCounterKind::Ds, value);
     } else if (mnemonic == "s_wait_kmcnt") {
-      apply_wait(state, WaitCounterKind::Km, value);
+      apply_kmcnt_wait(state, value);
     } else if (mnemonic == "s_wait_samplecnt") {
       apply_memory_wait(state, WaitCounterKind::Sample, value);
     } else if (mnemonic == "s_wait_bvhcnt") {
@@ -2141,7 +2160,7 @@ private:
         if (access == WaitcheckAccessKind::Def && ordered_waw(event, current_events))
           continue;
 
-        const auto required_count = event.min_younger;
+        const auto required_count = event.kind == WaitEventKind::Smem ? 0u : event.min_younger;
         emit_diagnostic(inst, event, *reg, access, required_count, section_offset, file_offset,
                         arch);
       }
@@ -2156,7 +2175,7 @@ private:
         const PendingEvent &event = events[i];
         if (!event.check_exec_defs)
           continue;
-        const auto required_count = event.min_younger;
+        const auto required_count = event.kind == WaitEventKind::Smem ? 0u : event.min_younger;
         emit_diagnostic(inst, event, RegisterRef{RegClass::EXEC, 0, 1}, WaitcheckAccessKind::Def,
                         required_count, section_offset, file_offset, arch);
       }
