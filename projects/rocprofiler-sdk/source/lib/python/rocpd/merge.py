@@ -67,6 +67,7 @@ def merge_sqlite_dbs(
 
     uuids = []
     views = []
+    rocpd_views_sql = {}
     data_views = []
     schema_versions = []
 
@@ -215,6 +216,8 @@ def merge_sqlite_dbs(
                         name == _name for _name, _ in data_views
                     ):
                         data_views.append((name, create_sql))
+                    if name.startswith("rocpd_") and name not in rocpd_views_sql:
+                        rocpd_views_sql[name] = create_sql
                     existing_views.add(name)
 
                 views += [itr for itr in list(existing_views) if itr.startswith("rocpd_")]
@@ -252,10 +255,20 @@ def merge_sqlite_dbs(
             matching_tables = [
                 titr for titr in existing_tables if titr.startswith(f"{vitr}_")
             ]
-            tables_union = " UNION ALL ".join(
-                [f"SELECT * FROM {titr}" for titr in matching_tables]
-            )
-            conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
+            if matching_tables:
+                tables_union = " UNION ALL ".join(
+                    [f"SELECT * FROM {titr}" for titr in matching_tables]
+                )
+                conn.execute(f"CREATE VIEW {vitr} AS {tables_union}")
+                continue
+
+            # Some rocpd_ views are derived from other views and have no
+            # direct backing tables with the "<view>_" prefix.
+            sql_view = rocpd_views_sql.get(vitr)
+            if sql_view:
+                conn.execute(sql_view)
+            else:
+                log(f"Skipping view {vitr}: no matching tables and no SQL definition")
         conn.commit()
 
         # Now that the rocpd_ views are created, re-create the data-views using all the data
