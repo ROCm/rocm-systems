@@ -24,7 +24,11 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -121,7 +125,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs, /*clear=*/false);
   if (sgpr_base < 0)
     return nullptr;
 
@@ -137,10 +141,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
               vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
-  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
-  // arguments from L2/memory rather than stale lines from a prior kernel.
-  // On real hardware, the driver issues s_dcache_inv at kernel launch.
-  l1_scalar_.invalidate_all();
+  // Per-CU cache invalidation (L1 scalar + instruction fetch) is done once per
+  // dispatch in begin_workgroup(), not per wavefront here.
 
   auto *wf = wfs_[wf_id].get();
   wf->wg_id_ = wg_id;
@@ -347,8 +349,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   uint32_t vmid = active->process_id();
 
   rj_code_binary_inst_t words[4];
-  for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
+  fetch_instruction_words(active->pc, vmid, words);
 
   active->trace_inst_count_++;
 
@@ -413,7 +414,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  execute_instruction(inst.get(), *active);
+  try {
+    execute_instruction(inst.get(), *active);
+  } catch (...) {
+    // A caller may recover from the fault and patch or replace the instruction
+    // before retrying the CU. Do not retain bytes from the failed execution.
+    invalidate_inst_fetch_cache();
+    throw;
+  }
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
@@ -458,6 +466,26 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   active->pc += inst_size;
+}
+
+void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]) {
+  auto &line = inst_fetch_cache_[inst_cache_index(pc, vmid)];
+  if (line.valid && line.pc == pc && line.vmid == vmid) {
+    std::memcpy(words, line.words.data(), sizeof(line.words));
+    return;
+  }
+
+  memory_->read_block(
+      pc, std::span<uint8_t>(reinterpret_cast<uint8_t *>(words), sizeof(line.words)), vmid);
+  line.pc = pc;
+  line.vmid = vmid;
+  std::memcpy(line.words.data(), words, sizeof(line.words));
+  line.valid = true;
+}
+
+void ComputeUnitCore::invalidate_inst_fetch_cache() {
+  for (auto &line : inst_fetch_cache_)
+    line.valid = false;
 }
 
 bool ComputeUnitCore::step() {

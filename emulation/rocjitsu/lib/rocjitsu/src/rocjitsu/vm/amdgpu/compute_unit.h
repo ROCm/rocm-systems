@@ -36,6 +36,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -235,6 +236,16 @@ public:
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
+    // Invalidate per-CU caches once per dispatch (when a new kernel's first WG
+    // lands on this CU), not once per wavefront. The L1 scalar cache must be
+    // flushed so wavefronts read fresh kernargs; the instruction-fetch cache
+    // must drop any prior kernel's code. Doing this per wavefront (in
+    // dispatch_wf) repeated the work ~wfs_per_dispatch times.
+    if (dispatch_id != last_invalidated_dispatch_id_) {
+      last_invalidated_dispatch_id_ = dispatch_id;
+      l1_scalar_.invalidate_all();
+      invalidate_inst_fetch_cache();
+    }
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
 
@@ -363,6 +374,7 @@ public:
     memory_ = memory;
     l1_vector_.set_memory(memory);
     l1_scalar_.set_memory(memory);
+    invalidate_inst_fetch_cache();
   }
 
   /// @brief Set (or replace) the L2 cache pointer.
@@ -515,6 +527,14 @@ public:
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
 
+  /// @brief Write 32-bit lane values into one VGPR.
+  /// @param reg_idx Physical register index.
+  /// @param lane_mask Enabled lanes to write.
+  /// @param src Source bytes, indexed as src[lane * src_stride].
+  /// @param src_stride Byte stride between source lane values.
+  virtual void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                                  uint32_t src_stride) = 0;
+
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
   /// @returns Pointer to the contiguous SGPR data.
@@ -570,6 +590,14 @@ public:
     return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
 
+  const uint32_t *vgpr_lanes32(uint32_t reg_idx) const {
+    return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx));
+  }
+
+  uint32_t *vgpr_lanes32(uint32_t reg_idx) {
+    return reinterpret_cast<uint32_t *>(raw_vgpr_data(reg_idx));
+  }
+
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.
   const simdojo::RegisterFile<uint32_t> &sgpr_file() const { return sgpr_file_; }
@@ -615,6 +643,12 @@ protected:
 
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
+
+  /// @brief Fetch the 16-byte decode window for the given PC.
+  void fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]);
+
+  /// @brief Drop cached instruction bytes after image or dispatch changes.
+  void invalidate_inst_fetch_cache();
 
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
@@ -663,6 +697,26 @@ protected:
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool pool_driven_ = false;
+
+  struct InstFetchCacheLine {
+    uint64_t pc = 0;
+    uint32_t vmid = 0;
+    std::array<uint32_t, 4> words{};
+    bool valid = false;
+  };
+  static constexpr size_t kInstFetchCacheLines = 1024;
+  static_assert((kInstFetchCacheLines & (kInstFetchCacheLines - 1)) == 0);
+  // Direct-mapped instruction-fetch line index.
+  static constexpr size_t inst_cache_index(uint64_t pc, uint32_t vmid) {
+    return ((pc >> 2) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL)) &
+           (kInstFetchCacheLines - 1);
+  }
+  std::array<InstFetchCacheLine, kInstFetchCacheLines> inst_fetch_cache_{};
+
+  // Dispatch id whose arrival last triggered per-CU cache invalidation, so the
+  // invalidation happens once per dispatch (in begin_workgroup) rather than per
+  // wavefront. UINT32_MAX = none yet.
+  uint32_t last_invalidated_dispatch_id_ = UINT32_MAX;
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
@@ -851,6 +905,26 @@ public:
     vgpr_file_[reg_idx][lane] = val;
   }
 
+  void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                          uint32_t src_stride) override {
+    auto &reg = vgpr_file_[reg_idx];
+    constexpr uint64_t full_lane_mask = [] {
+      if constexpr (Isa::WF_SIZE >= 64)
+        return ~uint64_t{0};
+      else
+        return (uint64_t{1} << Isa::WF_SIZE) - 1;
+    }();
+    if (lane_mask == full_lane_mask && src_stride == sizeof(uint32_t)) {
+      std::memcpy(&reg[0], src, Isa::WF_SIZE * sizeof(uint32_t));
+      return;
+    }
+    for (uint32_t lane = 0; lane < Isa::WF_SIZE; ++lane) {
+      if (!(lane_mask & (uint64_t{1} << lane)))
+        continue;
+      std::memcpy(&reg[lane], src + lane * src_stride, sizeof(uint32_t));
+    }
+  }
+
   /// @returns Const pointer to the raw VGPR data.
   const uint8_t *raw_vgpr_data(uint32_t base) const override {
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
@@ -871,7 +945,7 @@ public:
 
 protected:
   /// @returns Base index of the allocated VGPR block, or -1 on failure.
-  int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count); }
+  int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count, false); }
 
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
