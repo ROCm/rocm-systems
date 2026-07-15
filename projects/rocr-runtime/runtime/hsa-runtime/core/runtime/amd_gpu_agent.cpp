@@ -1974,20 +1974,32 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   case HSA_AMD_MEMORY_COPY_OP_LINEAR: {
     // BlitDevToDev linear copy shader, one entry at a time. Covers both the
     // multi-entry batch (hipMemcpyBatchAsync H2D/D2H) and the single scalar op.
+    // The 3-arg DmaCopy issues blits_[BlitDevToDev] synchronously; under SDMA=0
+    // this is the same shader the single-entry LINEAR path lands on, since
+    // DmaCopyOnEngine forces engine_offset = BlitDevToDev when SDMA is disabled
+    // (covering local H2D/D2H as well as peer entries the copy agent can map).
     for (core::Signal* sig : dep_signals)
       sig->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
                        HSA_WAIT_STATE_BLOCKED);
-    hsa_status_t status = HSA_STATUS_SUCCESS;
     if (op.num_entries > 0) {
       for (uint16_t d = 0; d < op.num_entries; ++d) {
-        status = DmaCopy(op.dst_list[d], op.src_list[d], op.size_list[d]);
-        if (status != HSA_STATUS_SUCCESS) break;
+        hsa_status_t status =
+            DmaCopy(op.dst_list[d], op.src_list[d], op.size_list[d]);
+        // On error, leave the completion signal untouched and return, matching
+        // the normal DmaCopyBatch switch (callee resolves the signal only on
+        // success; the caller propagates the error). Decrementing here would
+        // signal completion for a copy that did not happen.
+        if (status != HSA_STATUS_SUCCESS) return status;
       }
     } else {
-      status = DmaCopy(op.dst, op.src, op.size);
+      hsa_status_t status = DmaCopy(op.dst, op.src, op.size);
+      if (status != HSA_STATUS_SUCCESS) return status;
     }
-    out_signal.SubRelaxed(1);
-    return status;
+    // Release edge so a consumer waiting on the completion signal with
+    // scacquire is guaranteed to observe the copied bytes (mirrors the
+    // synchronous copy-then-signal pattern in CpuAgent::DmaCopy).
+    out_signal.SubRelease(1);
+    return HSA_STATUS_SUCCESS;
   }
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
@@ -1996,11 +2008,15 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
     // No shader-blit equivalent for broadcast/swap/indirect yet; these are the
     // slots for the 1-to-N / swap / indirect blit shaders once added. Until
-    // then, reject under SDMA=0 (same as the SDMA fan-out path would).
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  default:
+    // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
+    // the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+
+  // No default case: keep the switch exhaustive over hsa_amd_memory_copy_op_t
+  // so a newly added op type triggers a compiler warning here instead of being
+  // silently rejected.
+  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
 hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
@@ -2021,6 +2037,11 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // which selects the appropriate blit shader per op type (or rejects ops
     // with no shader equivalent yet). Done before the switch so all SDMA=0
     // shader-selection lives in one place.
+    //
+    // The H2D blit is used as the SDMA-availability probe on the assumption
+    // that SDMA is enabled/disabled globally (the HSA_ENABLE_SDMA=0 case this
+    // fallback targets). If per-direction SDMA availability ever diverges this
+    // probe would need to move per-entry, but today all blits share one state.
     if (!GetBlitObject(BlitHostToDev)->isSDMA()) {
       status = DmaCopyBatchFallback(op, dep_signals);
       if (status != HSA_STATUS_SUCCESS)
