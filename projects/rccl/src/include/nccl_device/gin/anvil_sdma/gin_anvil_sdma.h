@@ -8,6 +8,7 @@
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_H_
 
 #include "../gin_device_common.h"
+#include "../../hip_compat.h"
 #include "gin_anvil_sdma_device_host_common.h"
 #include "gin_anvil_ipc_copy.h"
 #include "gin_anvil_ipc_table_device.h"
@@ -20,6 +21,8 @@ namespace anvil {
 namespace detail {
 
 using nccl::utility::loadConst;
+
+static constexpr int kSdmaDirtyBitWidth = NCCL_GIN_ANVIL_SDMA_DIRTY_BITS;
 
 NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr &&
@@ -106,7 +109,9 @@ NCCL_DEVICE_INLINE void markSdmaDirty(ncclGinAnvilSdmaGPUContext* rsCtx, int pee
                                       int effCh) {
   uint64_t* dirty = loadConst(&rsCtx->sdmaDirty);
   if (dirty == nullptr) return;
-  uint64_t bit = 1ULL << (peer * numCh + effCh);
+  const int bitIdx = peer * numCh + effCh;
+  if (bitIdx < 0 || bitIdx >= kSdmaDirtyBitWidth) return;
+  uint64_t bit = 1ULL << bitIdx;
   __hip_atomic_fetch_or(dirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 }
 
@@ -115,8 +120,8 @@ NCCL_DEVICE_INLINE int effectiveChannel(ncclGinAnvilSdmaGPUContext* rsCtx, int b
   int baseCh = loadConst(&rsCtx->sdmaChannel);
   int stride = loadConst(&rsCtx->sdmaChannelStride);
   if (!stride) return baseCh;
-  int warpId = __builtin_amdgcn_readfirstlane(threadIdx.x) / 64;
-  int nWarpsPerBlock = blockDim.x / 64;
+  int warpId = __builtin_amdgcn_readfirstlane(threadIdx.x) / NCCL_WARP_SIZE;
+  int nWarpsPerBlock = blockDim.x / NCCL_WARP_SIZE;
   if (nWarpsPerBlock <= 0) nWarpsPerBlock = 1;
   int slot = blockId * nWarpsPerBlock + warpId;
   return (baseCh + stride * slot) % numCh;

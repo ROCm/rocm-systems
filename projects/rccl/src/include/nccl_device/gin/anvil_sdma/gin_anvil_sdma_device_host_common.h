@@ -24,6 +24,9 @@ struct ncclGinAnvilIpcBufEntry;
 /** Default on (OSS7): fused COPY_LINEAR_WAIT_SIGNAL_MI4 for large SDMA puts with SignalInc. */
 #define NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL_DEFAULT 1u
 
+/** sdmaDirty is a uint64_t bitmask; one bit per (peer, channel) slot. */
+#define NCCL_GIN_ANVIL_SDMA_DIRTY_BITS 64
+
 struct ncclGinAnvilSdmaGPUContext {
   uint32_t layoutMagic;  // NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC
   void** queueHandles;   // [local_pe * numChannels + ch] SdmaQueueDeviceHandle*

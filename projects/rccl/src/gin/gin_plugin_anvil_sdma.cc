@@ -23,8 +23,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <mutex>
 
 static std::map<void*, int> bufferRegRefcount;
+static std::mutex pluginMutex;
 
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
@@ -69,11 +71,13 @@ static std::map<struct ncclComm*, GinAnvilPendingEntry*> g_pendingByComm;
 static std::map<struct ncclComm*, int> g_nextSignalSlot;
 
 static void ginAnvilPendingAdd(struct ncclComm* comm, ginAnvilGinCtx* ctx) {
+  std::lock_guard<std::mutex> lock(pluginMutex);
   auto* e = new GinAnvilPendingEntry{ctx, g_pendingByComm[comm]};
   g_pendingByComm[comm] = e;
 }
 
 static void ginAnvilPendingRemove(struct ncclComm* comm, ginAnvilGinCtx* ctx) {
+  std::lock_guard<std::mutex> lock(pluginMutex);
   GinAnvilPendingEntry** prev = &g_pendingByComm[comm];
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
     if (e->ctx == ctx) {
@@ -86,6 +90,7 @@ static void ginAnvilPendingRemove(struct ncclComm* comm, ginAnvilGinCtx* ctx) {
 }
 
 static void ginAnvilPendingClear(struct ncclComm* comm) {
+  std::lock_guard<std::mutex> lock(pluginMutex);
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr;) {
     GinAnvilPendingEntry* next = e->next;
     delete e;
@@ -116,6 +121,7 @@ void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm) {
 }
 
 void ncclGinAnvilPluginTestResetHostState(void) {
+  std::lock_guard<std::mutex> lock(pluginMutex);
   while (!g_pendingByComm.empty()) {
     ginAnvilPendingClear(g_pendingByComm.begin()->first);
   }
@@ -262,30 +268,31 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   ginAnvilMemHandle* mh = nullptr;
   NCCLCHECK(ncclCalloc(&mh, 1));
 
-  auto& refcount = bufferRegRefcount[data];
-
   void* lsaSelfAddr = nullptr;
   NCCLCHECK(ncclDevrGetLsaSelfAddr(devr, data, &lsaSelfAddr));
   if (lsaSelfAddr == nullptr) {
     WARN("GIN anvil-sdma: could not resolve LSA flat addr for %p", data);
-    bufferRegRefcount.erase(data);
     free(mh);
     return ncclSystemError;
   }
 
-  if (refcount == 0) {
-    int rc = ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaSelf, devr->lsaSize,
-                                             (ptrdiff_t)devr->bigSize);
-    if (rc != 0) {
-      WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr,
-           size);
-      bufferRegRefcount.erase(data);
-      free(mh);
-      return ncclSystemError;
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto& refcount = bufferRegRefcount[data];
+    if (refcount == 0) {
+      int rc = ncclGinAnvilIpcTableRegisterVmm(lsaSelfAddr, size, devr->lsaSelf, devr->lsaSize,
+                                               (ptrdiff_t)devr->bigSize);
+      if (rc != 0) {
+        WARN("GIN anvil-sdma: IPC table register failed for %p (lsaSelf=%p) size %zu", data, lsaSelfAddr,
+             size);
+        bufferRegRefcount.erase(data);
+        free(mh);
+        return ncclSystemError;
+      }
+      INFO(NCCL_INIT, "GIN anvil-sdma: registered addr=%p lsaSelf=%p +%zu", data, lsaSelfAddr, size);
     }
-    INFO(NCCL_INIT, "GIN anvil-sdma: registered addr=%p lsaSelf=%p +%zu", data, lsaSelfAddr, size);
+    refcount++;
   }
-  refcount++;
 
   mh->addr = data;
   mh->lsaSelfAddr = lsaSelfAddr;
@@ -340,6 +347,7 @@ static ncclResult_t ginAnvilDeregMrSym(void* collComm, void* mhandle) {
   if (!mh) return ncclSuccess;
 
   if (mh->addr) {
+    std::lock_guard<std::mutex> lock(pluginMutex);
     auto it = bufferRegRefcount.find(mh->addr);
     if (it != bufferRegRefcount.end()) {
       it->second--;
@@ -484,7 +492,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_v13_t* c
   ctx->nSignals = config->nSignals;
   ctx->nCounters = config->nCounters;
   ctx->comm = cctx->comm;
-  ctx->signalSlot = g_nextSignalSlot[cctx->comm]++;
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    ctx->signalSlot = g_nextSignalSlot[cctx->comm]++;
+  }
   ctx->hasError = false;
   ctx->signalsBound = false;
   ctx->gpu_queue_handles = cctx->gpu_queue_handles;
