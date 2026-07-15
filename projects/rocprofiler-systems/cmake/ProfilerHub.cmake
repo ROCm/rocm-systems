@@ -68,11 +68,9 @@ else()
     set(_PROFILER_HUB_STAMP "${_PROFILER_HUB_ROOT}/.checkout.stamp")
     set(_PROFILER_HUB_INSTALL_DIR "${_PROFILER_HUB_ROOT}/install")
 
-    # profiler-hub's own `project(profiler-hub VERSION ...)` (see
-    # profilers/profiler-hub/CMakeLists.txt) is the single source of truth for
-    # this. ExternalProject's BUILD_BYPRODUCTS/IMPORTED_LOCATION need the exact
-    # installed filenames *before* the fetch has happened, so the version has
-    # to be duplicated here; bump it if profiler-hub's own version changes.
+    # Duplicated from profiler-hub's own project() version - BUILD_BYPRODUCTS
+    # needs the exact installed filename before the fetch runs. Bump if that
+    # version changes.
     set(_PROFILER_HUB_VERSION "0.1.0")
     set(_PROFILER_HUB_SOVERSION "0")
 
@@ -89,20 +87,13 @@ else()
         "${_PROFILER_HUB_INSTALL_DIR}/lib/libprofiler-hub${CMAKE_STATIC_LIBRARY_SUFFIX}"
     )
 
-    # CMAKE_PREFIX_PATH is a ;-separated list; ExternalProject_Add's CMAKE_ARGS
-    # entries are themselves list items, so the inner list separator has to be
-    # escaped to something else and un-escaped via LIST_SEPARATOR, otherwise
-    # CMake mis-splits the argument.
+    # Escape CMAKE_PREFIX_PATH's ";" so it survives as one CMAKE_ARGS list
+    # item (unescaped via LIST_SEPARATOR below).
     string(REPLACE ";" "|" _PROFILER_HUB_PREFIX_PATH_ESCAPED "${CMAKE_PREFIX_PATH}")
 
-    # profiler-hub's own cmake/fmt.cmake does find_package(fmt 11.2.0 QUIET)
-    # against the same CMAKE_PREFIX_PATH we forward below, then only exports
-    # fmt::fmt as a real (non-BUILD_INTERFACE) link requirement of
-    # profiler-hub-static when that find_package succeeds; otherwise fmt is
-    # vendored and kept build-only, invisible to consumers. Since the nested
-    # build's own package config doesn't exist yet at our configure time, this
-    # detection has to be duplicated here so the hand-declared IMPORTED target
-    # below carries the same link requirement the real installed package would.
+    # Mirrors profiler-hub's own fmt detection (cmake/fmt.cmake) so the
+    # hand-declared IMPORTED target below matches what the real installed
+    # package would export.
     set(_PROFILER_HUB_FMT_VERSION "11.2.0")
     find_package(fmt ${_PROFILER_HUB_FMT_VERSION} QUIET)
 
@@ -113,19 +104,14 @@ else()
         SOURCE_DIR "${_PROFILER_HUB_ROOT}/src"
         BINARY_DIR "${_PROFILER_HUB_ROOT}/build"
         INSTALL_DIR "${_PROFILER_HUB_INSTALL_DIR}"
-        # STAMP_DIR/TMP_DIR default to a location derived from SOURCE_DIR's name
-        # ("src"), which would otherwise nest ExternalProject's own per-step
-        # bookkeeping files inside SOURCE_DIR itself - exactly what the sparse
-        # checkout script wipes with REMOVE_RECURSE on every re-checkout.
+        # Keep ExternalProject's bookkeeping out of SOURCE_DIR - the checkout
+        # script wipes it via REMOVE_RECURSE on every re-checkout.
         STAMP_DIR "${_PROFILER_HUB_ROOT}/stamp"
         TMP_DIR "${_PROFILER_HUB_ROOT}/tmp"
         LIST_SEPARATOR "|"
-        # ExternalProject runs a custom DOWNLOAD_COMMAND with <SOURCE_DIR> itself
-        # as the process's working directory, but the script below removes and
-        # recreates <SOURCE_DIR> as its first action - deleting your own cwd
-        # invalidates it for the rest of the process. `cmake -E chdir` forces the
-        # actual cmake -P process to start from this file's (never-deleted)
-        # directory instead, so it never runs with a stale/removed cwd.
+        # chdir here first: DOWNLOAD_COMMAND's default cwd is <SOURCE_DIR>,
+        # which the script deletes/recreates as its first step - can't run
+        # from a cwd you just removed.
         DOWNLOAD_COMMAND
             ${CMAKE_COMMAND} -E chdir ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_COMMAND}
             -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
