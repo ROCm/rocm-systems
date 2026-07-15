@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
+#include "agent.hpp"
 #include "common/md5sum.hpp"
 #include "common/units.hpp"
 #include "core/agent_manager.hpp"
@@ -17,6 +18,7 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <array>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
@@ -1031,34 +1033,34 @@ rocpd_processor_t::post_process_metadata()
     }
 
     // Register kernel symbols
-    auto _kernel_symbols_list = m_metadata->get_kernel_symbol_list();
-    for(const auto& kernel_symbol : _kernel_symbols_list)
+    auto kernel_symbols_list = m_metadata->get_kernel_symbol_list();
+    for(const auto& kernel_symbol : kernel_symbols_list)
     {
         auto kernel_name = rocprofsys::utility::demangle(kernel_symbol.kernel_name);
 
-        profiler_hub::writer_types::kernel_symbol_info_t ks;
-        ks.id                        = kernel_symbol.kernel_id;
-        ks.name                      = kernel_symbol.kernel_name;
-        ks.display_name              = kernel_name.c_str();
-        ks.kernel_object             = kernel_symbol.kernel_object;
-        ks.kernarg_segment_size      = kernel_symbol.kernarg_segment_size;
-        ks.kernarg_segment_alignment = kernel_symbol.kernarg_segment_alignment;
-        ks.group_segment_size        = kernel_symbol.group_segment_size;
-        ks.private_segment_size      = kernel_symbol.private_segment_size;
-        ks.sgpr_count                = kernel_symbol.sgpr_count;
-        ks.arch_vgpr_count           = kernel_symbol.arch_vgpr_count;
-        ks.accum_vgpr_count          = kernel_symbol.accum_vgpr_count;
-        ks.node_id                   = n_info.id;
-        ks.process_id                = process_info.pid;
-        ks.code_obj_id               = kernel_symbol.code_object_id;
-        m_writer->register_kernel_symbol_info(ks);
+        profiler_hub::writer_types::kernel_symbol_info_t ksi;
+        ksi.id                        = kernel_symbol.kernel_id;
+        ksi.name                      = kernel_symbol.kernel_name;
+        ksi.display_name              = kernel_name;
+        ksi.kernel_object             = kernel_symbol.kernel_object;
+        ksi.kernarg_segment_size      = kernel_symbol.kernarg_segment_size;
+        ksi.kernarg_segment_alignment = kernel_symbol.kernarg_segment_alignment;
+        ksi.group_segment_size        = kernel_symbol.group_segment_size;
+        ksi.private_segment_size      = kernel_symbol.private_segment_size;
+        ksi.sgpr_count                = kernel_symbol.sgpr_count;
+        ksi.arch_vgpr_count           = kernel_symbol.arch_vgpr_count;
+        ksi.accum_vgpr_count          = kernel_symbol.accum_vgpr_count;
+        ksi.node_id                   = n_info.id;
+        ksi.process_id                = process_info.pid;
+        ksi.code_obj_id               = kernel_symbol.code_object_id;
+        m_writer->register_kernel_symbol_info(ksi);
 
         m_writer->register_string(kernel_name);
     }
 
     // Register queue info
-    auto _queue_list = m_metadata->get_queue_list();
-    for(const auto& queue_handle : _queue_list)
+    auto queue_list = m_metadata->get_queue_list();
+    for(const auto& queue_handle : queue_list)
     {
         auto queue_name = fmt::format("Queue {}", queue_handle);
 
@@ -1076,12 +1078,12 @@ rocpd_processor_t::post_process_metadata()
     {
         auto stream_name = fmt::format("Stream {}", stream_handle);
 
-        profiler_hub::writer_types::stream_info_t si;
-        si.stream_id  = stream_handle;
-        si.name       = stream_name;
-        si.node_id    = n_info.id;
-        si.process_id = process_info.pid;
-        m_writer->register_stream_info(si);
+        profiler_hub::writer_types::stream_info_t str_info;
+        str_info.stream_id  = stream_handle;
+        str_info.name       = stream_name;
+        str_info.node_id    = n_info.id;
+        str_info.process_id = process_info.pid;
+        m_writer->register_stream_info(str_info);
     }
 
     // Register buffer info strings
@@ -1127,29 +1129,29 @@ rocpd_processor_t::post_process_metadata()
         LOG_TRACE("Inserting PMC description: agent_uid: {}, pmc_info: {}",
                   pmc_agent_uid.type_index, pmc_info.name);
 
-        profiler_hub::writer_types::pmc_info_t           pmc_info;
+        profiler_hub::writer_types::pmc_info_t           pmc_info_data;
         profiler_hub::writer_types::pmc_info_unique_id_t uid;
-        uid.name                  = pmc_info.name;
-        uid.agent_id              = pmc_agent_uid;
-        pmc_info.unique_id        = uid;
-        pmc_info.target_arch      = is_cpu_gpu_agent
-                                        ? std::make_optional<std::string>(pmc_info.target_arch)
-                                        : std::nullopt;
-        pmc_info.event_code       = pmc_info.event_code;
-        pmc_info.instance_id      = pmc_info.instance_id;
-        pmc_info.symbol           = pmc_info.symbol;
-        pmc_info.description      = pmc_info.description;
-        pmc_info.long_description = pmc_info.long_description;
-        pmc_info.component        = pmc_info.component;
-        pmc_info.units            = pmc_info.units;
-        pmc_info.value_type       = pmc_info.value_type;
-        pmc_info.block            = pmc_info.block;
-        pmc_info.expression       = pmc_info.expression;
-        pmc_info.is_constant      = pmc_info.is_constant;
-        pmc_info.is_derived       = pmc_info.is_derived;
-        pmc_info.node_id          = n_info.id;
-        pmc_info.process_id       = process_info.pid;
-        m_writer->register_pmc_info(pmc_info);
+        uid.name                = pmc_info.name;
+        uid.agent_id            = pmc_agent_uid;
+        pmc_info_data.unique_id = uid;
+        pmc_info_data.target_arch =
+            is_cpu_gpu_agent ? std::make_optional<std::string>(pmc_info.target_arch)
+                             : std::nullopt;
+        pmc_info_data.event_code       = pmc_info.event_code;
+        pmc_info_data.instance_id      = pmc_info.instance_id;
+        pmc_info_data.symbol           = pmc_info.symbol;
+        pmc_info_data.description      = pmc_info.description;
+        pmc_info_data.long_description = pmc_info.long_description;
+        pmc_info_data.component        = pmc_info.component;
+        pmc_info_data.units            = pmc_info.units;
+        pmc_info_data.value_type       = pmc_info.value_type;
+        pmc_info_data.block            = pmc_info.block;
+        pmc_info_data.expression       = pmc_info.expression;
+        pmc_info_data.is_constant      = pmc_info.is_constant;
+        pmc_info_data.is_derived       = pmc_info.is_derived;
+        pmc_info_data.node_id          = n_info.id;
+        pmc_info_data.process_id       = process_info.pid;
+        m_writer->register_pmc_info(pmc_info_data);
     }
 }
 
