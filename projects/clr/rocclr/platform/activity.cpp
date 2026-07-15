@@ -138,8 +138,8 @@ void ReportActivity(const amd::Command& command) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
     const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // kernel_names and timestamps are parallel — one entry each per dispatch slot.
-    // Names are stable const char* resolved at dispatch time, no lookup needed.
+    // kernel_names and timestamps are both populated only when profiling is active
+    // at dispatch time. Walk the shorter of the two as a safety bound.
     for (uint32_t i = 0; i < kernel_names.size() && i < timestamps.size(); i++) {
       auto it = timestamps[i];
       record.begin_ns = it.first;
