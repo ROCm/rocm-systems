@@ -261,7 +261,6 @@ class os_thread {
 static_assert(sizeof(LibHandle) == sizeof(void*), "OS abstraction size mismatch");
 static_assert(sizeof(Semaphore) == sizeof(sem_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Mutex) == sizeof(pthread_mutex_t*), "OS abstraction size mismatch");
-static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
@@ -723,74 +722,6 @@ uint64_t AccurateClockFrequency() {
   }
   if (invPeriod == 0.0) invPeriod = 1.0 / double(time.tv_nsec);
   return 1000000000ull / uint64_t(time.tv_nsec);
-}
-
-SharedMutex CreateSharedMutex() {
-  pthread_rwlockattr_t attrib;
-  int err = pthread_rwlockattr_init(&attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock attribute init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-#ifdef HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP
-  err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-  if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
-    return nullptr;
-  }
-#endif
-
-  std::unique_ptr<pthread_rwlock_t> lock(new pthread_rwlock_t);
-  err = pthread_rwlock_init(lock.get(), &attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-  pthread_rwlockattr_destroy(&attrib);
-  return lock.release();
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_trywrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_wrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_tryrdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_rdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  pthread_rwlock_destroy(*(pthread_rwlock_t**)&lock);
-  delete *(pthread_rwlock_t**)&lock;
 }
 
 static uint64_t sys_clock_period_ = 0;

@@ -6,6 +6,22 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
 
+### Added
+
+- `--exe-only` flag for `rocprof-sys-instrument`: shorthand for excluding every shared
+  library from instrumentation, leaving only the main executable.
+
+- `--exclude-internal-lib-paths` flag for `rocprof-sys-instrument`: by default, each
+  internal library is excluded only at the path linked at startup; when enabled, every
+  on-disk path matching an internal library's filename is excluded.
+
+- `--max-library-functions` option for `rocprof-sys-instrument`: skips shared libraries
+  whose procedure count exceeds the given threshold, keeping instrumentation overhead
+  manageable. The target executable is never gated by this, and the check is bypassed by
+  the module include/restrict (`--module-include`/`-MI`, `--module-restrict`/`-MR`) and
+  function include/restrict (`--function-include`/`-I`, `--function-restrict`/`-R`)
+  regexes.
+
 ### Changed
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
@@ -15,6 +31,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
   an already running process. Use the `rocprof-sys-attach` executable instead, which
   attaches to and profiles running processes via the rocprofiler-sdk rocattach API.
+
+- Removed `--parse-all-modules` from `rocprof-sys-instrument`. The tool iterates through objects and modules to extract the functions by default.
 
 ## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
 

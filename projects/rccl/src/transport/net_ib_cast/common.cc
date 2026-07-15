@@ -22,9 +22,7 @@ ncclProfilerCallback_t IbCastProfilerFunction;
 NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
-extern int ncclParamIbCastReceiverSideMatchingScheme();
 extern int ncclParamIbCastOooRq();
-extern int ncclParamIbCastResiliencyPortFailover();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
@@ -64,14 +62,6 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   baseComm->ready = 0;
 
   NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
-  baseComm->recvMatchingScheme = ncclParamIbCastReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbCastReceiverSideMatchingScheme();
-
-  if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
-    baseComm->recvMatchingScheme = BY_ID;
-    if (ncclParamIbCastReceiverSideMatchingScheme() == BY_INDEX) {
-      INFO(NCCL_NET, "NET/IB: %s: Overriding matching scheme to ID-based (%d)", __func__, BY_ID);
-    }
-  }
 
   return ncclSuccess;
 }

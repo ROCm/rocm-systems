@@ -609,6 +609,40 @@ INSTANTIATE_TEST_SUITE_P(
       return std::string(info.param.arch_name);
     });
 
+void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sleep_encoding) {
+  constexpr uint64_t kCodeAddress = 0x2000;
+
+  amdgpu::GpuMemory gpu_mem("functional_sleep_mem");
+  amdgpu::L2Cache l2("functional_sleep_l2");
+  gpu_mem.write32(kCodeAddress, sleep_encoding);
+  gpu_mem.write32(kCodeAddress + sizeof(uint32_t), S_NOP);
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("functional_sleep_cu", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, kCodeAddress, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  EXPECT_TRUE(cu->advance());
+  EXPECT_EQ(wf->pc, kCodeAddress + sizeof(uint32_t));
+}
+
+TEST(FunctionalSchedulingTest, SleepYieldsBeforeQuantumExpires) {
+  constexpr uint32_t kSleep = 0xBF8E0001u; // CDNA4 s_sleep 1
+  expect_sleep_yields_before_quantum_expires(ROCJITSU_CODE_ARCH_CDNA4, kSleep);
+}
+
+TEST(FunctionalSchedulingTest, SleepVarYieldsBeforeQuantumExpires) {
+  constexpr uint32_t kSleepVar = 0xBE805800u; // RDNA4 s_sleep_var s0
+  expect_sleep_yields_before_quantum_expires(ROCJITSU_CODE_ARCH_RDNA4, kSleepVar);
+}
+
 // ---------------------------------------------------------------------------
 // MUBUF lds modifier test: verify that buffer_load_dword with the lds bit set
 // (bit 16 of dword 0) produces a disassembly string containing " lds".
