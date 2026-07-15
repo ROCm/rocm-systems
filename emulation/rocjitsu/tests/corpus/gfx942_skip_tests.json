@@ -6,6 +6,9 @@
     "cts.gfx942.fpsan.fpsan_smfmac_cdna3_test",
     "cts.gfx942.fpsan.fpsan_atomic_test",
     "cts.gfx942.fpsan.fpsan_hip_device_test",
+    "cts.gfx942.fpsan.fpsan_wave_test",
+    "cts.gfx942.fpsan.fpsan_amdgcn_math_test",
+    "cts.gfx942.fpsan.fpsan_amdgcn_ldexp_test",
     "cts.gfx942.fpsan.fpsan_amdgcn_math_extra_test",
     "cts.gfx942.fpsan.fpsan_mfma_cdna3_f16_16x16x4_test",
     "cts.gfx942.fpsan.fpsan_mfma_cdna3_f16_wide_test",
@@ -22,6 +25,7 @@
     "cts.gfx942.fpsan.fpsan_mfma_cdna3_f32_32x32_test"
   ],
   "kernels": [
+    "hip_streamk_two_tile::m256_n256_k256",
     "llama_mul_mat_vec_q::default",
     "llama_rms_norm::default"
   ]
