@@ -352,8 +352,7 @@ void AnvilLib::buildGpuAgentMap() {
 hsa_agent_t AnvilLib::getHipGpuAgent(int hipDeviceId) const {
   if (hipDeviceId < 0 || hipDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
       !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)])) {
-    throw std::runtime_error("anvil: no HSA agent mapped for HIP device " +
-                             std::to_string(hipDeviceId));
+    LOG_ERROR_EXIT("anvil: no HSA agent mapped for HIP device %d", hipDeviceId);
   }
   return gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)];
 }
@@ -469,10 +468,10 @@ int AnvilLib::getOamId(int deviceId) {
   int xgmi_physical_id;
   if (file.is_open()) {
     if (!(file >> xgmi_physical_id)) {
-      throw std::runtime_error("Failed to read xGMI physical id from file: " + file_str);
+      LOG_ERROR_EXIT("anvil: failed to read xGMI physical id from %s", file_str.c_str());
     }
   } else {
-    throw std::runtime_error("Failed to open file: " + file_str);
+    LOG_ERROR_EXIT("anvil: failed to open file: %s", file_str.c_str());
   }
   return xgmi_physical_id;
 }
