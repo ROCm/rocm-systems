@@ -559,6 +559,11 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "DdaFabricEligibilityTest",
+          "description": "Dda Fabric eligibility tests",
+          "test_filter": "DdaFabricEligibilityTest.*"
+        },
+        {
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
@@ -743,6 +748,23 @@
         {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
         {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
+      ]
+    },
+    "asymmetric_visibility": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
       ]
     },
     "debug_tests": {
@@ -1389,6 +1411,91 @@
       ]
     },
 
+    "symmetric_window_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "SymWin_AllReduce_BothWindows_OutOfPlace",
+          "description": "AllReduce with both send and recv windows registered (symmetric baseline)",
+          "test_filter": "SymWin_AllReduce.BothWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlySendWindow",
+          "description": "AllReduce with only send buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlySendWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlyRecvWindow",
+          "description": "AllReduce with only recv buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlyRecvWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_NoWindows",
+          "description": "AllReduce without window registration (non-symmetric fallback)",
+          "test_filter": "SymWin_AllReduce.NoWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_SingleWindow_InPlace",
+          "description": "AllReduce in-place with single window (primary one-buffer use case)",
+          "test_filter": "SymWin_AllReduce.SingleWindow_InPlace"
+        },
+        {
+          "name": "SymWin_ReduceScatter_BothWindows",
+          "description": "ReduceScatter with both windows registered",
+          "test_filter": "SymWin_ReduceScatter.BothWindows"
+        },
+        {
+          "name": "SymWin_ReduceScatter_OnlySendWindow",
+          "description": "ReduceScatter with only send window (relaxed path)",
+          "test_filter": "SymWin_ReduceScatter.OnlySendWindow"
+        },
+        {
+          "name": "SymWin_ReduceScatter_NoWindows",
+          "description": "ReduceScatter without windows (fallback)",
+          "test_filter": "SymWin_ReduceScatter.NoWindows"
+        },
+        {
+          "name": "SymWin_AllGather_BothWindows",
+          "description": "AllGather with both windows registered",
+          "test_filter": "SymWin_AllGather.BothWindows"
+        },
+        {
+          "name": "SymWin_AllGather_OnlyRecvWindow",
+          "description": "AllGather with only recv window (relaxed path)",
+          "test_filter": "SymWin_AllGather.OnlyRecvWindow"
+        },
+        {
+          "name": "SymWin_AllGather_NoWindows",
+          "description": "AllGather without windows (fallback)",
+          "test_filter": "SymWin_AllGather.NoWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Basic",
+          "description": "Basic window register/deregister lifecycle",
+          "test_filter": "SymWin_WindowLifecycle.RegisterDeregister_Basic"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Multiple",
+          "description": "Multiple independent window registrations",
+          "test_filter": "SymWin_WindowLifecycle.MultipleWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Repeated",
+          "description": "Repeated register/deregister cycles",
+          "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        }
+      ]
+    },
     "net_ib_branch_coverage": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -3135,6 +3242,12 @@
       "enabled": true
     },
     {
+      "name": "Asymmetric Visibility",
+      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
+      "config": "asymmetric_visibility",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
@@ -3654,6 +3767,12 @@
       "name": "Host API Tests - Default",
       "description": "Host API tests with default memory support",
       "config": "host_api_tests_default",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Window Tests - Single Node",
+      "description": "Symmetric window registration tests for relaxed one-buffer path validation",
+      "config": "symmetric_window_tests",
       "enabled": true
     }
   ]
