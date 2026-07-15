@@ -3281,7 +3281,7 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevrWindow* sendWin,
     struct ncclDevrWindow* recvWin,
     void* ddaRecvBase, // non-null -> DDA path: local scratch buffer
-    void** ddaPeerBasesHost, // host [nRanks] peer scartch bases (DDA path)
+    void** ddaPeerBasesHost, // host [nRanks] peer scratch bases (DDA path)
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
 
@@ -3643,9 +3643,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Append CE collective task if CE is supported and requested by user
-      bool CeScartchAvailable = ncclCeScartchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      bool CeScratchAvailable = ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (rcclParamForceCe() && CeScartchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);      
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                       comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
