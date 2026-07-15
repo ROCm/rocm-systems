@@ -63,7 +63,7 @@ def find_rccl_library(artifact_dir: Path) -> Path:
         log.error("librccl.so not found in %s", artifact_dir)
         log.error("Shared libraries found: %s", [str(f) for f in so_files])
         sys.exit(1)
-    lib_path = matches[0]
+    lib_path = matches[0].resolve()
     log.info("Found librccl.so at: %s", lib_path)
     return lib_path
 
@@ -265,6 +265,7 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     passed_tests = []
     failed_tests = []
     summary_line = ""
+    current_test = ""
 
     with open(results_log, "w") as log_file:
         proc = subprocess.Popen(
@@ -280,18 +281,17 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
             sys.stdout.write(line)
             sys.stdout.flush()
             log_file.write(line)
-            if " PASSED" in line and "::" in line:
-                test_name = line.split("::")[1].split()[0] if "::" in line else line.strip()
-                duration = ""
+            test_header = re.match(r"test/.*?::([\w:]+)", line)
+            if test_header:
+                current_test = test_header.group(1)
+            if "PASSED" in line and re.search(r"PASSED\s+\[", line):
                 dur_match = re.search(r"\[(\d+\.\d+s)\]", line)
-                if dur_match:
-                    duration = dur_match.group(1)
-                passed_tests.append((test_name, duration))
-            elif " FAILED" in line and "::" in line:
-                test_name = line.split("::")[1].split()[0] if "::" in line else line.strip()
-                failed_tests.append(test_name)
-            elif "passed" in line and ("failed" in line or "deselected" in line or "error" in line or line.strip().startswith("=")):
-                summary_line = line.strip()
+                duration = dur_match.group(1) if dur_match else ""
+                passed_tests.append((current_test, duration))
+                current_test = ""
+            elif "FAILED" in line and re.search(r"FAILED\s+\[", line):
+                failed_tests.append(current_test)
+                current_test = ""
             elif line.strip().startswith("=") and "passed" in line:
                 summary_line = line.strip()
         proc.wait()
