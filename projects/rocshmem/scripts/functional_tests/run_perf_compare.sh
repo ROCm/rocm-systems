@@ -16,9 +16,9 @@
 #   --cmake-args   ARGS   Extra cmake args for all builds (quoted string)
 #   --branch-args  ARGS   Extra cmake args for the branch build only (quoted string)
 #   --variant-args SPEC   Additional named variant: NAME:ENV1=V1,...:cmake-args
-#                         NAME       - label used in plots and directory name
-#                         ENV1=V1,…  - comma-separated env vars set at runtime
-#                         cmake-args - extra cmake args for this variant's build
+#                         NAME       - Label used in plots and directory name
+#                         ENV1=V1,…  - Comma-separated environment variables to set at runtime
+#                         cmake-args - Extra CMake arguments for this variant's build
 #                         May be repeated for multiple variants.
 #                         Example: --variant-args "sdma-on:ROCSHMEM_SDMA_ENABLED=1:-DUSE_SDMA=ON"
 #   --pr           NUM    Compare GitHub PR NUM against origin/develop baseline.
@@ -27,12 +27,13 @@
 #   --baseline-dir PATH   Use PATH as pre-built baseline (skips baseline build).
 #                         Use with --skip-baseline to also skip baseline test runs.
 #   --branch-dir   PATH   Use PATH as pre-built branch build (skips branch build).
+#                         Use with --skip-branch to also skip branch test runs.
 #   --variant-dir  SPEC   Additional named variant: NAME:ENV1=V1,...:PATH
-#                         NAME       - label used in plots and directory name
-#                         ENV1=V1,…  - comma-separated env vars set at runtime
-#                         PATH       - PATH to use as pre-build variant build (skips variant build)
+#                         NAME       - Label used in plots
+#                         ENV1=V1,…  - Comma-separated environment variables to set at runtime
+#                         PATH       - Use PATH as pre-built variant build (skips variant build)
 #                         May be repeated for multiple variants.
-#                         Example: --variant-path "sdma-on:ROCSHMEM_SDMA_ENABLED=1:build/sdma"
+#                         Example: --variant-dir "sdma-on:ROCSHMEM_SDMA_ENABLED=1:build/sdma"
 #   --skip-build          Skip all build steps (reuse existing builds)
 #   --skip-baseline       Skip baseline build and test runs (reuse existing logs)
 #   --skip-develop        Alias for --skip-baseline
