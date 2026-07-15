@@ -272,6 +272,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     decode_caps.codec_type = p_video_format->codec;
     decode_caps.chroma_format = p_video_format->chroma_format;
     decode_caps.bit_depth_minus_8 = p_video_format->bit_depth_luma_minus8;
+    decode_caps.device_id = device_id_;
 
     rocDecGetDecoderCaps(&decode_caps);
     if(!decode_caps.is_supported) {
