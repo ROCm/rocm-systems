@@ -232,22 +232,23 @@ foreach(_target profiler-hub profiler-hub-static)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
+    # Link against the object library itself (not just its
+    # $<TARGET_OBJECTS:>) so its PRIVATE dependencies (fmt, spdlog,
+    # nlohmann_json, sqlite3, queries, rocprofiler-sdk-rocpd) are inherited
+    # as usage requirements of profiler-hub-objects instead of being
+    # re-declared here. $<BUILD_INTERFACE:> keeps that reference out of
+    # ${_target}'s own link requirements in the installed export: for a
+    # STATIC library, an un-guarded PRIVATE dependency is copied into
+    # INTERFACE_LINK_LIBRARIES (the well-known reason install(EXPORT) needs
+    # $<BUILD_INTERFACE:> for in-tree-only deps), and the same guard is
+    # required for the SHARED target too, because install(EXPORT)'s
+    # export-set validation for a SHARED library inspects its raw PRIVATE
+    # link dependencies directly rather than the (normally unpopulated)
+    # INTERFACE_LINK_LIBRARIES property.
     target_link_libraries(
         ${_target}
-        PRIVATE
-            profiler-hub_queries
-            profiler-hub-sqlite3
-            spdlog::spdlog
-            fmt::fmt
-            nlohmann_json::nlohmann_json
+        PRIVATE $<BUILD_INTERFACE:profiler-hub-objects>
     )
-
-    if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-        target_link_libraries(
-            ${_target}
-            PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        )
-    endif()
 
     if(PROFILER_HUB_ENABLE_COVERAGE)
         target_link_options(
@@ -257,14 +258,14 @@ foreach(_target profiler-hub profiler-hub-static)
     endif()
 endforeach()
 
-# STATIC libraries copy PRIVATE link deps into INTERFACE_LINK_LIBRARIES so
-# consumers can resolve undefined symbols, but install(EXPORT) then
-# validates every target referenced there, even inside $<BUILD_INTERFACE:>.
-# Rebuild the property with only the deps that are genuinely
-# find_package()-imported and thus resolvable by real consumers; queries
-# and sqlite3 are always in-tree-only and never belong in it.
-# profiler-hub (SHARED) needs no such fix: PRIVATE deps of a shared library
-# are never copied into INTERFACE_LINK_LIBRARIES.
+# profiler-hub-static's own link requirements no longer come from
+# target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
+# object library), so consumers of the *installed* static package would
+# otherwise get no transitive link requirements at all. Explicitly restore
+# the ones that are genuinely find_package()-imported and thus resolvable
+# by real consumers; queries, sqlite3, and profiler-hub-objects itself are
+# always in-tree-only and never belong here. profiler-hub (SHARED) needs no
+# such list: its dependencies are already fully baked into the .so.
 set(profiler_hub_static_iface_libs "")
 foreach(_dep fmt spdlog nlohmann_json)
     if(${_dep}_FOUND)
