@@ -25,6 +25,14 @@ enum class DbtExecutionBackend {
   Simulator, ///< Forward execution-facing operations to a RocJITsu simulated GPU.
 };
 
+/// @brief Host target selected for DBT translation and execution.
+struct DbtHostConfig {
+  std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
+  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to isa.
+  DbtExecutionBackend backend = DbtExecutionBackend::Hardware; ///< Hardware or simulator execution.
+  std::string simulator_config_path; ///< Optional external simulator host config.
+};
+
 /// @brief DBT guest-GPU discovery configuration.
 ///
 /// @details When enabled, the Linux KFD interposer exposes one synthetic guest
@@ -33,26 +41,20 @@ enum class DbtExecutionBackend {
 /// tools hook translates guest code and maps guest-agent execution calls to the
 /// selected hardware or simulated host agent.
 struct DbtGuestConfig {
-  bool enabled = false;     ///< True when GuestKfd mode is active.
-  std::string guest_isa;    ///< Guest ISA advertised by the synthetic agent.
-  std::string host_isa;     ///< Host ISA used for actual ROCR execution.
-  uint32_t host_gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to host_isa.
-  DbtExecutionBackend execution_backend =
-      DbtExecutionBackend::Hardware; ///< Execution backend selected for the host agent.
-  std::string simulator_config;      ///< Simulator VM config path for the simulator backend.
-  int log_level = 0;                 ///< DBT hook logging level loaded from the config file.
-  bool signal_backtrace = false;     ///< Install a best-effort HSA-hook crash backtrace handler.
-  KfdDeviceConfig guest_device;      ///< Synthetic guest device appended to KFD topology.
+  bool enabled = false;          ///< True when GuestKfd mode is active.
+  std::string guest_isa;         ///< Guest ISA advertised by the synthetic agent.
+  DbtHostConfig host;            ///< Host translation and execution target.
+  int log_level = 0;             ///< DBT hook logging level loaded from the config file.
+  bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
+  KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
 };
 
-/// @brief Return the stable configuration spelling for an execution backend.
-const char *dbt_execution_backend_name(DbtExecutionBackend backend);
-
-/// @brief Resolve a simulator config relative to its enclosing DBT config.
-/// @details Absolute paths are preserved and the result is normalized
-/// lexically without requiring the target to exist.
-std::string resolve_dbt_simulator_config_path(const std::string &dbt_config_path,
-                                              const std::string &simulator_config);
+/// @brief Resolve the simulator host config selected by a DBT guest config.
+/// @details An empty host_config_path selects dbt_config_path itself. Relative
+/// external paths are resolved beside the DBT guest config. A non-empty path
+/// selects that external file instead of VM/topology in the DBT guest file.
+std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
+                                         const std::string &host_config_path);
 
 /// @brief Reject guest limits that exceed a simulator execution target.
 /// @details Simulator-backed discovery must not advertise resource limits that

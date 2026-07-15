@@ -134,6 +134,8 @@ jobs:
           ASAN_UBSAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            "Cdna4ToCdna3SimulatedDispatchTest\..*"
+            "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"

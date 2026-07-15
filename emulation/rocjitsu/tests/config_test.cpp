@@ -354,10 +354,9 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
-  EXPECT_EQ(dbt.host_isa, "gfx1201");
-  EXPECT_EQ(dbt.host_gpu_id, 8716u);
-  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
-  EXPECT_TRUE(dbt.simulator_config.empty());
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
   EXPECT_EQ(dbt.log_level, 2);
   EXPECT_TRUE(dbt.signal_backtrace);
   ASSERT_TRUE(dbt.guest_device.present);
@@ -433,9 +432,9 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
 
   EXPECT_TRUE(loaded.dbt_guest.enabled);
   EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
-  EXPECT_EQ(loaded.dbt_guest.host_isa, "gfx1201");
-  EXPECT_EQ(loaded.dbt_guest.host_gpu_id, 8716u);
-  EXPECT_EQ(loaded.dbt_guest.execution_backend, config::DbtExecutionBackend::Hardware);
+  EXPECT_EQ(loaded.dbt_guest.host.isa, "gfx1201");
+  EXPECT_EQ(loaded.dbt_guest.host.gpu_id, 8716u);
+  EXPECT_EQ(loaded.dbt_guest.host.backend, config::DbtExecutionBackend::Hardware);
   EXPECT_EQ(loaded.dbt_guest.log_level, 2);
   EXPECT_TRUE(loaded.dbt_guest.signal_backtrace);
   ASSERT_TRUE(loaded.dbt_guest.guest_device.present);
@@ -453,10 +452,9 @@ TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
 
   EXPECT_FALSE(dbt.enabled);
   EXPECT_TRUE(dbt.guest_isa.empty());
-  EXPECT_TRUE(dbt.host_isa.empty());
-  EXPECT_EQ(dbt.host_gpu_id, 0u);
-  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
-  EXPECT_TRUE(dbt.simulator_config.empty());
+  EXPECT_TRUE(dbt.host.isa.empty());
+  EXPECT_EQ(dbt.host.gpu_id, 0u);
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
   EXPECT_EQ(dbt.log_level, 0);
   EXPECT_FALSE(dbt.signal_backtrace);
   EXPECT_FALSE(dbt.guest_device.present);
@@ -477,7 +475,7 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
-  EXPECT_EQ(dbt.host_isa, "gfx1201");
+  EXPECT_EQ(dbt.host.isa, "gfx1201");
   EXPECT_FALSE(dbt.guest_device.present);
 }
 
@@ -490,7 +488,7 @@ TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
 }
 
 TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
-  const std::filesystem::path path =
+  const std::filesystem::path external_path =
       write_temp_config("rocjitsu_simulator_dbt_guest_config_test.json", R"({
         "dbt_guest": {
           "enabled": true,
@@ -500,13 +498,26 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
           "simulator_config": "gfx942_cdna3_kmd.json"
         }
       })");
+  const std::filesystem::path self_contained_path =
+      write_temp_config("rocjitsu_self_contained_dbt_guest_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942",
+          "execution_backend": "simulator"
+        }
+      })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
-  std::filesystem::remove(path);
+  auto external = config::load_dbt_guest_config_from_file(external_path.string());
+  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_path.string());
+  std::filesystem::remove(external_path);
+  std::filesystem::remove(self_contained_path);
 
-  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Simulator);
-  EXPECT_EQ(dbt.simulator_config, "gfx942_cdna3_kmd.json");
-  EXPECT_STREQ(config::dbt_execution_backend_name(dbt.execution_backend), "simulator");
+  EXPECT_EQ(external.host.isa, "gfx942");
+  EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_EQ(external.host.simulator_config_path, "gfx942_cdna3_kmd.json");
+  EXPECT_EQ(self_contained.host.backend, config::DbtExecutionBackend::Simulator);
+  EXPECT_TRUE(self_contained.host.simulator_config_path.empty());
 }
 
 TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
@@ -521,8 +532,7 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
   auto dbt = config::load_dbt_guest_config_from_file(path.string());
   std::filesystem::remove(path);
 
-  EXPECT_EQ(dbt.execution_backend, config::DbtExecutionBackend::Hardware);
-  EXPECT_STREQ(config::dbt_execution_backend_name(dbt.execution_backend), "hardware");
+  EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
@@ -554,7 +564,7 @@ TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
 TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
   config::DbtGuestConfig guest;
   guest.enabled = true;
-  guest.execution_backend = config::DbtExecutionBackend::Simulator;
+  guest.host.backend = config::DbtExecutionBackend::Simulator;
   guest.guest_device.present = true;
   guest.guest_device.lds_size_kb = 64;
   guest.guest_device.max_slots_scratch_cu = 32;
@@ -599,28 +609,13 @@ TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
   std::filesystem::remove(hardware_path);
 }
 
-TEST(ConfigLoaderTest, ResolvesDbtSimulatorConfigPath) {
-  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "sim.json"),
-            "/a/b/sim.json");
-  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "/abs/sim.json"),
+TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", ""), "/a/b/dbt.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "sim.json"), "/a/b/sim.json");
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "/abs/sim.json"),
             "/abs/sim.json");
-  EXPECT_EQ(config::resolve_dbt_simulator_config_path("/a/b/dbt.json", "../c/./sim.json"),
+  EXPECT_EQ(config::resolve_dbt_host_config_path("/a/b/dbt.json", "../c/./sim.json"),
             "/a/c/sim.json");
-}
-
-TEST(ConfigLoaderTest, RejectsSimulatorDbtBackendWithoutSimulatorConfig) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_missing_simulator_dbt_config_test.json", R"({
-        "dbt_guest": {
-          "enabled": true,
-          "guest_isa": "gfx950",
-          "host_isa": "gfx942",
-          "execution_backend": "simulator"
-        }
-      })");
-
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
 }
 
 TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {

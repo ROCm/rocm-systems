@@ -19,8 +19,11 @@ RJ_DIAGNOSTIC_POP
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -42,7 +45,7 @@ constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
 
-std::optional<std::string> read_active_config_path() {
+std::optional<std::string> read_active_config_json() {
   const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
   if (!runtime_dir || !*runtime_dir)
     return std::nullopt;
@@ -52,11 +55,14 @@ std::optional<std::string> read_active_config_path() {
   if (!std::getline(active_config, configured_path) || configured_path.empty())
     return std::nullopt;
 
-  return std::filesystem::absolute(configured_path).lexically_normal().string();
+  std::ifstream config(std::filesystem::absolute(configured_path).lexically_normal());
+  if (!config)
+    return std::nullopt;
+  return std::string(std::istreambuf_iterator<char>(config), std::istreambuf_iterator<char>());
 }
 
-bool install_inline_dbt_config(const std::string &simulator_config, const char *host_isa,
-                               uint32_t lds_size_kb) {
+bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
+                               uint32_t lds_size_kb, std::string_view external_host_config = {}) {
   const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
   if (!runtime_dir || !*runtime_dir)
     return false;
@@ -66,18 +72,22 @@ bool install_inline_dbt_config(const std::string &simulator_config, const char *
     std::filesystem::create_directories(runtime);
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
-    std::ofstream config(config_path);
-    if (!config)
+    const size_t insert_pos = simulator_json.find('{');
+    if (insert_pos == std::string::npos)
       return false;
-    config << R"({
+    std::ostringstream dbt_guest;
+    dbt_guest << R"(
   "dbt_guest": {
     "enabled": true,
     "guest_isa": "gfx950",
     "host_isa": ")"
-           << host_isa << R"(",
-    "execution_backend": "simulator",
+              << host_isa << R"(",
+    "execution_backend": "simulator",)";
+    if (!external_host_config.empty())
+      dbt_guest << R"(
     "simulator_config": ")"
-           << simulator_config << R"(",
+                << external_host_config << R"(",)";
+    dbt_guest << R"(
     "guest_device": {
       "gpu_id": 38144,
       "gfx_target_version": 90500,
@@ -89,11 +99,15 @@ bool install_inline_dbt_config(const std::string &simulator_config, const char *
       "wave_front_size": 64,
       "max_slots_scratch_cu": 32,
       "lds_size_kb": )"
-           << lds_size_kb << R"(
+              << lds_size_kb << R"(
     }
-  }
-}
-)";
+  },)";
+    simulator_json.insert(insert_pos + 1, dbt_guest.str());
+
+    std::ofstream config(config_path);
+    if (!config)
+      return false;
+    config << simulator_json;
     config.close();
     if (!config)
       return false;
@@ -346,7 +360,7 @@ TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
   ASSERT_NE(runtime_dir, nullptr);
   const std::string nonexistent =
       (std::filesystem::path(runtime_dir) / "nonexistent_simulator_config.json").string();
-  ASSERT_TRUE(install_inline_dbt_config(nonexistent, "gfx942", 64));
+  ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
 
   errno = 0;
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
@@ -357,9 +371,9 @@ TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
 }
 
 TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
-  const auto simulator_config = read_active_config_path();
-  ASSERT_TRUE(simulator_config.has_value());
-  ASSERT_TRUE(install_inline_dbt_config(*simulator_config, "gfx940", 64));
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx940", 64));
 
   errno = 0;
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
@@ -370,9 +384,9 @@ TEST(GuestKfdFailureTest, SimulatorHostIsaMismatchFailsCleanly) {
 }
 
 TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
-  const auto simulator_config = read_active_config_path();
-  ASSERT_TRUE(simulator_config.has_value());
-  ASSERT_TRUE(install_inline_dbt_config(*simulator_config, "gfx942", 65));
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 65));
 
   errno = 0;
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);

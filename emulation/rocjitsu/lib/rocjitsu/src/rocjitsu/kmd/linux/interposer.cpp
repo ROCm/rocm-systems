@@ -803,11 +803,11 @@ public:
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
-              dbt_guest.execution_backend == rocjitsu::config::DbtExecutionBackend::Simulator;
+              dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
           if (simulator_backend) {
-            const std::string simulator_path = rocjitsu::config::resolve_dbt_simulator_config_path(
-                *cfg_path, dbt_guest.simulator_config);
-            if (!create_local_vm(simulator_path)) {
+            const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
+                *cfg_path, dbt_guest.host.simulator_config_path);
+            if (!create_local_vm(host_config_path)) {
               in_construction = false;
               return nullptr;
             }

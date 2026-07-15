@@ -346,9 +346,9 @@ public:
 
   /// @brief Build the overlay from the current host sysfs topology.
   /// @param guest Synthetic guest GPU properties to append.
-  /// @param host_topology Optional generated simulated-host topology root.
+  /// @param host_topology_path Optional path to a generated simulated-host topology root.
   /// @returns true when topology and guest DRM paths are ready.
-  bool generate(const Sysfs::GpuInfo &guest, const std::string &host_topology = {});
+  bool generate(const Sysfs::GpuInfo &guest, const std::string &host_topology_path = {});
 
   /// @brief Remove generated overlay directories.
   void cleanup();
@@ -369,8 +369,8 @@ private:
   /// @brief Copy a host sysfs subtree into the generated overlay.
   bool copy_tree(const std::string &src, const std::string &dst);
 
-  /// @brief Copy a simulated topology or the first available real KFD topology.
-  bool copy_host_topology(const std::string &host_topology);
+  /// @brief Copy a simulated topology path or the first available real KFD topology.
+  bool copy_host_topology(const std::string &host_topology_path);
 
   /// @brief Generate the appended guest KFD node and guest DRM metadata.
   bool copy_guest_node(const Sysfs::GpuInfo &guest);
@@ -442,9 +442,9 @@ bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::str
   return ok;
 }
 
-bool GuestKfd::TopologyOverlay::copy_host_topology(const std::string &host_topology) {
-  if (!host_topology.empty())
-    return copy_tree(host_topology, topology_dir_);
+bool GuestKfd::TopologyOverlay::copy_host_topology(const std::string &host_topology_path) {
+  if (!host_topology_path.empty())
+    return copy_tree(host_topology_path, topology_dir_);
 
   for (std::string_view topology_path : kRealTopologyPaths) {
     if (copy_tree(std::string(topology_path), topology_dir_))
@@ -498,11 +498,11 @@ bool GuestKfd::TopologyOverlay::patch_topology_files() {
 }
 
 bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest,
-                                         const std::string &host_topology) {
+                                         const std::string &host_topology_path) {
   cleanup();
   if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
     return false;
-  if (!copy_host_topology(host_topology)) {
+  if (!copy_host_topology(host_topology_path)) {
     cleanup();
     return false;
   }
@@ -539,7 +539,7 @@ GuestKfd::GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver)
   guest_ = gpu_info_from_config(config_.guest_device,
                                 std::max(1u, config_.guest_device.num_shader_engines));
   guest_.drm_render_minor = choose_render_minor(guest_.drm_render_minor);
-  host_gpu_id_ = config_.host_gpu_id;
+  host_gpu_id_ = config_.host.gpu_id;
 }
 
 GuestKfd::~GuestKfd() {
@@ -624,9 +624,9 @@ bool GuestKfd::ensure_ready_locked() {
     std::optional<uint32_t> host_gpu_id;
     if (execution_driver_)
       host_gpu_id = first_gpu_id_matching_isa_in_topology(execution_driver_->topology_path(),
-                                                          config_.host_isa);
+                                                          config_.host.isa);
     else
-      host_gpu_id = first_real_gpu_id_matching_isa(config_.host_isa);
+      host_gpu_id = first_real_gpu_id_matching_isa(config_.host.isa);
     if (!host_gpu_id) {
       errno = ENODEV;
       return false;

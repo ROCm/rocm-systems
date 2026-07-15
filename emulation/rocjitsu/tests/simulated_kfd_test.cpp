@@ -108,9 +108,9 @@ TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {
   rocjitsu::config::DbtGuestConfig config;
   config.enabled = true;
   config.guest_isa = "gfx950";
-  config.host_isa = "gfx950";
-  config.host_gpu_id = execution_driver->gpu_id();
-  config.execution_backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
   config.guest_device = vm->loaded.device;
   config.guest_device.gpu_id += 1;
   config.guest_device.drm_render_minor += 1;
@@ -144,9 +144,9 @@ TEST_F(SimulatedKfdTest, GuestOpenSurvivesExecutionPrimaryOverwrite) {
   rocjitsu::config::DbtGuestConfig config;
   config.enabled = true;
   config.guest_isa = "gfx950";
-  config.host_isa = "gfx950";
-  config.host_gpu_id = execution_driver->gpu_id();
-  config.execution_backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
   config.guest_device = vm->loaded.device;
   config.guest_device.gpu_id += 1;
   config.guest_device.drm_render_minor += 1;

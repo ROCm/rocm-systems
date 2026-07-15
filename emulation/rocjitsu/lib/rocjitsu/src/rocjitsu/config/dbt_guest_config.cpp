@@ -21,16 +21,14 @@ namespace rocjitsu {
 namespace config {
 namespace {
 
-DbtExecutionBackend parse_execution_backend(const fb::DbtGuestConfig *guest) {
-  if (!guest->execution_backend())
+DbtExecutionBackend execution_backend_from_fb(fb::DbtExecutionBackend backend) {
+  switch (backend) {
+  case fb::DbtExecutionBackend_hardware:
     return DbtExecutionBackend::Hardware;
-  const std::string value = guest->execution_backend()->str();
-  if (value == "hardware")
-    return DbtExecutionBackend::Hardware;
-  if (value == "simulator")
+  case fb::DbtExecutionBackend_simulator:
     return DbtExecutionBackend::Simulator;
-  throw std::runtime_error("dbt_guest.execution_backend must be 'hardware' or 'simulator', got '" +
-                           value + "'");
+  }
+  throw std::runtime_error("dbt_guest.execution_backend is invalid");
 }
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
@@ -53,27 +51,9 @@ void validate_guest_device_geometry(const KfdDeviceConfig &device) {
 
 } // namespace
 
-const char *dbt_execution_backend_name(DbtExecutionBackend backend) {
-  switch (backend) {
-  case DbtExecutionBackend::Hardware:
-    return "hardware";
-  case DbtExecutionBackend::Simulator:
-    return "simulator";
-  }
-  return "unknown";
-}
-
-std::string resolve_dbt_simulator_config_path(const std::string &dbt_config_path,
-                                              const std::string &simulator_config) {
-  std::filesystem::path resolved(simulator_config);
-  if (resolved.is_relative())
-    resolved = std::filesystem::path(dbt_config_path).parent_path() / resolved;
-  return resolved.lexically_normal().string();
-}
-
 void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
                                           const KfdDeviceConfig &simulator_device) {
-  if (!guest.enabled || guest.execution_backend != DbtExecutionBackend::Simulator)
+  if (!guest.enabled || guest.host.backend != DbtExecutionBackend::Simulator)
     return;
   if (!guest.guest_device.present || !simulator_device.present)
     throw std::runtime_error("simulator-backed dbt_guest requires guest and simulator devices");
@@ -107,23 +87,31 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   if (guest->guest_isa())
     config.guest_isa = guest->guest_isa()->str();
   if (guest->host_isa())
-    config.host_isa = guest->host_isa()->str();
-  config.host_gpu_id = guest->host_gpu_id();
-  config.execution_backend = parse_execution_backend(guest);
+    config.host.isa = guest->host_isa()->str();
+  config.host.gpu_id = guest->host_gpu_id();
+  config.host.backend = execution_backend_from_fb(guest->execution_backend());
   if (guest->simulator_config())
-    config.simulator_config = guest->simulator_config()->str();
+    config.host.simulator_config_path = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
   validate_guest_device_geometry(config.guest_device);
-  if (config.enabled && config.execution_backend == DbtExecutionBackend::Simulator &&
-      config.simulator_config.empty())
-    throw std::runtime_error(
-        "dbt_guest.simulator_config is required when execution_backend is 'simulator'");
-  if (config.enabled && config.execution_backend == DbtExecutionBackend::Hardware &&
-      !config.simulator_config.empty())
-    throw std::runtime_error("dbt_guest.simulator_config requires execution_backend 'simulator'");
+  if (config.enabled && config.host.backend == DbtExecutionBackend::Hardware &&
+      !config.host.simulator_config_path.empty())
+    throw std::runtime_error("dbt_guest.simulator_config requires execution_backend=\"simulator\"");
   return config;
+}
+
+std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
+                                         const std::string &host_config_path) {
+  const std::filesystem::path dbt_path(dbt_config_path);
+  if (host_config_path.empty())
+    return dbt_path.lexically_normal().string();
+
+  const std::filesystem::path host_path(host_config_path);
+  if (host_path.is_absolute())
+    return host_path.lexically_normal().string();
+  return (dbt_path.parent_path() / host_path).lexically_normal().string();
 }
 
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
