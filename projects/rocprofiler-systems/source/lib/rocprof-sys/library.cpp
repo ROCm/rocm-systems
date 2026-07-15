@@ -27,7 +27,6 @@
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
