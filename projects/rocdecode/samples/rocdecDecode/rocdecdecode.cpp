@@ -354,6 +354,7 @@ void init() {}
 
 void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    create_info.device_id = dec_info.dec_device_id;
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     create_info.max_width = DEFAULT_WIDTH;
     create_info.max_height = DEFAULT_HEIGHT;
