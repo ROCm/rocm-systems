@@ -237,8 +237,13 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
                 f"SQTT marker correction for {clock_domain}: delay range exceeds half the window",
                 RuntimeWarning,
             )
-        for record, residue, header_payloads in domain_headers:
-            correction = max(0, residue - minimum - (bucket_size - 1))
+        # Keep the reference causal; a later minimum cannot revise earlier headers.
+        reference = window_mask
+        for record, residue, header_payloads in sorted(
+            domain_headers, key=lambda header: header[0].time
+        ):
+            reference = min(reference, residue)
+            correction = max(0, residue - reference - (bucket_size - 1))
             if correction:
                 record.time -= correction
                 # TODO: sort one-payload blocks atomically; a final per-record
