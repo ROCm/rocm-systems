@@ -66,7 +66,9 @@ output_config::parse_env()
     annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
     annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
     annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
-    auto to_upper  = [](std::string val) {
+    pc_sampling_decode_instructions =
+        common::get_env("ROCPROF_PC_SAMPLING_DECODE_INSTRUCTIONS", pc_sampling_decode_instructions);
+    auto to_upper = [](std::string val) {
         for(auto& vitr : val)
             vitr = toupper(vitr);
         return val;

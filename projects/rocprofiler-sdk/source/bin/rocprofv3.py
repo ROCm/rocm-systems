@@ -754,6 +754,19 @@ For attachment profiling of running processes:
         type=int,
     )
 
+    add_parser_bool_argument(
+        pc_sampling_options,
+        "--pc-sampling-decode-instructions",
+        help=(
+            "Persist instruction text and comments already resolved while processing PC "
+            "samples directly in ROCPD output. Default: off (ROCPD post-processing attempts "
+            "lazy disassembly from trusted local code-object paths when no text is stored). "
+            "WARNING: "
+            "enabling this can drastically increase the database size, especially for "
+            "applications with large code objects."
+        ),
+    )
+
     post_processing_options = parser.add_argument_group("Post-processing tracing options")
 
     add_parser_bool_argument(
@@ -1843,6 +1856,11 @@ def run(app_args, args, **kwargs):
         _summary_output_fname = _summary_output_fname.lower()
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
+    update_env(
+        "ROCPROF_PC_SAMPLING_DECODE_INSTRUCTIONS",
+        args.pc_sampling_decode_instructions,
+        overwrite=True,
+    )
     update_env("ROCPROF_STATS_SUMMARY", args.summary, overwrite_if_true=True)
     update_env("ROCPROF_STATS_SUMMARY_UNITS", args.summary_units, overwrite=True)
     update_env("ROCPROF_STATS_SUMMARY_OUTPUT", _summary_output_fname, overwrite=True)

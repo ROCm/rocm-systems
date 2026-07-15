@@ -43,4 +43,3 @@
 -- CREATE INDEX `rocpd_region{{uuid}}_pid_idx` ON `rocpd_region{{uuid}}` ("pid");
 -- CREATE INDEX `rocpd_region{{uuid}}_start_idx` ON `rocpd_region{{uuid}}` ("start");
 -- CREATE INDEX `rocpd_region{{uuid}}_end_idx` ON `rocpd_region{{uuid}}` ("end");
-

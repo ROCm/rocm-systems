@@ -25,6 +25,7 @@
 
 import os
 import re
+import sqlite3
 
 from .importer import RocpdImportData
 from .query import export_sqlite_query
@@ -438,6 +439,58 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def _table_exists(importData, table: str) -> bool:
+    """Return True when *table* is queryable; False for pre-3.0.3 schemas."""
+    try:
+        importData.execute(f"SELECT 1 FROM {table} LIMIT 0")
+        return True
+    except sqlite3.OperationalError as error:
+        message = str(error).lower()
+        if "no such table" in message or "no such view" in message:
+            return False
+        raise
+
+
+def write_pc_sampling_host_trap_csv(importData, config) -> None:
+    if not _table_exists(importData, '"rocpd_gpu_pc_sample_decoded"'):
+        return
+    query = """
+        SELECT
+            timestamp AS Sample_Timestamp,
+            exec_mask AS Exec_Mask,
+            dispatch_id AS Dispatch_Id,
+            instruction AS Instruction,
+            instruction_comment AS Instruction_Comment,
+            correlation_id AS Correlation_Id
+        FROM "rocpd_gpu_pc_sample_decoded"
+        WHERE wave_issued IS NULL
+        ORDER BY id ASC
+    """
+    write_sql_query_to_csv(importData, config, query, "pc_sampling_host_trap")
+
+
+def write_pc_sampling_stochastic_csv(importData, config) -> None:
+    if not _table_exists(importData, '"rocpd_gpu_pc_sample_decoded"'):
+        return
+    query = """
+        SELECT
+            timestamp AS Sample_Timestamp,
+            exec_mask AS Exec_Mask,
+            dispatch_id AS Dispatch_Id,
+            instruction AS Instruction,
+            instruction_comment AS Instruction_Comment,
+            correlation_id AS Correlation_Id,
+            wave_issued AS Wave_Issued_Instruction,
+            inst_type_name AS Instruction_Type,
+            stall_reason_name AS Stall_Reason,
+            wave_count AS Wave_Count
+        FROM "rocpd_gpu_pc_sample_decoded"
+        WHERE wave_issued IS NOT NULL
+        ORDER BY id ASC
+    """
+    write_sql_query_to_csv(importData, config, query, "pc_sampling_stochastic")
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
@@ -448,6 +501,8 @@ def write_csv(importData, config):
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+    write_pc_sampling_host_trap_csv(importData, config)
+    write_pc_sampling_stochastic_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):

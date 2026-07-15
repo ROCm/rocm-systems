@@ -16,6 +16,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.1/data_views.sql
       rocpd_summary_views: versions/3.0.1/summary_views.sql
     - version: "3.0.2"
+      rocpd_metadata: versions/3.0.2/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.2/rocpd_tables.sql
+      rocpd_views: versions/3.0.2/rocpd_views.sql
+      rocpd_indexes: versions/3.0.2/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.2/data_views.sql
+      rocpd_summary_views: versions/3.0.2/summary_views.sql
+    - version: "3.0.3"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -35,3 +42,12 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.2
 # - Added graph_exec_id and graph_node_id columns to rocpd_kernel_dispatch and rocpd_memory_copy
 # - Added rocpd_graph_launch table for HIP graph launch summary records
+
+# Version 3.0.3
+# - Added rocpd_info_blob_schema table (self-describing binary blob layout)
+# - Added rocpd_info_blob_field table (per-field descriptor for blob schemas)
+# - Added rocpd_blob_event table (schema-tagged binary blob instances)
+# - Added rocpd_gpu_pc_sample table (GPU PC sampling data)
+# - Added rocpd_disassembly_data table (optional persisted instruction text)
+# - Added rocpd_event.parent_id for parent/child event relationships
+# - Populated rocpd_info_code_object.storage_type (column present since 3.0.1)

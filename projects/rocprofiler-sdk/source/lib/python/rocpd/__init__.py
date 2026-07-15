@@ -38,6 +38,14 @@ try:
     # librocpd and Python use the same SQLite library, avoiding mixed-lib symbol
     # collisions
     _sqlite3lib = ctypes.CDLL(_sqlite3.__file__, mode=ctypes.RTLD_GLOBAL)
+
+    _rocpd_lib = os.path.realpath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "librocprofiler-sdk-rocpd.so.1"
+        )
+    )
+    if os.path.exists(_rocpd_lib):
+        ctypes.CDLL(_rocpd_lib, mode=ctypes.RTLD_GLOBAL)
 except Exception:
     pass
 

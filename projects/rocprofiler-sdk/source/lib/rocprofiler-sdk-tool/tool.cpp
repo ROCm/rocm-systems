@@ -3713,6 +3713,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator(),
+                          pc_sampling_host_trap_output.get_generator(),
+                          pc_sampling_stochastic_output.get_generator(),
                           spm_counters_output.get_generator(),
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),

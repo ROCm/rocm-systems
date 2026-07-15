@@ -43,6 +43,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/details/mpl.hpp>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -64,6 +65,7 @@
 
 #include <atomic>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -225,6 +227,43 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("node", tool::agent_indexing::node)
         .value("logical_node", tool::agent_indexing::logical_node)
         .value("logical_node_type", tool::agent_indexing::logical_node_type);
+
+    namespace codeobj = ::rocprofiler::sdk::codeobj::disassembly;
+
+    py::class_<codeobj::CodeobjAddressTranslate>(pyrocpd, "isa_decoder")
+        .def(py::init<>())
+        .def("add_code_object_file",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const std::string&                path,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 self.addDecoder(path.c_str(), code_object_id, load_delta, load_size);
+             })
+        .def("add_code_object_memory",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const py::bytes&                  data,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 auto bytes = static_cast<std::string>(data);
+                 self.addDecoder(bytes.data(), bytes.size(), code_object_id, load_delta, load_size);
+             })
+        .def("decode",
+             [](codeobj::CodeobjAddressTranslate& self,
+                uint64_t                          code_object_id,
+                uint64_t                          code_object_offset) -> py::object {
+                 auto instruction = self.get(code_object_id, code_object_offset);
+                 if(!instruction) return py::none{};
+
+                 py::dict result{};
+                 result["instruction"] = instruction->inst;
+                 result["comment"]     = instruction->comment;
+                 result["size"]        = instruction->size;
+                 result["faddr"]       = instruction->faddr;
+                 result["vaddr"]       = instruction->vaddr;
+                 return result;
+             });
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "agent")

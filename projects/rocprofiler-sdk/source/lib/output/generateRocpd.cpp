@@ -24,11 +24,11 @@
 #include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
+#include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
 #include "timestamps.hpp"
 
-#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/filesystem.hpp"
@@ -67,6 +67,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -106,10 +107,17 @@ namespace
 namespace fs          = ::rocprofiler::common::filesystem;
 using function_args_t = std::vector<argument_info>;
 
+// Wrapper to distinguish raw BLOB bytes from TEXT strings in sql_insert_value.
+struct blob_data
+{
+    std::string bytes;
+};
+
 struct sql_insert_value
 {
-    std::string_view                                                                     name  = {};
-    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
+    std::string_view name = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t, blob_data>
+        value = {};
 };
 
 struct pending_insert_batch
@@ -119,6 +127,7 @@ struct pending_insert_batch
     std::vector<std::vector<sql_insert_value>> rows         = {};
     size_t                                     max_rows     = 1;
     uint64_t                                   last_touched = 0;
+    bool                                       has_blob     = false;
 };
 
 struct rocpd_db
@@ -154,7 +163,35 @@ struct rocpd_db
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
 
+    // Recycled storage for fixed-size BLOB payloads (e.g. PC sampling extdata).  Batching
+    // needs each blob to have stable storage until its row is flushed, so rather than a fresh
+    // heap allocation per row we reuse buffers returned by already-flushed batches.
+    std::vector<std::string> blob_buffer_pool     = {};
+    static constexpr size_t  max_blob_buffer_pool = 2048;
+
     size_t get_event_id() { return ++event_id_counter; }
+
+    // Acquire a buffer holding a copy of [data, data + size).  Reuses a pooled allocation when
+    // one is available (no malloc when its capacity already fits); otherwise allocates.
+    std::string acquire_blob_buffer(const void* data, size_t size)
+    {
+        auto buf = std::string{};
+        if(!blob_buffer_pool.empty())
+        {
+            buf = std::move(blob_buffer_pool.back());
+            blob_buffer_pool.pop_back();
+        }
+        buf.assign(static_cast<const char*>(data), size);
+        return buf;
+    }
+
+    // Return a blob buffer for reuse once its batch has been fully stepped and cleared.
+    void recycle_blob_buffer(std::string&& buf)
+    {
+        if(blob_buffer_pool.size() >= max_blob_buffer_pool) return;
+        buf.clear();
+        blob_buffer_pool.emplace_back(std::move(buf));
+    }
 };
 
 void
@@ -257,7 +294,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 2};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -379,6 +416,21 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
+template <typename Tp, typename TraitT = int>
+ROCPROFILER_NOINLINE sql_insert_value
+insert_nullable_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {})
+{
+    if(!_value.has_value()) return sql_insert_value{_name, nullptr};
+    return insert_value(_name, _value.value(), TraitT{});
+}
+
+// Store raw bytes as a SQLite BLOB column (not TEXT).
+ROCPROFILER_NOINLINE sql_insert_value
+insert_blob_value(std::string_view _name, std::string bytes)
+{
+    return sql_insert_value{_name, blob_data{std::move(bytes)}};
+}
+
 rocpd_db::~rocpd_db()
 {
     finish_pending_insert_batch(*this);
@@ -428,7 +480,8 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
                 if(val <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
                     return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
                 // Values > INT64_MAX cannot be stored as SQLite INTEGER without wrapping;
-                // bind as TEXT to preserve the exact value.
+                // bind as TEXT to preserve the exact value.  This is a local temporary (unlike
+                // the batched std::string/blob values below), so it must remain SQLITE_TRANSIENT.
                 auto text = fmt::format("{}", val);
                 return sqlite3_bind_text(
                     stmt, idx, text.c_str(), static_cast<int>(text.size()), SQLITE_TRANSIENT);
@@ -439,7 +492,16 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             }
             else if constexpr(common::mpl::is_string_type<value_type>::value)
             {
-                return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+                // SQLITE_STATIC: the std::string lives in pending.rows and is neither modified
+                // nor freed until after sqlite3_step (rows are cleared only once the whole batch
+                // has been stepped), so SQLite may reference it in place instead of copying.
+                return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_STATIC);
+            }
+            else if constexpr(std::is_same_v<value_type, blob_data>)
+            {
+                // SQLITE_STATIC: blob bytes also live in pending.rows until after the step.
+                return sqlite3_bind_blob64(
+                    stmt, idx, val.bytes.data(), val.bytes.size(), SQLITE_STATIC);
             }
             else
             {
@@ -471,6 +533,13 @@ normalize_batch_table_name(const rocpd_db& db, std::string_view table)
     }
 
     return std::string{table};
+}
+
+std::string
+quote_sql_identifier(std::string_view value)
+{
+    // SQLite accepts backtick-quoted identifiers; escape embedded backticks by doubling.
+    return fmt::format("`{}`", replace_all(std::string{value}, '`', "``"));
 }
 
 void
@@ -525,11 +594,23 @@ get_or_prepare_batch_statement(rocpd_db&                   db,
     const auto row_placeholder  = fmt::format("({})", fmt::join(placeholders, ", "));
     const auto row_placeholders = std::vector(rows_per_exec, row_placeholder);
     const auto values_clause    = fmt::format("{}", fmt::join(row_placeholders, ", "));
-    const auto field_names      = fmt::format("{}", fmt::join(pending.fields, ", "));
+    auto       quoted_fields    = std::vector<std::string>{};
+    quoted_fields.reserve(pending.fields.size());
+    for(const auto& field : pending.fields)
+        quoted_fields.emplace_back(quote_sql_identifier(field));
+
+    const auto table_name  = quote_sql_identifier(pending.table);
+    const auto field_names = fmt::format("{}", fmt::join(quoted_fields, ", "));
 
     const auto sql =
-        fmt::format("INSERT INTO {} ({}) VALUES {};", pending.table, field_names, values_clause);
-    SQLITE3_CHECK(sqlite3_prepare_v2(db.conn, sql.c_str(), -1, &stmt, nullptr));
+        fmt::format("INSERT INTO {} ({}) VALUES {};", table_name, field_names, values_clause);
+
+    auto prepare_rc = sqlite3_prepare_v2(db.conn, sql.c_str(), -1, &stmt, nullptr);
+    ROCP_FATAL_IF(prepare_rc != SQLITE_OK)
+        << "sqlite3_prepare_v2 failed with error code " << prepare_rc
+        << ", sqlite3_errmsg: " << sqlite3_errmsg(db.conn) << ", table: " << pending.table
+        << ", rows_per_exec: " << rows_per_exec << ", field_count: " << pending.fields.size()
+        << ", sql: " << sql;
     return stmt;
 }
 
@@ -684,6 +765,18 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
         begin_idx = end_idx;
     }
 
+    // Return blob allocations to the pool for reuse.  Safe here: every row above has already
+    // been stepped, moving the buffers only transfers ownership (the bytes stay valid), and the
+    // statement is reset and re-bound before any further step.  Gated by has_blob so non-blob
+    // batches keep their original clear() fast path.
+    if(pending.has_blob)
+    {
+        for(auto& row : pending.rows)
+            for(auto& value : row)
+                if(auto* blob = std::get_if<blob_data>(&value.value))
+                    db.recycle_blob_buffer(std::move(blob->bytes));
+    }
+
     pending.rows.clear();
     db.flushing_tables.erase(pending.table);
 }
@@ -729,6 +822,9 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
             flush_pending_insert_batch(db, pending);
             pending.fields   = std::move(fields);
             pending.max_rows = get_max_batch_rows(db.conn, pending.fields.size());
+            pending.has_blob = std::any_of(values.begin(), values.end(), [](const auto& v) {
+                return std::holds_alternative<blob_data>(v.value);
+            });
             pending.rows.clear();
             pending.rows.reserve(pending.max_rows);
         }
@@ -764,6 +860,9 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
     pending.fields       = std::move(fields);
     pending.max_rows     = get_max_batch_rows(db.conn, pending.fields.size());
     pending.last_touched = ++db.pending_touch_count;
+    pending.has_blob     = std::any_of(values.begin(), values.end(), [](const auto& v) {
+        return std::holds_alternative<blob_data>(v.value);
+    });
     pending.rows.reserve(pending.max_rows);
     pending.rows.emplace_back(std::move(values));
 
@@ -884,6 +983,17 @@ std::string
 extract_flags_field(const Tp&, long)
 {
     return "";
+}
+
+std::optional<std::string>
+get_code_object_storage_type(rocprofiler_code_object_storage_type_t storage_type)
+{
+    switch(storage_type)
+    {
+        case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE: return "FILE";
+        case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY: return "MEMORY";
+        default: return std::nullopt;
+    }
 }
 
 template <typename Tp>
@@ -1034,6 +1144,8 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
     const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&             ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&        graph_launch_gen,
@@ -1356,19 +1468,22 @@ write_rocpd(
             auto        json_data =
                 get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
 
-            get_insert_statement(db,
-                                 "rocpd_info_code_object{{uuid}}",
-                                 {
-                                     insert_value("id", itr.code_object_id),
-                                     insert_value("nid", node_id),
-                                     insert_value("pid", this_pid),
-                                     insert_value("agent_id", CHECK_NOTNULL(_agent)->node_id),
-                                     insert_value("uri", itr.uri),
-                                     insert_value("load_base", itr.load_base),
-                                     insert_value("load_size", itr.load_size),
-                                     insert_value("load_delta", itr.load_delta),
-                                     insert_value("extdata", json_data),
-                                 });
+            get_insert_statement(
+                db,
+                "rocpd_info_code_object{{uuid}}",
+                {
+                    insert_value("id", itr.code_object_id),
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("agent_id", CHECK_NOTNULL(_agent)->node_id),
+                    insert_value("uri", itr.uri),
+                    insert_value("load_base", itr.load_base),
+                    insert_value("load_size", itr.load_size),
+                    insert_value("load_delta", itr.load_delta),
+                    insert_nullable_value("storage_type",
+                                          get_code_object_storage_type(itr.storage_type)),
+                    insert_value("extdata", json_data),
+                });
         }
 
         for(const auto& itr : tool_metadata.get_kernel_symbols())
@@ -1445,7 +1560,9 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
+    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids,
+                                                              auto& dispatch_agent_ids,
+                                                              auto& dispatch_thread_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
         auto _deferred         = sql::deferred_transaction{db.conn};
 
@@ -1464,8 +1581,8 @@ write_rocpd(
                                     uint64_t    graph_exec_id,
                                     uint64_t    graph_node_id,
                                     bool        enable_duplicate_check) {
-            // Skip if we've already processed this dispatch_id
-            if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
+            // Skip if we've already processed this dispatch_id.
+            if(dispatch_evt_ids.count(dispatch_id) > 0) return;
 
             auto kern_name = (kernel_id > 0)
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
@@ -1479,12 +1596,8 @@ write_rocpd(
                                            insert_value("correlation_id", corr_id.external.value),
                                        });
 
-            // Ensure dispatch_evt_ids is large enough
-            if(dispatch_evt_ids.size() < dispatch_id + 1)
-                common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
-
             // Check for duplicates if requested
-            if(enable_duplicate_check && dispatch_evt_ids.at(dispatch_id) != 0)
+            if(enable_duplicate_check && dispatch_evt_ids.count(dispatch_id) > 0)
             {
                 ROCP_CI_LOG(WARNING)
                     << fmt::format("duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
@@ -1496,7 +1609,7 @@ write_rocpd(
                                    kern_name);
             }
 
-            dispatch_evt_ids.at(dispatch_id) = evt_id;
+            dispatch_evt_ids.emplace(dispatch_id, evt_id);
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
@@ -1505,6 +1618,9 @@ write_rocpd(
                 (_rename_it != _rename_strings.end()) ? _rename_it->second : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
+
+            dispatch_agent_ids.emplace(dispatch_id, agent_node_id);
+            dispatch_thread_ids.emplace(dispatch_id, static_cast<uint64_t>(thread_id));
 
             // Insert into kernel dispatch table
             get_insert_statement(
@@ -1616,7 +1732,10 @@ write_rocpd(
                     const auto& info        = record.dispatch_data.dispatch_info;
                     auto        dispatch_id = info.dispatch_id;
 
-                    auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                    auto dispatch_itr = dispatch_evt_ids.find(dispatch_id);
+                    if(dispatch_itr == dispatch_evt_ids.end()) continue;
+
+                    auto evt_id = dispatch_itr->second;
                     for(const auto& count : record.read())
                     {
                         get_insert_statement(db,
@@ -2084,7 +2203,565 @@ write_rocpd(
             }
         };
 
-    auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
+    auto dispatch_to_evt_id    = std::unordered_map<uint64_t, uint64_t>{};
+    auto dispatch_to_agent_id  = std::unordered_map<uint64_t, uint64_t>{};
+    auto dispatch_to_thread_id = std::unordered_map<uint64_t, uint64_t>{};
+    // ---------------------------------------------------------------------------
+    // Packed blob struct — architecture-specific fields stored alongside each
+    // PC sample row.  The schema is self-describing via rocpd_info_blob_schema /
+    // rocpd_info_blob_field, so Python consumers can decode the binary without
+    // hard-coding offsets.
+    // ---------------------------------------------------------------------------
+#pragma pack(push, 1)
+    struct pc_sample_extdata_v1
+    {
+        // hw_id fields
+        uint32_t hw_id_chiplet          = 0;
+        uint32_t hw_id_wave_id          = 0;
+        uint32_t hw_id_simd_id          = 0;
+        uint32_t hw_id_pipe_id          = 0;
+        uint32_t hw_id_cu_or_wgp_id     = 0;
+        uint32_t hw_id_shader_array_id  = 0;
+        uint32_t hw_id_shader_engine_id = 0;
+        uint32_t hw_id_workgroup_id     = 0;
+        uint32_t hw_id_vm_id            = 0;
+        uint32_t hw_id_queue_id         = 0;
+        uint32_t hw_id_microengine_id   = 0;
+        // Generic PC sample fields retained for decode.
+        uint32_t wave_in_group  = 0;
+        uint32_t workgroup_id_x = 0;
+        uint32_t workgroup_id_y = 0;
+        uint32_t workgroup_id_z = 0;
+        // arbiter-state fields (stochastic only; remain zero for host-trap)
+        uint8_t dual_issue_valu            = 0;
+        uint8_t arb_state_issue_valu       = 0;
+        uint8_t arb_state_issue_matrix     = 0;
+        uint8_t arb_state_issue_lds        = 0;
+        uint8_t arb_state_issue_lds_direct = 0;
+        uint8_t arb_state_issue_scalar     = 0;
+        uint8_t arb_state_issue_vmem_tex   = 0;
+        uint8_t arb_state_issue_flat       = 0;
+        uint8_t arb_state_issue_exp        = 0;
+        uint8_t arb_state_issue_misc       = 0;
+        uint8_t arb_state_issue_brmsg      = 0;
+        uint8_t arb_state_stall_valu       = 0;
+        uint8_t arb_state_stall_matrix     = 0;
+        uint8_t arb_state_stall_lds        = 0;
+        uint8_t arb_state_stall_lds_direct = 0;
+        uint8_t arb_state_stall_scalar     = 0;
+        uint8_t arb_state_stall_vmem_tex   = 0;
+        uint8_t arb_state_stall_flat       = 0;
+        uint8_t arb_state_stall_exp        = 0;
+        uint8_t arb_state_stall_misc       = 0;
+        uint8_t arb_state_stall_brmsg      = 0;
+    };
+#pragma pack(pop)
+
+    static_assert(sizeof(pc_sample_extdata_v1) == (15 * sizeof(uint32_t) + 21),
+                  "PC sample blob layout changed; update its schema version");
+    static_assert(alignof(pc_sample_extdata_v1) == 1, "PC sample blob must remain byte-packed");
+    static_assert(std::is_standard_layout_v<pc_sample_extdata_v1>);
+    static_assert(std::is_trivially_copyable_v<pc_sample_extdata_v1>);
+
+    // ---------------------------------------------------------------------------
+    // blob_field_desc — describes one field inside a packed blob struct.
+    // blob_schema_desc — bundles the table-level metadata with the field list.
+    // Passing a blob_schema_desc to register_blob_schema keeps that function
+    // independent of any specific data type.
+    // ---------------------------------------------------------------------------
+    struct blob_field_desc
+    {
+        std::string_view name;
+        size_t           offset;
+        size_t           size;
+        std::string_view data_type;
+        bool             is_signed;
+        std::string_view description;
+    };
+
+    struct blob_schema_desc
+    {
+        std::string_view             name;
+        std::string_view             source_table;
+        std::string_view             description;
+        std::string_view             byte_order;
+        int64_t                      alignment;
+        int64_t                      struct_size;
+        int64_t                      version;
+        std::vector<blob_field_desc> fields;
+    };
+
+    // PC sampling extdata schema: hw_id (both methods) + arbiter-state snapshot
+    // (stochastic only; arbiter fields remain zero for host-trap samples).
+    const auto pc_sample_extdata_v1_schema =
+        blob_schema_desc{"pc_sample_extdata_v1",
+                         "rocpd_gpu_pc_sample",
+                         "PC sampling arch-specific fields (packed)",
+                         "little",
+                         int64_t{1},
+                         static_cast<int64_t>(sizeof(pc_sample_extdata_v1)),
+                         int64_t{1},
+                         {
+                             {"hw_id_chiplet",
+                              offsetof(pc_sample_extdata_v1, hw_id_chiplet),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID chiplet index"},
+                             {"hw_id_wave_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_wave_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID wave slot index"},
+                             {"hw_id_simd_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_simd_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID SIMD index"},
+                             {"hw_id_pipe_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_pipe_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID pipe index"},
+                             {"hw_id_cu_or_wgp_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_cu_or_wgp_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID CU (GFX9) or WGP (GFX10+) index"},
+                             {"hw_id_shader_array_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_shader_array_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID shader array index"},
+                             {"hw_id_shader_engine_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_shader_engine_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID shader engine index"},
+                             {"hw_id_workgroup_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_workgroup_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID workgroup index"},
+                             {"hw_id_vm_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_vm_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID virtual memory ID"},
+                             {"hw_id_queue_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_queue_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID queue ID"},
+                             {"hw_id_microengine_id",
+                              offsetof(pc_sample_extdata_v1, hw_id_microengine_id),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "HW ID microengine (ACE) index"},
+                             {"wave_in_group",
+                              offsetof(pc_sample_extdata_v1, wave_in_group),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "Wave position within workgroup"},
+                             {"workgroup_id_x",
+                              offsetof(pc_sample_extdata_v1, workgroup_id_x),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "Workgroup coordinate X"},
+                             {"workgroup_id_y",
+                              offsetof(pc_sample_extdata_v1, workgroup_id_y),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "Workgroup coordinate Y"},
+                             {"workgroup_id_z",
+                              offsetof(pc_sample_extdata_v1, workgroup_id_z),
+                              sizeof(uint32_t),
+                              "uint32_t",
+                              false,
+                              "Workgroup coordinate Z"},
+                             {"dual_issue_valu",
+                              offsetof(pc_sample_extdata_v1, dual_issue_valu),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Dual-issue VALU (stochastic only)"},
+                             {"arb_state_issue_valu",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_valu),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued VALU instruction"},
+                             {"arb_state_issue_matrix",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_matrix),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued matrix instruction"},
+                             {"arb_state_issue_lds",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_lds),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued LDS instruction"},
+                             {"arb_state_issue_lds_direct",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_lds_direct),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued LDS direct instruction"},
+                             {"arb_state_issue_scalar",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_scalar),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued scalar instruction"},
+                             {"arb_state_issue_vmem_tex",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_vmem_tex),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued VMEM/TEX instruction"},
+                             {"arb_state_issue_flat",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_flat),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued FLAT instruction"},
+                             {"arb_state_issue_exp",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_exp),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued export instruction"},
+                             {"arb_state_issue_misc",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_misc),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued misc instruction"},
+                             {"arb_state_issue_brmsg",
+                              offsetof(pc_sample_extdata_v1, arb_state_issue_brmsg),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Arbiter issued branch/message instruction"},
+                             {"arb_state_stall_valu",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_valu),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "VALU stall"},
+                             {"arb_state_stall_matrix",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_matrix),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Matrix stall"},
+                             {"arb_state_stall_lds",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_lds),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "LDS stall"},
+                             {"arb_state_stall_lds_direct",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_lds_direct),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "LDS direct stall"},
+                             {"arb_state_stall_scalar",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_scalar),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Scalar stall"},
+                             {"arb_state_stall_vmem_tex",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_vmem_tex),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "VMEM/TEX stall"},
+                             {"arb_state_stall_flat",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_flat),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Flat stall"},
+                             {"arb_state_stall_exp",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_exp),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Export stall"},
+                             {"arb_state_stall_misc",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_misc),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Misc stall"},
+                             {"arb_state_stall_brmsg",
+                              offsetof(pc_sample_extdata_v1, arb_state_stall_brmsg),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Branch/message stall"},
+                         }};
+
+    // ---------------------------------------------------------------------------
+    // Design note:
+    // 1) The blob schema is registered once and shared by host-trap and
+    //    stochastic PC sampling generators.
+    // 2) get_insert_statement batches inserts, so the schema row is not visible
+    //    to sqlite3_last_insert_rowid() until the schema batch is flushed.
+    // 3) We must flush rocpd_info_blob_schema{{uuid}} before reading
+    //    sqlite3_last_insert_rowid(), and we must read it before enqueueing any
+    //    field rows in this lambda.
+    // ---------------------------------------------------------------------------
+    auto register_blob_schema =
+        [&db, node_id, this_pid](const blob_schema_desc& schema) -> uint64_t {
+        auto schema_table = replace_uuid(db, "rocpd_info_blob_schema{{uuid}}");
+
+        auto _deferred = sql::deferred_transaction{db.conn};
+
+        get_insert_statement(
+            db,
+            "rocpd_info_blob_schema{{uuid}}",
+            {
+                insert_value("nid", node_id),
+                insert_value("pid", this_pid),
+                insert_value("name", std::string{schema.name}),
+                insert_value("source_table", std::string{schema.source_table}),
+                insert_value("description", std::string{schema.description}, allow_empty_string{}),
+                insert_value("byte_order", std::string{schema.byte_order}),
+                insert_value("alignment", schema.alignment),
+                insert_value("struct_size", schema.struct_size),
+                insert_value("version", schema.version),
+            });
+
+        // Flush the schema row now so last_insert_rowid is valid.
+        if(auto itr = db.pending_batches.find(schema_table); itr != db.pending_batches.end())
+            flush_pending_insert_batch(db, itr->second);
+
+        const auto schema_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(db.conn));
+
+        for(const auto& field : schema.fields)
+        {
+            get_insert_statement(
+                db,
+                "rocpd_info_blob_field{{uuid}}",
+                {
+                    insert_value("schema_id", schema_id),
+                    insert_value("name", std::string{field.name}),
+                    insert_value("offset", static_cast<int64_t>(field.offset)),
+                    insert_value("size", static_cast<int64_t>(field.size)),
+                    insert_value("data_type", std::string{field.data_type}),
+                    insert_value("is_signed", field.is_signed ? int64_t{1} : int64_t{0}),
+                    insert_value(
+                        "description", std::string{field.description}, allow_empty_string{}),
+                });
+        }
+
+        return schema_id;
+    };
+
+    // Insert PC sampling rows, one per sample.
+    //
+    // Design note:
+    // 1) dispatch_to_evt_id / dispatch_to_agent_id / dispatch_to_thread_id are
+    //    sparse lookup tables keyed by dispatch_id.
+    // 2) PC samples may exist without a matching kernel_dispatch record
+    //    (e.g. counter-collection-only traces), so lookup misses are expected.
+    // 3) On lookup miss we intentionally store NULL parent/agent/thread context
+    //    instead of dropping the sample, preserving data with partial context.
+    // 4) Each sample still gets a dedicated rocpd_event + rocpd_blob_event pair,
+    //    and parent_id is linked only when dispatch context is available.
+    auto disasm_seen             = std::set<std::pair<uint64_t, uint64_t>>{};
+    auto insert_pc_sampling_data = [&db,
+                                    &cfg,
+                                    &tool_metadata,
+                                    &disasm_seen,
+                                    node_id,
+                                    this_pid,
+                                    &dispatch_to_evt_id,
+                                    &dispatch_to_agent_id,
+                                    &dispatch_to_thread_id](const auto& pc_sampling_gen,
+                                                            uint64_t    ext_schema_id) {
+        if(pc_sampling_gen.empty()) return;
+
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
+        auto _deferred         = sql::deferred_transaction{db.conn};
+
+        // Resolve an optional dispatch-indexed value; std::nullopt when the dispatch was
+        // not captured by the kernel_dispatch buffer (e.g. counter-collection-only traces).
+        auto lookup_dispatch = [](const auto& _map,
+                                  uint64_t    _dispatch_id) -> std::optional<uint64_t> {
+            if(auto _itr = _map.find(_dispatch_id); _itr != _map.end()) return _itr->second;
+            return std::nullopt;
+        };
+
+        for(auto pitr : pc_sampling_gen)
+        {
+            for(const auto& itr : pc_sampling_gen.get(pitr))
+            {
+                const auto& record = itr.pc_sample_record;
+
+                // Resolve parent dispatch context by dispatch_id.  Each value is NULL when the
+                // dispatch was not captured by the kernel_dispatch buffer.  tid is the real CPU
+                // thread that launched the parent dispatch, not the SDK correlation ID (which is
+                // not a thread ID).
+                auto parent_event_id = lookup_dispatch(dispatch_to_evt_id, record.dispatch_id);
+                auto agent_id        = lookup_dispatch(dispatch_to_agent_id, record.dispatch_id);
+                auto tid             = lookup_dispatch(dispatch_to_thread_id, record.dispatch_id);
+
+                auto wave_issued  = std::optional<int64_t>{};
+                auto wave_count   = std::optional<int64_t>{};
+                auto inst_type    = std::optional<int64_t>{};
+                auto stall_reason = std::optional<int64_t>{};
+
+                // Build the packed extdata blob from hw_id (always present) and
+                // arbiter-state snapshot (stochastic only).
+                auto extdata                  = pc_sample_extdata_v1{};
+                extdata.hw_id_chiplet         = static_cast<uint32_t>(record.hw_id.chiplet);
+                extdata.hw_id_wave_id         = static_cast<uint32_t>(record.hw_id.wave_id);
+                extdata.hw_id_simd_id         = static_cast<uint32_t>(record.hw_id.simd_id);
+                extdata.hw_id_pipe_id         = static_cast<uint32_t>(record.hw_id.pipe_id);
+                extdata.hw_id_cu_or_wgp_id    = static_cast<uint32_t>(record.hw_id.cu_or_wgp_id);
+                extdata.hw_id_shader_array_id = static_cast<uint32_t>(record.hw_id.shader_array_id);
+                extdata.hw_id_shader_engine_id =
+                    static_cast<uint32_t>(record.hw_id.shader_engine_id);
+                extdata.hw_id_workgroup_id   = static_cast<uint32_t>(record.hw_id.workgroup_id);
+                extdata.hw_id_vm_id          = static_cast<uint32_t>(record.hw_id.vm_id);
+                extdata.hw_id_queue_id       = static_cast<uint32_t>(record.hw_id.queue_id);
+                extdata.hw_id_microengine_id = static_cast<uint32_t>(record.hw_id.microengine_id);
+                extdata.wave_in_group        = static_cast<uint32_t>(record.wave_in_group);
+                extdata.workgroup_id_x       = static_cast<uint32_t>(record.workgroup_id.x);
+                extdata.workgroup_id_y       = static_cast<uint32_t>(record.workgroup_id.y);
+                extdata.workgroup_id_z       = static_cast<uint32_t>(record.workgroup_id.z);
+
+                if constexpr(std::is_same_v<
+                                 common::mpl::unqualified_type_t<decltype(pc_sampling_gen)>,
+                                 generator<rocprofiler_tool_pc_sampling_stochastic_record_t>>)
+                {
+                    wave_issued  = static_cast<int64_t>(record.wave_issued);
+                    wave_count   = static_cast<int64_t>(record.wave_count);
+                    inst_type    = static_cast<int64_t>(record.inst_type);
+                    stall_reason = static_cast<int64_t>(record.snapshot.reason_not_issued);
+
+#define SET_ARB_FIELD(FIELD)                                                                       \
+    extdata.FIELD = static_cast<uint8_t>(static_cast<bool>(record.snapshot.FIELD) ? 1 : 0)
+
+                    SET_ARB_FIELD(dual_issue_valu);
+                    SET_ARB_FIELD(arb_state_issue_valu);
+                    SET_ARB_FIELD(arb_state_issue_matrix);
+                    SET_ARB_FIELD(arb_state_issue_lds);
+                    SET_ARB_FIELD(arb_state_issue_lds_direct);
+                    SET_ARB_FIELD(arb_state_issue_scalar);
+                    SET_ARB_FIELD(arb_state_issue_vmem_tex);
+                    SET_ARB_FIELD(arb_state_issue_flat);
+                    SET_ARB_FIELD(arb_state_issue_exp);
+                    SET_ARB_FIELD(arb_state_issue_misc);
+                    SET_ARB_FIELD(arb_state_issue_brmsg);
+                    SET_ARB_FIELD(arb_state_stall_valu);
+                    SET_ARB_FIELD(arb_state_stall_matrix);
+                    SET_ARB_FIELD(arb_state_stall_lds);
+                    SET_ARB_FIELD(arb_state_stall_lds_direct);
+                    SET_ARB_FIELD(arb_state_stall_scalar);
+                    SET_ARB_FIELD(arb_state_stall_vmem_tex);
+                    SET_ARB_FIELD(arb_state_stall_flat);
+                    SET_ARB_FIELD(arb_state_stall_exp);
+                    SET_ARB_FIELD(arb_state_stall_misc);
+                    SET_ARB_FIELD(arb_state_stall_brmsg);
+#undef SET_ARB_FIELD
+                }
+
+                // Serialise the packed struct to raw bytes for rocpd_blob_event, reusing a
+                // pooled buffer to avoid a heap allocation per sample.
+                auto blob_bytes = db.acquire_blob_buffer(&extdata, sizeof(pc_sample_extdata_v1));
+
+                const auto sample_event_id = create_event(
+                    db,
+                    {
+                        insert_value("correlation_id", record.correlation_id.external.value),
+                        insert_nullable_value("parent_id", parent_event_id),
+                    });
+
+                get_insert_statement(
+                    db,
+                    "rocpd_blob_event{{uuid}}",
+                    {
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("event_id", static_cast<int64_t>(sample_event_id)),
+                        insert_value("schema_id", static_cast<int64_t>(ext_schema_id)),
+                        insert_blob_value("blob", std::move(blob_bytes)),
+                    });
+
+                get_insert_statement(
+                    db,
+                    "rocpd_gpu_pc_sample{{uuid}}",
+                    {
+                        insert_value("timestamp", record.timestamp),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_nullable_value("tid", tid),
+                        insert_nullable_value("agent_id", agent_id),
+                        insert_value("event_id", static_cast<int64_t>(sample_event_id)),
+                        insert_value("dispatch_id", record.dispatch_id),
+                        insert_value("correlation_id", record.correlation_id.internal),
+                        insert_value("exec_mask", record.exec_mask),
+                        insert_value("code_object_id", record.pc.code_object_id),
+                        insert_value("code_object_offset", record.pc.code_object_offset),
+                        insert_nullable_value("wave_issued", wave_issued),
+                        insert_nullable_value("inst_type", inst_type),
+                        insert_nullable_value("stall_reason", stall_reason),
+                        insert_nullable_value("wave_count", wave_count),
+
+                    });
+
+                if(cfg.pc_sampling_decode_instructions)
+                {
+                    auto _disasm_key =
+                        std::make_pair(static_cast<uint64_t>(record.pc.code_object_id),
+                                       static_cast<uint64_t>(record.pc.code_object_offset));
+                    if(disasm_seen.insert(_disasm_key).second)
+                    {
+                        // PC transformation already resolved this instruction. Reuse
+                        // that cache instead of disassembling the same address again.
+                        if(itr.inst_index < 0) continue;
+
+                        get_insert_statement(
+                            db,
+                            "rocpd_disassembly_data{{uuid}}",
+                            {
+                                insert_value("nid", node_id),
+                                insert_value("pid", this_pid),
+                                insert_value("code_object_id", record.pc.code_object_id),
+                                insert_value("code_object_offset", record.pc.code_object_offset),
+                                insert_value("instruction",
+                                             tool_metadata.get_instruction(itr.inst_index),
+                                             allow_empty_string{}),
+                                insert_value("comment",
+                                             tool_metadata.get_comment(itr.inst_index),
+                                             allow_empty_string{}),
+                            });
+                    }
+                }
+            }
+        }
+    };
 
     insert_node_data();
     insert_process_data();
@@ -2107,10 +2784,36 @@ write_rocpd(
         insert_api_data(rocshmem_api_gen);
     }
 
-    insert_kernel_dispatch_data(dispatch_to_evt_id);
+    insert_kernel_dispatch_data(dispatch_to_evt_id, dispatch_to_agent_id, dispatch_to_thread_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
     insert_graph_launch_data(graph_launch_gen);
+
+    {
+        // Register the blob schema once, then pass the resulting id to both sampling loops.
+        // The schema covers hw_id (both methods) and arbiter-state snapshot (stochastic only).
+        const bool has_pc_sampling =
+            !pc_sampling_host_trap_gen.empty() || !pc_sampling_stochastic_gen.empty();
+        const auto ext_schema_id =
+            has_pc_sampling ? register_blob_schema(pc_sample_extdata_v1_schema) : uint64_t{0};
+
+        if(ext_schema_id == 0)
+        {
+            ROCP_CI_LOG_IF(WARNING, has_pc_sampling)
+                << "PC sampling records were collected but are being skipped in ROCPD output due "
+                   "to schema incompatibility";
+        }
+        else
+        {
+            if(cfg.pc_sampling_decode_instructions)
+                ROCP_WARNING << "PC sampling instruction disassembly is enabled "
+                                "(--pc-sampling-decode-instructions); the output database size "
+                                "may increase significantly.";
+
+            insert_pc_sampling_data(pc_sampling_host_trap_gen, ext_schema_id);
+            insert_pc_sampling_data(pc_sampling_stochastic_gen, ext_schema_id);
+        }
+    }
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");

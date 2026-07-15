@@ -769,4 +769,3 @@ GROUP BY
     K.dispatch_id,
     PMC_I.name,
     K.agent_id;
-

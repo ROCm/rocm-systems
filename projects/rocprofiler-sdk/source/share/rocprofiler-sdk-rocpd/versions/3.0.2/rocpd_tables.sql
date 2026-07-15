@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.3
+-- RocPD schema version 3.0.2
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -134,56 +134,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- Binary blob schema (self-describing layout)
-CREATE TABLE IF NOT EXISTS
-    `rocpd_info_blob_schema{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "nid" INTEGER NOT NULL,
-        "pid" INTEGER NOT NULL,
-        "name" TEXT NOT NULL,
-        "source_table" TEXT NOT NULL,
-        "description" TEXT,
-        "byte_order" TEXT CHECK ("byte_order" IN ('little', 'big')),
-        "alignment" INTEGER NOT NULL,
-        "struct_size" INTEGER NOT NULL,
-        "version" INTEGER NOT NULL,
-        "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
-CREATE TABLE IF NOT EXISTS
-    `rocpd_info_blob_field{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "schema_id" INTEGER NOT NULL,
-        "name" TEXT NOT NULL,
-        "offset" INTEGER NOT NULL,
-        "size" INTEGER NOT NULL,
-        "data_type" TEXT NOT NULL,
-        "is_signed" INTEGER NOT NULL,
-        "description" TEXT,
-        "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
--- Standalone blob event storage (one row per blob instance)
-CREATE TABLE IF NOT EXISTS
-    `rocpd_blob_event{{uuid}}` (
-        "id"        INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid"      TEXT    DEFAULT "{{guid}}" NOT NULL,
-        "nid"       INTEGER NOT NULL,
-        "pid"       INTEGER NOT NULL,
-        "event_id"  INTEGER NOT NULL,
-        "schema_id" INTEGER NOT NULL,
-        "blob"      BLOB    NOT NULL,
-        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_code_object{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -250,12 +200,10 @@ CREATE TABLE IF NOT EXISTS
         "stack_id" INTEGER,
         "parent_stack_id" INTEGER,
         "correlation_id" INTEGER,
-        "parent_id" INTEGER,
         "call_stack" JSONB DEFAULT "{}" NOT NULL,
         "line_info" JSONB DEFAULT "{}" NOT NULL,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (category_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (parent_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+        FOREIGN KEY (category_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- stores arguments for events
@@ -283,52 +231,6 @@ CREATE TABLE IF NOT EXISTS
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
--- GPU PC sampling data (common fields + event_id correlation to rocpd_blob_event)
-CREATE TABLE IF NOT EXISTS
-    `rocpd_gpu_pc_sample{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "timestamp" BIGINT NOT NULL,
-        "nid" INTEGER NOT NULL,
-        "pid" INTEGER NOT NULL,
-        "tid" INTEGER,
-        "agent_id" INTEGER,
-        "event_id" INTEGER NOT NULL,
-        "dispatch_id" INTEGER,
-        "correlation_id" INTEGER,
-        "exec_mask" TEXT,
-        "code_object_id" BIGINT,
-        "code_object_offset" BIGINT,
-        "wave_issued" INTEGER,
-        "inst_type" INTEGER,
-        "stall_reason" INTEGER,
-        "wave_count" INTEGER,
-
-        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
--- Disassembled instruction text for sampled program counters.  Only populated
--- when the --pc-sampling-decode-instructions knob is enabled (opt-in).  By
--- default instructions are disassembled on demand during post-processing.  Rows
--- are deduplicated per (code_object_id, code_object_offset).
-CREATE TABLE IF NOT EXISTS
-    `rocpd_disassembly_data{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "nid" INTEGER NOT NULL,
-        "pid" INTEGER NOT NULL,
-        "code_object_id" BIGINT,
-        "code_object_offset" BIGINT,
-        "instruction" TEXT,
-        "comment" TEXT,
-        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- Region with a start/stop on the same thread (CPU)
