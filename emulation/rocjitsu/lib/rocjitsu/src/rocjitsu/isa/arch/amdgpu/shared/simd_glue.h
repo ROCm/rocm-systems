@@ -3621,13 +3621,11 @@ template <typename Inst, typename Op>
   return false;
 }
 
-/// VOP3P v_pk_mov_b32 SIMD fast path. Each src is a 64-bit pair
-/// where the per-source pair is the consecutive {base, base+1} VGPRs
-/// when the encoding points at the VGPR range. SGPR / literal sources
-/// broadcast both halves identically (handled by read_simd64's
-/// broadcast64 fallback). op_sel[0] selects the low output dword from src0,
-/// and op_sel[1] selects the high output dword from src1. The fast path is
-/// limited to the assembler's default op_sel_hi value. Functorless / fixed-op.
+/// VOP3P v_pk_mov_b32 SIMD fast path. Each src is a 64-bit SGPR or VGPR pair.
+/// SGPR pairs are broadcast across lanes by read_simd64's broadcast64 fallback.
+/// op_sel[0] selects the low output dword from src0, and op_sel[1] selects the
+/// high output dword from src1. The fast path is limited to the assembler's
+/// default op_sel_hi value. Functorless / fixed-op.
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &inst, Wavefront &wf) {

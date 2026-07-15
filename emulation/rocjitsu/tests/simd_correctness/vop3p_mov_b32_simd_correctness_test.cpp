@@ -8,7 +8,8 @@
 /// op_sel[0] selects the low output dword from src0.{lo,hi}, and op_sel[1]
 /// selects the high output dword from src1.{lo,hi}. Each case runs twice in
 /// the same process -- once forcing the scalar body, once allowing the SIMD
-/// fast path -- and both paths must match the same golden 64-bit result.
+/// fast path -- and both paths must match the same golden 64-bit result. A
+/// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
 /// In-process inactive lanes must keep the sentinel.
 
 #include "util/simd_test_hooks.h"
@@ -43,6 +44,10 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 8; // pair occupies kDstVgpr..kDstVgpr+1
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
+constexpr uint32_t kMixedSgprLo = 0x11111111u;
+constexpr uint32_t kMixedSgprHi = 0x22222222u;
+constexpr uint32_t kMixedVgprLo = 0x55555555u;
+constexpr uint32_t kMixedVgprHi = 0x66666666u;
 
 struct ArchCase {
   rj_code_arch_t arch;
@@ -103,13 +108,18 @@ struct Fixture {
   }
 
   void seed_inputs(uint32_t rot, uint64_t exec) {
+    uint32_t sb = wf->sgpr_alloc().base;
     uint32_t vb = wf->vgpr_alloc().base;
+    cu->write_sgpr(sb + 0, kMixedSgprLo);
+    cu->write_sgpr(sb + 1, kMixedSgprHi);
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       // src0 pair at v0:v1, src1 pair at v2:v3.
       cu->write_vgpr(vb + 0, lane, kVals[lane % kVals.size()]);
       cu->write_vgpr(vb + 1, lane, kVals[(lane + 1) % kVals.size()]);
       cu->write_vgpr(vb + 2, lane, kVals[(lane + rot) % kVals.size()]);
       cu->write_vgpr(vb + 3, lane, kVals[(lane + rot + 1) % kVals.size()]);
+      cu->write_vgpr(vb + 4, lane, kMixedVgprLo);
+      cu->write_vgpr(vb + 5, lane, kMixedVgprHi);
       cu->write_vgpr(vb + kDstVgpr + 0, lane, DST_SENTINEL);
       cu->write_vgpr(vb + kDstVgpr + 1, lane, DST_SENTINEL);
     }
@@ -256,6 +266,60 @@ TEST(Vop3pMovB32SimdCorrectness, PartialExec) {
     return;
   }
   check(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+
+  ForceScalarGuard gate_guard;
+  struct MixedSourceCase {
+    const char *name;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t op_sel;
+    uint64_t golden;
+  };
+  constexpr std::array<MixedSourceCase, 2> kCases{{
+      {"sgpr-vgpr", /*src0=*/0, /*src1=*/256 + 4, /*op_sel=*/1,
+       uint64_t{kMixedSgprHi} | (uint64_t{kMixedVgprLo} << 32)},
+      {"vgpr-sgpr", /*src0=*/256 + 4, /*src1=*/0, /*op_sel=*/2,
+       uint64_t{kMixedVgprLo} | (uint64_t{kMixedSgprHi} << 32)},
+  }};
+
+  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case, bool force_scalar) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx(arch);
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    vop3p_encode(/*op=*/51, kDstVgpr, test_case.src0, test_case.src1, test_case.op_sel, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << arch.name << " " << test_case.name
+                             << " v_pk_mov_b32_vop3p decode failed";
+    auto out = force_scalar
+                   ? fx.run(inst, /*rot=*/0, /*exec=*/~0ULL)
+                   : fx.run_simd_probe(inst, arch, /*rot=*/0, /*exec=*/~0ULL, test_case.op_sel);
+    delete inst;
+    return out;
+  };
+
+  for (const auto &arch : kArchCases) {
+    for (const auto &test_case : kCases) {
+      const auto scalar_out = run_mode(arch, test_case, /*force_scalar=*/true);
+      const auto simd_out = run_mode(arch, test_case, /*force_scalar=*/false);
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        EXPECT_EQ(scalar_out[lane], test_case.golden)
+            << arch.name << " " << test_case.name
+            << ": scalar mixed SGPR/VGPR result differs at lane " << lane;
+        EXPECT_EQ(simd_out[lane], test_case.golden)
+            << arch.name << " " << test_case.name
+            << ": SIMD mixed SGPR/VGPR result differs at lane " << lane;
+      }
+    }
+  }
 }
 
 } // namespace

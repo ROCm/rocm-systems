@@ -1990,6 +1990,9 @@ class TestDerivePacked:
         assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
         assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
         assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
+        assert 'uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane)' in cpp
+        assert 'uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane)' in cpp
+        assert 'encoding_value_ >= 256' not in cpp
 
 
 class TestDeriveDot:
