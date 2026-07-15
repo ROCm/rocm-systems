@@ -465,9 +465,7 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   std::vector<size_t> sendcounts1(nRanks);
   std::vector<size_t> recvcounts1(nRanks);
 
-  std::vector<size_t> sizes(4*nRanks);	//4 for sdispl, rdispl, scount, rcount
-  std::vector<size_t> gatheredSizes(4*nRanks*nRanks);
-
+  std::vector<size_t> sizes(4*nRanks);	// [sendSizes, sendDispls, recvSizes, recvDispls] (bytes).
   for (int i = 0; i < nRanks; i++) {
      sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
      rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
