@@ -180,6 +180,10 @@ typedef struct ncclCollConfig_v23100 {
   int cgaClusterSize;   /* CUDA thread-block-cluster size (Hopper+), should be the same for all
                            collectives in the same Group. Inconsistent cgaClusterSize in a Group
                            is undefined behavior. */
+  /* algorithm selection: filter which algorithm(s) this call may use. */
+  const char* algSelection;   /* selection string; NULL/UNDEF/"" == automatic */
+  int forceAlgSelection;      /* default 1 (true): unsatisfiable selection is an error */
+  int CTAPolicy;              /* NCCL_CTA_POLICY_* bitmask; UNDEF == inherit comm-level CTAPolicy */
 } ncclCollConfig_t;
 
 /* NCCL_COLLCONFIG_INITIALIZER must be used to initialize a ncclCollConfig_t when it is
@@ -193,6 +197,9 @@ typedef struct ncclCollConfig_v23100 {
   NCCL_CONFIG_UNDEF_INT,                    /* maxCTAs */             \
   NCCL_CONFIG_UNDEF_INT,                    /* nvlsCTAs */            \
   NCCL_CONFIG_UNDEF_INT,                    /* cgaClusterSize */      \
+  NCCL_CONFIG_UNDEF_PTR,                    /* algSelection */        \
+  1,                                        /* forceAlgSelection */   \
+  NCCL_CONFIG_UNDEF_INT,                    /* CTAPolicy */           \
 }
 
 /* This struct will be used by ncclGroupSimulateEnd() API to query information about simulation. */

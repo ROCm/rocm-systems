@@ -22,6 +22,7 @@
 #include "rma/rma.h"
 #include "sym_kernels.h"
 #include "config/collconfig.h"
+#include "config/algorithm_registry.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -2077,6 +2078,13 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* info, i
   struct ncclTuningInput_t input;
   input.comm = comm;
   input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
+  // algSelection for any function it forced.
+  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
+  if (effAlgMask != 0) {
+    input.tuningMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  }
+  input.CTAPolicy = info->CTAPolicy;
   input.func = info->func;
   input.redOp = info->opHost;
   input.devRedOp = info->opDev.op;
@@ -2089,7 +2097,34 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* info, i
   NCCLCHECK(ncclGetRegBuff(comm, info, &input.regBuff));
   struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
   bestTuning.maxChannels = 0;
-  NCCLCHECK(ncclTuningCompute(&input, &bestTuning));
+  if (effAlgMask != 0) {
+    // User has set algSelection:
+    // The mask that matches nothing is a possible outcome, not necessarily an error.
+    // We suppress the error temporarily.
+    NOWARN(ncclTuningCompute(&input, &bestTuning), NCCL_TUNING);
+    if (bestTuning.algo == NCCL_ALGO_UNDEF) {
+      // If no algorithm is picked, it could be the provided algSelection is impossible, or a hard
+      // failure in ncclTuningCompute() (OOM, tuner plugin error, etc.).
+      // Recompute the full general menu with NCCLCHECK: a hard failure should recur
+      // and propagate from here.
+      // On success, we will determine if unmet algSelection is a hard error or soft error (fallback).
+      input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS;
+      bestTuning = NCCL_TUNING_RESULT_INIT;
+      bestTuning.maxChannels = 0;
+      NCCLCHECK(ncclTuningCompute(&input, &bestTuning));
+      if (info->forceAlgSelection) {
+        WARN("algSelection: no algorithm in the selected set is available for %s", ncclFuncToString(info->func));
+        return ncclInvalidArgument;
+      }
+      INFO(NCCL_TUNING, "algSelection: selected set unavailable for %s; falling back to automatic selection",
+           ncclFuncToString(info->func));
+    } else {
+      INFO(NCCL_TUNING, "algSelection: %s picked within the selected set",
+           ncclAlgNameForGeneral(bestTuning.algo, bestTuning.proto));
+    }
+  } else {
+    NCCLCHECK(ncclTuningCompute(&input, &bestTuning));
+  }
   INFO(NCCL_TUNING, "Best tuning, algorithm, %s, protocol, %s", ncclAlgoToString(bestTuning.algo),
        ncclProtoToString(bestTuning.proto));
   info->algorithm = bestTuning.algo;
@@ -2671,7 +2706,11 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->opDev = opDev; // C++ struct assignment
     t->chunkSteps = info->chunkSteps;
     t->sliceSteps = info->sliceSteps;
-    t->aggIsolate = ncclCollConfigNeedAggIsolate(&info->collConfig);
+    // A per-call CTAPolicy that resolves to something other than the comm default must also be
+    // isolated from aggregation. It is resolved in place (see taskAppend), so compare against the
+    // comm policy rather than the UNDEF sentinel the other per-call options use.
+    t->aggIsolate =
+      ncclCollConfigNeedAggIsolate(&info->collConfig) || info->collConfig.CTAPolicy != comm->config.CTAPolicy;
     // Resolve the config options (env > per-call > comm) here at task-append:
     // info->collConfig holds the raw per-call values.
     NCCL_CONFIG_SET(t, minCTAs, ncclParamMinCTAs(), info->collConfig.minCTAs, comm->config.minCTAs, 1, MAXCHANNELS);
@@ -2686,6 +2725,9 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
                     MAXCHANNELS);
     NCCL_CONFIG_SET(t, cgaClusterSize, ncclParamCGAClusterSize(), info->collConfig.cgaClusterSize,
                     comm->config.cgaClusterSize, 0, NCCL_MAX_CGA_CLUSTER_SIZE);
+    NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &t->algMask));
+    t->CTAPolicy = info->collConfig.CTAPolicy;
+    t->forceAlgSelection = info->collConfig.forceAlgSelection;
     t->eActivationMask = ncclProfilerApiState.eActivationMask;
     t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
     t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
@@ -2993,6 +3035,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     // Empty collectives can be discarded.
     if (info->count == 0) return ncclSuccess;
 
+    // Validate any per-call algorithm selection up front, before the single-rank early-out and
+    // before AllToAll/Gather/Scatter lower to point-to-point tasks. Those paths never reach the
+    // kernel selector, so without this an unsatisfiable selection (bad syntax, or a function with
+    // no selectable algorithm) would be silently accepted despite forceAlgSelection. getAlgMask
+    // rejects it when forceAlgSelection is set, else logs and falls back to automatic.
+    uint64_t algMask;
+    NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
+
     if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
       if (comm->minCompCap < 90 && info->coll != ncclFuncAllGather && info->coll != ncclFuncBroadcast &&
           info->coll != ncclFuncAlltoAll && info->coll != ncclFuncScatter && info->coll != ncclFuncGather) {
@@ -3021,7 +3071,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool hierCeAvailable = ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) {
+      // CTA policy: resolve the effective per-call value in place (info->collConfig is our private
+      // copy). An unset or invalid value, or an NCCL_CTA_POLICY env override (already folded into
+      // comm->config.CTAPolicy at init), inherits the comm policy; otherwise the per-call value
+      // wins, with ZERO taking precedence over EFFICIENCY. The CE routing gate below and
+      // collTaskAppend read the resolved value back.
+      int perCall = info->collConfig.CTAPolicy;
+      bool envOverridden = ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT;
+      info->collConfig.CTAPolicy = ncclCollConfigResolveCTAPolicy(perCall, comm->config.CTAPolicy, envOverridden);
+      if ((info->collConfig.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
+          !hasSysmemSegment) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective
@@ -3083,9 +3142,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype,
                                   info->root, allowUB));
-        } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
-                   info->count > symCeAllGatherThreshold(comm) && comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
-          // Use CE for AllGather on Blackwell when size exceeds sym CE threshold
+        } else if (!ncclCollConfigHasAlgSelection(&info->collConfig) && ceAvailable && comm->symmetricSupport &&
+                   info->coll == ncclFuncAllGather && info->count > symCeAllGatherThreshold(comm) &&
+                   comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
+          // Use CE for AllGather on Blackwell when size exceeds sym CE threshold. Skip this automatic
+          // route when the user passed an algorithm selection so the selection is honored.
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
         } else {
           NCCLCHECK(collTaskAppend(comm, info, opDev));

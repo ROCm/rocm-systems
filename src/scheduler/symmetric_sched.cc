@@ -13,6 +13,7 @@
 #include "scheduler.h"
 #include "tuning.h"
 #include "enqueue.h"
+#include "config/algorithm_registry.h"
 #include <cuda_fp16.h>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
@@ -95,8 +96,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     struct ncclTaskColl* next = task->next;
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
     bool symAvailable = ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
+    // algSelection for any function it forced.
+    uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
+    bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
 
-    if (symAvailable) {
+    if (symAvailable && cfgAllowsSymk) {
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
       NCCLCHECK(ncclGetSymRegType(task->sendWin, task->recvWin, &task->winRegType));
@@ -163,6 +168,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       struct ncclTuningInput_t input;
       input.comm = comm;
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
+      // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
+      // algSelection for any function it forced.
+      uint64_t effAlgMask = comm->tuningContext.forced[headTask->func] ? 0 : headTask->algMask;
+      if (effAlgMask != 0) {
+        uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
+        if (symkMask != 0) input.tuningMask = symkMask;
+      }
       input.func = headTask->func;
       input.redOp = headTask->opHost;
       input.devRedOp = symkOp;
@@ -176,6 +188,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.symAligned16B = symBatchAligned16B(headTask);
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
+      input.CTAPolicy = headTask->CTAPolicy;
       NCCLCHECK(ncclGetCollNetSupport(comm, headTask, &input.collNetSupport));
       NCCLCHECK(ncclGetRegBuff(comm, headTask, &input.regBuff));
       struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
@@ -184,6 +197,17 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       nChannels = bestTuning.nChannels;
       nWarps = bestTuning.nWarps;
       task = headTask;
+      // Hard-error only when the selection was symmetric-only (no general algorithm to fall
+      // back to) and force is on; otherwise let the legacy fallback below run.
+      if (kernelId == ncclSymkKernelId_Count && effAlgMask != 0 && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0 &&
+          (effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS) == 0 && headTask->forceAlgSelection) {
+        WARN("algSelection names only symmetric kernel(s) that are unavailable for %s",
+             ncclFuncToString(headTask->func));
+        return ncclInvalidArgument;
+      }
+      if (effAlgMask != 0 && kernelId != ncclSymkKernelId_Count) {
+        INFO(NCCL_TUNING, "algSelection: %s picked within the selected set", ncclAlgNameForSymk(kernelId));
+      }
       // Override needFallback when buffers are registered but VAs contain sysmem segments.
       // The below functions return false when the window is NULL, so this covers non-reg cases as well.
       if (kernelId == ncclSymkKernelId_Count || ncclDevrWindowHasSysmemSegment(headTask->sendWin) ||

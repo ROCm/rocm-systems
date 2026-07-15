@@ -226,9 +226,12 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
       int collNetSupport = input->collNetSupport;
       int nvlsSupport = input->nvlsSupport;
       NCCLCHECKGOTO(ncclTuningSelectBestTuning(&tunings, &bestTuning), ret, exit);
-      // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
-      if ((input->comm->config.CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) && ncclGetEnv("NCCL_ALGO") == NULL &&
-          ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL) {
+      // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL).
+      // The NVLS-bit guard keeps this bias inside the candidate set: a per-call algSelection may have
+      // narrowed tuningMask, so EFFICIENCY must not resurrect NVLS when the selection excluded it.
+      if ((input->CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) && ncclGetEnv("NCCL_ALGO") == NULL &&
+          ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL &&
+          (input->tuningMask & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)))) {
         // make algorithm selection based on buffer registration
         // there can be other specialized policies for algorithms and protocols pickup in the future
         if (input->regBuff && (input->func == ncclFuncAllGather || input->func == ncclFuncReduceScatter)) {

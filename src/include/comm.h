@@ -244,6 +244,10 @@ struct ncclTaskColl {
   int maxCTAs;
   int nvlsCTAs;
   int cgaClusterSize;
+  // Resolved algorithm selection, captured at append time for the same reason.
+  uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
+  int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
+  int CTAPolicy;  // resolved effective CTAPolicy for this task
 };
 
 struct ncclTaskBcast {
@@ -929,5 +933,8 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
+
+// Process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when unset/invalid.
+int ncclGetEnvCtaPolicy();
 
 #endif

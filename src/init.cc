@@ -86,6 +86,7 @@ static bool ctaPolicyIsValid(int ctaPolicy) {
 }
 
 static int ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
+static std::once_flag onceEnvCtaPolicy;
 static void getEnvCtaPolicyOnce() {
   const char* env = ncclGetEnv("NCCL_CTA_POLICY");
   if (env == NULL) return;
@@ -129,6 +130,14 @@ static void getEnvCtaPolicyOnce() {
     }
     free(str);
   }
+}
+
+// Returns the process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when the env var
+// is unset or held no valid token. A UNDEF result means no env override was applied, so per-call and
+// comm-level policy stand.
+int ncclGetEnvCtaPolicy() {
+  std::call_once(onceEnvCtaPolicy, getEnvCtaPolicyOnce);
+  return ctaPolicyEnv;
 }
 
 static ncclResult_t commReclaim(struct ncclAsyncJob* job_);
@@ -2252,13 +2261,12 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     }
   }
 
-  static std::once_flag onceEnvCtaPolicy;
-  std::call_once(onceEnvCtaPolicy, getEnvCtaPolicyOnce);
-  if (ctaPolicyEnv != NCCL_CONFIG_UNDEF_INT) {
+  int ctaPolicyEnvVal = ncclGetEnvCtaPolicy();
+  if (ctaPolicyEnvVal != NCCL_CONFIG_UNDEF_INT) {
     if (comm->config.CTAPolicy != NCCL_CONFIG_UNDEF_INT) {
-      INFO(NCCL_ENV, "Comm config CTAPolicy reset to NCCL_CTA_POLICY=%d", ctaPolicyEnv);
+      INFO(NCCL_ENV, "Comm config CTAPolicy reset to NCCL_CTA_POLICY=%d", ctaPolicyEnvVal);
     }
-    comm->config.CTAPolicy = ctaPolicyEnv;
+    comm->config.CTAPolicy = ctaPolicyEnvVal;
   }
 
   nvlsCTAsEnv = ncclParamNvlsChannels();
