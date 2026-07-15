@@ -80,11 +80,8 @@ NCCL_DEVICE_INLINE uint64_t* remoteSignalAddr(ncclGinAnvilSdmaGPUContext* rsCtx,
 
 NCCL_DEVICE_INLINE uint64_t* remoteSdmaFusedSignalAddr(ncclGinAnvilSdmaGPUContext* rsCtx, int peer,
                                                        ncclGinSignal_t signalId) {
-  uintptr_t* signalRemoteAddrs = loadConst(&rsCtx->signal_remote_addrs);
-  if (signalRemoteAddrs == nullptr) return nullptr;
-  uintptr_t base = loadConst(&signalRemoteAddrs[peer]);
-  if (base == 0) return nullptr;
-  return reinterpret_cast<uint64_t*>(base + static_cast<size_t>(signalId) * sizeof(uint64_t));
+  // Same peer resolution as remoteSignalAddr: IPC table first, then bound remote bases.
+  return remoteSignalAddr(rsCtx, peer, signalId);
 }
 
 NCCL_DEVICE_INLINE bool useSdmaFusedSignal(ncclGinAnvilSdmaGPUContext* rsCtx, bool sdmaDataPath,

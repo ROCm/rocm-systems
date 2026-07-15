@@ -21,8 +21,8 @@ struct ncclGinAnvilIpcBufEntry;
  *  larger transfers use direct Anvil SDMA. */
 #define NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT 128u
 
-/** Default on (OSS7): fused COPY_LINEAR_WAIT_SIGNAL_MI4 for large SDMA puts with SignalInc. */
-#define NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL_DEFAULT 1u
+/** Default off until SDMA signal VA bind is stable on MI355; opt-in via NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL=1. */
+#define NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL_DEFAULT 0u
 
 /** sdmaDirty is a uint64_t bitmask; one bit per (peer, channel) slot. */
 #define NCCL_GIN_ANVIL_SDMA_DIRTY_BITS 64

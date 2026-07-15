@@ -123,9 +123,15 @@ void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm) {
 void ncclGinAnvilPluginTestResetHostState(void) {
   std::lock_guard<std::mutex> lock(pluginMutex);
   while (!g_pendingByComm.empty()) {
-    ginAnvilPendingClear(g_pendingByComm.begin()->first);
+    struct ncclComm* comm = g_pendingByComm.begin()->first;
+    for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr;) {
+      GinAnvilPendingEntry* next = e->next;
+      delete e;
+      e = next;
+    }
+    g_pendingByComm.erase(comm);
+    g_nextSignalSlot.erase(comm);
   }
-  g_nextSignalSlot.clear();
   bufferRegRefcount.clear();
 }
 
