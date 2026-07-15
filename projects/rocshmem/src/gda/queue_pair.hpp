@@ -344,6 +344,14 @@ class QueuePair {
   const int *symm_count{nullptr};
 
   /**
+   * @brief Resolved remote address and remote key for a symmetric target.
+   */
+  struct raddr_info {
+    uintptr_t raddr;  //!< Remote address in the connected peer's address space.
+    uint32_t rkey;    //!< Remote key to use for the transfer.
+  };
+
+  /**
    * @brief Resolve the remote address and remote key for a symmetric target.
    *
    * The target PE is this QP's connected peer. Common case is a
@@ -352,33 +360,26 @@ class QueuePair {
    * QP's registration slice, which supplies the peer base and per-NIC key
    * directly.
    *
-   * @param[in]  sym_addr  Symmetric address (valid in the local address space)
-   * @param[out] rkey_out  Filled with the remote key to use
-   * @return Remote address in the connected peer's address space
+   * @param[in] sym_addr Symmetric address (valid in the local address space)
+   * @return Remote address and remote key. Returns {0, 0} for a non-symmetric
+   *         pointer (undefined in SHMEM) so the NIC rejects the transfer,
+   *         rather than fabricating a heap offset that could silently corrupt
+   *         peer memory.
    */
-  __device__ __forceinline__ uintptr_t translate_remote(const void *sym_addr,
-      uint32_t *rkey_out) {
+  __device__ __forceinline__ raddr_info get_raddr(const void *sym_addr) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
     if ((addr - base_heap) < base_heap_size) {
-      *rkey_out = rkey;
-      return remote_heap_base + (addr - base_heap);
+      return {remote_heap_base + (addr - base_heap), rkey};
     }
     int n = symm_count ? *symm_count : 0;
     for (int i = 0; i < n; ++i) {
-      QpSymmEntry e = symm_entries[i];
-      if ((addr - e.local_base) < e.length) {
-        *rkey_out = e.rkey;
-        return e.remote_base + (addr - e.local_base);
+      uintptr_t local_base = symm_entries[i].local_base;
+      if ((addr - local_base) < symm_entries[i].length) {
+        return {symm_entries[i].remote_base + (addr - local_base),
+                symm_entries[i].rkey};
       }
     }
-    /*
-     * Neither a heap address nor a registered buffer: the caller passed a
-     * non-symmetric pointer (undefined in SHMEM). Return an invalid target
-     * (address 0 / key 0) so the NIC rejects the transfer, rather than
-     * fabricating a heap offset that could silently corrupt peer memory.
-     */
-    *rkey_out = 0;
-    return 0;
+    return {0, 0};
   }
 
   /**

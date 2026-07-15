@@ -97,8 +97,7 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
@@ -122,8 +121,7 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -153,8 +151,7 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_and not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -186,8 +183,7 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_or not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -219,8 +215,7 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_xor not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -252,8 +247,7 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_cas not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
@@ -272,8 +266,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -294,8 +287,7 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fcas not implemented for non-64bit types"); }//TODO:support for non-uint64t
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint32_t rkey;
-  uintptr_t raddr = qps[qp_index].translate_remote(dst, &rkey);
+  auto [raddr, rkey] = qps[qp_index].get_raddr(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;

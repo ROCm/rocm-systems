@@ -293,8 +293,7 @@ __device__ void QueuePair::quiet_single() {
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  uint32_t dst_rkey;
-  uintptr_t raddr = translate_remote(dest, &dst_rkey);
+  auto [raddr, dst_rkey] = get_raddr(dest);
   uint32_t src_lkey =
       (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
           ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
@@ -342,8 +341,7 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  uint32_t src_rkey;
-  uintptr_t raddr = translate_remote(source, &src_rkey);
+  auto [raddr, src_rkey] = get_raddr(source);
   uint32_t dst_lkey = get_lkey(reinterpret_cast<uintptr_t>(dest));
   get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, length,
           wf_info);
@@ -496,10 +494,7 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
 
   /* Get the correct lkey for the user buffer */
   for (size_t i=0; i<num_user_buffers; i++) {
-    uintptr_t uaddr = user_buf_info[i].addr;
-    size_t uaddr_len = user_buf_info[i].length;
-
-    if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
+    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
       return user_buf_info[i].lkey;
     }
   }
@@ -507,9 +502,9 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
   /* Get the correct lkey for a registered symmetric buffer */
   int n = symm_count ? *symm_count : 0;
   for (int i = 0; i < n; ++i) {
-    QpSymmEntry e = symm_entries[i];
-    if (is_ptr_in_range(e.local_base, e.length, addr)) {
-      return e.lkey;
+    if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length,
+                        addr)) {
+      return symm_entries[i].lkey;
     }
   }
 
