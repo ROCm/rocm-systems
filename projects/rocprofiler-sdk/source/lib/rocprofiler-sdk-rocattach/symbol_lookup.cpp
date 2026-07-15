@@ -93,7 +93,11 @@ struct mapped_object_key
     uint32_t device_minor = 0;
     uint64_t inode        = 0;
 
-    bool operator==(const mapped_object_key&) const = default;
+    bool operator==(const mapped_object_key& rhs) const
+    {
+        return device_major == rhs.device_major && device_minor == rhs.device_minor &&
+               inode == rhs.inode;
+    }
 };
 
 struct mapped_object_key_hash
@@ -613,8 +617,6 @@ symbol_is_supported_function(const Elf64_Sym& sym)
 std::optional<uint64_t>
 lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
 {
-    auto name = std::string{symbol_name};
-
     // Prefer section-backed .dynsym lookup when section headers are present;
     // sectionless files fall back to PT_DYNAMIC.
     for(const auto& section : elf.reader.sections)
@@ -622,18 +624,28 @@ lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
         if(section == nullptr || section->get_type() != SHT_DYNSYM) continue;
 
         ELFIO::const_symbol_section_accessor symbols{elf.reader, section.get()};
-        if(symbols.get_symbols_num() > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
+        auto                                 symbol_count = symbols.get_symbols_num();
+        if(symbol_count > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
 
-        auto value = ELFIO::Elf64_Addr{0};
-        auto size  = ELFIO::Elf_Xword{0};
-        auto bind  = static_cast<unsigned char>(0);
-        auto type  = static_cast<unsigned char>(0);
-        auto index = ELFIO::Elf_Half{0};
-        auto other = static_cast<unsigned char>(0);
-        if(symbols.get_symbol(name, value, size, bind, type, index, other) &&
-           symbol_is_supported_function(bind, type, index, other))
+        for(ELFIO::Elf_Xword i = 0; i < symbol_count; ++i)
         {
-            return value;
+            auto name  = std::string{};
+            auto value = ELFIO::Elf64_Addr{0};
+            auto size  = ELFIO::Elf_Xword{0};
+            auto bind  = static_cast<unsigned char>(0);
+            auto type  = static_cast<unsigned char>(0);
+            auto index = ELFIO::Elf_Half{0};
+            auto other = static_cast<unsigned char>(0);
+
+            if(!symbols.get_symbol(i, name, value, size, bind, type, index, other))
+            {
+                continue;
+            }
+
+            if(name == symbol_name && symbol_is_supported_function(bind, type, index, other))
+            {
+                return value;
+            }
         }
     }
 
