@@ -9,6 +9,6 @@ matrix-nightly:
   - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
 matrix-ci:
   # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+  # - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
   # Navi4x
   - { os-release: '24.04', gpu: 'navi4x', arch: 'gfx120X', runner: 'linux-gfx120X-gpu-rocm' }
