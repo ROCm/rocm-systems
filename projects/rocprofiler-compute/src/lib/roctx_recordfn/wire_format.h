@@ -12,8 +12,7 @@ namespace roctx_recordfn::detail
 {
 
 // Percent-encoding of the two characters that would otherwise collide with the
-// marker-path grammar. The inverse decode lives with the Python readers
-// (utils/inject_roctx/core.py decode_marker_name, utils/utils_analysis.py).
+// marker-path grammar.
 inline constexpr const char* kEncodedPercent = "%25";
 inline constexpr const char* kEncodedSlash   = "%2F";
 

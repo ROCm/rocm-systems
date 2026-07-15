@@ -7,6 +7,7 @@
 #include "install_state.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
+#include "scope_guard.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
@@ -66,10 +67,11 @@ inline void unwind_observer_context(const RoctxObserverContext& observer_ctx, bo
 
 inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
 {
-    std::unique_ptr<RoctxObserverContext> observer_ctx;
     try
     {
-        observer_ctx = std::make_unique<RoctxObserverContext>();
+        auto observer_ctx = std::make_unique<RoctxObserverContext>();
+        auto rollback     = make_scope_guard(
+            [&] { unwind_observer_context(*observer_ctx, /*count_pop=*/false); });
 
         const at::RecordScope scope  = record_fn.scope();
         const std::int64_t    seq_nr = record_fn.seqNr();
@@ -125,22 +127,13 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
         observer_ctx->pushed_roctx_range = true;
         g_capture.capture(wire_string);
         inc(g_stats.pushes);
+
+        rollback.dismiss();
         return observer_ctx;
     }
     catch (...)
     {
         inc(g_stats.callback_errors);
-        try
-        {
-            if (observer_ctx)
-            {
-                unwind_observer_context(*observer_ctx, /*count_pop=*/false);
-            }
-        }
-        catch (...)
-        {
-            inc(g_stats.callback_errors);
-        }
         return nullptr;
     }
 }
