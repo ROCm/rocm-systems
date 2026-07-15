@@ -178,12 +178,8 @@ bool ParseNonNegInt(const std::string& s, int64_t& out) {
 }
 
 const char* const kLocalRankVars[] = {
-    "LOCAL_RANK",
-    "OMPI_COMM_WORLD_LOCAL_RANK",
-    "MPI_LOCALRANKID",
-    "PMI_LOCAL_RANK",
-    "MV2_COMM_WORLD_LOCAL_RANK",
-    "SLURM_LOCALID"};
+    "LOCAL_RANK",     "OMPI_COMM_WORLD_LOCAL_RANK", "MPI_LOCALRANKID",
+    "PMI_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK",  "SLURM_LOCALID"};
 
 // Resolves the seed offset (>=0) and its source name; source is "" when the
 // result is -1 (getpid() fallback).

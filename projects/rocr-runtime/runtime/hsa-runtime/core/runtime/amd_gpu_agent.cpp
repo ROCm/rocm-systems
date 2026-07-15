@@ -951,8 +951,8 @@ void GpuAgent::InitDma() {
       // behavior takes precedence. The downstream
       // NumSdmaXgmiEngines guard still forces the default engine pick when no
       // xGMI engine exists.
-      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
-          properties_.NumSdmaEngines > 0) {
+      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 &&
+          supported_isas()[0]->GetMinorVersion() >= 4 && properties_.NumSdmaEngines > 0) {
         // Method A: the round-robin seed comes from Flag, which resolves it in
         // priority order: HSA_SDMA_ENGINE_ID_OFFSET (explicit, includes 0),
         // then a launcher local-rank env var (LOCAL_RANK,
@@ -963,9 +963,8 @@ void GpuAgent::InitDma() {
         // cause (two pids reducing to the same engine).
         const Flag& rt_flag = core::Runtime::runtime_singleton_->flag();
         const int64_t sdma_seed_off = rt_flag.sdma_seed_offset();
-        const uint32_t sdma_seed =
-            (sdma_seed_off >= 0) ? static_cast<uint32_t>(sdma_seed_off)
-                                 : static_cast<uint32_t>(getpid());
+        const uint32_t sdma_seed = (sdma_seed_off >= 0) ? static_cast<uint32_t>(sdma_seed_off)
+                                                        : static_cast<uint32_t>(getpid());
         const char* sdma_seed_src =
             (sdma_seed_off >= 0) ? rt_flag.sdma_seed_source().c_str() : "getpid()";
 
@@ -977,19 +976,18 @@ void GpuAgent::InitDma() {
         const bool limit_d2h = (!isHostToDev && d2h_limit > 0);
 
         if (rt_flag.sdma_round_robin_pcie_xgmi() == Flag::SDMA_ENABLE) {
-          uint32_t total_eng =
-              properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+          uint32_t total_eng = properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
           if (limit_d2h)
             total_eng = std::min<uint32_t>(total_eng, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % total_eng;
           debug_print(
-              "HSA_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
+              "HSA_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA "
+              "engines%s\n",
               sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, total_eng,
               limit_d2h ? " [D2H near-AID limit]" : "");
         } else if (rt_flag.sdma_round_robin() == Flag::SDMA_ENABLE) {
           uint32_t mod_eng = properties_.NumSdmaEngines;
-          if (limit_d2h)
-            mod_eng = std::min<uint32_t>(mod_eng, static_cast<uint32_t>(d2h_limit));
+          if (limit_d2h) mod_eng = std::min<uint32_t>(mod_eng, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % mod_eng;
           debug_print("HSA_SDMA_ROUND_ROBIN: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
                       sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, mod_eng,

@@ -136,8 +136,7 @@ class Flag {
     // engines and both live on the first XCD/XCC, so this stays within that
     // XCC. Opt-in via HSA_SDMA_ROUND_ROBIN=1; default keeps the stock pick.
     var = os::GetEnvVar("HSA_SDMA_ROUND_ROBIN");
-    sdma_round_robin_ = (var == "1") ? SDMA_ENABLE :
-                        ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
+    sdma_round_robin_ = (var == "1") ? SDMA_ENABLE : ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
     // Widen the host<->device round-robin to ALL SDMA engines -- the
     // NumSdmaEngines PCIe/paging engines plus the NumSdmaXgmiEngines xGMI
@@ -151,8 +150,8 @@ class Flag {
     // degrades safely to the two-engine behavior and is a no-op. Opt-in via
     // HSA_SDMA_ROUND_ROBIN_PCIE_XGMI=1; default keeps the stock pick.
     var = os::GetEnvVar("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
-    sdma_round_robin_pcie_xgmi_ = (var == "1") ? SDMA_ENABLE :
-                                  ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
+    sdma_round_robin_pcie_xgmi_ =
+        (var == "1") ? SDMA_ENABLE : ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
     // Explicit SDMA engine-id offset for the round-robin pick. When set to a
     // valid non-negative integer it replaces the getpid() seed used by
@@ -202,12 +201,8 @@ class Flag {
       sdma_seed_source_ = "HSA_SDMA_ENGINE_ID_OFFSET";
     } else {
       static const char* const kLocalRankVars[] = {
-          "LOCAL_RANK",
-          "OMPI_COMM_WORLD_LOCAL_RANK",
-          "MPI_LOCALRANKID",
-          "PMI_LOCAL_RANK",
-          "MV2_COMM_WORLD_LOCAL_RANK",
-          "SLURM_LOCALID"};
+          "LOCAL_RANK",     "OMPI_COMM_WORLD_LOCAL_RANK", "MPI_LOCALRANKID",
+          "PMI_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK",  "SLURM_LOCALID"};
       for (const char* name : kLocalRankVars) {
         int64_t rank = -1;
         if (parse_nonneg(os::GetEnvVar(name), rank)) {
