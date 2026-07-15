@@ -17,9 +17,13 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
+import re
+import smtplib
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
+from email.mime.text import MIMEText
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -228,8 +232,8 @@ def print_environment_info() -> None:
     log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
 
 
-def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> int:
-    """Run pytest on test_c10d_nccl.py and return the exit code."""
+def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> tuple[int, dict]:
+    """Run pytest on test_c10d_nccl.py and return (exit_code, summary_dict)."""
     miopen_cache = tempfile.mkdtemp(prefix="miopen_cache_")
     os.environ["MIOPEN_USER_DB_PATH"] = miopen_cache
 
@@ -258,6 +262,10 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     ]
     log.info("Running: %s", " ".join(cmd))
 
+    passed_tests = []
+    failed_tests = []
+    summary_line = ""
+
     with open(results_log, "w") as log_file:
         proc = subprocess.Popen(
             cmd,
@@ -272,11 +280,110 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
             sys.stdout.write(line)
             sys.stdout.flush()
             log_file.write(line)
+            if " PASSED" in line and "::" in line:
+                test_name = line.split("::")[1].split()[0] if "::" in line else line.strip()
+                duration = ""
+                dur_match = re.search(r"\[(\d+\.\d+s)\]", line)
+                if dur_match:
+                    duration = dur_match.group(1)
+                passed_tests.append((test_name, duration))
+            elif " FAILED" in line and "::" in line:
+                test_name = line.split("::")[1].split()[0] if "::" in line else line.strip()
+                failed_tests.append(test_name)
+            elif "passed" in line and ("failed" in line or "deselected" in line or "error" in line or line.strip().startswith("=")):
+                summary_line = line.strip()
+            elif line.strip().startswith("=") and "passed" in line:
+                summary_line = line.strip()
         proc.wait()
 
     log.info("Test exit code: %d", proc.returncode)
     log.info("Results written to: %s", results_log)
-    return proc.returncode
+
+    summary = {
+        "exit_code": proc.returncode,
+        "test_scope": test_scope,
+        "passed": passed_tests,
+        "failed": failed_tests,
+        "summary_line": summary_line.strip("= "),
+    }
+    return proc.returncode, summary
+
+
+def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
+    """Generate a plain-text summary report."""
+    import torch
+
+    status = "PASSED" if summary["exit_code"] == 0 else "FAILED"
+    gpu_info = []
+    for i in range(torch.cuda.device_count()):
+        gpu_info.append(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+
+    lines = [
+        f"RCCL PyTorch c10d Test Report",
+        f"{'=' * 40}",
+        f"Status:     {status}",
+        f"Test scope: {summary['test_scope']}",
+        f"Date:       {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"",
+        f"PyTorch:    {torch.__version__}",
+        f"RCCL:       {rccl_lib}",
+        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0)}",
+        f"",
+        f"Results:    {summary['summary_line']}",
+        f"",
+    ]
+
+    if summary["failed"]:
+        lines.append(f"FAILED tests ({len(summary['failed'])}):")
+        for name in summary["failed"]:
+            lines.append(f"  FAIL  {name}")
+        lines.append("")
+
+    if summary["passed"]:
+        lines.append(f"PASSED tests ({len(summary['passed'])}):")
+        for name, duration in summary["passed"]:
+            lines.append(f"  OK    {name:60s} {duration}")
+        lines.append("")
+
+    run_url = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_url and repo and run_id:
+        lines.append(f"CI run: {run_url}/{repo}/actions/runs/{run_id}")
+
+    return "\n".join(lines)
+
+
+def write_github_summary(report: str) -> None:
+    """Write report to GITHUB_STEP_SUMMARY if available."""
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a") as f:
+            f.write("```\n")
+            f.write(report)
+            f.write("\n```\n")
+        log.info("Summary written to GITHUB_STEP_SUMMARY")
+
+
+def send_email_report(report: str, recipient: str, status: str) -> None:
+    """Send the summary report via email."""
+    subject = f"RCCL PyTorch c10d Test: {status}"
+    msg = MIMEText(report)
+    msg["Subject"] = subject
+    msg["From"] = "rccl-ci@amd.com"
+    msg["To"] = recipient
+
+    smtp_servers = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
+    for server in smtp_servers:
+        try:
+            with smtplib.SMTP(server, timeout=10) as s:
+                s.sendmail(msg["From"], [recipient], msg.as_string())
+            log.info("Email sent to %s via %s", recipient, server)
+            return
+        except Exception as e:
+            log.debug("SMTP %s failed: %s", server, e)
+            continue
+    log.warning("Could not send email to %s (tried: %s)", recipient, ", ".join(smtp_servers))
 
 
 def set_github_output(key: str, value: str) -> None:
@@ -314,6 +421,12 @@ def main() -> None:
         help="Run smoke tests (22 curated tests, ~3min) or all tests (default: smoke)",
     )
     parser.add_argument(
+        "--notify-email",
+        type=str,
+        default="",
+        help="Send summary report to this email address",
+    )
+    parser.add_argument(
         "--discover-only",
         action="store_true",
         help="Only discover library paths and set GITHUB_OUTPUT, then exit",
@@ -343,7 +456,21 @@ def main() -> None:
     # Step 4: Patch missing modules, print environment info, and run tests
     patch_missing_torch_modules()
     print_environment_info()
-    exit_code = run_tests(args.pytorch_src, args.results_log, args.test_scope)
+    exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
+
+    # Step 5: Generate and distribute summary report
+    report = generate_summary_report(summary, rccl_lib)
+    log.info("\n%s", report)
+    write_github_summary(report)
+
+    summary_path = args.results_log.parent / "pytorch_c10d_summary.txt"
+    summary_path.write_text(report)
+    log.info("Summary written to: %s", summary_path)
+
+    if args.notify_email:
+        status = "PASSED" if exit_code == 0 else "FAILED"
+        send_email_report(report, args.notify_email, status)
+
     sys.exit(exit_code)
 
 
