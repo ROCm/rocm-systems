@@ -124,8 +124,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
             const char*         name = data->args.roctxRangePushA.message;
             const std::uint64_t range_id =
                 s_push_range_id.fetch_sub(1, std::memory_order_relaxed);
-            m_controller->handle_range_start(range_id, name);
-            const bool pushed_write_enabled = m_controller->should_write_markers();
+            m_trigger->on_range_start(range_id, name);
+            const bool pushed_write_enabled = m_trigger->should_write_markers();
             m_pushed_ranges.push_back(
                 { tim::add_hash_id(name), ts, pushed_write_enabled, range_id });
             if(pushed_write_enabled)
@@ -210,7 +210,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 
             const auto range_id = m_pushed_ranges.back().range_id;
             pop_and_write(m_pushed_ranges);
-            m_controller->handle_range_stop(range_id);
+            m_trigger->on_range_stop(range_id);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
