@@ -42,14 +42,12 @@ from rich.text import Text
 
 from utils.mem_chart_common import (
     COLORS,
-    _fmt_edge,
-    _safe_float_sum,
     bar,
-    format_sci,
+    fmt_edge,
     format_value,
     metric_line,
+    safe_float_sum,
 )
-from utils.utils_analysis import format_bw_human_readable
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -215,7 +213,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["tcp_gl1_read_bw"] = metric_dict.get("TCP-GL1 Read Bandwidth")
     m["tcp_gl1_write_bw"] = metric_dict.get("TCP-GL1 Write Bandwidth")
 
-    m["sqc_gl1_read_bw"] = _safe_float_sum(m["icache_gl1_bw"], m["dcache_gl1_bw"])
+    m["sqc_gl1_read_bw"] = safe_float_sum(m["icache_gl1_bw"], m["dcache_gl1_bw"])
 
     m["gl1c_util"] = metric_dict.get("GL1 Cache Utilization")
     m["gl1c_hit"] = metric_dict.get("GL1 Cache Hit Rate")
@@ -248,7 +246,7 @@ def _build_kernel_and_l0(
 
     Returns (kernel_panel, kernel_edges_text, l0_stack, gl1_edges_text).
     """
-    fmt_bw = format_bw_human_readable
+
     c_rd = COLORS["read"]
     c_wr = COLORS["write"]
     c_at = COLORS["atomic"]
@@ -271,19 +269,19 @@ def _build_kernel_and_l0(
         "",
         "     [white]Request[/white]",
         "",
-        f"[{c_rd}]{_fmt_edge('Read', m['lds_insts'])}[/{c_rd}]",
+        f"[{c_rd}]{fmt_edge('Read', m['lds_insts'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_wr}]{_fmt_edge('Write', m['lds_inst_cycles'])}[/{c_wr}]",
+        f"[{c_wr}]{fmt_edge('Write', m['lds_inst_cycles'])}[/{c_wr}]",
         f"[{c_wr}]{ka_r}[/{c_wr}]",
-        f"[{c_at}]{_fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
+        f"[{c_at}]{fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
         f"[{c_at}]{ka_b}[/{c_at}]",
         "",
         "",
         "",
         "",
-        f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
+        f"[{c_rd}]{fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_wr}]{_fmt_edge('Write', m['tcp_write_req'])}[/{c_wr}]",
+        f"[{c_wr}]{fmt_edge('Write', m['tcp_write_req'])}[/{c_wr}]",
         f"[{c_wr}]{ka_r}[/{c_wr}]",
         "",
         "",
@@ -293,9 +291,9 @@ def _build_kernel_and_l0(
         "",
         "",
         "",
-        f"[{c_rd}]{_fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_rd}]{_fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
     ]
     kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
@@ -349,9 +347,9 @@ def _build_kernel_and_l0(
     # Edges to GL1 Cache (TCP and SQC connect, LDS does NOT)
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
-    tcp_gl1_rd = fmt_bw(m["tcp_gl1_read_bw"], precision=1)
-    tcp_gl1_wr = fmt_bw(m["tcp_gl1_write_bw"], precision=1)
-    sqc_gl1_rd = fmt_bw(m["sqc_gl1_read_bw"], precision=1)
+    tcp_gl1_rd = format_value(m["tcp_gl1_read_bw"], "Bytes/s", 1)
+    tcp_gl1_wr = format_value(m["tcp_gl1_write_bw"], "Bytes/s", 1)
+    sqc_gl1_rd = format_value(m["sqc_gl1_read_bw"], "Bytes/s", 1)
     gl1_edges_lines = [
         "",
         "",
@@ -391,7 +389,7 @@ def _build_cache_columns(
 
     Returns (gl1_panel, gl1_gl2_edges_text, gl2_panel).
     """
-    fmt_bw = format_bw_human_readable
+
     c_rd = COLORS["read"]
     c_wr = COLORS["write"]
     c_bl = COLORS["block"]
@@ -412,8 +410,8 @@ def _build_cache_columns(
         height=30,
     )
 
-    rd_bw = fmt_bw(m["gl1_gl2_read_bw"], precision=1)
-    wr_bw = fmt_bw(m["gl1_gl2_write_bw"], precision=1)
+    rd_bw = format_value(m["gl1_gl2_read_bw"], "Bytes/s", 1)
+    wr_bw = format_value(m["gl1_gl2_write_bw"], "Bytes/s", 1)
     gl1_gl2_edges_lines = [
         "",
         "",
@@ -463,15 +461,15 @@ def _build_memory_columns(
 
     Returns (gl2_gcea_edges_text, gcea_panel, dram_edges_text, dram_panel).
     """
-    fmt_bw = format_bw_human_readable
+
     c_rd = COLORS["read"]
     c_wr = COLORS["write"]
     c_bl = COLORS["block"]
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
 
-    gl2_rd = fmt_bw(m["gl2c_read_bw"], precision=1)
-    gl2_wr = fmt_bw(m["gl2c_write_bw"], precision=1)
+    gl2_rd = format_value(m["gl2c_read_bw"], "Bytes/s", 1)
+    gl2_wr = format_value(m["gl2c_write_bw"], "Bytes/s", 1)
     gl2_gcea_edges_lines = [
         "",
         "",
@@ -509,8 +507,8 @@ def _build_memory_columns(
         height=30,
     )
 
-    dram_rd = fmt_bw(m["dram_read_bw"], precision=1)
-    dram_wr = fmt_bw(m["dram_write_bw"], precision=1)
+    dram_rd = format_value(m["dram_read_bw"], "Bytes/s", 1)
+    dram_wr = format_value(m["dram_write_bw"], "Bytes/s", 1)
     dram_edges_lines = [
         "",
         "",
@@ -537,7 +535,7 @@ def _build_memory_columns(
     ]
     dram_edges_text = Text.from_markup("\n".join(dram_edges_lines))
 
-    total = fmt_bw(m["total_bw"], precision=1)
+    total = format_value(m["total_bw"], "Bytes/s", 1)
     dram_panel = Panel(
         "[dim]DDR5/LPDDR5[/dim]\n"
         "\n"

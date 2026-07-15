@@ -11,7 +11,8 @@ Covers:
 
 import common
 
-from utils import mem_chart_gfx9, mem_chart_gfx11
+from utils import mem_chart_common, mem_chart_gfx9, mem_chart_gfx11
+from utils.utils_analysis import format_bw_human_readable
 
 # =============================================================================
 # Tests for format_bw_human_readable function (gfx11)
@@ -24,104 +25,93 @@ class TestFormatBwHumanReadable:
     def test_terabytes_per_second(self):
         """Test TB/s formatting for values >= 1e12."""
         # 1 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e12, "Bytes/s", 1)
+        result = format_bw_human_readable(1e12, "Bytes/s", 1)
         assert result == "1.0 TB/s"
 
         # 2.5 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(2.5e12, "Bytes/s", 1)
+        result = format_bw_human_readable(2.5e12, "Bytes/s", 1)
         assert result == "2.5 TB/s"
 
         # Large value with higher precision
-        result = mem_chart_gfx11.format_bw_human_readable(1.234e12, "Bytes/s", 2)
+        result = format_bw_human_readable(1.234e12, "Bytes/s", 2)
         assert result == "1.23 TB/s"
 
     def test_gigabytes_per_second(self):
         """Test GB/s formatting for values >= 1e9 and < 1e12."""
         # 1 GB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e9, "Bytes/s", 1)
+        result = format_bw_human_readable(1e9, "Bytes/s", 1)
         assert result == "1.0 GB/s"
 
         # 100 GB/s (typical HBM bandwidth)
-        result = mem_chart_gfx11.format_bw_human_readable(100e9, "Bytes/s", 1)
+        result = format_bw_human_readable(100e9, "Bytes/s", 1)
         assert result == "100.0 GB/s"
 
         # 512.5 GB/s
-        result = mem_chart_gfx11.format_bw_human_readable(512.5e9, "Bytes/s", 1)
+        result = format_bw_human_readable(512.5e9, "Bytes/s", 1)
         assert result == "512.5 GB/s"
 
     def test_megabytes_per_second(self):
         """Test MB/s formatting for values >= 1e6 and < 1e9."""
         # 1 MB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e6, "Bytes/s", 1)
+        result = format_bw_human_readable(1e6, "Bytes/s", 1)
         assert result == "1.0 MB/s"
 
         # 500 MB/s
-        result = mem_chart_gfx11.format_bw_human_readable(500e6, "Bytes/s", 1)
+        result = format_bw_human_readable(500e6, "Bytes/s", 1)
         assert result == "500.0 MB/s"
 
     def test_kilobytes_per_second(self):
         """Test KB/s formatting for values >= 1e3 and < 1e6."""
         # 1 KB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e3, "Bytes/s", 1)
+        result = format_bw_human_readable(1e3, "Bytes/s", 1)
         assert result == "1.0 KB/s"
 
         # 512 KB/s
-        result = mem_chart_gfx11.format_bw_human_readable(512e3, "Bytes/s", 1)
+        result = format_bw_human_readable(512e3, "Bytes/s", 1)
         assert result == "512.0 KB/s"
 
     def test_bytes_per_second(self):
         """Test B/s formatting for values < 1e3."""
         # 500 B/s
-        result = mem_chart_gfx11.format_bw_human_readable(500, "Bytes/s", 1)
+        result = format_bw_human_readable(500, "Bytes/s", 1)
         assert result == "500.0 B/s"
 
         # 0 B/s
-        result = mem_chart_gfx11.format_bw_human_readable(0, "Bytes/s", 1)
+        result = format_bw_human_readable(0, "Bytes/s", 1)
         assert result == "0.0 B/s"
 
     def test_legacy_gbps_unit_conversion(self):
         """Test conversion from legacy GB/s unit to human-readable."""
         # Input is 100 GB/s, should convert to Bytes/s first then format
-        result = mem_chart_gfx11.format_bw_human_readable(100, "GB/s", 1)
+        result = format_bw_human_readable(100, "GB/s", 1)
         assert result == "100.0 GB/s"
 
         # 1500 GB/s -> 1.5 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1500, "GB/s", 1)
+        result = format_bw_human_readable(1500, "GB/s", 1)
         assert result == "1.5 TB/s"
 
     def test_none_value(self):
         """Test handling of None values."""
-        result = mem_chart_gfx11.format_bw_human_readable(None, "Bytes/s", 1)
+        result = format_bw_human_readable(None, "Bytes/s", 1)
         assert result == "N/A"
 
     def test_invalid_string_value(self):
         """Test handling of non-numeric string values."""
-        result = mem_chart_gfx11.format_bw_human_readable("invalid", "Bytes/s", 1)
+        result = format_bw_human_readable("invalid", "Bytes/s", 1)
         assert result == "N/A"
 
     def test_precision_parameter(self):
         """Test different precision values."""
         value = 123.456789e9  # 123.456789 GB/s
 
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 0) == "123 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 1)
-            == "123.5 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 2)
-            == "123.46 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 3)
-            == "123.457 GB/s"
-        )
+        assert format_bw_human_readable(value, "Bytes/s", 0) == "123 GB/s"
+        assert format_bw_human_readable(value, "Bytes/s", 1) == "123.5 GB/s"
+        assert format_bw_human_readable(value, "Bytes/s", 2) == "123.46 GB/s"
+        assert format_bw_human_readable(value, "Bytes/s", 3) == "123.457 GB/s"
 
 
 # =============================================================================
-# Tests for format_value function (gfx11)
+# Tests for format_value function (mem_chart_common)
 # =============================================================================
 
 
@@ -130,40 +120,40 @@ class TestFormatValue:
 
     def test_percentage_formatting(self):
         """Test percentage formatting."""
-        result = mem_chart_gfx11.format_value(85.5, "%", 1)
+        result = mem_chart_common.format_value(85.5, "%", 1)
         assert result == "85.5%"
 
-        result = mem_chart_gfx11.format_value(100, "%", 0)
+        result = mem_chart_common.format_value(100, "%", 0)
         assert result == "100%"
 
     def test_bytes_per_second_unit(self):
         """Test Bytes/s formatting routes to human-readable."""
-        result = mem_chart_gfx11.format_value(100e9, "Bytes/s", 1)
+        result = mem_chart_common.format_value(100e9, "Bytes/s", 1)
         assert "GB/s" in result
 
     def test_gbps_unit(self):
         """Test GB/s formatting routes to human-readable."""
-        result = mem_chart_gfx11.format_value(100, "GB/s", 1)
+        result = mem_chart_common.format_value(100, "GB/s", 1)
         assert "GB/s" in result
 
     def test_none_value(self):
         """Test handling of None values."""
-        result = mem_chart_gfx11.format_value(None, "%", 1)
+        result = mem_chart_common.format_value(None, "%", 1)
         assert result == "N/A"
 
     def test_string_value_conversion(self):
         """Test conversion of string values to float."""
-        result = mem_chart_gfx11.format_value("50.5", "%", 1)
+        result = mem_chart_common.format_value("50.5", "%", 1)
         assert result == "50.5%"
 
     def test_invalid_string_value(self):
         """Test handling of non-convertible string values."""
-        result = mem_chart_gfx11.format_value("invalid", "%", 1)
+        result = mem_chart_common.format_value("invalid", "%", 1)
         assert result == "invalid"
 
 
 # =============================================================================
-# Tests for format_sci function (gfx11)
+# Tests for format_sci function (mem_chart_common)
 # =============================================================================
 
 
@@ -172,38 +162,38 @@ class TestFormatSci:
 
     def test_small_numbers_no_scientific(self):
         """Test that small numbers are displayed as integers."""
-        assert mem_chart_gfx11.format_sci(100) == "100"
-        assert mem_chart_gfx11.format_sci(999) == "999"
+        assert mem_chart_common.format_sci(100) == "100"
+        assert mem_chart_common.format_sci(999) == "999"
 
     def test_large_numbers_scientific(self):
         """Test that large numbers are displayed in scientific notation."""
-        result = mem_chart_gfx11.format_sci(1000000)
+        result = mem_chart_common.format_sci(1000000)
         assert "e" in result.lower()
 
-        result = mem_chart_gfx11.format_sci(12345678, 2)
+        result = mem_chart_common.format_sci(12345678, 2)
         assert "e" in result.lower()
 
     def test_none_value(self):
         """Test handling of None values."""
-        result = mem_chart_gfx11.format_sci(None)
+        result = mem_chart_common.format_sci(None)
         assert result == "N/A"
 
     def test_invalid_value(self):
         """Test handling of invalid values."""
-        result = mem_chart_gfx11.format_sci("invalid")
+        result = mem_chart_common.format_sci("invalid")
         assert result == "N/A"
 
     def test_negative_numbers(self):
         """Test negative number handling."""
-        result = mem_chart_gfx11.format_sci(-500)
+        result = mem_chart_common.format_sci(-500)
         assert result == "-500"
 
-        result = mem_chart_gfx11.format_sci(-1000000)
+        result = mem_chart_common.format_sci(-1000000)
         assert "e" in result.lower()
 
 
 # =============================================================================
-# Tests for bar function (gfx11)
+# Tests for bar function (mem_chart_common)
 # =============================================================================
 
 
@@ -212,45 +202,45 @@ class TestBar:
 
     def test_full_bar(self):
         """Test 100% progress bar."""
-        result = mem_chart_gfx11.bar(100, 10)
+        result = mem_chart_common.bar(100, 10)
         assert "█" * 10 in result
         assert "░" not in result
 
     def test_empty_bar(self):
         """Test 0% progress bar."""
-        result = mem_chart_gfx11.bar(0, 10)
+        result = mem_chart_common.bar(0, 10)
         assert "░" * 10 in result
         assert "█" not in result
 
     def test_partial_bar(self):
         """Test 50% progress bar."""
-        result = mem_chart_gfx11.bar(50, 10)
+        result = mem_chart_common.bar(50, 10)
         assert "█" * 5 in result
         assert "░" * 5 in result
 
     def test_none_value(self):
         """Test None value returns empty bar."""
-        result = mem_chart_gfx11.bar(None, 10)
+        result = mem_chart_common.bar(None, 10)
         assert "░" * 10 in result
 
     def test_invalid_value(self):
         """Test invalid value returns empty bar."""
-        result = mem_chart_gfx11.bar("invalid", 10)
+        result = mem_chart_common.bar("invalid", 10)
         assert "░" * 10 in result
 
     def test_over_100_clamped(self):
         """Test values over 100% are clamped."""
-        result = mem_chart_gfx11.bar(150, 10)
+        result = mem_chart_common.bar(150, 10)
         assert "█" * 10 in result
 
     def test_negative_clamped(self):
         """Test negative values are clamped to 0."""
-        result = mem_chart_gfx11.bar(-50, 10)
+        result = mem_chart_common.bar(-50, 10)
         assert "░" * 10 in result
 
 
 # =============================================================================
-# Tests for metric_line function (gfx11)
+# Tests for metric_line function (mem_chart_common)
 # =============================================================================
 
 
@@ -259,14 +249,14 @@ class TestMetricLine:
 
     def test_basic_metric(self):
         """Test basic metric line formatting."""
-        result = mem_chart_gfx11.metric_line("Util", 75.5, "%", "green")
+        result = mem_chart_common.metric_line("Util", 75.5, "%", "green")
         assert "Util" in result
         assert "75.5%" in result
         assert "green" in result
 
     def test_with_none_value(self):
         """Test metric line with None value."""
-        result = mem_chart_gfx11.metric_line("BW", None, "GB/s", "cyan")
+        result = mem_chart_common.metric_line("BW", None, "GB/s", "cyan")
         assert "BW" in result
         assert "N/A" in result
 
@@ -624,12 +614,22 @@ class TestPlotMemChartGfx9:
     def test_contains_cdna_architecture_elements(self):
         """Output contains all CDNA memory hierarchy block names."""
         result = mem_chart_gfx9.plot_mem_chart(
-            "per_kernel", dict(GFX9_SAMPLE_METRICS),
+            "per_kernel",
+            dict(GFX9_SAMPLE_METRICS),
         )
         stripped = common.strip_ansi(result)
         expected_blocks = [
-            "Kernel", "Requests", "VL1D", "LDS", "sL1D",
-            "L1I", "L2", "Data Fabric", "MALL", "UMC", "HBM",
+            "Kernel",
+            "Requests",
+            "VL1D",
+            "LDS",
+            "sL1D",
+            "L1I",
+            "L2",
+            "Data Fabric",
+            "MALL",
+            "UMC",
+            "HBM",
         ]
         for block in expected_blocks:
             assert block in stripped, f"Missing block: {block}"
@@ -649,7 +649,9 @@ class TestPlotMemChartGfx9:
         """Custom chart_title appears in output."""
         title = "Custom CDNA Chart Title"
         result = mem_chart_gfx9.plot_mem_chart(
-            "per_kernel", dict(GFX9_SAMPLE_METRICS), chart_title=title,
+            "per_kernel",
+            dict(GFX9_SAMPLE_METRICS),
+            chart_title=title,
         )
         stripped = common.strip_ansi(result)
         assert title in stripped
@@ -731,3 +733,45 @@ class TestIntegrationGfx9:
         result = mem_chart_gfx9.plot_mem_chart("per_kernel", metrics)
         assert isinstance(result, str)
         assert len(result) > 100
+
+
+# =============================================================================
+# Tests for mem_chart_common helpers
+# =============================================================================
+
+
+class TestSafeFloatSum:
+    """Tests for safe_float_sum — tolerant numeric aggregation."""
+
+    def test_mixed_valid_and_none(self):
+        assert mem_chart_common.safe_float_sum(1.5, None, 2.5) == 4.0
+
+    def test_all_none_returns_none(self):
+        assert mem_chart_common.safe_float_sum(None, None) is None
+
+    def test_string_numbers_coerced(self):
+        assert mem_chart_common.safe_float_sum("10", 5) == 15.0
+
+    def test_unparseable_strings_skipped(self):
+        assert mem_chart_common.safe_float_sum("bad", 7) == 7.0
+
+    def test_all_unparseable_returns_none(self):
+        assert mem_chart_common.safe_float_sum(None, "bad") is None
+
+
+class TestFmtEdge:
+    """Tests for fmt_edge — edge label formatter for diagram arrows."""
+
+    def test_with_value_includes_sci_notation(self):
+        result = mem_chart_common.fmt_edge("Read", 1_500_000)
+        assert "Read" in result
+        assert "1.50e+06" in result
+
+    def test_none_value_omits_number(self):
+        result = mem_chart_common.fmt_edge("Write", None)
+        assert "Write" in result
+        assert ":" not in result
+
+    def test_small_value_shows_integer(self):
+        result = mem_chart_common.fmt_edge("Atomic", 42)
+        assert "42" in result

@@ -64,7 +64,7 @@ def metric_line(
     return f"{label} [{color}]{formatted}[/{color}]"
 
 
-def bar(pct: float, w: int = 10) -> str:
+def bar(pct: Optional[float], w: int = 10) -> str:
     if pct is None:
         return "░" * w
     try:
@@ -75,7 +75,7 @@ def bar(pct: float, w: int = 10) -> str:
     return "█" * filled + "░" * (w - filled)
 
 
-def _safe_float_sum(
+def safe_float_sum(
     *values: Union[int, float, str, None],
 ) -> Optional[float]:
     """Sum non-None numeric values. Returns None if no value is valid."""
@@ -91,7 +91,7 @@ def _safe_float_sum(
     return total if any_valid else None
 
 
-def _fmt_edge(
+def fmt_edge(
     label: str,
     value: Any,  # noqa: ANN401
     width: int = 7,
