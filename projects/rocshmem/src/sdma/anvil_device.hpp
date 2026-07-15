@@ -38,8 +38,8 @@
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
-namespace gin_anvil {
-namespace sdma {
+namespace sdma_anvil {
+
 
 constexpr uint32_t SDMA_QUEUE_SIZE = 1024 * 1024;  // 1MB (matches rocm-xio sdma-ep)
 constexpr HSA_QUEUE_PRIORITY DEFAULT_PRIORITY = HSA_QUEUE_PRIORITY_NORMAL;
@@ -638,7 +638,7 @@ __device__ __forceinline__ bool waitForSignal(HSAuint64* addr, uint64_t expected
 
 #endif  // __HIPCC__ || __CUDACC__
 
-}  // namespace sdma
-}  // namespace gin_anvil
+
+}  // namespace sdma_anvil
 
 #endif  // LIBRARY_SRC_SDMA_ANVIL_DEVICE_HPP_

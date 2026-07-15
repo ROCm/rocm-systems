@@ -21,14 +21,14 @@ struct gin_anvil_sdma_opaque {
   int myRank;
   int myDeviceId;
   int sdmaChannelStride;
-  gin_anvil::sdma::SdmaQueueDeviceHandle** deviceHandles_d;
+  sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d;
   uint64_t* sdmaDirty_d;
 };
 
 extern "C" int gin_anvil_sdma_probe(void) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 1) return 0;
-  return gin_anvil::sdma::initEndpoint() ? 1 : 0;
+  return sdma_anvil::initEndpoint() ? 1 : 0;
 }
 
 static int checkHip(hipError_t e, const char* what) {
@@ -73,7 +73,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 
   const int myDev = devs[static_cast<size_t>(myRank)];
 
-  if (!gin_anvil::sdma::initEndpoint()) {
+  if (!sdma_anvil::initEndpoint()) {
     LOG_ERROR("gin_anvil_sdma: Anvil SDMA init failed");
     return -1;
   }
@@ -81,9 +81,9 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   try {
     for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
       const int remoteDev = devs[static_cast<size_t>(local_pe)];
-      if (gin_anvil::sdma::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
-      if (myDev != remoteDev) gin_anvil::sdma::EnablePeerAccess(myDev, remoteDev);
-      if (!gin_anvil::sdma::anvil.connect(myDev, remoteDev, numChannels)) {
+      if (sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
+      if (myDev != remoteDev) sdma_anvil::EnablePeerAccess(myDev, remoteDev);
+      if (!sdma_anvil::anvil.connect(myDev, remoteDev, numChannels)) {
         LOG_ERROR("gin_anvil_sdma: connect(%d -> %d) failed", myDev, remoteDev);
         return -1;
       }
@@ -94,13 +94,13 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
 
   const int total = nRanks * numChannels;
-  std::vector<gin_anvil::sdma::SdmaQueueDeviceHandle*> host_handles(
+  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> host_handles(
       static_cast<size_t>(total), nullptr);
   int validHandles = 0;
   for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
     const int remoteDev = devs[static_cast<size_t>(local_pe)];
     for (int c = 0; c < numChannels; ++c) {
-      gin_anvil::sdma::SdmaQueue* q = gin_anvil::sdma::anvil.getSdmaQueue(myDev, remoteDev, c);
+      sdma_anvil::SdmaQueue* q = sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, c);
       auto* h = q ? q->deviceHandle() : nullptr;
       host_handles[static_cast<size_t>(local_pe * numChannels + c)] = h;
       if (h != nullptr) validHandles++;
@@ -111,7 +111,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
     return -1;
   }
 
-  gin_anvil::sdma::SdmaQueueDeviceHandle** dev_row = nullptr;
+  sdma_anvil::SdmaQueueDeviceHandle** dev_row = nullptr;
   if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(void*)), "hipMalloc handles") != 0)
     return -1;
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
