@@ -969,7 +969,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
     """Un-sampled instructions of a dispatched kernel are added and attributed
     via the mangled-name join; a disassembly offset that matches an already-
     sampled offset inserts no duplicate row; ISA of an un-dispatched symbol is
-    not stored at all."""
+    not stored at all; a non-surviving pid's disassembly is skipped."""
     workload_path = common.get_output_dir()
     Path(workload_path).mkdir(parents=True, exist_ok=True)
     load_base = 0x1000
@@ -1012,6 +1012,26 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         (Path(workload_path) / "42_code_obj_info.json").write_text(
             json.dumps({"code_objects": code_objects}), encoding="utf-8"
         )
+        # A non-surviving pid (metadata pid is 42) reuses code_object_id 5; its
+        # 0x50 offset must never be stored since only pid 42's load_base is known.
+        (Path(workload_path) / "99_code_obj_info.json").write_text(
+            json.dumps({
+                "code_objects": [
+                    make_disasm_code_object(
+                        5,
+                        [
+                            {
+                                "virtual_address": load_base + 0x50,
+                                "name": "s_nop",
+                                "comment": "",
+                            }
+                        ],
+                        symbol_name="_Z7vecCopyv",
+                    )
+                ]
+            }),
+            encoding="utf-8",
+        )
 
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
@@ -1033,8 +1053,11 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         lines = db_session.query(orm.InstructionLine).all()
         by_offset = {line.code_object_offset: line for line in lines}
         # Two sampled offsets + one new un-sampled offset; the un-dispatched
-        # symbol's 0x40 line is dropped, and 0x10 is not duplicated.
+        # symbol's 0x40 line and the non-surviving pid's 0x50 line are dropped,
+        # and 0x10 is not duplicated.
         assert set(by_offset) == {0x10, 0x20, 0x30}
+        # Only the surviving pid (42) is stored.
+        assert {store.pid for store in db_session.query(orm.CodeObjectStore)} == {42}
         # The disassembly-only line joins its kernel and carries no sample state.
         isa_line = by_offset[0x30]
         assert isa_line.kernel.kernel_name == "vecCopy"
