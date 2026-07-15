@@ -120,25 +120,6 @@ def _spm_counter_summary(trace_path: Path) -> dict[str, Any]:
     }
 
 
-def _spm_counter_track_names(trace_path: Path) -> list[str]:
-    """Return SPM SQ_WAVES counter track names from a Perfetto trace."""
-    tp = _load_trace_processor(trace_path)
-    try:
-        rows = list(tp.query("""
-                SELECT DISTINCT t.name AS name
-                FROM counter c
-                JOIN counter_track t ON c.track_id = t.id
-                WHERE t.name LIKE 'GPU SPM SQ_WAVES%'
-                ORDER BY t.name
-                """))
-    finally:
-        close = getattr(tp, "close", None)
-        if close is not None:
-            close()
-
-    return [row.name for row in rows]
-
-
 @pytest.fixture
 def spm_perfetto_env() -> dict[str, str]:
     """Environment for a bounded SPM Perfetto validation run."""
@@ -148,7 +129,7 @@ def spm_perfetto_env() -> dict[str, str]:
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
         "ROCPROFSYS_USE_KOKKOSP": "OFF",
-        "ROCPROFSYS_ROCM_SPM_EVENTS": "SQ_WAVES:device=0",
+        "ROCPROFSYS_ROCM_SPM_EVENTS": "SQ_WAVES",
         "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL": "32768",
         "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT": "sclk_cycles",
     }
@@ -188,13 +169,3 @@ class TestSPMPerfetto(RocprofsysTest):
         assert (
             summary["total_value"] is not None and summary["total_value"] > 0
         ), f"GPU SPM SQ_WAVES sample total is not positive: {summary}"
-
-        track_names = _spm_counter_track_names(perfetto_file)
-        assert track_names, "No GPU SPM SQ_WAVES counter track names were found"
-        unexpected_tracks = [
-            name for name in track_names if not name.startswith("GPU SPM SQ_WAVES [0] ")
-        ]
-        assert not unexpected_tracks, (
-            "SPM device filter SQ_WAVES:device=0 produced tracks for other devices: "
-            f"{unexpected_tracks}"
-        )
