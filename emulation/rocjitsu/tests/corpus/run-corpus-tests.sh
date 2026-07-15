@@ -28,6 +28,7 @@ for target in "${targets[@]}"; do
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
   artifact_dir=".pytest-artifacts/${name}"
   cache_dir=".pytest-cache/${name}"
+  target_failed=0
 
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
@@ -48,9 +49,15 @@ for target in "${targets[@]}"; do
   else
     corpus_test_status=1
     status_message="::warning::Some (${name}) tests failed."
+    target_failed=1
   fi
   echo "::endgroup::"
   echo "${status_message}"
+  if (( target_failed )); then
+    echo "::group::pytest last-failed summary (${name})"
+    pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
+    echo "::endgroup::"
+  fi
 done
 
 exit "${corpus_test_status}"
