@@ -23,6 +23,7 @@
 #include "symbol_lookup.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 
 #include <fmt/format.h>
 #include <elfio/elfio.hpp>
@@ -91,47 +92,6 @@ struct target_elf
     std::vector<uint8_t>    data          = {};
     ELFIO::elfio            reader        = {};
     std::vector<Elf64_Phdr> load_segments = {};
-};
-
-class unique_fd
-{
-public:
-    explicit unique_fd(int fd)
-    : m_fd{fd}
-    {}
-
-    unique_fd(const unique_fd&) = delete;
-    unique_fd& operator=(const unique_fd&) = delete;
-
-    unique_fd(unique_fd&& other) noexcept
-    : m_fd{std::exchange(other.m_fd, -1)}
-    {}
-
-    unique_fd& operator=(unique_fd&& other) noexcept
-    {
-        if(this != &other)
-        {
-            reset();
-            m_fd = std::exchange(other.m_fd, -1);
-        }
-        return *this;
-    }
-
-    ~unique_fd() { reset(); }
-
-    int get() const { return m_fd; }
-
-    void reset()
-    {
-        if(m_fd >= 0)
-        {
-            ::close(m_fd);
-            m_fd = -1;
-        }
-    }
-
-private:
-    int m_fd = -1;
 };
 
 std::optional<uint64_t>
@@ -294,12 +254,15 @@ std::vector<memory_mapping>
 parse_maps(pid_t pid)
 {
     auto filename = fmt::format("/proc/{}/maps", pid);
+    errno         = 0;
     auto maps     = std::ifstream{filename};
+    auto open_err = errno;
     auto result   = std::vector<memory_mapping>{};
 
     if(!maps)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't open " << filename;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't open " << filename << ": "
+                   << ((open_err != 0) ? std::strerror(open_err) : "unknown error");
         return result;
     }
 
@@ -320,6 +283,9 @@ find_mapped_objects(pid_t pid, const std::string& library)
     {
         if(mapping.inode == 0 || !library_name_matches(mapping, library)) continue;
 
+        // Multiple maps entries usually belong to the same ELF: readonly headers,
+        // executable text, writable data, and so on. Device/inode is the stable key
+        // for grouping those segments even when paths differ through namespaces.
         auto key =
             fmt::format("{}:{}:{}", mapping.device_major, mapping.device_minor, mapping.inode);
         auto& object        = objects[key];
@@ -432,11 +398,11 @@ read_file_if_matches_mapping(const std::string& path, const mapped_object& objec
     struct stat st
     {};
 
-    auto raw_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if(raw_fd < 0) return std::nullopt;
-    auto fd = unique_fd{raw_fd};
+    auto fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if(fd < 0) return std::nullopt;
+    auto close_fd = common::scope_destructor{[fd]() { ::close(fd); }};
 
-    if(::fstat(fd.get(), &st) != 0)
+    if(::fstat(fd, &st) != 0)
     {
         ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not stat opened target ELF " << path
                      << ": " << std::strerror(errno);
@@ -465,7 +431,7 @@ read_file_if_matches_mapping(const std::string& path, const mapped_object& objec
         return std::nullopt;
     }
 
-    auto data = read_file_from_fd(fd.get(), path, static_cast<uint64_t>(st.st_size));
+    auto data = read_file_from_fd(fd, path, static_cast<uint64_t>(st.st_size));
     if(!data || data->empty()) return std::nullopt;
 
     auto elf = target_elf{};
@@ -477,6 +443,9 @@ read_file_if_matches_mapping(const std::string& path, const mapped_object& objec
 std::optional<target_elf>
 open_target_elf(pid_t pid, const mapped_object& object)
 {
+    // Prefer map_files because it is a kernel-provided handle to the exact file
+    // backing a VMA. If permissions block that path, fall back to the same path
+    // as seen through the target process root and still validate device/inode.
     for(const auto& mapping : object.mappings)
     {
         auto map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
@@ -526,6 +495,8 @@ parse_target_elf(target_elf& elf)
         return false;
     }
 
+    // PT_LOAD segments are used later to translate ELF virtual addresses into
+    // target-process addresses.
     elf.load_segments.clear();
     for(const auto& segment : elf.reader.segments)
     {
@@ -551,83 +522,44 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto candidates = std::vector<uint64_t>{};
-
-    for(const auto& mapping : object.mappings)
+    auto first_load_segment =
+        std::min_element(elf.load_segments.begin(),
+                         elf.load_segments.end(),
+                         [](const auto& lhs, const auto& rhs) { return lhs.p_vaddr < rhs.p_vaddr; });
+    if(first_load_segment == elf.load_segments.end())
     {
-        for(const auto& segment : elf.load_segments)
-        {
-            auto segment_file_page    = align_down(segment.p_offset, page_size);
-            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
-            if(mapping.file_offset != segment_file_page) continue;
-
-            auto candidate =
-                checked_sub(static_cast<uint64_t>(mapping.start), segment_virtual_page);
-            if(!candidate)
-            {
-                ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
-                           << object.path << ": mapping start is below segment virtual page";
-                return std::nullopt;
-            }
-
-            if(std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
-            {
-                candidates.emplace_back(*candidate);
-            }
-        }
-    }
-
-    auto best_bias  = std::optional<uint64_t>{};
-    auto best_score = size_t{0};
-    auto is_tied    = false;
-    for(auto candidate : candidates)
-    {
-        auto score = size_t{0};
-        for(const auto& segment : elf.load_segments)
-        {
-            auto segment_file_page    = align_down(segment.p_offset, page_size);
-            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
-            auto expected_start       = checked_add(candidate, segment_virtual_page);
-            if(!expected_start) continue;
-
-            auto mapping_itr = std::find_if(
-                object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
-                    return mapping.file_offset == segment_file_page &&
-                           static_cast<uint64_t>(mapping.start) == *expected_start;
-                });
-            if(mapping_itr != object.mappings.end()) ++score;
-        }
-
-        if(score > best_score)
-        {
-            best_bias  = candidate;
-            best_score = score;
-            is_tied    = false;
-        }
-        else if(score == best_score && score > 0)
-        {
-            is_tied = true;
-        }
-    }
-
-    if(best_bias && !is_tied)
-    {
-        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
-                   << " as 0x" << std::hex << *best_bias << std::dec << " using " << best_score
-                   << " PT_LOAD mapping matches";
-        return best_bias;
-    }
-
-    if(is_tied)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Ambiguous target load-bias candidates for "
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF has no PT_LOAD segments: "
                    << object.path;
         return std::nullopt;
     }
 
-    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not match target mappings for " << object.path
-               << " to ELF PT_LOAD segments";
-    return std::nullopt;
+    auto first_mapping         = object.mappings.front();
+    auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
+    auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);
+    // Match the maps entry to the PT_LOAD segment by file page before using it
+    // to derive the ET_DYN load bias.
+    if(first_mapping.file_offset != segment_file_page)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] First target mapping for " << object.path
+                   << " has file offset 0x" << std::hex << first_mapping.file_offset
+                   << ", but the first PT_LOAD segment starts at file page 0x" << segment_file_page
+                   << std::dec;
+        return std::nullopt;
+    }
+
+    // For ET_DYN shared objects, load bias is runtime start minus page-aligned
+    // segment virtual address.
+    auto bias = checked_sub(static_cast<uint64_t>(first_mapping.start), segment_virtual_page);
+    if(!bias)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
+                   << object.path << ": mapping start is below segment virtual page";
+        return std::nullopt;
+    }
+
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
+               << " as 0x" << std::hex << *bias << std::dec;
+    return bias;
 }
 
 std::optional<uint64_t>
@@ -668,11 +600,15 @@ lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
 {
     auto name = std::string{symbol_name};
 
+    // Prefer section-backed .dynsym lookup when section headers are present;
+    // sectionless files fall back to PT_DYNAMIC.
     for(const auto& section : elf.reader.sections)
     {
         if(section == nullptr || section->get_type() != SHT_DYNSYM) continue;
 
         ELFIO::const_symbol_section_accessor symbols{elf.reader, section.get()};
+        if(symbols.get_symbols_num() > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
+
         auto                                 value = ELFIO::Elf64_Addr{0};
         auto                                 size  = ELFIO::Elf_Xword{0};
         auto                                 bind  = static_cast<unsigned char>(0);
@@ -778,6 +714,8 @@ lookup_symbol_from_pt_dynamic(const target_elf& elf, std::string_view symbol_nam
         return std::nullopt;
     }
 
+    // Sectionless ELF files still carry dynamic-loader metadata in PT_DYNAMIC.
+    // The hash tables bound how many dynamic symbols we can scan safely.
     auto symtab_vaddr   = std::optional<uint64_t>{};
     auto strtab_vaddr   = std::optional<uint64_t>{};
     auto strsz          = std::optional<uint64_t>{};
@@ -875,6 +813,8 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
         return std::nullopt;
     }
 
+    // Dynamic symbol values are ELF virtual addresses; adding load bias yields
+    // the target-process address.
     auto address = checked_add(*load_bias, *sym);
     if(!address)
     {
