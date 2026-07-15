@@ -231,7 +231,9 @@ if(__HIP_ENABLE_PCH)
 endif()
 
 # Add hiprtc
-add_subdirectory(hiprtc)
+if(HIP_BUILD_RTC)
+  add_subdirectory(hiprtc)
+endif()
 
 # HRR in-tree capture layer
 add_subdirectory(hrr)
