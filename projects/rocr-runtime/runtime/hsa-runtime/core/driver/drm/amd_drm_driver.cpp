@@ -66,7 +66,10 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
     fprintf(stderr, "DEBUG DRM: Creating compute queue with eop_va=0x%llx, cwsr_va=0x%llx, cwsr_size=%u\n",
             (unsigned long long)compute_mqd.eop_va, (unsigned long long)compute_mqd.ctx_save_area_addr, compute_mqd.ctx_save_area_size);
     mqd_in = &compute_mqd;
-    flags = AMDGPU_USERQ_CREATE_FLAGS_QUEUE_SECURE;
+    // This is an HSA AQL queue — tell the kernel/MES to configure it in AQL mode.
+    // Previously set SECURE (1<<2) which made MES treat it as a non-AQL (PM4) TMZ
+    // queue; AQL packets then never executed → dispatch hang. AQL_COMPUTE is 1<<3.
+    flags = AMDGPU_USERQ_CREATE_FLAGS_QUEUE_AQL_COMPUTE;
     ip_type = AMDGPU_HW_IP_COMPUTE;
   } else if (type == SDMA_QUEUE) {
     sdma_mqd.csa_va = drmQueueIn->extra_va;
