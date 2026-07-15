@@ -74,7 +74,7 @@ jobs:
           path: "TheRock"
 
       - name: Run setup test environment
-        uses: './TheRock/.github/actions/setup_test_environment'
+        uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
