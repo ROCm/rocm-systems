@@ -35,11 +35,6 @@ Tokens are space- or comma-separated, so multiple formats can be requested at on
 example ``--output-format proto rocpd``. For details on all formats, see
 :doc:`./how-to/understanding-rocprof-sys-output`.
 
-.. important::
-   If you are using a version of ROCm prior to ROCm 6.3.1 and are experiencing problems viewing your
-   trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using
-   [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
-
 To use ROCm Systems Profiler for instrumentation, follow these two configuration steps:
 
 #. Indicate the functions and modules to :doc:`instrument <./how-to/instrumenting-rewriting-binary-application>` in the target binaries, including the executable and any libraries
