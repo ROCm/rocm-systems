@@ -155,3 +155,169 @@ TEST(RocrSdmaEngineIdOffset, OutOfRangeFallsBack) {
   EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
   unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
 }
+
+// Method A: launcher local-rank seed detection. The final round-robin seed
+// offset is resolved in priority order (mirroring rocr::Flag::Refresh()):
+//   1. ROCR_SDMA_ENGINE_ID_OFFSET (explicit, including 0)
+//   2. the first launcher local-rank env var that parses to a valid
+//      non-negative integer (LOCAL_RANK, OMPI_COMM_WORLD_LOCAL_RANK,
+//      MPI_LOCALRANKID, PMI_LOCAL_RANK, MV2_COMM_WORLD_LOCAL_RANK,
+//      SLURM_LOCALID)
+//   3. -1, which makes amd_gpu_agent.cpp fall back to getpid().
+namespace {
+
+bool ParseNonNegInt(const std::string& s, int64_t& out) {
+  if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos) return false;
+  int64_t parsed = 0;
+  for (char c : s) {
+    parsed = parsed * 10 + (c - '0');
+    if (parsed > 0x7fffffff) return false;
+  }
+  out = parsed;
+  return true;
+}
+
+const char* const kLocalRankVars[] = {
+    "LOCAL_RANK",
+    "OMPI_COMM_WORLD_LOCAL_RANK",
+    "MPI_LOCALRANKID",
+    "PMI_LOCAL_RANK",
+    "MV2_COMM_WORLD_LOCAL_RANK",
+    "SLURM_LOCALID"};
+
+// Resolves the seed offset (>=0) and its source name; source is "" when the
+// result is -1 (getpid() fallback).
+int64_t ResolveSeedOffset(std::string* source) {
+  int64_t offset = ParseSdmaEngineIdOffset(std::getenv("ROCR_SDMA_ENGINE_ID_OFFSET"));
+  if (offset >= 0) {
+    if (source) *source = "ROCR_SDMA_ENGINE_ID_OFFSET";
+    return offset;
+  }
+  for (const char* name : kLocalRankVars) {
+    const char* raw = std::getenv(name);
+    int64_t rank = -1;
+    if (raw != nullptr && ParseNonNegInt(std::string(raw), rank)) {
+      if (source) *source = name;
+      return rank;
+    }
+  }
+  if (source) source->clear();
+  return -1;
+}
+
+void ClearSeedEnv() {
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  for (const char* name : kLocalRankVars) unsetenv(name);
+}
+
+}  // namespace
+
+TEST(RocrSdmaSeedOffset, OffsetOnly) {
+  ClearSeedEnv();
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "7", 1));
+  std::string src;
+  EXPECT_EQ(static_cast<int64_t>(7), ResolveSeedOffset(&src));
+  EXPECT_EQ("ROCR_SDMA_ENGINE_ID_OFFSET", src);
+  ClearSeedEnv();
+}
+
+TEST(RocrSdmaSeedOffset, OffsetOverridesRank) {
+  ClearSeedEnv();
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "2", 1));
+  ASSERT_EQ(0, setenv("OMPI_COMM_WORLD_LOCAL_RANK", "5", 1));
+  std::string src;
+  EXPECT_EQ(static_cast<int64_t>(2), ResolveSeedOffset(&src));
+  EXPECT_EQ("ROCR_SDMA_ENGINE_ID_OFFSET", src);
+  ClearSeedEnv();
+}
+
+TEST(RocrSdmaSeedOffset, SingleRankVar) {
+  ClearSeedEnv();
+  ASSERT_EQ(0, setenv("SLURM_LOCALID", "3", 1));
+  std::string src;
+  EXPECT_EQ(static_cast<int64_t>(3), ResolveSeedOffset(&src));
+  EXPECT_EQ("SLURM_LOCALID", src);
+  ClearSeedEnv();
+}
+
+TEST(RocrSdmaSeedOffset, RankVarPriorityOrder) {
+  ClearSeedEnv();
+  // LOCAL_RANK precedes the MPI/SLURM variables; the first listed wins.
+  ASSERT_EQ(0, setenv("SLURM_LOCALID", "9", 1));
+  ASSERT_EQ(0, setenv("MPI_LOCALRANKID", "8", 1));
+  ASSERT_EQ(0, setenv("LOCAL_RANK", "1", 1));
+  std::string src;
+  EXPECT_EQ(static_cast<int64_t>(1), ResolveSeedOffset(&src));
+  EXPECT_EQ("LOCAL_RANK", src);
+  ClearSeedEnv();
+}
+
+TEST(RocrSdmaSeedOffset, InvalidRankIsSkipped) {
+  ClearSeedEnv();
+  // The first var has a malformed value; the resolver skips it and takes the
+  // next valid one.
+  ASSERT_EQ(0, setenv("LOCAL_RANK", "-4", 1));
+  ASSERT_EQ(0, setenv("OMPI_COMM_WORLD_LOCAL_RANK", "6", 1));
+  std::string src;
+  EXPECT_EQ(static_cast<int64_t>(6), ResolveSeedOffset(&src));
+  EXPECT_EQ("OMPI_COMM_WORLD_LOCAL_RANK", src);
+  ClearSeedEnv();
+}
+
+TEST(RocrSdmaSeedOffset, NoneFallsBackToPid) {
+  ClearSeedEnv();
+  std::string src = "sentinel";
+  EXPECT_EQ(static_cast<int64_t>(-1), ResolveSeedOffset(&src));
+  EXPECT_TRUE(src.empty());
+  ClearSeedEnv();
+}
+
+// Method D: ROCR_SDMA_D2H_ENGINE_LIMIT caps the D2H round-robin to the first N
+// SDMA engines. Parse mirrors rocr::Flag::Refresh(): 0 / unset / malformed ->
+// 0 (no limit); a valid non-negative integer -> that value (amd_gpu_agent.cpp
+// clamps it to the engine count with std::min at queue-creation time).
+namespace {
+
+int64_t ParseD2hEngineLimit(const char* raw) {
+  const std::string var = (raw != nullptr) ? std::string(raw) : std::string();
+  int64_t limit = 0;
+  ParseNonNegInt(var, limit);
+  return limit;
+}
+
+int64_t ParseD2hLimitFromEnv() {
+  return ParseD2hEngineLimit(std::getenv("ROCR_SDMA_D2H_ENGINE_LIMIT"));
+}
+
+}  // namespace
+
+TEST(RocrSdmaD2hEngineLimit, UnsetIsZero) {
+  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
+}
+
+TEST(RocrSdmaD2hEngineLimit, ZeroIsDisabled) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "0", 1));
+  EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
+  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+}
+
+TEST(RocrSdmaD2hEngineLimit, ValidValue) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "8", 1));
+  EXPECT_EQ(static_cast<int64_t>(8), ParseD2hLimitFromEnv());
+  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+}
+
+TEST(RocrSdmaD2hEngineLimit, LargeValueParsesForClamping) {
+  // Values above the engine count still parse; amd_gpu_agent.cpp clamps them to
+  // the available engine count via std::min at queue-creation time.
+  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "64", 1));
+  EXPECT_EQ(static_cast<int64_t>(64), ParseD2hLimitFromEnv());
+  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+}
+
+TEST(RocrSdmaD2hEngineLimit, MalformedIsZero) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "abc", 1));
+  EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
+  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+}

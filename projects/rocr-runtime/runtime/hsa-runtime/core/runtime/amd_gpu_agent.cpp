@@ -951,31 +951,56 @@ void GpuAgent::InitDma() {
       // xGMI engine exists.
       if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
           properties_.NumSdmaEngines > 0) {
-        // Seed for the round-robin pick. ROCR_SDMA_ENGINE_ID_OFFSET, when set
-        // to a valid non-negative integer, provides an explicit offset (e.g. a
-        // launcher-assigned local rank) so concurrent processes deterministically
-        // land on different engines. getpid() is only a fallback and can alias
-        // (pid_a % n == pid_b % n), colliding two processes on one engine.
-        const int64_t sdma_off =
-            core::Runtime::runtime_singleton_->flag().sdma_engine_id_offset();
+        // Method A: the round-robin seed comes from Flag, which resolves it in
+        // priority order: ROCR_SDMA_ENGINE_ID_OFFSET (explicit, includes 0),
+        // then a launcher local-rank env var (LOCAL_RANK,
+        // OMPI_COMM_WORLD_LOCAL_RANK, MPI_LOCALRANKID, PMI_LOCAL_RANK,
+        // MV2_COMM_WORLD_LOCAL_RANK, SLURM_LOCALID). When none is present the
+        // seed offset is -1 and we fall back to getpid() here. An explicit or
+        // rank-derived seed avoids the aliasing that getpid() % engine_count can
+        // cause (two pids reducing to the same engine).
+        const Flag& rt_flag = core::Runtime::runtime_singleton_->flag();
+        const int64_t sdma_seed_off = rt_flag.sdma_seed_offset();
         const uint32_t sdma_seed =
-            (sdma_off >= 0) ? static_cast<uint32_t>(sdma_off)
-                            : static_cast<uint32_t>(getpid());
+            (sdma_seed_off >= 0) ? static_cast<uint32_t>(sdma_seed_off)
+                                 : static_cast<uint32_t>(getpid());
         const char* sdma_seed_src =
-            (sdma_off >= 0) ? "ROCR_SDMA_ENGINE_ID_OFFSET" : "getpid()";
-        if (core::Runtime::runtime_singleton_->flag().sdma_round_robin_pcie_xgmi() ==
-            Flag::SDMA_ENABLE) {
-          const uint32_t total_eng =
+            (sdma_seed_off >= 0) ? rt_flag.sdma_seed_source().c_str() : "getpid()";
+
+        // Method D (opt-in, ROCR_SDMA_D2H_ENGINE_LIMIT=N): restrict D2H copies
+        // (isHostToDev == false) to the first N SDMA engines (the near-AID
+        // subset). H2D is never limited. 0 keeps the default of spreading over
+        // all engines. N is clamped to the available engine count below.
+        const int64_t d2h_limit = rt_flag.sdma_d2h_engine_limit();
+        const bool limit_d2h = (!isHostToDev && d2h_limit > 0);
+
+        if (rt_flag.sdma_round_robin_pcie_xgmi() == Flag::SDMA_ENABLE) {
+          uint32_t total_eng =
               properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+          if (limit_d2h)
+            total_eng = std::min<uint32_t>(total_eng, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % total_eng;
           debug_print(
-              "ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) rec_eng=%u of %u SDMA engines\n",
-              sdma_seed, sdma_seed_src, rec_eng, total_eng);
-        } else if (core::Runtime::runtime_singleton_->flag().sdma_round_robin() ==
-                   Flag::SDMA_ENABLE) {
-          rec_eng = (sdma_seed + rec_eng) % properties_.NumSdmaEngines;
-          debug_print("ROCR_SDMA_ROUND_ROBIN: seed=%u (%s) rec_eng=%u of %u SDMA engines\n",
-                      sdma_seed, sdma_seed_src, rec_eng, properties_.NumSdmaEngines);
+              "ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
+              sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, total_eng,
+              limit_d2h ? " [D2H near-AID limit]" : "");
+        } else if (rt_flag.sdma_round_robin() == Flag::SDMA_ENABLE) {
+          uint32_t mod_eng = properties_.NumSdmaEngines;
+          if (limit_d2h)
+            mod_eng = std::min<uint32_t>(mod_eng, static_cast<uint32_t>(d2h_limit));
+          rec_eng = (sdma_seed + rec_eng) % mod_eng;
+          debug_print("ROCR_SDMA_ROUND_ROBIN: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
+                      sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, mod_eng,
+                      limit_d2h ? " [D2H near-AID limit]" : "");
+        } else if (limit_d2h) {
+          // Method D can also apply on its own, without a round-robin flag:
+          // constrain the default D2H pick to the near-AID subset.
+          const uint32_t mod_eng =
+              std::min<uint32_t>(properties_.NumSdmaEngines, static_cast<uint32_t>(d2h_limit));
+          rec_eng = (sdma_seed + rec_eng) % mod_eng;
+          debug_print(
+              "ROCR_SDMA_D2H_ENGINE_LIMIT: seed=%u (%s) dir=D2H rec_eng=%u of %u near-AID engines\n",
+              sdma_seed, sdma_seed_src, rec_eng, mod_eng);
         } else {
           (void)sdma_seed_src;
           rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;

@@ -164,19 +164,75 @@ class Flag {
     // negative, non-numeric, out of range) falls back to the getpid() seed and
     // is stored as -1. Reviewer preference is to always pass an explicit
     // offset; the getpid() fallback is retained only for ease of use.
+    // Shared parse for a non-negative decimal integer in [0, 0x7fffffff].
+    // Returns true and sets 'out' on success; false (leaving 'out' untouched)
+    // for empty, negative, non-numeric or out-of-range input.
+    auto parse_nonneg = [](const std::string& s, int64_t& out) -> bool {
+      if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos) return false;
+      int64_t parsed = 0;
+      for (char c : s) {
+        parsed = parsed * 10 + (c - '0');
+        if (parsed > 0x7fffffff) return false;  // clamp absurd values; treat as malformed
+      }
+      out = parsed;
+      return true;
+    };
+
     var = os::GetEnvVar("ROCR_SDMA_ENGINE_ID_OFFSET");
     sdma_engine_id_offset_ = -1;
-    if (!var.empty() && var.find_first_not_of("0123456789") == std::string::npos) {
-      int64_t parsed = 0;
-      bool valid = true;
-      for (char c : var) {
-        parsed = parsed * 10 + (c - '0');
-        if (parsed > 0x7fffffff) {  // clamp absurd values; treat as malformed
-          valid = false;
+    {
+      int64_t parsed = -1;
+      if (parse_nonneg(var, parsed)) sdma_engine_id_offset_ = parsed;
+    }
+
+    // Method A: resolve the final round-robin seed offset and record where it
+    // came from, for debug provenance. Priority order:
+    //   1. ROCR_SDMA_ENGINE_ID_OFFSET (explicit, includes 0) -- parsed above.
+    //   2. a launcher-provided local-rank env var (first that parses to a valid
+    //      non-negative integer), so a per-process rank from an MPI/torchrun/srun
+    //      launcher becomes the seed without the caller setting the offset.
+    //   3. neither -> -1, and amd_gpu_agent.cpp falls back to getpid().
+    // Only the seed default changes here; the round-robin modulus and the flag
+    // semantics are unchanged.
+    sdma_seed_offset_ = -1;
+    sdma_seed_source_.clear();
+    if (sdma_engine_id_offset_ >= 0) {
+      sdma_seed_offset_ = sdma_engine_id_offset_;
+      sdma_seed_source_ = "ROCR_SDMA_ENGINE_ID_OFFSET";
+    } else {
+      static const char* const kLocalRankVars[] = {
+          "LOCAL_RANK",
+          "OMPI_COMM_WORLD_LOCAL_RANK",
+          "MPI_LOCALRANKID",
+          "PMI_LOCAL_RANK",
+          "MV2_COMM_WORLD_LOCAL_RANK",
+          "SLURM_LOCALID"};
+      for (const char* name : kLocalRankVars) {
+        int64_t rank = -1;
+        if (parse_nonneg(os::GetEnvVar(name), rank)) {
+          sdma_seed_offset_ = rank;
+          sdma_seed_source_ = name;
           break;
         }
       }
-      if (valid) sdma_engine_id_offset_ = parsed;
+    }
+
+    // Method D (opt-in): cap D2H round-robin engine selection to the first N
+    // SDMA engines. On gfx942/gfx950 the SDMA engines are physically grouped per
+    // AID and host PCIe egress lives on the near AID; a D2H copy driven from a
+    // far-AID engine is bandwidth-limited. The runtime has no per-engine->AID
+    // topology field (KFD node properties expose only NumSdmaEngines,
+    // NumSdmaXgmiEngines and NumXcc), so the near-AID engine subset cannot be
+    // derived reliably at runtime. This knob lets a deployment pin D2H to the
+    // near-AID half explicitly (e.g. set N to the near-AID engine count).
+    // 0 / unset / malformed keeps the stock behavior of spreading D2H across
+    // all engines. H2D is never limited. amd_gpu_agent.cpp clamps N to the
+    // engine count.
+    var = os::GetEnvVar("ROCR_SDMA_D2H_ENGINE_LIMIT");
+    sdma_d2h_engine_limit_ = 0;
+    {
+      int64_t limit = 0;
+      if (parse_nonneg(var, limit)) sdma_d2h_engine_limit_ = limit;
     }
 
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
@@ -478,6 +534,21 @@ class Flag {
   // valid explicit offset, distinct from "unset".
   int64_t sdma_engine_id_offset() const { return sdma_engine_id_offset_; }
 
+  // Final round-robin seed offset (method A): the explicit
+  // ROCR_SDMA_ENGINE_ID_OFFSET when set, else a launcher local-rank env var,
+  // else -1 (amd_gpu_agent.cpp then falls back to getpid()). A value of 0 is
+  // valid.
+  int64_t sdma_seed_offset() const { return sdma_seed_offset_; }
+
+  // Name of the env var that provided sdma_seed_offset(), or "" when none did
+  // (getpid() fallback). Used only for debug_print provenance.
+  const std::string& sdma_seed_source() const { return sdma_seed_source_; }
+
+  // Opt-in cap (method D) restricting D2H round-robin to the first N SDMA
+  // engines (near-AID subset). 0 means unset -> no limit. Clamped to the engine
+  // count by amd_gpu_agent.cpp; H2D is never limited.
+  int64_t sdma_d2h_engine_limit() const { return sdma_d2h_engine_limit_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -666,6 +737,9 @@ class Flag {
   SDMA_OVERRIDE sdma_round_robin_;
   SDMA_OVERRIDE sdma_round_robin_pcie_xgmi_;
   int64_t sdma_engine_id_offset_;
+  int64_t sdma_seed_offset_;
+  std::string sdma_seed_source_;
+  int64_t sdma_d2h_engine_limit_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
