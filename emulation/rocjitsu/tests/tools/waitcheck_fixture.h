@@ -285,6 +285,35 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx1200_code_object(text_words);
 }
 
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1200_function_only_padded_code_object() {
+  std::vector<uint32_t> first;
+  append_inst(first, s_wait_loadcnt(0));
+  first.push_back(0xBE80481EU); // s_setpc_b64 s[30:31]
+  first.push_back(0x00000000U);
+  first.push_back(0x00000000U);
+
+  std::vector<uint32_t> second;
+  append_inst(second, global_load_b32(0));
+  append_inst(second, v_mov_b32(1, 0));
+  second.push_back(0xBE80481EU); // s_setpc_b64 s[30:31]
+
+  auto image = make_gfx_multi_kernel_code_object({{"first", first}, {"second", second}},
+                                                 EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  auto *syms = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+  constexpr uint64_t text_vaddr = 0x1100;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  syms[1].st_shndx = 1;
+  syms[1].st_value = text_vaddr;
+  syms[1].st_size = 2 * sizeof(uint32_t);
+  syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  syms[2].st_shndx = 1;
+  syms[2].st_value = text_vaddr + first.size() * sizeof(uint32_t);
+  syms[2].st_size = second.size() * sizeof(uint32_t);
+  return image;
+}
+
 [[nodiscard]] inline std::vector<uint8_t> make_gfx1250_vmax_u64_code_object() {
   return make_gfx1250_code_object({0xD7190002U, 0x0201020CU});
 }

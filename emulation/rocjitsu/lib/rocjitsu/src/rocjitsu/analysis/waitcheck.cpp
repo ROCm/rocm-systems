@@ -26,6 +26,7 @@ RJ_DIAGNOSTIC_POP
 #include <charconv>
 #include <cstring>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -266,6 +267,51 @@ find_waitcheck_kernels(const CodeObject &code_object) {
   return kernels;
 }
 
+[[nodiscard]] std::vector<uint64_t> find_waitcheck_function_entries(const CodeObject &code_object) {
+  if (code_object.text_sections().size() != 1)
+    return {};
+
+  const Section &text = *code_object.text_sections().front();
+  const auto *image = reinterpret_cast<const uint8_t *>(code_object.image_data());
+  const size_t image_size = code_object.image_size();
+  if (image == nullptr || image_size < sizeof(Elf64_Ehdr))
+    return {};
+
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image);
+  if (std::memcmp(ehdr->e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
+      ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_shentsize != sizeof(Elf64_Shdr))
+    return {};
+  if (!fits_in_image(ehdr->e_shoff, static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr),
+                     image_size))
+    return {};
+
+  const auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(image + ehdr->e_shoff);
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+  std::set<uint64_t> entry_offsets;
+  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+    const Elf64_Shdr &symtab_shdr = shdrs[i];
+    if (symtab_shdr.sh_type != SHT_SYMTAB && symtab_shdr.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab_shdr.sh_entsize != sizeof(Elf64_Sym) ||
+        !fits_in_image(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_size))
+      continue;
+
+    const auto *syms = reinterpret_cast<const Elf64_Sym *>(image + symtab_shdr.sh_offset);
+    const size_t symbol_count = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
+    for (size_t sym_index = 0; sym_index < symbol_count; ++sym_index) {
+      const Elf64_Sym &sym = syms[sym_index];
+      if (elf_symbol_type(sym.st_info) != kElfSymbolTypeFunc || sym.st_size == 0 ||
+          sym.st_shndx >= ehdr->e_shnum || (shdrs[sym.st_shndx].sh_flags & SHF_EXECINSTR) == 0)
+        continue;
+      if (sym.st_value < text_vaddr || sym.st_value >= text_vaddr + text_size)
+        continue;
+      entry_offsets.insert(sym.st_value - text_vaddr);
+    }
+  }
+  return {entry_offsets.begin(), entry_offsets.end()};
+}
+
 enum class WaitEventKind {
   Unknown,
   VmemNoSamplerLoad,
@@ -424,6 +470,8 @@ struct ExpertSchedulingState {
 };
 
 struct PendingState {
+  // Vectors stay sorted by static event identity so CFG equality is stable.
+  // min_younger, rather than vector position, represents hardware issue order.
   std::array<std::vector<PendingEvent>, kCounterCount> pending;
   std::array<bool, kCounterCount> uncertain_order{};
   RegisterSet ready_regs;
@@ -643,6 +691,35 @@ struct Analyzer {
 
     bool changed = true;
     size_t iterations = 0;
+    size_t last_changed_node = 0;
+    std::string last_changed_components;
+    auto differing_components = [](const PendingState &lhs, const PendingState &rhs) {
+      std::string result;
+      auto append = [&](std::string_view component) {
+        if (!result.empty())
+          result += ',';
+        result += component;
+      };
+      for (size_t counter = 0; counter < kCounterCount; ++counter) {
+        if (lhs.pending[counter] != rhs.pending[counter])
+          append(wait_counter_name(static_cast<WaitCounterKind>(counter)));
+        if (lhs.uncertain_order[counter] != rhs.uncertain_order[counter])
+          append("uncertain-order");
+      }
+      if (lhs.ready_regs != rhs.ready_regs)
+        append("ready-regs");
+      if (lhs.sgpr_hazards != rhs.sgpr_hazards)
+        append("sgpr-hazards");
+      if (lhs.va_vdst_hazards != rhs.va_vdst_hazards)
+        append("va-vdst");
+      if (lhs.vgpr_msb != rhs.vgpr_msb)
+        append("vgpr-msb");
+      if (lhs.delay_alu != rhs.delay_alu)
+        append("delay-alu");
+      if (lhs.expert_scheduling != rhs.expert_scheduling)
+        append("expert-scheduling");
+      return result;
+    };
     const size_t max_iterations = analysis_blocks.size() * 8 + 32;
     while (changed && iterations++ < max_iterations) {
       changed = false;
@@ -650,7 +727,18 @@ struct Analyzer {
         PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
         PendingState next_out =
             analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
-        if (out_initialized[i] == 0 || !(merged == in[i]) || !(next_out == out[i])) {
+        const bool input_changed = !(merged == in[i]);
+        const bool output_changed = !(next_out == out[i]);
+        if (out_initialized[i] == 0 || input_changed || output_changed) {
+          last_changed_node = i;
+          last_changed_components.clear();
+          if (input_changed)
+            last_changed_components = "in:" + differing_components(merged, in[i]);
+          if (output_changed) {
+            if (!last_changed_components.empty())
+              last_changed_components += ';';
+            last_changed_components += "out:" + differing_components(next_out, out[i]);
+          }
           in[i] = std::move(merged);
           out[i] = std::move(next_out);
           out_initialized[i] = 1;
@@ -661,7 +749,12 @@ struct Analyzer {
 
     if (changed) {
       report_.supported = false;
-      report_.analysis_error = "waitcheck CFG dataflow did not converge";
+      std::ostringstream os;
+      os << "waitcheck CFG dataflow did not converge at .text+0x" << std::hex
+         << analysis_blocks[last_changed_node]->start_offset();
+      if (!last_changed_components.empty())
+        os << " (" << last_changed_components << ')';
+      report_.analysis_error = os.str();
       return;
     }
 
@@ -690,10 +783,51 @@ private:
            lhs.check_program_end == rhs.check_program_end;
   }
 
+  [[nodiscard]] static auto register_ref_key(const std::optional<RegisterRef> &ref) {
+    return std::make_tuple(ref.has_value(), ref ? static_cast<uint8_t>(ref->cls) : uint8_t{0},
+                           ref ? ref->index : uint16_t{0}, ref ? ref->width : uint8_t{0});
+  }
+
+  [[nodiscard]] static bool register_set_less(const RegisterSet &lhs, const RegisterSet &rhs) {
+    if (lhs == rhs)
+      return false;
+
+    std::vector<RegisterRef> lhs_regs;
+    std::vector<RegisterRef> rhs_regs;
+    lhs_regs.reserve(lhs.size());
+    rhs_regs.reserve(rhs.size());
+    lhs.for_each([&](RegisterRef ref) { lhs_regs.push_back(ref); });
+    rhs.for_each([&](RegisterRef ref) { rhs_regs.push_back(ref); });
+    auto less = [](RegisterRef lhs_ref, RegisterRef rhs_ref) {
+      return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
+             std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);
+    };
+    return std::lexicographical_compare(lhs_regs.begin(), lhs_regs.end(), rhs_regs.begin(),
+                                        rhs_regs.end(), less);
+  }
+
+  [[nodiscard]] static bool event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
+    const auto lhs_key = std::tie(
+        lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter,
+        lhs.kind, lhs.barrier_id, lhs.produces_regs, lhs.check_uses, lhs.check_defs,
+        lhs.check_exec_defs, lhs.check_memory_order, lhs.check_program_end);
+    const auto rhs_key = std::tie(
+        rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter,
+        rhs.kind, rhs.barrier_id, rhs.produces_regs, rhs.check_uses, rhs.check_defs,
+        rhs.check_exec_defs, rhs.check_memory_order, rhs.check_program_end);
+    if (lhs_key != rhs_key)
+      return lhs_key < rhs_key;
+    if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
+      return register_ref_key(lhs.special_reg) < register_ref_key(rhs.special_reg);
+    return register_set_less(lhs.regs, rhs.regs);
+  }
+
   [[nodiscard]] static auto find_event(std::vector<PendingEvent> &events,
                                        const PendingEvent &event) {
-    return std::ranges::find_if(
-        events, [&](const PendingEvent &existing) { return same_event_identity(existing, event); });
+    auto position = std::ranges::lower_bound(events, event, event_identity_less);
+    if (position != events.end() && same_event_identity(*position, event))
+      return position;
+    return events.end();
   }
 
   [[nodiscard]] static bool contains_event(const std::vector<PendingEvent> &events,
@@ -782,12 +916,12 @@ private:
     for (size_t i = 0; i < kCounterCount; ++i) {
       dst.uncertain_order[i] = dst.uncertain_order[i] || src.uncertain_order[i];
       for (const auto &event : src.pending[i]) {
-        auto existing = find_event(dst.pending[i], event);
-        if (existing == dst.pending[i].end()) {
-          dst.pending[i].push_back(event);
+        auto position = std::ranges::lower_bound(dst.pending[i], event, event_identity_less);
+        if (position == dst.pending[i].end() || !same_event_identity(*position, event)) {
+          dst.pending[i].insert(position, event);
         } else {
-          existing->min_younger = std::min(existing->min_younger, event.min_younger);
-          existing->old_value_regs &= event.old_value_regs;
+          position->min_younger = std::min(position->min_younger, event.min_younger);
+          position->old_value_regs &= event.old_value_regs;
         }
       }
     }
@@ -999,12 +1133,26 @@ private:
     if (state.uncertain_order[idx] || count >= matching)
       return;
 
-    size_t to_remove = matching - count;
+    // Pending vectors are canonicalized by event identity for stable CFG
+    // equality, so their physical order is not the hardware issue order.  An
+    // event's counter age is the ordering fact: keep the `count` youngest
+    // matching events and retire the older ones.  Equal ages at the boundary
+    // mean the merge lost their relative order, in which case a partial wait
+    // cannot prove that either one retired.
+    std::vector<uint32_t> matching_ages;
+    matching_ages.reserve(matching);
+    for (const PendingEvent &event : pending) {
+      if (is_implied(event))
+        matching_ages.push_back(event.min_younger);
+    }
+    std::ranges::sort(matching_ages);
+    if (matching_ages[count - 1] == matching_ages[count]) {
+      state.uncertain_order[idx] = true;
+      return;
+    }
+    const uint32_t youngest_retired_age = matching_ages[count];
     retire_events(state, pending, [&](const PendingEvent &event) {
-      if (!is_implied(event) || to_remove == 0)
-        return false;
-      --to_remove;
-      return true;
+      return is_implied(event) && event.min_younger >= youngest_retired_age;
     });
   }
 
@@ -1640,16 +1788,17 @@ private:
     }
 
     if (mnemonic == "global_inv") {
+      // LLVM tracks this in LOAD_CNT so it changes the wait threshold for an
+      // older load.  It has no result and does not by itself make the next
+      // memory instruction a wait consumer.
       events.emplace_back(WaitCounterKind::Load, WaitEventKind::GlobalInv,
-                          TrackedRegisterSource::None, false, false, false, std::nullopt,
-                          std::nullopt, true);
+                          TrackedRegisterSource::None, false, false);
       return events;
     }
 
     if (mnemonic == "global_wb" || mnemonic == "global_wbinv") {
       events.emplace_back(vmem_store_wait_counter(arch), WaitEventKind::GlobalWb,
-                          TrackedRegisterSource::None, false, false, false, std::nullopt,
-                          std::nullopt, true);
+                          TrackedRegisterSource::None, false, false);
       return events;
     }
 
@@ -2785,12 +2934,12 @@ private:
       if (pending_event.min_younger != std::numeric_limits<uint32_t>::max())
         ++pending_event.min_younger;
     }
-    if (auto existing = find_event(state.pending[idx], event);
-        existing != state.pending[idx].end()) {
-      existing->min_younger = 0;
-      existing->old_value_regs &= event.old_value_regs;
+    auto position = std::ranges::lower_bound(state.pending[idx], event, event_identity_less);
+    if (position != state.pending[idx].end() && same_event_identity(*position, event)) {
+      position->min_younger = 0;
+      position->old_value_regs &= event.old_value_regs;
     } else {
-      state.pending[idx].push_back(std::move(event));
+      state.pending[idx].insert(position, std::move(event));
     }
     if (record_stats)
       ++report_.memory_events_tracked;
@@ -3018,10 +3167,14 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
                                     : 0;
   try {
     const auto kernels = find_waitcheck_kernels(code_object);
+    const auto function_entries =
+        kernels.empty() ? find_waitcheck_function_entries(code_object) : std::vector<uint64_t>{};
     if (selected_kernel_entry) {
-      if (std::ranges::none_of(kernels, [&](const WaitcheckKernelInfo &kernel) {
-            return kernel.entry_offset == *selected_kernel_entry;
-          })) {
+      const bool is_kernel = std::ranges::any_of(kernels, [&](const WaitcheckKernelInfo &kernel) {
+        return kernel.entry_offset == *selected_kernel_entry;
+      });
+      if (!is_kernel &&
+          std::ranges::find(function_entries, *selected_kernel_entry) == function_entries.end()) {
         report.supported = false;
         report.analysis_error = "kernel entry offset is not present in the code object";
         return report;
@@ -3030,7 +3183,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build_reachable(code_object, *decoder, arch, entry);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
-    } else if (kernels.empty()) {
+    } else if (kernels.empty() && function_entries.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
@@ -3038,8 +3191,13 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
       // at once; generated Tensile libraries can contain hundreds of kernels.
-      for (const WaitcheckKernelInfo &kernel : kernels) {
-        const std::array<uint64_t, 1> entry{kernel.entry_offset};
+      std::vector<uint64_t> entries;
+      entries.reserve(kernels.size() + function_entries.size());
+      std::ranges::transform(kernels, std::back_inserter(entries),
+                             &WaitcheckKernelInfo::entry_offset);
+      entries.insert(entries.end(), function_entries.begin(), function_entries.end());
+      for (uint64_t entry_offset : entries) {
+        const std::array<uint64_t, 1> entry{entry_offset};
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);

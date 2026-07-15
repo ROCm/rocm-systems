@@ -1439,6 +1439,23 @@ TEST(WaitcheckTest, AcceptsLoadcntOneForOlderEvent) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, LoadcntOneRetiresOnlyOlderVmemSourceRead) {
+  std::vector<uint32_t> program;
+  auto older = global_load_b32(0);
+  older.vaddr = 8;
+  auto newer = global_load_b32(1);
+  newer.vaddr = 9;
+  append_inst(program, older);
+  append_inst(program, newer);
+  append_inst(program, sopp(64, 1)); // leaves only the newer load and its source read pending
+  append_inst(program, v_mov_b32(8, 10));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, AcceptsOrderedVmemLoadOverwrite) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(0));
@@ -3013,24 +3030,9 @@ TEST(WaitcheckTest, StoreSourceReadDoesNotNeedExpcnt) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ReportsMissingStorecntAfterGlobalWbBeforeMemoryOp) {
+TEST(WaitcheckTest, GlobalWbDoesNotInventMemoryDependency) {
   std::vector<uint32_t> program;
   append_inst(program, global_wb());
-  append_inst(program, global_store_b32(0));
-
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
-
-  ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Store);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
-  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
-}
-
-TEST(WaitcheckTest, AcceptsStorecntAfterGlobalWbBeforeMemoryOp) {
-  std::vector<uint32_t> program;
-  append_inst(program, global_wb());
-  append_inst(program, sopp(65, 0)); // s_wait_storecnt 0
   append_inst(program, global_store_b32(0));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
@@ -3039,37 +3041,48 @@ TEST(WaitcheckTest, AcceptsStorecntAfterGlobalWbBeforeMemoryOp) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ReportsMissingStorecntAfterGlobalWbinvBeforeMemoryOp) {
+TEST(WaitcheckTest, GlobalWbinvDoesNotInventMemoryDependency) {
   std::vector<uint32_t> program;
   append_inst(program, global_wbinv());
   append_inst(program, global_store_b32(0));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
-  ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Store);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ReportsMissingLoadcntAfterGlobalInvBeforeMemoryOp) {
+TEST(WaitcheckTest, GlobalInvDoesNotInventMemoryDependency) {
   std::vector<uint32_t> program;
   append_inst(program, global_inv());
   append_inst(program, global_store_b32(0));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
-  ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, AcceptsLoadcntAfterGlobalInvBeforeMemoryOp) {
+TEST(WaitcheckTest, GlobalInvContributesToLoadcntThreshold) {
   std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
   append_inst(program, global_inv());
-  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
-  append_inst(program, global_store_b32(0));
+  append_inst(program, v_mov_b32(1, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].required_count, 1u);
+}
+
+TEST(WaitcheckTest, AcceptsAdjustedLoadcntThresholdWithGlobalInv) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, global_inv());
+  append_inst(program, sopp(64, 1)); // s_wait_loadcnt 1
+  append_inst(program, v_mov_b32(1, 0));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
@@ -3663,6 +3676,19 @@ TEST(WaitcheckTest, DescriptorEntryAnalysisIgnoresPaddingAfterEndpgm) {
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty());
   EXPECT_EQ(report.instructions_analyzed, 2u);
+}
+
+TEST(WaitcheckTest, FunctionEntryAnalysisIgnoresInterFunctionPadding) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx1200_function_only_padded_code_object();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.instructions_analyzed, 5u);
 }
 
 TEST(WaitcheckTest, SharedKernelEntryDiagnosticsAreReportedOnce) {
