@@ -45,6 +45,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -57,12 +58,21 @@ namespace hotswap {
 
 struct AgentGfxRevision;
 
-using OwnedElfBuffer = std::unique_ptr<void, decltype(&std::free)>;
+// Owns a rewritten/retargeted ELF buffer. The deleter is type-erased so the
+// same handle can wrap either a heap allocation (freed with std::free) or a
+// read-only mmap of a disk-cache entry (released with munmap). std::free is
+// implicitly convertible to this deleter, so existing
+// `OwnedElfBuffer(ptr, &std::free)` call sites keep compiling.
+using OwnedElfBuffer = std::unique_ptr<void, std::function<void(void*)>>;
 
 struct CodeObjectView {
   const void* data = nullptr;
   size_t size = 0;
   std::string uri;
+  // Stable full-content digest computed once at ingestion (the code object
+  // reader) and reused across per-GPU loads. 0 means unset; the retarget cache
+  // key then falls back to hashing the bytes directly.
+  uint64_t content_digest = 0;
 };
 
 // Entry-trampoline rewriting is opt-in while validation is ongoing.
@@ -110,11 +120,28 @@ struct LoadAgentCodeObjectCallbacks {
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
+// Derive the code object's canonical target-id (e.g.
+// "amdgcn-amd-amdhsa--gfx1250") directly from the ELF (e_flags + code object
+// version) using the loader's own AmdHsaCode parser, without loading COMGR or
+// copying the whole object. Returns an empty string if the bytes are not a
+// parseable AMDGPU code object. This is the fast path used to keep COMGR (and
+// its dlopen + full-buffer copy) off the cache-hit path.
+std::string GetCodeObjectIsaNameFromElf(const void* elf_data, size_t elf_size);
+
+// Why a retarget failed. Only deterministic failures are safe to negative-cache;
+// transient ones may succeed on a later attempt.
+enum class RetargetFailureKind {
+  kNone,           // Succeeded.
+  kDeterministic,  // COMGR rewrite ran and rejected the object.
+  kTransient,      // Setup / allocation / COMGR-availability failure.
+};
+
 bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         const char* source_isa, const char* target_isa,
                         OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size,
                         bool request_entry_trampolines = false,
-                        bool request_strict_mode = false);
+                        bool request_strict_mode = false,
+                        RetargetFailureKind* out_failure = nullptr);
 
 RetargetCodeObjectResult TryRetargetCodeObject(
     const CodeObjectView& code_object, hsa_agent_t agent,
@@ -123,6 +150,24 @@ RetargetCodeObjectResult TryRetargetCodeObject(
 RetargetCodeObjectResult TryRetargetCodeObject(
     amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
     OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+
+// Outcome of PrepareRetargetedCodeObject.
+enum class PrepareStatus {
+  kNotNeeded,             // No rewrite required; load the source object as-is.
+  kPrepared,              // out_elf_buffer/out_elf_size hold the prepared bytes.
+  kRequiredRewriteFailed  // A required rewrite failed; the caller must error.
+};
+
+// Prepare (retarget) a code object for `agent` using the explicit `options`,
+// returning the prepared artifact bytes in out_elf_buffer/out_elf_size when
+// status == kPrepared. Reuses the persistent artifact store, so repeat / cross
+// process preparations of the same object skip COMGR. Unlike the onLoad engine
+// this takes explicit options (no environment inspection) and never selects an
+// agent implicitly, so the result is deterministic. Preparation runs on the
+// calling thread; callers own any asynchronous scheduling.
+PrepareStatus PrepareRetargetedCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
+                                          const RewriteOptions& options,
+                                          OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,

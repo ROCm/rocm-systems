@@ -110,6 +110,14 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapRewrite.GetIsaFromElfRealCodeObject"
+      - "HotswapRewrite.GetIsaFromElfInvalidCodeObject"
+      - "HotswapRewrite.FileUriKeyServesSecondLoadFromCache"
+      - "HotswapRewrite.WarmHotswapCachePopulatesCacheForLoad"
+      - "HotswapRewrite.DiskCachePersistsAndServesViaMmap"
+      - "HotswapRewrite.ConcurrentLoadsRetargetOnce"
+      - "HotswapPrewarm.ExportPopulatesRetargetCache"
+      - "HotswapPrewarm.ExportRejectsInvalidArgs"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -290,6 +298,14 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "HotswapRewrite.GetIsaFromElfRealCodeObject"
+      - "HotswapRewrite.GetIsaFromElfInvalidCodeObject"
+      - "HotswapRewrite.FileUriKeyServesSecondLoadFromCache"
+      - "HotswapRewrite.WarmHotswapCachePopulatesCacheForLoad"
+      - "HotswapRewrite.DiskCachePersistsAndServesViaMmap"
+      - "HotswapRewrite.ConcurrentLoadsRetargetOnce"
+      - "HotswapPrewarm.ExportPopulatesRetargetCache"
+      - "HotswapPrewarm.ExportRejectsInvalidArgs"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
