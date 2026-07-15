@@ -579,9 +579,10 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
            make_exec_fn<VCvtF16F32Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -1734,9 +1735,10 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     : Vop3("v_mov_b16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMovB16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -3692,9 +3694,10 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtF16U16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -3773,9 +3776,10 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtF16I16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -3854,9 +3858,10 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtU16F16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -3941,9 +3946,10 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtI16F16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4029,9 +4035,10 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4133,9 +4140,10 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4242,9 +4250,10 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4346,9 +4355,10 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
     : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLogF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4450,9 +4460,10 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VExpF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4555,9 +4566,10 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
            make_exec_fn<VFrexpMantF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4666,9 +4678,10 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
            make_exec_fn<VFrexpExpI16F16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4780,9 +4793,10 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
            make_exec_fn<VFloorF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4884,9 +4898,10 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -4989,9 +5004,10 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
            make_exec_fn<VTruncF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5094,9 +5110,10 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
            make_exec_fn<VRndneF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5199,9 +5216,10 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
            make_exec_fn<VFractF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5306,9 +5324,10 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSinF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5406,9 +5425,10 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
     : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCosF16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5507,9 +5527,10 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
            make_exec_fn<VSatPkU8I16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5550,9 +5571,10 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtNormI16F16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5636,9 +5658,10 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
            make_exec_fn<VCvtNormU16F16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -5721,9 +5744,10 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     : Vop3("v_not_b16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VNotB16Vop3>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &src0;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8057,10 +8081,11 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8181,10 +8206,11 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8306,10 +8332,11 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8430,10 +8457,11 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8682,10 +8710,11 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8808,10 +8837,11 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -8935,10 +8965,11 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12044,11 +12075,12 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12453,11 +12485,12 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12592,11 +12625,12 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12732,11 +12766,12 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12844,11 +12879,12 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -12953,11 +12989,12 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13093,11 +13130,12 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13205,11 +13243,12 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13314,11 +13353,12 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13456,11 +13496,12 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13570,11 +13611,12 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13683,11 +13725,12 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -13782,11 +13825,12 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -14641,11 +14685,12 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -14899,11 +14944,12 @@ VMaxminF16Vop3::VMaxminF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15040,11 +15086,12 @@ VMinmaxF16Vop3::VMinmaxF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15497,11 +15544,12 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15626,11 +15674,12 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  src_operands_[3] = &src2;
+  num_src_ = 4;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15754,10 +15803,11 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15846,10 +15896,11 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -15938,10 +15989,11 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16198,10 +16250,11 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16290,10 +16343,11 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16382,10 +16436,11 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16474,10 +16529,11 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16567,10 +16623,11 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -16658,10 +16715,11 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -18457,10 +18515,11 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -18546,10 +18605,11 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -18635,10 +18695,11 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -19094,10 +19155,11 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -19185,10 +19247,11 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -19276,10 +19339,11 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &src1;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(

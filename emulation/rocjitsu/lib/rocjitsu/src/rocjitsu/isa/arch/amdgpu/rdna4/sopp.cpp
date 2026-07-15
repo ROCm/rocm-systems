@@ -59,7 +59,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SClauseSopp::SClauseSopp(const MachineInst *inst)
     : Sopp("s_clause", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SClauseSopp>()),
@@ -93,9 +93,7 @@ SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
   flags_ |= WAITCNT;
 }
 
-void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wait_alu_sopp(*this, wf);
-}
+void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
     : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWaitcntSopp>()),
@@ -149,10 +147,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   flags_ |= PROGRAM_TERMINATOR;
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
     : Sopp("s_round_mode", reinterpret_cast<const OpEncoding *>(inst),
@@ -191,7 +186,7 @@ SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
 }
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_wait_sopp(*this, wf);
+  wf.set_state(amdgpu::WfState::BARRIER);
 }
 
 SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
