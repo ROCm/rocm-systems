@@ -38,3 +38,4 @@
 #endif
 
 #endif  // SRC_HSA_INCLUDES_H_
+(void)
