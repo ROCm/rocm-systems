@@ -13,7 +13,7 @@
 #include "comm.h"
 #include "enqueue.h"
 #include "group.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 #include "rccl_common.h"
 
 namespace RcclUnitTesting
