@@ -177,6 +177,38 @@ when you query a device, and the split APIs set them on the resources they
 produce. Treat ``minSmPartitionSize`` and ``smCoscheduledAlignment`` as
 architecture-dependent values to read at runtime, not constants to hard-code.
 
+The resource returned by ``hipDeviceGetDevResource`` is intersected with any
+global CU mask set through the ``ROC_GLOBAL_CU_MASK`` environment variable, so it
+reflects the CUs your process can actually use.
+
+Workgroup processor alignment
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+On AMD GPUs, CUs are grouped into workgroup processors (WGPs), and cooperating
+CUs are scheduled together. ``smCoscheduledAlignment`` reports this granularity,
+which is also the minimum partition granularity:
+
+.. list-table::
+    :header-rows: 1
+
+    * - Mode
+      - ``smCoscheduledAlignment``
+    * - WGP mode (typical on RDNA and recent CDNA)
+      - 2 CUs
+    * - CU mode
+      - 1 CU
+
+When the alignment is 2, request CU counts in multiples of two to avoid wasting
+units. Read ``smCoscheduledAlignment`` at runtime rather than assuming a value,
+since it depends on the device and its mode.
+
+.. note::
+
+    Creating an execution context does not, by itself, stop other work from
+    running on the same CUs; the partitions are not hardware-enforced as mutually
+    exclusive. To isolate workloads, split the device into disjoint partitions
+    and confine each workload to its own context.
+
 Work queue configuration resource
 -------------------------------------------------------------------------------
 
@@ -567,6 +599,13 @@ context's resources:
 On an execution context, the default stream flag behaves like
 ``hipStreamNonBlocking``.
 
+You can query the CU partition backing any stream with
+``hipStreamGetDevResource``. It returns the execution context's CU partition for
+a context stream, the explicit mask for a stream created with
+``hipExtStreamCreateWithCUMask``, and the full device resource for an ordinary
+stream. Only ``hipDevResourceTypeSm`` is supported; other types return
+``hipErrorInvalidResourceType``.
+
 Graphs
 -------------------------------------------------------------------------------
 
@@ -603,6 +642,46 @@ that device.
 ``hipExecutionCtxGetDevice`` returns the device behind a context, and
 ``hipExecutionCtxGetId`` returns its unique identifier. Release a context you
 created with ``hipExecutionCtxDestroy``.
+
+Destroy a context's streams before the context itself. A stream created from a
+destroyed context is orphaned: operations on it other than ``hipStreamDestroy``
+return ``hipErrorContextIsDestroyed``.
+
+Migrating from CUDA green contexts
+===============================================================================
+
+HIP execution contexts follow the CUDA green context model, so ports are mostly
+mechanical. The handle type differs: HIP uses ``hipExecutionCtx_t`` where CUDA
+uses ``CUgreenCtx``. The main function correspondences are:
+
+.. list-table::
+    :header-rows: 1
+
+    * - CUDA
+      - HIP
+    * - ``cuDeviceGetDevResource``
+      - ``hipDeviceGetDevResource``
+    * - ``cuDevSmResourceSplitByCount``
+      - ``hipDevSmResourceSplitByCount``
+    * - ``cuDevResourceGenerateDesc``
+      - ``hipDevResourceGenerateDesc``
+    * - ``cuGreenCtxCreate``
+      - ``hipGreenCtxCreate``
+    * - ``cuGreenCtxDestroy``
+      - ``hipExecutionCtxDestroy``
+    * - ``cuGreenCtxStreamCreate``
+      - ``hipExecutionCtxStreamCreate``
+    * - ``cuGreenCtxRecordEvent``
+      - ``hipExecutionCtxRecordEvent``
+    * - ``cuGreenCtxWaitEvent``
+      - ``hipExecutionCtxWaitEvent``
+    * - ``cuStreamGetGreenCtx``
+      - ``hipStreamGetDevResource``
+
+The most important behavioral difference is alignment. CUDA aligns partitions to
+SM granularity, while HIP aligns to the WGP granularity reported by
+``smCoscheduledAlignment``, which is 2 CUs in WGP mode. Query this value and size
+partitions accordingly instead of porting fixed SM counts directly.
 
 Worked example
 ===============================================================================
