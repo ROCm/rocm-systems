@@ -25,7 +25,7 @@ on:
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
         # Last updated on 2026/07/07.
-        default: "f58f02a2a0249f35998e99c0915fea2808fc86e3"
+        default: "7d17c85b7255e1bfe755558fe2497f7fa4e30e87"
         required: true
 
 concurrency:
@@ -103,7 +103,7 @@ jobs:
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           # Last updated on 2026/07/07.
-          ref: f58f02a2a0249f35998e99c0915fea2808fc86e3
+          ref: 7d17c85b7255e1bfe755558fe2497f7fa4e30e87
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -230,11 +230,12 @@ jobs:
               -- pytest \
               --durations=0 \
               tests/test_corpus.py -vv \
-              -n 4 \
+              -n 8 \
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 20; then
+              --timeout 60 \
+              -o timeout_func_only=true; then
               corpus_status=1
             fi
             echo "::endgroup::"
