@@ -41,5 +41,5 @@ add_subdirectory(util)
 add_subdirectory(pm4)
 
 if(ROCPROFILER_BUILD_TESTS)
-    add_subdirectory(tests/integration)
+    add_subdirectory(tests)
 endif()
