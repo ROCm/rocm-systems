@@ -33,6 +33,7 @@ _AINIC_STRINGS = [
     "ainic",
 ]
 
+
 def _find_librocprof_sys(lib_dir: Path) -> Path:
     """Return the versioned or unversioned librocprof-sys.so under lib_dir."""
     for pattern in ("librocprof-sys.so.*", "librocprof-sys.so"):
@@ -44,9 +45,8 @@ def _find_librocprof_sys(lib_dir: Path) -> Path:
         for c in candidates:
             if c.is_file():
                 return c
-    raise FileNotFoundError(
-        f"librocprof-sys.so not found under {lib_dir}"
-    )
+    raise FileNotFoundError(f"librocprof-sys.so not found under {lib_dir}")
+
 
 @pytest.fixture(scope="module")
 def librocprof_sys(rocprof_config: RocprofsysConfig) -> Path:
