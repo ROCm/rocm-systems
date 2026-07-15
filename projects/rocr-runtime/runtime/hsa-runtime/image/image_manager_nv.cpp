@@ -272,6 +272,25 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
   image.srd[6] = desc->word6.u32All;
   image.srd[7] = desc->word7.u32All;
 
+  if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2D ||
+      image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA) {
+    SQ_IMG_RSRC_WORD1 w1;
+    SQ_IMG_RSRC_WORD2 w2;
+    w1.u32All = image.srd[1];
+    w2.u32All = image.srd[2];
+    uint32_t srd_width  = (w2.f.WIDTH_HI << 2) | w1.f.WIDTH;
+    uint32_t srd_height = w2.f.HEIGHT;
+    uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
+    uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
+    if (img_width < srd_width || img_height < srd_height) {
+      w1.f.WIDTH    = img_width & 0x3u;
+      w2.f.WIDTH_HI = img_width >> 2;
+      w2.f.HEIGHT   = img_height;
+      image.srd[1]  = w1.u32All;
+      image.srd[2]  = w2.u32All;
+    }
+  }
+
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     SQ_BUF_RSRC_WORD0 word0;
     SQ_BUF_RSRC_WORD1 word1;

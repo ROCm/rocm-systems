@@ -709,7 +709,7 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 126)
     return static_cast<uint32_t>(wf.exec());
   if (ev == 127)
-    return static_cast<uint32_t>(wf.exec() >> 32);
+    return static_cast<uint32_t>(wf.exec_raw() >> 32);
   if (ev >= 128 && ev <= 192)
     return static_cast<uint32_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
@@ -816,7 +816,7 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 125)
     return wf.m0();
   if (ev == 126)
-    return wf.exec();
+    return wf.exec_raw();
   if (ev >= 128 && ev <= 192)
     return static_cast<uint64_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
@@ -890,7 +890,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev == 127) {
-    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
   throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));
@@ -922,7 +922,7 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
   if (ev == 124)
     return;
   if (ev == 126) {
-    wf.set_exec(val);
+    wf.set_exec_raw(val);
     return;
   }
   throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
