@@ -19,6 +19,12 @@ nesting, and code organization.
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff-tooling.md`](.ai/rules/ruff-tooling.md)**
 for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
+## Test Placement
+
+Read **[`.ai/rules/test-placement.md`](.ai/rules/test-placement.md)** before adding
+or moving test code. Tests mirror the source module they exercise; CLI suites stay
+CLI-only.
+
 ## Git Workflows
 
 Prefer the **`gh` CLI** for all GitHub interactions (pull requests, issues,
