@@ -55,9 +55,18 @@ The example above is intentionally minimal and single-threaded.
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Number of PDES engine partitions/worker threads. |
+| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+
+### Simulation threading
+
+`num_threads` controls Simdojo engine partitions and their worker threads.
+The value is clamped to the number of XCDs visible to the VM. With
+`num_threads: 1`, all XCDs stay in one engine partition. With
+`num_threads: 4` on the 8-XCD CDNA4 configs, whole XCD subtrees are assigned
+round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
+partition. A single XCD is never split across partitions.
 
 ### Topology
 

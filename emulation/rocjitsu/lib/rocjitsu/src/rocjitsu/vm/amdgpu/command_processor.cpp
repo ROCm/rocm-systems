@@ -475,10 +475,9 @@ void CommandProcessor::startup() {
   // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
   // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
   // the partition event queue without synchronization — safe only same-partition. The
-  // recursive-bisection partitioner (topology.partition(), run in the engine's
-  // create() before startup) could in principle split a CP from a CU under
-  // num_threads > 1; assert here (after partitioning, before the run loop) so any such
-  // split fails loudly rather than silently racing.
+  // generic balanced partitioner could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any
+  // such split fails loudly rather than silently racing.
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");

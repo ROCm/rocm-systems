@@ -374,6 +374,7 @@ add_executable(
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
+    partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
     buffer_operand_test.cpp

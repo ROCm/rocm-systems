@@ -34,7 +34,10 @@ struct LinkSpec {
 /// @brief A partition of the simulation topology.
 ///
 /// @details Each Partition holds the set of components assigned to a single
-/// worker thread, along with the links internal to and crossing this partition.
+/// event queue, along with the links internal to and crossing this partition.
+/// Membership determines scheduled-event ownership and link classification;
+/// it does not dispatch direct component calls or lifecycle hooks to the
+/// partition's worker thread.
 struct Partition {
   PartitionID id = 0;                  ///< Partition identifier.
   std::vector<Component *> components; ///< Components assigned to this partition.
@@ -92,6 +95,16 @@ public:
   /// @returns Raw pointer to the created link.
   Link *add_link(Port *src, Port *dst, Tick latency, uint32_t weight = 1);
 
+  /// @brief Create a queued link between two ports.
+  /// @param src Source port.
+  /// @param dst Destination port.
+  /// @param latency Propagation delay in simulation ticks.
+  /// @param capacity Maximum number of buffered messages.
+  /// @param weight Partitioning cut weight for this link.
+  /// @returns Raw pointer to the created queued link.
+  QueuedLink *add_queued_link(Port *src, Port *dst, Tick latency, size_t capacity,
+                              uint32_t weight = 1);
+
   /// @brief Create two unidirectional links for bidirectional communication.
   ///
   /// @details Wires a_out -> b_in (forward, fwd_latency) and b_out -> a_in (reverse,
@@ -143,9 +156,13 @@ public:
   /// @returns Const reference to the clock domain vector.
   const std::vector<std::unique_ptr<ClockDomain>> &clock_domains() const { return clock_domains_; }
 
-  /// @brief Partition the topology for parallel execution.
+  /// @brief Balance the topology across partitions for parallel execution.
+  ///
+  /// @details This invokes the generic Fiduccia-Mattheyses partitioner. Callers
+  /// with hardware or ownership constraints should use partition_manual().
   /// @param num_partitions Number of partitions to create (one per thread).
-  void partition(uint32_t num_partitions);
+  /// @throws std::invalid_argument if @p num_partitions is zero.
+  void partition_balanced(uint32_t num_partitions);
 
   /// @brief Resolve a dotted path (e.g., "xcd0.se1.cu3") to a Component.
   Component *resolve_component(const std::string &path) const;
@@ -163,9 +180,15 @@ public:
   /// deterministic partition layouts.
   /// @param num_partitions Number of partitions to create.
   /// @param assigner Callback returning the partition ID for each component.
+  /// @throws std::invalid_argument if @p num_partitions is zero or @p assigner
+  /// returns an out-of-range partition ID.
   void partition_manual(uint32_t num_partitions, std::function<PartitionID(Component *)> assigner);
 
 private:
+  /// @brief Append unique owners of registered link endpoints.
+  /// @param components Existing component list to extend without duplicates.
+  void append_link_endpoint_owners(std::vector<Component *> &components) const;
+
   /// @brief Classify links as internal or boundary for each partition.
   void classify_links();
 
