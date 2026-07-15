@@ -465,7 +465,7 @@ bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 }
 
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                          const std::string& isa, std::vector<std::string>& linkOptions,
+                          const std::string& isa, const std::vector<std::string>& linkOptions,
                           std::string& buildLog, comgr_helper::ComgrDataSetUniqueHandle& linkOutputs) {
   comgr_helper::ComgrActionInfoUniqueHandle action;
 
