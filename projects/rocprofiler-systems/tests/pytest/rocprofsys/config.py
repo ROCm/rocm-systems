@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from functools import cached_property
 import getpass
 import os
 from pathlib import Path
@@ -13,6 +12,7 @@ import tempfile
 from typing import Optional
 import re
 
+from .cache import persistent_cache, persistent_cached_property
 from .capabilities import SystemCapabilities
 
 
@@ -77,7 +77,7 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    @cached_property
+    @persistent_cached_property
     def llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
 
@@ -402,6 +402,7 @@ def _merge_python_root_dirs(
     return result or None
 
 
+@persistent_cache("config.discover_install_config")
 def discover_install_config(
     install_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,
@@ -515,6 +516,7 @@ def discover_install_config(
     )
 
 
+@persistent_cache("config.discover_build_config")
 def discover_build_config(
     build_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,

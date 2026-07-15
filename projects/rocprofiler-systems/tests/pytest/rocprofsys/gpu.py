@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import os
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+
+from .cache import persistent_cache
 
 GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+)")
 
@@ -106,7 +107,7 @@ def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("gpu.detect_gpu")
 def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
@@ -242,7 +243,7 @@ def lookup_gpu_category(
     return categories
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("gpu.get_offload_extractor")
 def get_offload_extractor(
     rocm_path: Optional[Path] = None,
 ) -> tuple[Optional[Path], Optional[bool]]:
@@ -322,8 +323,13 @@ def get_offload_extractor(
     return None, is_llvm_too_old
 
 
+@persistent_cache("gpu.get_target_gpu_arch")
 def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     """Get the list of gpu architectures (gfx) the target was compiled for.
+
+    Cached per ``(rocm_path, target_path)`` for the CTest session (a target
+    binary does not change mid-session; the config-setup fixture regenerates
+    the cache between runs).
 
     Args:
         rocm_path: Path to the ROCm installation directory
@@ -405,7 +411,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     return list(target_archs)
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("gpu.get_xnack_support")
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
     """Check whether the current GPU is XNACK-capable.
 
