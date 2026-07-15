@@ -14,20 +14,21 @@
 #include "core/trace_cache/sample_type.hpp"
 
 #include "common/units.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <cstddef>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
 
 #include <cstdint>
-#include <limits>
 #include <memory>
+#include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
 
-#include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/version.h>
 
@@ -69,9 +70,9 @@ generate_db_output_path(int pid)
 void
 rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-    auto& n_info    = node_info::get_instance();
-    auto  process   = m_metadata->get_process_info();
-    auto& agent_ref = m_agent_manager->get_agent_by_handle(_kds.agent_id_handle);
+    auto&       n_info    = node_info::get_instance();
+    auto        process   = m_metadata->get_process_info();
+    const auto& agent_ref = m_agent_manager->get_agent_by_handle(_kds.agent_id_handle);
 
     auto kernel_symbol = m_metadata->get_kernel_symbol(_kds.kernel_id);
     if(!kernel_symbol.has_value())
@@ -113,27 +114,27 @@ rocpd_processor_t::handle(const scratch_memory_sample& _sms)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    const auto* _name = m_metadata->get_buffer_name_info().at(
+    const auto* name = m_metadata->get_buffer_name_info().at(
         static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
         static_cast<rocprofiler_tracing_operation_t>(_sms.operation));
 
-    auto& agent_ref = m_agent_manager->get_agent_by_handle(_sms.agent_id_handle);
+    const auto& agent_ref = m_agent_manager->get_agent_by_handle(_sms.agent_id_handle);
 
-    auto [memory_operation, memory_type_val] = parse_memory_operation_name(_name);
+    auto [memory_operation, memory_type_val] = parse_memory_operation_name(name);
     auto extdata_json_str = fmt::format("{{\"flags\": {}}}", _sms.flags);
 
-    auto ev = make_event(_sms.correlation_id_internal, _sms.correlation_id_ancestor, 0,
-                         trait::name<category::rocm_scratch_memory>::value);
+    auto event = make_event(_sms.correlation_id_internal, _sms.correlation_id_ancestor, 0,
+                            trait::name<category::rocm_scratch_memory>::value);
 
     profiler_hub::writer_types::memory_alloc_data_t ma;
-    ma.event           = ev;
+    ma.event           = event;
     ma.type            = memory_operation.c_str();
     ma.level           = memory_type_val.c_str();
     ma.start_timestamp = _sms.start_timestamp;
     ma.end_timestamp   = _sms.end_timestamp;
     ma.address         = 0;
     ma.size            = _sms.allocation_size;
-    ma.extdata         = extdata_json_str.c_str();
+    ma.extdata         = extdata_json_str;
 
     auto env = make_trace_env_with_agent_queue_stream(
         n_info.id, process.pid, _sms.thread_id, agent_ref, _sms.queue_id_handle,
@@ -143,38 +144,38 @@ rocpd_processor_t::handle(const scratch_memory_sample& _sms)
 }
 
 void
-rocpd_processor_t::handle(const memory_copy_sample& _mcs)
+rocpd_processor_t::handle(const memory_copy_sample& mcs)
 {
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    auto _name = std::string{ m_metadata->get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
-        static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
+    auto name = std::string{ m_metadata->get_buffer_name_info().at(
+        static_cast<rocprofiler_buffer_tracing_kind_t>(mcs.kind),
+        static_cast<rocprofiler_tracing_operation_t>(mcs.operation)) };
 
-    auto& dst_agent = m_agent_manager->get_agent_by_handle(_mcs.dst_agent_id_handle);
-    auto& src_agent = m_agent_manager->get_agent_by_handle(_mcs.src_agent_id_handle);
+    const auto& dst_agent = m_agent_manager->get_agent_by_handle(mcs.dst_agent_id_handle);
+    const auto& src_agent = m_agent_manager->get_agent_by_handle(mcs.src_agent_id_handle);
 
-    auto ev = make_event(_mcs.correlation_id_internal, _mcs.correlation_id_ancestor, 0,
-                         trait::name<category::rocm_memory_copy>::value);
+    auto event = make_event(mcs.correlation_id_internal, mcs.correlation_id_ancestor, 0,
+                            trait::name<category::rocm_memory_copy>::value);
 
-    profiler_hub::writer_types::memory_copy_data_t mc;
-    mc.event           = ev;
-    mc.start_timestamp = _mcs.start_timestamp;
-    mc.end_timestamp   = _mcs.end_timestamp;
-    mc.dst_agent_id    = make_agent_uid(dst_agent);
-    mc.dst_address     = _mcs.dst_address_value;
-    mc.src_agent_id    = make_agent_uid(src_agent);
-    mc.src_address     = _mcs.src_address_value;
-    mc.size            = _mcs.bytes;
-    mc.name            = _name.c_str();
-    mc.region_name     = _name.c_str();
+    profiler_hub::writer_types::memory_copy_data_t memory_copy;
+    memory_copy.event           = event;
+    memory_copy.start_timestamp = mcs.start_timestamp;
+    memory_copy.end_timestamp   = mcs.end_timestamp;
+    memory_copy.dst_agent_id    = make_agent_uid(dst_agent);
+    memory_copy.dst_address     = mcs.dst_address_value;
+    memory_copy.src_agent_id    = make_agent_uid(src_agent);
+    memory_copy.src_address     = mcs.src_address_value;
+    memory_copy.size            = mcs.bytes;
+    memory_copy.name            = name;
+    memory_copy.region_name     = name;
 
-    auto env      = make_trace_env(n_info.id, process.pid, _mcs.thread_id);
-    env.stream_id = _mcs.stream_handle;
+    auto env      = make_trace_env(n_info.id, process.pid, mcs.thread_id);
+    env.stream_id = mcs.stream_handle;
     env.queue_id  = 0;
 
-    m_writer->insert_memory_copy_data(mc, env);
+    m_writer->insert_memory_copy_data(memory_copy, env);
 }
 
 void
@@ -442,7 +443,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     auto insert_device_level_metrics = [&](const std::string_view base_name,
                                            bool is_enabled, const auto& arr) {
         if(!is_enabled) return;
-        for(size_t i = 0; i < arr.size(); ++i)
+        for(std::size_t i = 0; i < arr.size(); ++i)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
@@ -510,14 +511,14 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 {
     // Insert NIC RDMA metrics into rocpd database
-    const auto* _name        = trait::name<category::amd_smi_nic>::value;
+    const auto* name         = trait::name<category::amd_smi_nic>::value;
     const auto& process_info = m_metadata->get_process_info();
     const auto& nic_agent =
         m_agent_manager->get_agent_by_id(_nic_sample.device_id, agent_type::NIC);
 
     const auto agent_uid = make_agent_uid(nic_agent);
 
-    auto ev = make_event(0, 0, 0, _name);
+    auto event = make_event(0, 0, 0, name);
 
     auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
                                        const char* track_name, std::uint64_t value) {
@@ -527,7 +528,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
                   track_name, value);
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = ev;
+        pmc_data.event = event;
         pmc_data.value = static_cast<double>(value);
 
         profiler_hub::writer_types::track_info_t track;
@@ -589,13 +590,13 @@ rocpd_processor_t::handle(
 {
     if(_gpu_perf_counter.entries.empty()) return;
 
-    const auto* _name        = "rocm_counter_collection";
+    const auto* name         = "rocm_counter_collection";
     const auto& process_info = m_metadata->get_process_info();
     const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
         _gpu_perf_counter.device_id, agent_type::GPU);
 
     const auto agent_uid = make_agent_uid(agent_ref);
-    auto       ev        = make_event(0, 0, 0, _name);
+    auto       event     = make_event(0, 0, 0, name);
 
     for(const auto& entry : _gpu_perf_counter.entries)
     {
@@ -606,7 +607,7 @@ rocpd_processor_t::handle(
         const auto& info = name_info->get();
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = ev;
+        pmc_data.event = event;
         pmc_data.value = entry.value;
 
         profiler_hub::writer_types::track_info_t track;
@@ -620,7 +621,7 @@ rocpd_processor_t::handle(
         pmc_data.sample  = sample;
 
         profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-        pmc_uid.name     = info.pmc_info_name.c_str();
+        pmc_uid.name     = info.pmc_info_name;
         pmc_uid.agent_id = agent_uid;
 
         m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
@@ -909,13 +910,13 @@ rocpd_processor_t::post_process_metadata()
     profiler_hub::writer_types::node_info_t node;
     node.node_id       = n_info.id;
     node.hash          = n_info.hash;
-    node.machine_id    = n_info.machine_id.c_str();
-    node.system_name   = n_info.system_name.c_str();
-    node.hostname      = n_info.node_name.c_str();
-    node.release       = n_info.release.c_str();
-    node.version       = n_info.version.c_str();
-    node.hardware_name = n_info.machine.c_str();
-    node.domain_name   = n_info.domain_name.c_str();
+    node.machine_id    = n_info.machine_id;
+    node.system_name   = n_info.system_name;
+    node.hostname      = n_info.node_name;
+    node.release       = n_info.release;
+    node.version       = n_info.version;
+    node.hardware_name = n_info.machine;
+    node.domain_name   = n_info.domain_name;
     m_writer->register_node_info(node);
 
     // Register process info
@@ -945,29 +946,30 @@ rocpd_processor_t::post_process_metadata()
 
         agent_info.logical_index = rocpd_agent->logical_node_id;
         agent_info.uuid          = rocpd_agent->device_id;
-        agent_info.name          = rocpd_agent->name.c_str();
-        agent_info.model_name    = rocpd_agent->model_name.c_str();
-        agent_info.vendor_name   = rocpd_agent->vendor_name.c_str();
-        agent_info.product_name  = rocpd_agent->product_name.c_str();
-        agent_info.user_name     = rocpd_agent->product_name.c_str();
-        agent_info.extdata       = rocpd_agent->agent_info.c_str();
+        agent_info.name          = rocpd_agent->name;
+        agent_info.model_name    = rocpd_agent->model_name;
+        agent_info.vendor_name   = rocpd_agent->vendor_name;
+        agent_info.product_name  = rocpd_agent->product_name;
+        agent_info.user_name     = rocpd_agent->product_name;
+        agent_info.extdata       = rocpd_agent->agent_info;
         agent_info.node_id       = n_info.id;
         agent_info.process_id    = process_info.pid;
         m_writer->register_agent_info(agent_info);
     }
 
     // Register strings
-    auto _string_list = m_metadata->get_string_list();
-    for(auto& _string : _string_list)
+    auto string_list = m_metadata->get_string_list();
+    for(auto& str : string_list)
     {
-        m_writer->register_string(_string);
+        m_writer->register_string(str);
     }
 
     // Register thread info
-    auto _thread_info_list = m_metadata->get_thread_info_list();
-    for(auto& t_info : _thread_info_list)
+    auto thread_info_list = m_metadata->get_thread_info_list();
+    for(auto& t_info : thread_info_list)
     {
-        const auto& extended_info = thread_info::get(t_info.thread_id, SystemTID);
+        const auto& extended_info =
+            thread_info::get(static_cast<std::int64_t>(t_info.thread_id), SystemTID);
         if(extended_info.has_value())
         {
             t_info.start = extended_info->get_start();
@@ -976,34 +978,34 @@ rocpd_processor_t::post_process_metadata()
 
         auto thread_name = fmt::format("Thread {}", t_info.thread_id);
 
-        profiler_hub::writer_types::thread_info_t ti;
-        ti.parent_process_id = process_info.ppid;
-        ti.thread_id         = t_info.thread_id;
-        ti.name              = thread_name;
-        ti.start             = t_info.start;
-        ti.end               = t_info.end;
-        ti.node_id           = n_info.id;
-        ti.process_id        = process_info.pid;
-        m_writer->register_thread_info(ti);
+        profiler_hub::writer_types::thread_info_t thread_info;
+        thread_info.parent_process_id = process_info.ppid;
+        thread_info.thread_id         = t_info.thread_id;
+        thread_info.name              = thread_name;
+        thread_info.start             = t_info.start;
+        thread_info.end               = t_info.end;
+        thread_info.node_id           = n_info.id;
+        thread_info.process_id        = process_info.pid;
+        m_writer->register_thread_info(thread_info);
     }
 
     // Register tracks
-    auto _track_info_list = m_metadata->get_track_info_list();
-    for(auto& track : _track_info_list)
+    auto track_info_list = m_metadata->get_track_info_list();
+    for(auto& track : track_info_list)
     {
-        profiler_hub::writer_types::track_info_t ti;
-        ti.name       = std::make_optional<std::string_view>(track.track_name.c_str());
-        ti.node_id    = n_info.id;
-        ti.process_id = process_info.pid;
-        ti.thread_id  = track.thread_id;
-        m_writer->register_track_info(ti);
+        profiler_hub::writer_types::track_info_t track_info;
+        track_info.name       = track.track_name;
+        track_info.node_id    = n_info.id;
+        track_info.process_id = process_info.pid;
+        track_info.thread_id  = track.thread_id;
+        m_writer->register_track_info(track_info);
     }
 
     // Register code objects
-    auto _code_object_list = m_metadata->get_code_object_list();
-    for(const auto& code_object : _code_object_list)
+    auto code_object_list = m_metadata->get_code_object_list();
+    for(const auto& code_object : code_object_list)
     {
-        auto& code_agent = m_agent_manager->get_agent_by_handle(
+        const auto& code_agent = m_agent_manager->get_agent_by_handle(
             get_handle_from_code_object(code_object));
 
         const char* strg_type = "UNKNOWN";
@@ -1068,8 +1070,8 @@ rocpd_processor_t::post_process_metadata()
     }
 
     // Register stream info
-    auto _stream_list = m_metadata->get_stream_list();
-    for(const auto& stream_handle : _stream_list)
+    auto stream_list = m_metadata->get_stream_list();
+    for(const auto& stream_handle : stream_list)
     {
         auto stream_name = fmt::format("Stream {}", stream_handle);
 
