@@ -18,6 +18,7 @@
 #include "rocjitsu/version.h"
 
 #include "embedded_schema.h"
+#include "launch_preload.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,7 +27,6 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -43,15 +43,6 @@
 #include <vector>
 
 using namespace rocjitsu;
-
-#ifndef __has_feature
-#define __has_feature(x) 0
-#endif
-
-#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
-#define RJ_BUILT_WITH_ASAN 1
-extern "C" void __asan_init();
-#endif
 
 namespace {
 
@@ -177,36 +168,6 @@ std::string find_runtime_lib(std::string_view lib_name) {
 std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
 
 std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
-
-void prepend_env_path(const char *name, const std::string &value) {
-  if (const char *old_value = std::getenv(name); old_value && *old_value) {
-    std::string combined = value + ":" + old_value;
-    setenv(name, combined.c_str(), 1);
-    return;
-  }
-  setenv(name, value.c_str(), 1);
-}
-
-std::string find_loaded_asan_runtime() {
-#if defined(RJ_BUILT_WITH_ASAN)
-  Dl_info info{};
-  if (!dladdr(reinterpret_cast<void *>(&__asan_init), &info) || !info.dli_fname)
-    return {};
-
-  const std::filesystem::path runtime_path(info.dli_fname);
-  if (runtime_path.filename().string().find("asan") == std::string::npos)
-    return {};
-  return canonical_existing_path(runtime_path);
-#else
-  return {};
-#endif
-}
-
-void prepend_launch_preloads(const std::string &interposer_path) {
-  prepend_env_path("LD_PRELOAD", interposer_path);
-  if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
-    prepend_env_path("LD_PRELOAD", asan_runtime);
-}
 
 bool write_config_file(const std::string &config_path, pid_t pid) {
   auto cfg_file = rpc_invocation_config_file_path(pid);
@@ -650,7 +611,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  prepend_launch_preloads(lib_path);
+  rocjitsu::cli::prepend_launch_preloads(lib_path);
   if (dbt_guest_mode) {
     maybe_expand_rocr_visible_devices(dbt_guest_config);
     // The HSA hook still uses the legacy tools callback path. Disable only the
