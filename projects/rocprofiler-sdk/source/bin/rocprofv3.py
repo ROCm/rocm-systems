@@ -759,6 +759,22 @@ For attachment profiling of running processes:
         type=int,
     )
 
+    isa_decode_options = parser.add_argument_group("ISA decode options")
+
+    add_parser_bool_argument(
+        isa_decode_options,
+        "--complete-isa-decode",
+        help=(
+            "Persist the instruction text and comments resolved during ISA decode "
+            "(e.g. PC sample decode, thread trace decode) directly in ROCPD output. "
+            "Default: off (ROCPD post-processing attempts lazy disassembly from trusted "
+            "local code-object paths when no text is stored). "
+            "WARNING: "
+            "enabling this can drastically increase the database size, especially for "
+            "applications with large code objects."
+        ),
+    )
+
     post_processing_options = parser.add_argument_group("Post-processing tracing options")
 
     add_parser_bool_argument(
@@ -1851,6 +1867,11 @@ def run(app_args, args, **kwargs):
         _summary_output_fname = _summary_output_fname.lower()
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
+    update_env(
+        "ROCPROF_COMPLETE_ISA_DECODE",
+        args.complete_isa_decode,
+        overwrite=True,
+    )
     update_env("ROCPROF_STATS_SUMMARY", args.summary, overwrite_if_true=True)
     update_env("ROCPROF_STATS_SUMMARY_UNITS", args.summary_units, overwrite=True)
     update_env("ROCPROF_STATS_SUMMARY_OUTPUT", _summary_output_fname, overwrite=True)

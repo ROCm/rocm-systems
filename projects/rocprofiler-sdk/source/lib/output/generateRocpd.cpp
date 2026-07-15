@@ -24,11 +24,11 @@
 #include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
+#include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
 #include "timestamps.hpp"
 
-#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/filesystem.hpp"
@@ -69,6 +69,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -108,10 +109,17 @@ namespace
 namespace fs          = ::rocprofiler::common::filesystem;
 using function_args_t = std::vector<argument_info>;
 
+// Wrapper to distinguish raw BLOB bytes from TEXT strings in sql_insert_value.
+struct blob_data
+{
+    std::string bytes;
+};
+
 struct sql_insert_value
 {
-    std::string_view                                                                     name  = {};
-    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
+    std::string_view name = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t, blob_data>
+        value = {};
 };
 
 struct pending_insert_batch
@@ -121,6 +129,7 @@ struct pending_insert_batch
     std::vector<std::vector<sql_insert_value>> rows         = {};
     size_t                                     max_rows     = 1;
     uint64_t                                   last_touched = 0;
+    bool                                       has_blob     = false;
 };
 
 struct rocpd_db
@@ -157,8 +166,36 @@ struct rocpd_db
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
 
+    // Recycled storage for fixed-size BLOB payloads (e.g. PC sampling extdata).  Batching
+    // needs each blob to have stable storage until its row is flushed, so rather than a fresh
+    // heap allocation per row we reuse buffers returned by already-flushed batches.
+    std::vector<std::string> blob_buffer_pool     = {};
+    static constexpr size_t  max_blob_buffer_pool = 2048;
+
     size_t get_event_id() { return ++event_id_counter; }
     size_t get_sample_id() { return ++sample_id_counter; }
+
+    // Acquire an empty pooled buffer (no copy); the caller fills it in place, e.g. when
+    // assembling a PC-sample blob field-by-field.
+    std::string acquire_blob_buffer()
+    {
+        auto buf = std::string{};
+        if(!blob_buffer_pool.empty())
+        {
+            buf = std::move(blob_buffer_pool.back());
+            blob_buffer_pool.pop_back();
+        }
+        buf.clear();
+        return buf;
+    }
+
+    // Return a blob buffer for reuse once its batch has been fully stepped and cleared.
+    void recycle_blob_buffer(std::string&& buf)
+    {
+        if(blob_buffer_pool.size() >= max_blob_buffer_pool) return;
+        buf.clear();
+        blob_buffer_pool.emplace_back(std::move(buf));
+    }
 };
 
 void
@@ -261,7 +298,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -383,6 +420,21 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
+template <typename Tp, typename TraitT = int>
+ROCPROFILER_NOINLINE sql_insert_value
+insert_nullable_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {})
+{
+    if(!_value.has_value()) return sql_insert_value{_name, nullptr};
+    return insert_value(_name, _value.value(), TraitT{});
+}
+
+// Store raw bytes as a SQLite BLOB column (not TEXT).
+ROCPROFILER_NOINLINE sql_insert_value
+insert_blob_value(std::string_view _name, std::string bytes)
+{
+    return sql_insert_value{_name, blob_data{std::move(bytes)}};
+}
+
 rocpd_db::~rocpd_db()
 {
     finish_pending_insert_batch(*this);
@@ -432,7 +484,8 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
                 if(val <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
                     return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
                 // Values > INT64_MAX cannot be stored as SQLite INTEGER without wrapping;
-                // bind as TEXT to preserve the exact value.
+                // bind as TEXT to preserve the exact value.  This is a local temporary (unlike
+                // the batched std::string/blob values below), so it must remain SQLITE_TRANSIENT.
                 auto text = fmt::format("{}", val);
                 return sqlite3_bind_text(
                     stmt, idx, text.c_str(), static_cast<int>(text.size()), SQLITE_TRANSIENT);
@@ -443,7 +496,16 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             }
             else if constexpr(common::mpl::is_string_type<value_type>::value)
             {
-                return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+                // SQLITE_STATIC: the std::string lives in pending.rows and is neither modified
+                // nor freed until after sqlite3_step (rows are cleared only once the whole batch
+                // has been stepped), so SQLite may reference it in place instead of copying.
+                return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_STATIC);
+            }
+            else if constexpr(std::is_same_v<value_type, blob_data>)
+            {
+                // SQLITE_STATIC: blob bytes also live in pending.rows until after the step.
+                return sqlite3_bind_blob64(
+                    stmt, idx, val.bytes.data(), val.bytes.size(), SQLITE_STATIC);
             }
             else
             {
@@ -475,6 +537,13 @@ normalize_batch_table_name(const rocpd_db& db, std::string_view table)
     }
 
     return std::string{table};
+}
+
+std::string
+quote_sql_identifier(std::string_view value)
+{
+    // SQLite accepts backtick-quoted identifiers; escape embedded backticks by doubling.
+    return fmt::format("`{}`", replace_all(std::string{value}, '`', "``"));
 }
 
 void
@@ -529,11 +598,23 @@ get_or_prepare_batch_statement(rocpd_db&                   db,
     const auto row_placeholder  = fmt::format("({})", fmt::join(placeholders, ", "));
     const auto row_placeholders = std::vector(rows_per_exec, row_placeholder);
     const auto values_clause    = fmt::format("{}", fmt::join(row_placeholders, ", "));
-    const auto field_names      = fmt::format("{}", fmt::join(pending.fields, ", "));
+    auto       quoted_fields    = std::vector<std::string>{};
+    quoted_fields.reserve(pending.fields.size());
+    for(const auto& field : pending.fields)
+        quoted_fields.emplace_back(quote_sql_identifier(field));
+
+    const auto table_name  = quote_sql_identifier(pending.table);
+    const auto field_names = fmt::format("{}", fmt::join(quoted_fields, ", "));
 
     const auto sql =
-        fmt::format("INSERT INTO {} ({}) VALUES {};", pending.table, field_names, values_clause);
-    SQLITE3_CHECK(sqlite3_prepare_v2(db.conn, sql.c_str(), -1, &stmt, nullptr));
+        fmt::format("INSERT INTO {} ({}) VALUES {};", table_name, field_names, values_clause);
+
+    auto prepare_rc = sqlite3_prepare_v2(db.conn, sql.c_str(), -1, &stmt, nullptr);
+    ROCP_FATAL_IF(prepare_rc != SQLITE_OK)
+        << "sqlite3_prepare_v2 failed with error code " << prepare_rc
+        << ", sqlite3_errmsg: " << sqlite3_errmsg(db.conn) << ", table: " << pending.table
+        << ", rows_per_exec: " << rows_per_exec << ", field_count: " << pending.fields.size()
+        << ", sql: " << sql;
     return stmt;
 }
 
@@ -688,6 +769,18 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
         begin_idx = end_idx;
     }
 
+    // Return blob allocations to the pool for reuse.  Safe here: every row above has already
+    // been stepped, moving the buffers only transfers ownership (the bytes stay valid), and the
+    // statement is reset and re-bound before any further step.  Gated by has_blob so non-blob
+    // batches keep their original clear() fast path.
+    if(pending.has_blob)
+    {
+        for(auto& row : pending.rows)
+            for(auto& value : row)
+                if(auto* blob = std::get_if<blob_data>(&value.value))
+                    db.recycle_blob_buffer(std::move(blob->bytes));
+    }
+
     pending.rows.clear();
     db.flushing_tables.erase(pending.table);
 }
@@ -733,6 +826,9 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
             flush_pending_insert_batch(db, pending);
             pending.fields   = std::move(fields);
             pending.max_rows = get_max_batch_rows(db.conn, pending.fields.size());
+            pending.has_blob = std::any_of(values.begin(), values.end(), [](const auto& v) {
+                return std::holds_alternative<blob_data>(v.value);
+            });
             pending.rows.clear();
             pending.rows.reserve(pending.max_rows);
         }
@@ -768,6 +864,9 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
     pending.fields       = std::move(fields);
     pending.max_rows     = get_max_batch_rows(db.conn, pending.fields.size());
     pending.last_touched = ++db.pending_touch_count;
+    pending.has_blob     = std::any_of(values.begin(), values.end(), [](const auto& v) {
+        return std::holds_alternative<blob_data>(v.value);
+    });
     pending.rows.reserve(pending.max_rows);
     pending.rows.emplace_back(std::move(values));
 
@@ -888,6 +987,17 @@ std::string
 extract_flags_field(const Tp&, long)
 {
     return "";
+}
+
+std::optional<std::string>
+get_code_object_storage_type(rocprofiler_code_object_storage_type_t storage_type)
+{
+    switch(storage_type)
+    {
+        case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE: return "FILE";
+        case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY: return "MEMORY";
+        default: return std::nullopt;
+    }
 }
 
 template <typename Tp>
@@ -1020,6 +1130,405 @@ construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
 
     return data;
 }
+
+// ---------------------------------------------------------------------------
+// Self-describing PC-sample blob machinery.
+//
+// A blob layout is an ordered list of reusable field descriptors.  The SAME list
+// drives (1) the packed little-endian bytes written per sample and (2) the
+// self-describing schema (rocpd_info_blob_schema / rocpd_info_blob_field), so the
+// two can never drift.  Each sampling method has exactly one layout, composed from
+// shared groups (hw_id, wave/workgroup, and -- for stochastic -- snapshot); adding
+// or removing a field is a one-line edit to a group -- no packed struct, no
+// per-layout macro, no static_assert to keep in sync.
+// ---------------------------------------------------------------------------
+struct blob_field_desc
+{
+    std::string_view name;
+    size_t           offset;
+    size_t           size;
+    std::string_view data_type;
+    bool             is_signed;
+    std::string_view description;
+};
+
+struct blob_schema_desc
+{
+    std::string_view             name;
+    std::string_view             source_table;
+    std::string_view             description;
+    std::string_view             byte_order;
+    int64_t                      alignment;
+    int64_t                      struct_size;
+    int64_t                      version;
+    std::vector<blob_field_desc> fields;
+};
+
+// One reusable blob field: how to describe it (schema) and how to read its value from
+// a sample record (fill).  `get` is a captureless function pointer, so a layout carries
+// no per-field heap state and the hot path is a plain indirect call.
+template <typename SampleT>
+struct pc_sample_blob_field
+{
+    std::string_view name;
+    std::string_view data_type;
+    uint32_t         size;  // bytes emitted to the packed blob (little-endian)
+    bool             is_signed;
+    std::string_view description;
+    uint64_t (*get)(const SampleT&);
+};
+
+template <typename SampleT>
+using pc_sample_blob_layout = std::vector<pc_sample_blob_field<SampleT>>;
+
+// Recover the record type Tp from a generator<Tp> so callers need not name it.
+template <typename>
+struct generator_value;
+template <typename Tp>
+struct generator_value<generator<Tp>>
+{
+    using type = Tp;
+};
+
+// hw_id group -- the baseline hw_id field set, shared by both sampling methods.
+template <typename SampleT>
+void
+append_pc_sample_hw_id_fields(pc_sample_blob_layout<SampleT>& out)
+{
+    out.push_back({"hw_id_chiplet",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID chiplet index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.chiplet; }});
+    out.push_back({"hw_id_wave_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID wave slot index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.wave_id; }});
+    out.push_back({"hw_id_simd_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID SIMD index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.simd_id; }});
+    out.push_back({"hw_id_pipe_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID pipe index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.pipe_id; }});
+    out.push_back({"hw_id_cu_or_wgp_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID CU (GFX9) or WGP (GFX10+) index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.cu_or_wgp_id; }});
+    out.push_back({"hw_id_shader_array_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID shader array index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.shader_array_id; }});
+    out.push_back({"hw_id_shader_engine_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID shader engine index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.shader_engine_id; }});
+    out.push_back({"hw_id_workgroup_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID workgroup index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.workgroup_id; }});
+    out.push_back({"hw_id_vm_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID virtual memory ID",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.vm_id; }});
+    out.push_back(
+        {"hw_id_queue_id", "uint8_t", 1, false, "HW ID queue ID", [](const SampleT& r) -> uint64_t {
+             return r.hw_id.queue_id;
+         }});
+    out.push_back({"hw_id_microengine_id",
+                   "uint8_t",
+                   1,
+                   false,
+                   "HW ID microengine (ACE) index",
+                   [](const SampleT& r) -> uint64_t { return r.hw_id.microengine_id; }});
+}
+
+// Wave/workgroup group -- the baseline wave/workgroup position fields, shared by both
+// sampling methods.
+template <typename SampleT>
+void
+append_pc_sample_wave_workgroup_fields(pc_sample_blob_layout<SampleT>& out)
+{
+    out.push_back({"wave_in_group",
+                   "uint32_t",
+                   4,
+                   false,
+                   "Wave position within workgroup",
+                   [](const SampleT& r) -> uint64_t { return r.wave_in_group; }});
+    out.push_back({"workgroup_id_x",
+                   "uint32_t",
+                   4,
+                   false,
+                   "Workgroup coordinate X",
+                   [](const SampleT& r) -> uint64_t { return r.workgroup_id.x; }});
+    out.push_back({"workgroup_id_y",
+                   "uint32_t",
+                   4,
+                   false,
+                   "Workgroup coordinate Y",
+                   [](const SampleT& r) -> uint64_t { return r.workgroup_id.y; }});
+    out.push_back({"workgroup_id_z",
+                   "uint32_t",
+                   4,
+                   false,
+                   "Workgroup coordinate Z",
+                   [](const SampleT& r) -> uint64_t { return r.workgroup_id.z; }});
+}
+
+// Snapshot group (arbiter/dual-issue state) -- stochastic only.
+template <typename SampleT>
+void
+append_pc_sample_snapshot_fields(pc_sample_blob_layout<SampleT>& out)
+{
+    out.push_back({"dual_issue_valu",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Dual-issue VALU (stochastic only)",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.dual_issue_valu; }});
+    out.push_back({"arb_state_issue_valu",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued VALU instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_valu; }});
+    out.push_back({"arb_state_issue_matrix",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued matrix instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_matrix; }});
+    out.push_back({"arb_state_issue_lds",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued LDS instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_lds; }});
+    out.push_back({"arb_state_issue_scalar",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued scalar instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_scalar; }});
+    out.push_back(
+        {"arb_state_issue_vmem_tex",
+         "uint8_t",
+         1,
+         false,
+         "Arbiter issued VMEM/TEX instruction",
+         [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_vmem_tex; }});
+    out.push_back({"arb_state_issue_flat",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued FLAT instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_flat; }});
+    out.push_back({"arb_state_issue_exp",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued export instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_exp; }});
+    out.push_back({"arb_state_issue_misc",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Arbiter issued misc instruction",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_misc; }});
+    out.push_back({"arb_state_stall_valu",
+                   "uint8_t",
+                   1,
+                   false,
+                   "VALU stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_valu; }});
+    out.push_back({"arb_state_stall_matrix",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Matrix stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_matrix; }});
+    out.push_back(
+        {"arb_state_stall_lds", "uint8_t", 1, false, "LDS stall", [](const SampleT& r) -> uint64_t {
+             return r.snapshot.arb_state_stall_lds;
+         }});
+    out.push_back({"arb_state_stall_scalar",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Scalar stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_scalar; }});
+    out.push_back(
+        {"arb_state_stall_vmem_tex",
+         "uint8_t",
+         1,
+         false,
+         "VMEM/TEX stall",
+         [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_vmem_tex; }});
+    out.push_back({"arb_state_stall_flat",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Flat stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_flat; }});
+    out.push_back({"arb_state_stall_exp",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Export stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_exp; }});
+    out.push_back({"arb_state_stall_misc",
+                   "uint8_t",
+                   1,
+                   false,
+                   "Misc stall",
+                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_misc; }});
+}
+
+// Compose the complete blob layout for one sampling method.  Host-trap uses the hw_id +
+// wave/workgroup groups; stochastic additionally appends the snapshot (arbiter) group.
+// IsStochastic is a compile-time parameter so the snapshot extractors (which read .snapshot)
+// are only instantiated for the stochastic record.
+template <bool IsStochastic, typename SampleT>
+pc_sample_blob_layout<SampleT>
+make_pc_sample_layout()
+{
+    auto out = pc_sample_blob_layout<SampleT>{};
+    append_pc_sample_hw_id_fields(out);
+    append_pc_sample_wave_workgroup_fields(out);
+    if constexpr(IsStochastic) append_pc_sample_snapshot_fields(out);
+    return out;
+}
+
+template <typename SampleT>
+size_t
+pc_sample_blob_size(const pc_sample_blob_layout<SampleT>& layout)
+{
+    auto total = size_t{0};
+    for(const auto& f : layout)
+        total += f.size;
+    return total;
+}
+
+// Derive the self-describing schema (offsets auto-accumulated) from the same layout that
+// produces the bytes -- a single source of truth for both.
+template <typename SampleT>
+blob_schema_desc
+make_pc_sample_schema(std::string_view                      name,
+                      std::string_view                      description,
+                      const pc_sample_blob_layout<SampleT>& layout)
+{
+    auto fields = std::vector<blob_field_desc>{};
+    fields.reserve(layout.size());
+    auto offset = size_t{0};
+    for(const auto& f : layout)
+    {
+        fields.push_back({f.name, offset, f.size, f.data_type, f.is_signed, f.description});
+        offset += f.size;
+    }
+    return blob_schema_desc{name,
+                            "rocpd_gpu_pc_sample",
+                            description,
+                            "little",
+                            int64_t{1},
+                            static_cast<int64_t>(offset),
+                            int64_t{1},
+                            std::move(fields)};
+}
+
+// Assemble the packed little-endian blob for one sample from its layout, reusing a pooled
+// buffer to avoid a per-sample heap allocation.
+template <typename SampleT>
+std::string
+build_pc_sample_blob(rocpd_db&                             db,
+                     const pc_sample_blob_layout<SampleT>& layout,
+                     size_t                                total_size,
+                     const SampleT&                        rec)
+{
+    auto buf = db.acquire_blob_buffer();
+    buf.resize(total_size);
+    auto offset = size_t{0};
+    for(const auto& f : layout)
+    {
+        const auto value = f.get(rec);
+        for(uint32_t b = 0; b < f.size; ++b)
+            buf[offset + b] = static_cast<char>((value >> (8U * b)) & 0xFFU);
+        offset += f.size;
+    }
+    return buf;
+}
+
+// Register a self-describing blob schema and return its rowid.
+//
+// Design note: get_insert_statement batches inserts, so the schema row is not visible to
+// sqlite3_last_insert_rowid() until its batch is flushed.  Flush the schema batch before
+// reading the rowid, and read it before enqueueing any field rows.
+inline uint64_t
+register_blob_schema(rocpd_db&               db,
+                     uint64_t                node_id,
+                     uint64_t                this_pid,
+                     const blob_schema_desc& schema)
+{
+    auto schema_table = replace_uuid(db, "rocpd_info_blob_schema{{uuid}}");
+
+    // NOTE: the caller (insert_pc_sampling_data) already holds a deferred_transaction.
+    // SQLite has no nested transactions, so we must NOT open another one here (doing so
+    // fails with "cannot start a transaction within a transaction").
+    get_insert_statement(
+        db,
+        "rocpd_info_blob_schema{{uuid}}",
+        {
+            insert_value("nid", node_id),
+            insert_value("pid", this_pid),
+            insert_value("name", std::string{schema.name}),
+            insert_value("source_table", std::string{schema.source_table}),
+            insert_value("description", std::string{schema.description}, allow_empty_string{}),
+            insert_value("byte_order", std::string{schema.byte_order}),
+            insert_value("alignment", schema.alignment),
+            insert_value("struct_size", schema.struct_size),
+            insert_value("version", schema.version),
+        });
+
+    if(auto itr = db.pending_batches.find(schema_table); itr != db.pending_batches.end())
+        flush_pending_insert_batch(db, itr->second);
+
+    const auto schema_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(db.conn));
+
+    for(const auto& field : schema.fields)
+    {
+        get_insert_statement(
+            db,
+            "rocpd_info_blob_field{{uuid}}",
+            {
+                insert_value("schema_id", schema_id),
+                insert_value("name", std::string{field.name}),
+                insert_value("offset", static_cast<int64_t>(field.offset)),
+                insert_value("size", static_cast<int64_t>(field.size)),
+                insert_value("data_type", std::string{field.data_type}),
+                insert_value("is_signed", field.is_signed ? int64_t{1} : int64_t{0}),
+                insert_value("description", std::string{field.description}, allow_empty_string{}),
+            });
+    }
+
+    return schema_id;
+}
 }  // namespace
 
 void
@@ -1042,7 +1551,9 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
-    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen)
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1363,19 +1874,22 @@ write_rocpd(
             auto        json_data =
                 get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
 
-            get_insert_statement(db,
-                                 "rocpd_info_code_object{{uuid}}",
-                                 {
-                                     insert_value("id", itr.code_object_id),
-                                     insert_value("nid", node_id),
-                                     insert_value("pid", this_pid),
-                                     insert_value("agent_id", CHECK_NOTNULL(_agent)->node_id),
-                                     insert_value("uri", itr.uri),
-                                     insert_value("load_base", itr.load_base),
-                                     insert_value("load_size", itr.load_size),
-                                     insert_value("load_delta", itr.load_delta),
-                                     insert_value("extdata", json_data),
-                                 });
+            get_insert_statement(
+                db,
+                "rocpd_info_code_object{{uuid}}",
+                {
+                    insert_value("id", itr.code_object_id),
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("agent_id", CHECK_NOTNULL(_agent)->node_id),
+                    insert_value("uri", itr.uri),
+                    insert_value("load_base", itr.load_base),
+                    insert_value("load_size", itr.load_size),
+                    insert_value("load_delta", itr.load_delta),
+                    insert_nullable_value("storage_type",
+                                          get_code_object_storage_type(itr.storage_type)),
+                    insert_value("extdata", json_data),
+                });
         }
 
         for(const auto& itr : tool_metadata.get_kernel_symbols())
@@ -1453,7 +1967,9 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
+    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids,
+                                                              auto& dispatch_agent_ids,
+                                                              auto& dispatch_thread_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
         auto _deferred         = sql::deferred_transaction{db.conn};
 
@@ -1472,8 +1988,8 @@ write_rocpd(
                                     uint64_t    graph_exec_id,
                                     uint64_t    graph_node_id,
                                     bool        enable_duplicate_check) {
-            // Skip if we've already processed this dispatch_id
-            if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
+            // Skip if we've already processed this dispatch_id.
+            if(dispatch_evt_ids.count(dispatch_id) > 0) return;
 
             auto kern_name = (kernel_id > 0)
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
@@ -1487,12 +2003,8 @@ write_rocpd(
                                            insert_value("correlation_id", corr_id.external.value),
                                        });
 
-            // Ensure dispatch_evt_ids is large enough
-            if(dispatch_evt_ids.size() < dispatch_id + 1)
-                common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
-
             // Check for duplicates if requested
-            if(enable_duplicate_check && dispatch_evt_ids.at(dispatch_id) != 0)
+            if(enable_duplicate_check && dispatch_evt_ids.count(dispatch_id) > 0)
             {
                 ROCP_CI_LOG(WARNING)
                     << fmt::format("duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
@@ -1504,7 +2016,7 @@ write_rocpd(
                                    kern_name);
             }
 
-            dispatch_evt_ids.at(dispatch_id) = evt_id;
+            dispatch_evt_ids.emplace(dispatch_id, evt_id);
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
@@ -1515,6 +2027,8 @@ write_rocpd(
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
 
             get_thread_id(thread_id);
+            dispatch_agent_ids.emplace(dispatch_id, agent_node_id);
+            dispatch_thread_ids.emplace(dispatch_id, static_cast<uint64_t>(thread_id));
 
             // Insert into kernel dispatch table
             get_insert_statement(
@@ -1665,7 +2179,10 @@ write_rocpd(
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
 
-                auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                auto dispatch_itr = dispatch_evt_ids.find(dispatch_id);
+                if(dispatch_itr == dispatch_evt_ids.end()) continue;
+
+                auto evt_id = dispatch_itr->second;
                 for(const auto& count : record.read())
                 {
                     get_insert_statement(db,
@@ -2194,7 +2711,174 @@ write_rocpd(
             }
         };
 
-    auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
+    auto dispatch_to_evt_id    = std::unordered_map<uint64_t, uint64_t>{};
+    auto dispatch_to_agent_id  = std::unordered_map<uint64_t, uint64_t>{};
+    auto dispatch_to_thread_id = std::unordered_map<uint64_t, uint64_t>{};
+    // PC-sample extdata is described by reusable field descriptors defined at file
+    // scope (pc_sample_blob_field / append_pc_sample_*_fields / make_pc_sample_layout).
+    // The single layout for this method drives both the packed blob bytes and the
+    // self-describing schema, so adding or removing a field is a one-line change to a
+    // shared group.
+
+    // Insert PC sampling rows, one per sample.
+    //
+    // Design note:
+    // 1) dispatch_to_evt_id / dispatch_to_agent_id / dispatch_to_thread_id are
+    //    sparse lookup tables keyed by dispatch_id.
+    // 2) PC samples may exist without a matching kernel_dispatch record
+    //    (e.g. counter-collection-only traces), so lookup misses are expected.
+    // 3) On lookup miss we intentionally store NULL parent/agent/thread context
+    //    instead of dropping the sample, preserving data with partial context.
+    // 4) Each sample still gets a dedicated rocpd_event + rocpd_blob_event pair,
+    //    and parent_id is linked only when dispatch context is available.
+    auto disasm_seen             = std::set<std::pair<uint64_t, uint64_t>>{};
+    auto insert_pc_sampling_data = [&db,
+                                    &cfg,
+                                    &tool_metadata,
+                                    &disasm_seen,
+                                    node_id,
+                                    this_pid,
+                                    &dispatch_to_evt_id,
+                                    &dispatch_to_agent_id,
+                                    &dispatch_to_thread_id](const auto& pc_sampling_gen) {
+        if(pc_sampling_gen.empty()) return;
+
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
+        auto _deferred         = sql::deferred_transaction{db.conn};
+
+        // Method selects which reusable groups compose the layout: host-trap uses hw_id +
+        // wave/workgroup; stochastic additionally appends the snapshot group.
+        constexpr bool is_stochastic =
+            std::is_same_v<common::mpl::unqualified_type_t<decltype(pc_sampling_gen)>,
+                           generator<rocprofiler_tool_pc_sampling_stochastic_record_t>>;
+        using tool_record_t = typename generator_value<
+            common::mpl::unqualified_type_t<decltype(pc_sampling_gen)>>::type;
+        using sample_t = common::mpl::unqualified_type_t<decltype(
+            std::declval<tool_record_t>().pc_sample_record)>;
+
+        // One builder composes the complete layout for this method; the same layout drives
+        // both the packed bytes and the self-describing schema, so they cannot drift.
+        const auto layout     = make_pc_sample_layout<is_stochastic, sample_t>();
+        const auto total_size = pc_sample_blob_size(layout);
+
+        // Schema identity is per method so consumers never confuse the two field sets.
+        auto schema_name = std::string_view{"pc_sample_extdata_hosttrap"};
+        auto schema_desc = std::string_view{"PC sampling arch-specific fields (host-trap, packed)"};
+        if constexpr(is_stochastic)
+        {
+            schema_name = "pc_sample_extdata_stochastic";
+            schema_desc = "PC sampling arch-specific fields (packed)";
+        }
+        const auto ext_schema_id = register_blob_schema(
+            db, node_id, this_pid, make_pc_sample_schema(schema_name, schema_desc, layout));
+
+        // Resolve an optional dispatch-indexed value; std::nullopt when the dispatch was not
+        // captured by the kernel_dispatch buffer (e.g. counter-collection-only traces).
+        auto lookup_dispatch = [](const auto& _map,
+                                  uint64_t    _dispatch_id) -> std::optional<uint64_t> {
+            if(auto _itr = _map.find(_dispatch_id); _itr != _map.end()) return _itr->second;
+            return std::nullopt;
+        };
+
+        for(auto pitr : pc_sampling_gen)
+        {
+            for(const auto& itr : pc_sampling_gen.get(pitr))
+            {
+                const auto& record = itr.pc_sample_record;
+
+                // Parent dispatch context by dispatch_id; NULL when the dispatch was not captured
+                // by the kernel_dispatch buffer.  tid is the real CPU thread that launched the
+                // parent dispatch, not the SDK correlation ID.
+                auto parent_event_id = lookup_dispatch(dispatch_to_evt_id, record.dispatch_id);
+                auto agent_id        = lookup_dispatch(dispatch_to_agent_id, record.dispatch_id);
+                auto tid             = lookup_dispatch(dispatch_to_thread_id, record.dispatch_id);
+
+                auto wave_issued  = std::optional<int64_t>{};
+                auto wave_count   = std::optional<int64_t>{};
+                auto inst_type    = std::optional<int64_t>{};
+                auto stall_reason = std::optional<int64_t>{};
+
+                if constexpr(is_stochastic)
+                {
+                    wave_issued  = static_cast<int64_t>(record.wave_issued);
+                    wave_count   = static_cast<int64_t>(record.wave_count);
+                    inst_type    = static_cast<int64_t>(record.inst_type);
+                    stall_reason = static_cast<int64_t>(record.snapshot.reason_not_issued);
+                }
+
+                // Assemble the packed little-endian blob from the layout (reusing a pooled
+                // buffer): host-trap fills hw_id + wave/workgroup, stochastic also fills snapshot.
+                auto blob_bytes = build_pc_sample_blob(db, layout, total_size, record);
+
+                const auto sample_event_id = create_event(
+                    db,
+                    {
+                        insert_value("correlation_id", record.correlation_id.external.value),
+                        insert_nullable_value("parent_id", parent_event_id),
+                    });
+
+                get_insert_statement(
+                    db,
+                    "rocpd_blob_event{{uuid}}",
+                    {
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("event_id", static_cast<int64_t>(sample_event_id)),
+                        insert_value("schema_id", static_cast<int64_t>(ext_schema_id)),
+                        insert_blob_value("blob", std::move(blob_bytes)),
+                    });
+
+                get_insert_statement(
+                    db,
+                    "rocpd_gpu_pc_sample{{uuid}}",
+                    {
+                        insert_value("timestamp", record.timestamp),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_nullable_value("tid", tid),
+                        insert_nullable_value("agent_id", agent_id),
+                        insert_value("event_id", static_cast<int64_t>(sample_event_id)),
+                        insert_value("dispatch_id", record.dispatch_id),
+                        insert_value("correlation_id", record.correlation_id.internal),
+                        insert_value("exec_mask", record.exec_mask),
+                        insert_value("code_object_id", record.pc.code_object_id),
+                        insert_value("code_object_offset", record.pc.code_object_offset),
+                        insert_nullable_value("wave_issued", wave_issued),
+                        insert_nullable_value("inst_type", inst_type),
+                        insert_nullable_value("stall_reason", stall_reason),
+                        insert_nullable_value("wave_count", wave_count),
+                    });
+
+                // Persist disassembly only for PCs the transformation already resolved
+                // (inst_index >= 0).  Mark a PC "seen" only when we write its row so a later
+                // sample at the same (code_object_id, offset) that does resolve is still persisted.
+                if(cfg.complete_isa_decode && itr.inst_index >= 0)
+                {
+                    auto _disasm_key =
+                        std::make_pair(static_cast<uint64_t>(record.pc.code_object_id),
+                                       static_cast<uint64_t>(record.pc.code_object_offset));
+                    if(disasm_seen.insert(_disasm_key).second)
+                    {
+                        get_insert_statement(
+                            db,
+                            "rocpd_disassembly_data{{uuid}}",
+                            {
+                                insert_value("nid", node_id),
+                                insert_value("pid", this_pid),
+                                insert_value("code_object_id", record.pc.code_object_id),
+                                insert_value("code_object_offset", record.pc.code_object_offset),
+                                insert_value("instruction",
+                                             tool_metadata.get_instruction(itr.inst_index),
+                                             allow_empty_string{}),
+                                insert_value("comment",
+                                             tool_metadata.get_comment(itr.inst_index),
+                                             allow_empty_string{}),
+                            });
+                    }
+                }
+            }
+        }
+    };
 
     insert_node_data();
     insert_process_data();
@@ -2218,10 +2902,33 @@ write_rocpd(
         insert_api_data(hipfile_api_gen);
     }
 
-    insert_kernel_dispatch_data(dispatch_to_evt_id);
+    insert_kernel_dispatch_data(dispatch_to_evt_id, dispatch_to_agent_id, dispatch_to_thread_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
     insert_graph_launch_data(graph_launch_gen);
+
+    {
+        // Register a schema only for the sampling method(s) actually present, then hand each
+        // loop its own schema id.  Host-trap uses the compact hw_id + wave/workgroup layout;
+        // stochastic adds the snapshot group.  A method that produced no samples
+        // registers neither a schema row nor any field metadata.
+        const bool has_host_trap  = !pc_sampling_host_trap_gen.empty();
+        const bool has_stochastic = !pc_sampling_stochastic_gen.empty();
+
+        if(has_host_trap || has_stochastic)
+        {
+            if(cfg.complete_isa_decode)
+                ROCP_WARNING << "PC sampling instruction disassembly is enabled "
+                                "(--complete-isa-decode); the output database size "
+                                "may increase significantly.";
+
+            // Each method builds its layout, registers the matching self-describing
+            // schema, and writes one blob per sample.
+            if(has_host_trap) insert_pc_sampling_data(pc_sampling_host_trap_gen);
+
+            if(has_stochastic) insert_pc_sampling_data(pc_sampling_stochastic_gen);
+        }
+    }
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");

@@ -426,6 +426,7 @@ Purpose: Shared event metadata (category, call stack, correlation id) referenced
 | stack_id | Stack identifier for call stack grouping. |
 | parent_stack_id | Parent stack identifier. |
 | correlation_id | Correlation id to link related events (e.g. API call and kernel). |
+| parent_id | Optional parent event id for generic event-graph traversal (child -> parent); unlike table-local ids (e.g. dispatch_id), this key is shared via rocpd_event across domains. |
 | call_stack | JSON array representing the call stack. |
 | line_info | JSON with line/source info. |
 | extdata | JSON for any extra data. |

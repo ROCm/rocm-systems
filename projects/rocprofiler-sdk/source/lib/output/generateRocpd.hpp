@@ -27,6 +27,7 @@
 #include "kfd_info.hpp"
 #include "metadata.hpp"
 #include "output_config.hpp"
+#include "pc_sample_transform.hpp"
 #include "stream_info.hpp"
 
 #include <cstdint>
@@ -56,7 +57,9 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
-    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen);
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen);
 
 // used in schema generation
 struct argument_info

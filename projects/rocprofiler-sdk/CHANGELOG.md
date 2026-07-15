@@ -35,6 +35,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Bump rocpd schema to version 3.0.1 which supports NIC agent types.
 - Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
 - Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
+- Bump rocpd schema to version 3.0.4 for PC sampling support (`rocpd_gpu_pc_sample`, blob tables `rocpd_info_blob_schema`/`rocpd_info_blob_field`/`rocpd_blob_event`, `rocpd_disassembly_data`, and `rocpd_event.parent_id`). The pre-PC-sampling 3.0.3 schema is now frozen under `versions/3.0.3/` per the rocpd schema versioning scheme.
 
 ### Removed
 

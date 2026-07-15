@@ -74,6 +74,7 @@ struct output_config
     bool                     annotate_args               = false;
     bool                     annotate_kfd                = false;
     bool                     annotate_pmc                = false;
+    bool                     complete_isa_decode         = false;
     uint64_t                 stats_summary_unit_value    = 1;
     size_t                   perfetto_shmem_size_hint    = defaults::perfetto_shmem_size_hint_kb;
     size_t                   perfetto_buffer_size        = defaults::perfetto_buffer_size_kb;
@@ -134,6 +135,7 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(otf2_output);
     CFG_SERIALIZE_MEMBER(summary_output);
     CFG_SERIALIZE_MEMBER(rocpd_output);
+    CFG_SERIALIZE_MEMBER(complete_isa_decode);
     CFG_SERIALIZE_MEMBER(kernel_rename);
     CFG_SERIALIZE_MEMBER(group_by_queue);
     CFG_SERIALIZE_MEMBER(annotate_args);

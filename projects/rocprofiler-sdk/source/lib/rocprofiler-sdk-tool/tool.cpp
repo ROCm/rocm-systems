@@ -3737,7 +3737,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
-                          hipfile_output.get_generator());
+                          hipfile_output.get_generator(),
+                          pc_sampling_host_trap_output.get_generator(),
+                          pc_sampling_stochastic_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

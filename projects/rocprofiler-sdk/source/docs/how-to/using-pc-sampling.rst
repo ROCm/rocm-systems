@@ -415,4 +415,114 @@ For example, ``arb_state_issue_`` fields indicate the type of instructions issue
 On the other hand, ``arb_state_stall_`` fields indicate the type of instructions stalled at the time of sampling.
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
 
+.. note::
+
+   The ``arb_state_issue_lds_direct``, ``arb_state_issue_brmsg``,
+   ``arb_state_stall_lds_direct``, and ``arb_state_stall_brmsg`` fields shown above are
+   part of the SDK JSON output only. The gfx9 rocpd PC-sampling blob and its
+   ``rocpd_gpu_pc_sample_decoded`` view do not include these arbiter fields.
+
 For information about how to analyze stochastic PC sampling data, see :ref:`cdna3-cdna4-pc-sampling`.
+
+.. _pc-sampling-rocpd-output:
+
+ROCPD output format
+====================
+
+PC sampling data can be written to a ROCPD SQLite database. ``rocpd`` is the
+default output format, so it is used automatically when ``--output-format`` is
+omitted (pass ``--output-format rocpd`` to request it explicitly). This format
+stores samples alongside all other profiling data (kernel dispatches, memory
+copies, API traces) in a single, queryable ``.db`` file.
+
+.. code-block:: bash
+
+  rocprofv3 --pc-sampling-beta-enabled \
+            --pc-sampling-method host_trap \
+            --pc-sampling-unit time \
+            --pc-sampling-interval 1 \
+            --output-format rocpd \
+            -- <application_path>
+
+The output file is named ``<pid>_results.db`` by default. You can specify a
+custom base name with ``-o``:
+
+.. code-block:: bash
+
+  rocprofv3 --pc-sampling-beta-enabled \
+            --pc-sampling-method stochastic \
+            --pc-sampling-unit cycles \
+            --pc-sampling-interval 1048576 \
+            --output-format rocpd \
+            -o my_profile.db \
+            -- <application_path>
+
+PC sampling tables in ROCPD
+-----------------------------
+
+The following tables are written when PC sampling is enabled:
+
+- ``rocpd_gpu_pc_sample``: One row per sample. Key columns:
+
+  - ``timestamp``: Sample timestamp in nanoseconds
+  - ``dispatch_id``: Dispatch ID of the kernel being sampled
+  - ``correlation_id``: Internal correlation ID of the PC sample record (the
+    user-assigned external ID is on the linked ``rocpd_event`` row)
+  - ``exec_mask``: Active SIMD lanes at sample time (stored as TEXT to preserve
+    the full 64-bit mask)
+  - ``code_object_id``: ID of the loaded code object
+  - ``code_object_offset``: Byte offset within the code object (the PC value)
+  - ``agent_id``: GPU agent on which the sample was collected
+  - ``tid``: CPU thread that launched the parent dispatch
+  - ``event_id``: Foreign key into ``rocpd_event`` (links to the parent dispatch via ``parent_id``)
+  - ``wave_issued``, ``inst_type``, ``stall_reason``, ``wave_count``: Stochastic-only fields; NULL for host-trap
+
+- ``rocpd_blob_event``: Raw packed binary data per sample (architecture-specific
+  hardware state such as HW ID fields and arbiter-state snapshot for stochastic
+  sampling). Each row is linked to a ``rocpd_gpu_pc_sample`` row via ``event_id``.
+
+- ``rocpd_info_blob_schema``: Describes the layout of the binary blob (name,
+  total size, byte order, alignment).
+
+- ``rocpd_info_blob_field``: One row per field in the blob schema (field name,
+  offset, size, data type). Consumers can decode the binary without
+  hard-coding struct layouts.
+
+Parent-dispatch linkage
+------------------------
+
+Each PC sample event in ``rocpd_event`` has its ``parent_id`` set to the
+``rocpd_event.id`` of the corresponding kernel dispatch. ``parent_id`` is
+``NULL`` when the parent dispatch was not captured -- for example when
+``--kernel-trace`` is not enabled or the sample was taken outside a tracked
+dispatch -- so filter on ``parent_id IS NOT NULL`` when linkage is required.
+When querying databases merged from multiple recordings, also match on ``guid``
+(for example ``... AND K.guid = S.guid``) because ``dispatch_id`` and event ids
+are only unique within a single ``guid``. This allows you to join samples to
+dispatch metadata:
+
+.. code-block:: sql
+
+  -- All PC samples for a named kernel
+  SELECT S.timestamp, S.exec_mask, S.code_object_offset
+  FROM rocpd_gpu_pc_sample S
+  JOIN rocpd_event      SE ON SE.id         = S.event_id
+  JOIN rocpd_event      DE ON DE.id         = SE.parent_id
+  JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id
+  JOIN rocpd_info_kernel_symbol KS ON KS.id  = K.kernel_id
+  WHERE KS.display_name LIKE '%MatrixTranspose%';
+
+  -- Count samples per dispatch
+  SELECT K.dispatch_id,
+         KS.display_name,
+         COUNT(*) AS sample_count
+  FROM rocpd_gpu_pc_sample S
+  JOIN rocpd_event SE ON SE.id = S.event_id
+  JOIN rocpd_event DE ON DE.id = SE.parent_id
+  JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id
+  JOIN rocpd_info_kernel_symbol KS ON KS.id   = K.kernel_id
+  GROUP BY K.dispatch_id
+  ORDER BY sample_count DESC;
+
+The ROCPD schema version containing PC sampling support is **3.0.4**. For the
+full ROCPD format documentation, see :ref:`using-rocpd-output-format`.
