@@ -913,3 +913,27 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     assert {
         r.stall_reason_type.text for r in stalled.pc_sample_state.stall_reasons
     } == {"WAITCNT"}
+
+
+def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
+    """Lines whose kernel is absent from kernel_objs (filtered out) are dropped
+    along with their sample state and child counts, not attributed to no kernel."""
+    workload_path = "/fake/workload"
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    # Only vecCopy survives filtering; vecAdd's line must be dropped.
+    kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
+    db_session.add(kernel_objs["vecCopy"])
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pc_sampling_tool_data_per_workload = {
+        workload_path: make_pc_sampling_tool_data()
+    }
+    analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+    db_session.commit()
+
+    lines = db_session.query(orm.InstructionLine).all()
+    assert [line.code_object_offset for line in lines] == [0x10]
+    assert all(line.kernel is not None for line in lines)
+    # No orphaned child rows for the dropped line.
+    assert db_session.query(orm.PCSampleState).count() == 1

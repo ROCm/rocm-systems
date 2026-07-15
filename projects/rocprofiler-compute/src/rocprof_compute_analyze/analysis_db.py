@@ -414,12 +414,17 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[str, orm.Kernel],
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
+        kernel = kernel_objs.get(line.kernel_name)
+        if kernel is None:
+            # Drop lines whose kernel was filtered out or never mapped.
+            return
+
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             comment=line.comment,
             instruction=line.instruction,
             code_object_store=code_object_store,
-            kernel=kernel_objs.get(line.kernel_name),
+            kernel=kernel,
         )
         Database.get_session().add(instruction_line)
 
