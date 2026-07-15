@@ -620,3 +620,114 @@ class TestPlotMemChartGfx9:
         result = mem_chart_gfx9.plot_mem_chart("per_kernel", partial)
         assert isinstance(result, str)
         assert len(result) > 0
+
+    def test_contains_cdna_architecture_elements(self):
+        """Output contains all CDNA memory hierarchy block names."""
+        result = mem_chart_gfx9.plot_mem_chart(
+            "per_kernel", dict(GFX9_SAMPLE_METRICS),
+        )
+        stripped = common.strip_ansi(result)
+        expected_blocks = [
+            "Kernel", "Requests", "VL1D", "LDS", "sL1D",
+            "L1I", "L2", "Data Fabric", "MALL", "UMC", "HBM",
+        ]
+        for block in expected_blocks:
+            assert block in stripped, f"Missing block: {block}"
+
+    def test_contains_legend(self):
+        """Output contains the color legend."""
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", dict(GFX9_SAMPLE_METRICS))
+        stripped = common.strip_ansi(result)
+        assert "Legend" in stripped
+
+    def test_contains_utilization_bars(self):
+        """Output contains utilization bar characters."""
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", dict(GFX9_SAMPLE_METRICS))
+        assert "█" in result or "░" in result
+
+    def test_chart_title_override(self):
+        """Custom chart_title appears in output."""
+        title = "Custom CDNA Chart Title"
+        result = mem_chart_gfx9.plot_mem_chart(
+            "per_kernel", dict(GFX9_SAMPLE_METRICS), chart_title=title,
+        )
+        stripped = common.strip_ansi(result)
+        assert title in stripped
+
+
+class TestGetSampleMetricsGfx9:
+    """Tests for gfx9 get_sample_metrics."""
+
+    def test_returns_dict(self):
+        result = mem_chart_gfx9.get_sample_metrics()
+        assert isinstance(result, dict)
+
+    def test_contains_all_keys(self):
+        result = mem_chart_gfx9.get_sample_metrics()
+        for key in mem_chart_gfx9.MEM_CHART_PANEL_METRIC_KEYS:
+            assert key in result, f"Missing key: {key}"
+
+    def test_all_values_numeric(self):
+        result = mem_chart_gfx9.get_sample_metrics()
+        for key, val in result.items():
+            assert isinstance(val, (int, float)), f"Non-numeric: {key}={val}"
+
+    def test_returns_copy(self):
+        a = mem_chart_gfx9.get_sample_metrics()
+        b = mem_chart_gfx9.get_sample_metrics()
+        a["VL1 Hit"] = -999
+        assert b["VL1 Hit"] != -999
+
+
+class TestNormalizeMemChartMetricsGfx9:
+    """Tests for gfx9 normalize_mem_chart_metrics."""
+
+    def test_preserves_known_keys(self):
+        result = mem_chart_gfx9.normalize_mem_chart_metrics({"VL1 Hit": 92})
+        assert result["VL1 Hit"] == 92
+
+    def test_fills_missing_with_none(self):
+        result = mem_chart_gfx9.normalize_mem_chart_metrics({})
+        for key in mem_chart_gfx9.MEM_CHART_PANEL_METRIC_KEYS:
+            assert key in result
+            assert result[key] is None
+
+    def test_drops_unknown_keys(self):
+        result = mem_chart_gfx9.normalize_mem_chart_metrics({"UNKNOWN_KEY": 42})
+        assert "UNKNOWN_KEY" not in result
+
+
+class TestDefaultSampleMetricsGfx9:
+    """Tests for gfx9 DEFAULT_SAMPLE_METRICS."""
+
+    def test_keys_match_panel_keys(self):
+        assert set(mem_chart_gfx9.DEFAULT_SAMPLE_METRICS.keys()) == set(
+            mem_chart_gfx9.MEM_CHART_PANEL_METRIC_KEYS
+        )
+
+    def test_has_all_hierarchy_levels(self):
+        keys = set(mem_chart_gfx9.DEFAULT_SAMPLE_METRICS.keys())
+        for prefix in ["VL1", "sL1D", "IL1", "L2", "Fabric", "HBM"]:
+            assert any(prefix in k for k in keys), f"Missing hierarchy: {prefix}"
+
+
+class TestFormatMemChartHeadingGfx9:
+    """Tests for gfx9 format_mem_chart_heading."""
+
+    def test_default_heading(self):
+        result = mem_chart_gfx9.format_mem_chart_heading("per_kernel")
+        assert result == "3. Memory Chart (Normalization: per_kernel)"
+
+    def test_custom_panel_id(self):
+        result = mem_chart_gfx9.format_mem_chart_heading("per_wave", panel_id=500)
+        assert "5." in result
+
+
+class TestIntegrationGfx9:
+    """Integration tests for gfx9 chart."""
+
+    def test_full_workflow(self):
+        metrics = mem_chart_gfx9.get_sample_metrics()
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", metrics)
+        assert isinstance(result, str)
+        assert len(result) > 100
