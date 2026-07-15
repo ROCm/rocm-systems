@@ -615,7 +615,7 @@ class CodeGenerator:
         if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
         literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
-        if operand_type == 'OPR_SIMM16' or opnd.size == 16:
+        if operand_type == 'OPR_SIMM16':
             literal_expr = f'({literal_expr} & 0xFFFFu)'
         operand_size = size_expr or opnd.size
         if CodeGenerator._literal_operand_uses_f64_high_bits(
@@ -635,15 +635,13 @@ class CodeGenerator:
     def _literal_operand_uses_f64_high_bits(
         opnd: Operand, inst_sem: InstructionSemantics | None, operand_type: str
     ) -> bool:
-        if (
-            operand_type != 'OPR_SIMM32'
-            or not opnd.is_input
-            or opnd.size != 64
-            or not inst_sem
-            or not inst_sem.data_type
-        ):
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input or opnd.size != 64:
             return False
-        return 'f64' in inst_sem.data_type.split('_')
+        if opnd.data_format_name:
+            return opnd.data_format_name == 'FMT_NUM_F64'
+        if inst_sem and inst_sem.data_type:
+            return 'f64' in inst_sem.data_type.split('_')
+        return False
 
     @staticmethod
     def _has_inline_literal_operand(inst: Instruction) -> bool:

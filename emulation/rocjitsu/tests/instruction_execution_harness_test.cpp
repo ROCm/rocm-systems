@@ -2676,6 +2676,16 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     cu->execute_instruction(and_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x11118000u);
 
+    cu->write_vgpr(vb + 1, 0, 0x22220000u);
+
+    // v_and_b16 v1.l, 0x8000, v3.l op_sel:[1,0,0]
+    const uint32_t and_high_words[] = {0xD7620801U, 0x020206FFU, 0x80000000U};
+    std::unique_ptr<Instruction> and_high_inst(decoder->decode(and_high_words));
+    ASSERT_NE(and_high_inst, nullptr);
+    ASSERT_EQ(std::string_view(and_high_inst->mnemonic()), "v_and_b16");
+    cu->execute_instruction(and_high_inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x22228000u);
+
     // v_xor_b16 v0.l, v1.l, v0.l
     const uint32_t xor_words[] = {0xD7640000U, 0x02020101U};
     std::unique_ptr<Instruction> xor_inst(decoder->decode(xor_words));

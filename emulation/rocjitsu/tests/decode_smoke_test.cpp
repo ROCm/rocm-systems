@@ -23,6 +23,7 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
@@ -134,6 +135,32 @@ TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_waitcnt");
   EXPECT_EQ(inst->disassemble(), "s_waitcnt vmcnt(1) expcnt(0) lgkmcnt(0)");
+}
+
+TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOperand) {
+  constexpr uint32_t literal = 0xaf123456u;
+
+  rdna3::Vop3InstLiteralMachineInst raw{};
+  raw.vdst = 0;
+  raw.src0 = 255;
+  raw.src1 = 255;
+  raw.simm32 = literal;
+
+  rdna3::VTrigPreopF64Vop3 inst(reinterpret_cast<const rdna3::MachineInst *>(&raw));
+
+  ASSERT_EQ(inst.num_src_operands(), 2);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  ASSERT_NE(src0, nullptr);
+  ASSERT_NE(src1, nullptr);
+
+  EXPECT_EQ(src0->size_bits(), 64);
+  ASSERT_TRUE(src0->literal64_value().has_value());
+  EXPECT_EQ(*src0->literal64_value(), 0xaf12345600000000ULL);
+
+  EXPECT_EQ(src1->size_bits(), 32);
+  EXPECT_FALSE(src1->literal64_value().has_value());
+  EXPECT_EQ(static_cast<uint32_t>(src1->encoding_value()), literal);
 }
 
 struct VopdDecodeCase {
