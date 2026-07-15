@@ -3,64 +3,23 @@
 
 set(target test-roctx-recordfn)
 
-find_library(
-    _rcfn_libpython
-    NAMES python${_py_major}.${_py_minor} python${_py_major}.${_py_minor}m
-    HINTS ${Python3_LIBRARY_DIRS}
-    PATHS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
-)
-find_path(
-    _rcfn_python_include
-    NAMES Python.h
-    HINTS ${Python3_INCLUDE_DIRS}
-    PATHS
-        /usr/include/python${_py_major}.${_py_minor}
-        /usr/local/include/python${_py_major}.${_py_minor}
-)
-if(NOT _rcfn_libpython OR NOT _rcfn_python_include)
-    message(
-        WARNING
-        "roctx_recordfn: skipping ${target}: Python ${_py_major}.${_py_minor} "
-        "development files (headers + libpython) not found. Install the "
-        "python development package for your distro to enable this test "
-        "(e.g. libpython${_py_major}.${_py_minor}-dev on Debian/Ubuntu, "
-        "python${_py_major}${_py_minor}-devel on RHEL/Fedora)."
-    )
-    return()
-endif()
-
 add_executable(${target} test_roctx_recordfn.cpp)
 
-target_link_libraries(
-    ${target}
-    PRIVATE gtest_main ${_torch_resolved_libs} ${ROCTX_LIB} ${_rcfn_libpython}
-)
+# Includes, torch libraries, and the DebugInfoKind flag are inherited from
+# roctx-recordfn. Only the runtime search paths below are test-specific.
+target_link_libraries(${target} PRIVATE roctx-recordfn gtest_main)
 
+# torch's shared libraries cross-reference one another at load time.
 target_link_options(${target} PRIVATE LINKER:--allow-shlib-undefined)
 
-target_include_directories(
-    ${target}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/..
-        ${_torch_includes}
-        ${ROCTX_INCLUDE_DIR}
-        ${_rcfn_python_include}
-)
-
-if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
-    target_compile_definitions(
-        ${target}
-        PRIVATE ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND=1
-    )
-endif()
-
 get_filename_component(_roctx_lib_dir "${ROCTX_LIB}" DIRECTORY)
-
 set_target_properties(
     ${target}
     PROPERTIES INSTALL_RPATH "${_torch_lib_search_dirs};${_roctx_lib_dir}"
 )
 
+# On some ROCm layouts openblas is outside the torch wheel; add it to the
+# runtime library path when present.
 set(_rcfn_openblas_dir "")
 foreach(
     _dir
@@ -75,10 +34,7 @@ foreach(
 )
     file(GLOB _rcfn_openblas_hits "${_dir}/librocm-openblas.so*")
     if(_rcfn_openblas_hits)
-        list(SORT _rcfn_openblas_hits COMPARE NATURAL ORDER DESCENDING)
-        list(GET _rcfn_openblas_hits 0 _rcfn_openblas_latest)
         set(_rcfn_openblas_dir "${_dir}")
-        message(STATUS "roctx_recordfn: using openblas ${_rcfn_openblas_latest}")
         break()
     endif()
 endforeach()

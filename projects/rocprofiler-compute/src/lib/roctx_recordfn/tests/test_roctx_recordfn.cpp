@@ -1,14 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include <pybind11/pybind11.h>
-
-#undef PYBIND11_MODULE
-#define PYBIND11_MODULE(name, m) \
-    [[maybe_unused]] static void _roctx_recordfn_test_module_stub_(pybind11::module_& m)
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include "../roctx_recordfn.cpp"
+#include "capture_buffer.h"
+#include "capture_control.h"
+#include "install_state.h"
+#include "leaf_context.h"
+#include "marker_stack.h"
+#include "record_function_bridge.h"
+#include "snapshot_store.h"
+#include "stack_entry.h"
+#include "stats.h"
+#include "user_scope.h"
+#include "wire_format.h"
 
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
