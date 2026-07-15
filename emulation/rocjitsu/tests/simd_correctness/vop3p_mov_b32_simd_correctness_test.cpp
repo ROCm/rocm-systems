@@ -268,6 +268,34 @@ TEST(Vop3pMovB32SimdCorrectness, PartialExec) {
   check(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
+TEST(Vop3pMovB32SimdCorrectness, ProductionSimdDispatchGolden) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+
+  ForceScalarGuard gate_guard;
+  util::set_force_scalar_for_testing(false);
+  constexpr uint32_t kRot = 5;
+  constexpr uint32_t kOpSel = 3;
+  constexpr uint64_t kExec = 0xA5A5'F0F0'1234'8001ULL;
+  const auto golden = expected(kRot, kExec, kOpSel);
+
+  for (const auto &arch : kArchCases) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.cu, nullptr);
+    ASSERT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, kOpSel, words);
+    Instruction *inst = fx.decoder->decode(words);
+    ASSERT_NE(inst, nullptr) << arch.name << " v_pk_mov_b32_vop3p decode failed";
+    const auto out = fx.run(inst, kRot, kExec);
+    delete inst;
+
+    EXPECT_EQ(out, golden) << arch.name << ": production SIMD dispatch differed from golden";
+  }
+}
+
 TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
