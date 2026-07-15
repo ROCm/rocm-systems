@@ -321,8 +321,10 @@ struct PendingEvent {
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitEventKind kind = WaitEventKind::Unknown;
   RegisterSet regs;
+  RegisterSet old_value_regs;
   std::optional<RegisterRef> special_reg;
   std::optional<int64_t> barrier_id;
+  bool produces_regs = false;
   bool check_uses = true;
   bool check_defs = true;
   bool check_exec_defs = false;
@@ -424,6 +426,7 @@ struct ExpertSchedulingState {
 struct PendingState {
   std::array<std::vector<PendingEvent>, kCounterCount> pending;
   std::array<bool, kCounterCount> uncertain_order{};
+  RegisterSet ready_regs;
   SgprHazardState sgpr_hazards;
   VaVdstHazardState va_vdst_hazards;
   VgprMsbState vgpr_msb;
@@ -479,6 +482,7 @@ struct Analyzer {
 
     PendingState state;
     state.expert_scheduling.enabled = supports_expert_scheduling(arch);
+    RegisterSet local_ready_regs;
     std::vector<uint32_t> padded(words.begin(), words.end());
     padded.resize(padded.size() + 2);
 
@@ -502,7 +506,8 @@ struct Analyzer {
 
       const auto section_offset = static_cast<uint64_t>(word_index * sizeof(uint32_t));
       const auto file_offset = file_offset_base + section_offset;
-      analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
+      analyze_instruction(state, local_ready_regs, *inst, section_name, section_offset, file_offset,
+                          arch, true);
       ++report_.instructions_analyzed;
       word_index += inst_words;
       if (should_stop_after_diagnostic())
@@ -521,21 +526,76 @@ struct Analyzer {
     for (size_t i = 0; i < blocks.size(); ++i)
       block_index.emplace(blocks[i].get(), i);
 
-    // BasicBlock keeps calls outside its ordinary successor list because each
-    // return continuation belongs to one call site. Materialize a temporary,
-    // kernel-local interprocedural graph for waitcheck: replace the caller's
-    // direct fallthrough with caller -> callee and pair every validated return
-    // with that call's continuation. This is the same conservative scoped-edge
-    // model used by DBT liveness, and lets waits in a device helper affect the
-    // instructions that execute after the call.
-    std::vector<std::vector<size_t>> cfg_successors(blocks.size());
-    auto add_edge = [&](size_t from, size_t to) {
-      auto &successors = cfg_successors[from];
-      if (std::ranges::find(successors, to) == successors.end())
-        successors.push_back(to);
+    // A shared helper may be called from many sites. Keep the active return
+    // continuation in the analysis-node identity so an s_setpc_b64 return can
+    // resume only the call that created that context. Without this expansion,
+    // later calls can return into earlier, mutually exclusive continuations and
+    // manufacture impossible pending-event paths.
+    using CallFrame = std::pair<size_t, uint16_t>;
+    using AnalysisNodeKey = std::pair<size_t, std::vector<CallFrame>>;
+    constexpr size_t kMaxCallDepth = 32;
+    const size_t max_analysis_nodes = std::max(blocks.size() * 32, blocks.size() + 1024);
+
+    std::map<AnalysisNodeKey, size_t> analysis_node_index;
+    std::vector<AnalysisNodeKey> analysis_node_keys;
+    std::vector<BasicBlock *> analysis_blocks;
+    std::vector<std::vector<size_t>> cfg_successors;
+    std::vector<size_t> expansion_worklist;
+
+    auto get_or_add_node = [&](AnalysisNodeKey key) -> std::optional<size_t> {
+      if (const auto it = analysis_node_index.find(key); it != analysis_node_index.end())
+        return it->second;
+      if (analysis_node_keys.size() >= max_analysis_nodes)
+        return std::nullopt;
+      const size_t index = analysis_node_keys.size();
+      analysis_node_index.emplace(key, index);
+      analysis_blocks.push_back(blocks[key.first].get());
+      analysis_node_keys.push_back(std::move(key));
+      cfg_successors.emplace_back();
+      expansion_worklist.push_back(index);
+      return index;
     };
+
     for (size_t i = 0; i < blocks.size(); ++i) {
-      const BasicBlock &block = *blocks[i];
+      if (!get_or_add_node({i, {}})) {
+        report_.supported = false;
+        report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+        return;
+      }
+    }
+
+    for (size_t work_index = 0; work_index < expansion_worklist.size(); ++work_index) {
+      const size_t node_index = expansion_worklist[work_index];
+      const AnalysisNodeKey node_key = analysis_node_keys[node_index];
+      const BasicBlock &block = *blocks[node_key.first];
+
+      auto add_context_edge = [&](size_t target_block_index,
+                                  std::vector<CallFrame> call_stack) -> bool {
+        const auto target = get_or_add_node({target_block_index, std::move(call_stack)});
+        if (!target)
+          return false;
+        auto &successors = cfg_successors[node_index];
+        if (std::ranges::find(successors, *target) == successors.end())
+          successors.push_back(*target);
+        return true;
+      };
+
+      const Instruction *term = block.terminator();
+      if (!node_key.second.empty() && term != nullptr &&
+          term->size() == static_cast<int>(sizeof(uint32_t)) && term->mnemonic() == "s_setpc_b64" &&
+          term->raw_encoding() != nullptr &&
+          static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) == node_key.second.back().second) {
+        std::vector<CallFrame> caller_stack = node_key.second;
+        const size_t continuation_index = caller_stack.back().first;
+        caller_stack.pop_back();
+        if (!add_context_edge(continuation_index, std::move(caller_stack))) {
+          report_.supported = false;
+          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          return;
+        }
+        continue;
+      }
+
       for (const BasicBlock *successor : block.successors()) {
         const auto successor_it = block_index.find(successor);
         if (successor_it == block_index.end())
@@ -544,66 +604,56 @@ struct Analyzer {
             std::ranges::any_of(block.call_edges(), [&](const BasicBlock::CallEdge &call) {
               return call.continuation == successor;
             });
-        if (!is_call_fallthrough)
-          add_edge(i, successor_it->second);
+        if (!is_call_fallthrough && !add_context_edge(successor_it->second, node_key.second)) {
+          report_.supported = false;
+          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          return;
+        }
       }
-      for (const BasicBlock::CallEdge &call : block.call_edges()) {
-        if (const auto callee_it = block_index.find(call.callee); callee_it != block_index.end())
-          add_edge(i, callee_it->second);
-      }
-    }
 
-    for (const auto &block : blocks) {
-      for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      for (const BasicBlock::CallEdge &call : block.call_edges()) {
+        const auto callee_it = block_index.find(call.callee);
         const auto continuation_it = block_index.find(call.continuation);
-        if (call.callee == nullptr || continuation_it == block_index.end())
+        if (callee_it == block_index.end() || continuation_it == block_index.end())
           continue;
-        std::vector<const BasicBlock *> worklist{call.callee};
-        std::unordered_set<const BasicBlock *> visited;
-        while (!worklist.empty()) {
-          const BasicBlock *callee_block = worklist.back();
-          worklist.pop_back();
-          if (callee_block == nullptr || !visited.insert(callee_block).second)
-            continue;
-          const auto callee_it = block_index.find(callee_block);
-          if (callee_it == block_index.end())
-            continue;
-          const Instruction *term = callee_block->terminator();
-          const uint32_t word =
-              term != nullptr && term->raw_encoding() != nullptr ? term->raw_encoding()[0] : 0;
-          if (term != nullptr && term->size() == static_cast<int>(sizeof(uint32_t)) &&
-              term->mnemonic() == "s_setpc_b64" &&
-              static_cast<uint16_t>(word & 0xffu) == call.return_sreg) {
-            add_edge(callee_it->second, continuation_it->second);
-            continue;
-          }
-          for (const BasicBlock *successor : callee_block->successors())
-            worklist.push_back(successor);
+        if (node_key.second.size() >= kMaxCallDepth) {
+          report_.supported = false;
+          report_.analysis_error = "waitcheck call depth exceeds supported limit";
+          return;
+        }
+        std::vector<CallFrame> callee_stack = node_key.second;
+        callee_stack.emplace_back(continuation_it->second, call.return_sreg);
+        if (!add_context_edge(callee_it->second, std::move(callee_stack))) {
+          report_.supported = false;
+          report_.analysis_error = "waitcheck call-context graph exceeded node limit";
+          return;
         }
       }
     }
 
-    std::vector<std::vector<size_t>> cfg_predecessors(blocks.size());
+    std::vector<std::vector<size_t>> cfg_predecessors(analysis_blocks.size());
     for (size_t from = 0; from < cfg_successors.size(); ++from) {
       for (size_t to : cfg_successors[from])
         cfg_predecessors[to].push_back(from);
     }
 
-    std::vector<PendingState> in(blocks.size());
-    std::vector<PendingState> out(blocks.size());
+    std::vector<PendingState> in(analysis_blocks.size());
+    std::vector<PendingState> out(analysis_blocks.size());
+    std::vector<uint8_t> out_initialized(analysis_blocks.size());
 
     bool changed = true;
     size_t iterations = 0;
-    const size_t max_iterations = blocks.size() * 8 + 32;
+    const size_t max_iterations = analysis_blocks.size() * 8 + 32;
     while (changed && iterations++ < max_iterations) {
       changed = false;
-      for (size_t i = 0; i < blocks.size(); ++i) {
-        PendingState merged = merge_predecessors(cfg_predecessors[i], out);
+      for (size_t i = 0; i < analysis_blocks.size(); ++i) {
+        PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
         PendingState next_out =
-            analyze_block(*blocks[i], merged, section_name, file_offset_base, arch, false);
-        if (!(merged == in[i]) || !(next_out == out[i])) {
+            analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
+        if (out_initialized[i] == 0 || !(merged == in[i]) || !(next_out == out[i])) {
           in[i] = std::move(merged);
           out[i] = std::move(next_out);
+          out_initialized[i] = 1;
           changed = true;
         }
       }
@@ -615,9 +665,9 @@ struct Analyzer {
       return;
     }
 
-    prepare_cfg_path_filter(blocks, cfg_predecessors, cfg_successors);
-    for (size_t i = 0; i < blocks.size(); ++i) {
-      (void)analyze_block(*blocks[i], in[i], section_name, file_offset_base, arch, true);
+    prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors);
+    for (size_t i = 0; i < analysis_blocks.size(); ++i) {
+      (void)analyze_block(*analysis_blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
         break;
     }
@@ -632,10 +682,11 @@ private:
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
     return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
            lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
-           lhs.check_uses == rhs.check_uses && lhs.check_defs == rhs.check_defs &&
-           lhs.check_exec_defs == rhs.check_exec_defs && lhs.section_name == rhs.section_name &&
-           lhs.section_offset == rhs.section_offset && lhs.file_offset == rhs.file_offset &&
-           lhs.instruction == rhs.instruction && lhs.check_memory_order == rhs.check_memory_order &&
+           lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
+           lhs.check_defs == rhs.check_defs && lhs.check_exec_defs == rhs.check_exec_defs &&
+           lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
+           lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction &&
+           lhs.check_memory_order == rhs.check_memory_order &&
            lhs.check_program_end == rhs.check_program_end;
   }
 
@@ -655,20 +706,19 @@ private:
 
   [[nodiscard]] bool should_stop_after_diagnostic() const { return report_.stopped_early; }
 
-  void prepare_cfg_path_filter(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+  void prepare_cfg_path_filter(const std::vector<BasicBlock *> &blocks,
                                const std::vector<std::vector<size_t>> &predecessors,
                                const std::vector<std::vector<size_t>> &successors) {
     cfg_views_.clear();
-    cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
 
     cfg_views_.reserve(blocks.size());
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-      const auto &block = blocks[block_index];
+      BasicBlock *block = blocks[block_index];
       CfgBlockView view;
-      view.block = block.get();
+      view.block = block;
       view.predecessors = predecessors[block_index];
       view.successors = successors[block_index];
       uint64_t section_offset = block->start_offset();
@@ -676,14 +726,12 @@ private:
         view.instructions.push_back({section_offset, &inst});
         section_offset += static_cast<uint64_t>(inst.size());
       }
-      cfg_block_by_start_offset_.emplace(block->start_offset(), cfg_views_.size());
       cfg_views_.push_back(std::move(view));
     }
   }
 
   void clear_cfg_path_filter() {
     cfg_views_.clear();
-    cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
@@ -739,6 +787,7 @@ private:
           dst.pending[i].push_back(event);
         } else {
           existing->min_younger = std::min(existing->min_younger, event.min_younger);
+          existing->old_value_regs &= event.old_value_regs;
         }
       }
     }
@@ -750,19 +799,27 @@ private:
     }
   }
 
-  [[nodiscard]] static PendingState merge_predecessors(std::span<const size_t> predecessors,
-                                                       const std::vector<PendingState> &outputs) {
+  [[nodiscard]] static PendingState
+  merge_predecessors(std::span<const size_t> predecessors, const std::vector<PendingState> &outputs,
+                     std::span<const uint8_t> output_initialized) {
     PendingState merged;
     if (predecessors.empty())
       return merged;
 
     std::array<std::optional<std::vector<PendingEvent>>, kCounterCount> first_source;
+    std::optional<RegisterSet> ready_regs;
     std::optional<VgprMsbState> first_vgpr_msb;
     std::optional<ExpertSchedulingState> first_expert_scheduling;
     for (size_t predecessor : predecessors) {
-      if (predecessor >= outputs.size())
+      if (predecessor >= outputs.size() || predecessor >= output_initialized.size() ||
+          output_initialized[predecessor] == 0)
         continue;
       const PendingState &pred_out = outputs[predecessor];
+      if (!ready_regs) {
+        ready_regs = pred_out.ready_regs;
+      } else {
+        *ready_regs &= pred_out.ready_regs;
+      }
       if (!first_expert_scheduling) {
         first_expert_scheduling = pred_out.expert_scheduling;
       } else if (*first_expert_scheduling != pred_out.expert_scheduling) {
@@ -790,6 +847,8 @@ private:
       merged.vgpr_msb = *first_vgpr_msb;
     if (first_expert_scheduling)
       merged.expert_scheduling = *first_expert_scheduling;
+    if (ready_regs)
+      merged.ready_regs = *ready_regs;
     return merged;
   }
 
@@ -798,9 +857,12 @@ private:
                                            uint64_t file_offset_base, rj_code_arch_t arch,
                                            bool emit_diagnostics) {
     PendingState state = input;
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+      state.ready_regs = {};
+    RegisterSet local_ready_regs;
     uint64_t section_offset = block.start_offset();
     for (const Instruction &inst : block.instructions()) {
-      analyze_instruction(state, inst, section_name, section_offset,
+      analyze_instruction(state, local_ready_regs, inst, section_name, section_offset,
                           file_offset_base + section_offset, arch, emit_diagnostics);
       if (emit_diagnostics)
         ++report_.instructions_analyzed;
@@ -808,18 +870,70 @@ private:
       if (emit_diagnostics && should_stop_after_diagnostic())
         break;
     }
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+      state.ready_regs = {};
     return state;
+  }
+
+  [[nodiscard]] static bool same_register_generation(const PendingEvent &lhs,
+                                                     const PendingEvent &rhs) {
+    return lhs.produces_regs && rhs.produces_regs && lhs.regs == rhs.regs &&
+           lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
+           lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction;
+  }
+
+  static void make_retired_generations_ready(PendingState &state,
+                                             std::span<const PendingEvent> retired_events) {
+    for (const PendingEvent &retired : retired_events) {
+      if (!retired.produces_regs)
+        continue;
+      retired.regs.for_each([&](RegisterRef reg) {
+        if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
+          return;
+        const bool generation_still_pending =
+            std::ranges::any_of(state.pending, [&](const std::vector<PendingEvent> &events) {
+              return std::ranges::any_of(events, [&](const PendingEvent &pending) {
+                return pending.regs.contains(reg) && same_register_generation(retired, pending);
+              });
+            });
+        if (generation_still_pending)
+          return;
+
+        state.ready_regs.expand(reg);
+        for (auto &events : state.pending) {
+          for (PendingEvent &pending : events) {
+            if (pending.produces_regs && pending.regs.contains(reg))
+              pending.old_value_regs.expand(reg);
+          }
+        }
+      });
+    }
+  }
+
+  template <typename Predicate>
+  static void retire_events(PendingState &state, std::vector<PendingEvent> &events,
+                            Predicate should_retire) {
+    std::vector<PendingEvent> retired_events;
+    const auto retained =
+        std::remove_if(events.begin(), events.end(), [&](const PendingEvent &event) {
+          if (!should_retire(event))
+            return false;
+          retired_events.push_back(event);
+          return true;
+        });
+    events.erase(retained, events.end());
+    make_retired_generations_ready(state, retired_events);
   }
 
   static void apply_wait(PendingState &state, WaitCounterKind counter, uint32_t count) {
     const size_t idx = counter_index(counter);
     auto &pending = state.pending[idx];
     if (count == 0) {
-      pending.clear();
+      retire_events(state, pending, [](const PendingEvent &) { return true; });
       state.uncertain_order[idx] = false;
       return;
     }
-    std::erase_if(pending,
+    retire_events(state, pending,
                   [count](const PendingEvent &event) { return event.min_younger >= count; });
     if (pending.empty())
       state.uncertain_order[idx] = false;
@@ -837,7 +951,7 @@ private:
     // kinds retain the normal counter-order behavior.
     const size_t idx = counter_index(WaitCounterKind::Km);
     auto &pending = state.pending[idx];
-    std::erase_if(pending, [count](const PendingEvent &event) {
+    retire_events(state, pending, [count](const PendingEvent &event) {
       return event.kind != WaitEventKind::Smem && event.min_younger >= count;
     });
     if (pending.empty())
@@ -876,7 +990,7 @@ private:
       return;
 
     if (count == 0) {
-      pending.erase(std::remove_if(pending.begin(), pending.end(), is_implied), pending.end());
+      retire_events(state, pending, is_implied);
       if (pending.empty())
         state.uncertain_order[idx] = false;
       return;
@@ -886,14 +1000,12 @@ private:
       return;
 
     size_t to_remove = matching - count;
-    pending.erase(std::remove_if(pending.begin(), pending.end(),
-                                 [&](const PendingEvent &event) {
-                                   if (!is_implied(event) || to_remove == 0)
-                                     return false;
-                                   --to_remove;
-                                   return true;
-                                 }),
-                  pending.end());
+    retire_events(state, pending, [&](const PendingEvent &event) {
+      if (!is_implied(event) || to_remove == 0)
+        return false;
+      --to_remove;
+      return true;
+    });
   }
 
   static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
@@ -929,6 +1041,8 @@ private:
   static void clear_expert_wait_state(PendingState &state) {
     state.pending[counter_index(WaitCounterKind::VmVsrc)].clear();
     state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
+    state.sgpr_hazards = {};
+    state.delay_alu.clear();
     clear_va_vdst_hazards(state.va_vdst_hazards);
   }
 
@@ -1252,10 +1366,9 @@ private:
       return true;
 
     if (operand_index == 0 && starts_with(mnemonic, "s_buffer_")) {
-      if (const int encoded = op.encoding_value(); encoded >= 0) {
-        const uint32_t base = static_cast<uint32_t>(encoded) * 2u;
-        if (base <= kMaxEncodedSgpr)
-          du.uses.expand({RegClass::SGPR, static_cast<uint16_t>(base), 4});
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
+        ref->width = 4;
+        du.uses.expand(*ref);
       }
       return true;
     }
@@ -1656,6 +1769,20 @@ private:
     return result;
   }
 
+  [[nodiscard]] static bool
+  creates_immediate_overlay_generation(rj_code_arch_t arch, const Instruction &inst,
+                                       std::span<const ClassifiedEvent> current_events) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || inst.is_memory_op())
+      return false;
+    // GFX950 schedules ordinary VALU and AccVGPR transfers into the currently
+    // visible generation while an asynchronous replacement of the same VGPR is
+    // pending. A memory instruction creates another pending generation instead
+    // and therefore does not qualify for this synchronous-overlay exception.
+    return std::ranges::none_of(current_events, [](const ClassifiedEvent &event) {
+      return event.registers == TrackedRegisterSource::Defs;
+    });
+  }
+
   [[nodiscard]] static std::string reg_name(RegisterRef ref) {
     const char *prefix = "?";
     switch (ref.cls) {
@@ -1890,14 +2017,15 @@ private:
         .first->second;
   }
 
-  [[nodiscard]] std::optional<size_t> cfg_block_index_containing(uint64_t section_offset) const {
+  [[nodiscard]] std::vector<size_t> cfg_block_indices_containing(uint64_t section_offset) const {
+    std::vector<size_t> result;
     for (size_t i = 0; i < cfg_views_.size(); ++i) {
       const BasicBlock *block = cfg_views_[i].block;
       if (block != nullptr && section_offset >= block->start_offset() &&
           section_offset < block->end_offset())
-        return i;
+        result.push_back(i);
     }
-    return std::nullopt;
+    return result;
   }
 
   [[nodiscard]] bool instruction_adds_younger_event(const Instruction &inst,
@@ -2081,23 +2209,41 @@ private:
     if (auto cached = feasible_path_cache_.find(cache_key); cached != feasible_path_cache_.end())
       return cached->second;
 
-    const auto producer_block_index = cfg_block_index_containing(event.section_offset);
-    const auto consumer_block_index = cfg_block_index_containing(consumer_offset);
-    if (!producer_block_index) {
+    const std::vector<size_t> producer_block_indices =
+        cfg_block_indices_containing(event.section_offset);
+    const std::vector<size_t> consumer_block_indices =
+        cfg_block_indices_containing(consumer_offset);
+    if (producer_block_indices.empty()) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
-    if (!consumer_block_index) {
+    if (consumer_block_indices.empty()) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
-    (void)blocks_reaching(*consumer_block_index);
-    (void)blocks_reaching(*producer_block_index);
-    (void)blocks_reachable_from(*producer_block_index);
-    const auto &can_reach_consumer = reverse_reachability_cache_.at(*consumer_block_index);
-    const auto &can_reach_producer = reverse_reachability_cache_.at(*producer_block_index);
-    const auto &reachable_from_producer = forward_reachability_cache_.at(*producer_block_index);
-    if (can_reach_consumer[*producer_block_index] == 0) {
+
+    std::vector<uint8_t> can_reach_consumer(cfg_views_.size());
+    for (size_t consumer_block_index : consumer_block_indices) {
+      const auto &reachable = blocks_reaching(consumer_block_index);
+      for (size_t i = 0; i < reachable.size(); ++i)
+        can_reach_consumer[i] = static_cast<uint8_t>(can_reach_consumer[i] | reachable[i]);
+    }
+    std::vector<uint8_t> can_reach_producer(cfg_views_.size());
+    std::vector<uint8_t> reachable_from_producer(cfg_views_.size());
+    for (size_t producer_block_index : producer_block_indices) {
+      const auto &reaching = blocks_reaching(producer_block_index);
+      const auto &reachable = blocks_reachable_from(producer_block_index);
+      for (size_t i = 0; i < cfg_views_.size(); ++i) {
+        can_reach_producer[i] = static_cast<uint8_t>(can_reach_producer[i] | reaching[i]);
+        reachable_from_producer[i] =
+            static_cast<uint8_t>(reachable_from_producer[i] | reachable[i]);
+      }
+    }
+    const bool producer_can_reach_consumer =
+        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
+          return can_reach_consumer[producer_block_index] != 0;
+        });
+    if (!producer_can_reach_consumer) {
       feasible_path_cache_[cache_key] = false;
       return false;
     }
@@ -2135,8 +2281,10 @@ private:
       if (block != nullptr && cfg_views_[i].predecessors.empty() && can_reach_producer[i] != 0)
         worklist.push_back({i, 0, false, 0, {}, std::nullopt});
     }
-    if (worklist.empty())
-      worklist.push_back({*producer_block_index, 0, false, 0, {}, std::nullopt});
+    if (worklist.empty()) {
+      for (size_t producer_block_index : producer_block_indices)
+        worklist.push_back({producer_block_index, 0, false, 0, {}, std::nullopt});
+    }
     std::set<std::tuple<size_t, size_t, bool, uint32_t, std::string>> visited;
     size_t states_processed = 0;
 
@@ -2207,14 +2355,17 @@ private:
           const int64_t target =
               static_cast<int64_t>(fallthrough_offset) + static_cast<int64_t>(*branch_delta);
           if (target >= 0) {
-            const auto target_it = cfg_block_by_start_offset_.find(static_cast<uint64_t>(target));
-            if (target_it != cfg_block_by_start_offset_.end() &&
-                can_continue_from(target_it->second, state.pending)) {
+            for (size_t successor : block_view.successors) {
+              const BasicBlock *successor_block = cfg_views_[successor].block;
+              if (successor_block == nullptr ||
+                  successor_block->start_offset() != static_cast<uint64_t>(target) ||
+                  !can_continue_from(successor, state.pending))
+                continue;
               ScalarConstraints taken_constraints = state.constraints;
               const bool branch_takes_on_scc_true = inst.mnemonic() == "s_cbranch_scc1";
               if (apply_scc_branch_constraint(taken_constraints, state.scc_predicate,
                                               branch_takes_on_scc_true)) {
-                worklist.push_back({target_it->second, 0, state.pending, state.age,
+                worklist.push_back({successor, 0, state.pending, state.age,
                                     std::move(taken_constraints), std::nullopt});
               }
             }
@@ -2225,13 +2376,18 @@ private:
         const bool fallthrough_on_scc_true = inst.mnemonic() == "s_cbranch_scc0";
         if (apply_scc_branch_constraint(fallthrough_constraints, state.scc_predicate,
                                         fallthrough_on_scc_true)) {
-          const auto fallthrough_it = cfg_block_by_start_offset_.find(fallthrough_offset);
-          if (fallthrough_it != cfg_block_by_start_offset_.end()) {
-            if (can_continue_from(fallthrough_it->second, state.pending)) {
-              worklist.push_back({fallthrough_it->second, 0, state.pending, state.age,
-                                  std::move(fallthrough_constraints), std::nullopt});
+          bool found_fallthrough = false;
+          for (size_t successor : block_view.successors) {
+            const BasicBlock *successor_block = cfg_views_[successor].block;
+            if (successor_block == nullptr || successor_block->start_offset() != fallthrough_offset)
+              continue;
+            found_fallthrough = true;
+            if (can_continue_from(successor, state.pending)) {
+              worklist.push_back(
+                  {successor, 0, state.pending, state.age, fallthrough_constraints, std::nullopt});
             }
-          } else if (state.inst_index + 1 < block_view.instructions.size()) {
+          }
+          if (!found_fallthrough && state.inst_index + 1 < block_view.instructions.size()) {
             worklist.push_back({state.block_index, state.inst_index + 1, state.pending, state.age,
                                 std::move(fallthrough_constraints), std::nullopt});
           }
@@ -2286,10 +2442,20 @@ private:
         std::optional<RegisterRef> reg;
         WaitcheckAccessKind access = WaitcheckAccessKind::Use;
         if (event.check_uses) {
-          reg = first_intersection(event.regs, du.uses);
+          // An asynchronous load creates a pending register generation.  Until
+          // the matching wait retires it, instructions may still consume a
+          // committed generation that was available when the load issued.
+          // Restrict RAW diagnostics to lanes for which no such old generation
+          // exists. Definitions are handled separately below because GFX950
+          // also supports synchronous overlays of the visible generation.
+          const RegisterSet pending_only_regs = event.regs - event.old_value_regs;
+          reg = first_intersection(pending_only_regs, du.uses);
         }
         if (!reg && event.check_defs) {
-          reg = first_intersection(event.regs, du.defs);
+          RegisterSet pending_only_regs = event.regs - event.old_value_regs;
+          if (creates_immediate_overlay_generation(arch, inst, current_events))
+            pending_only_regs -= du.defs;
+          reg = first_intersection(pending_only_regs, du.defs);
           access = WaitcheckAccessKind::Def;
         }
         if (!reg && event.special_reg) {
@@ -2528,7 +2694,7 @@ private:
       if (!state.tracked_pairs.test(sgpr_pair(ref)))
         return;
 
-      if (state.salu_hazards.test(ref.index)) {
+      if (is_valu && state.salu_hazards.test(ref.index)) {
         const auto producer = state.salu_producers.find(ref.index);
         emit_sgpr_hazard_diagnostic(
             inst, producer == state.salu_producers.end() ? nullptr : &producer->second, ref,
@@ -2549,7 +2715,7 @@ private:
       return;
 
     RegisterRef vcc{RegClass::VCC, 0, 1};
-    if (state.vcc_hazard & kSgprHazardSalu)
+    if (is_valu && (state.vcc_hazard & kSgprHazardSalu))
       emit_sgpr_hazard_diagnostic(inst,
                                   state.salu_vcc_producer ? &*state.salu_vcc_producer : nullptr,
                                   vcc, "depctr_sa_sdst", section_offset, file_offset);
@@ -2591,14 +2757,18 @@ private:
       set_vcc_hazard(state, is_valu, producer);
   }
 
-  void add_event(PendingState &state, ClassifiedEvent classification, const Instruction &inst,
-                 const InstDefUse &du, std::string section_name, uint64_t section_offset,
-                 uint64_t file_offset, std::string instruction, rj_code_arch_t arch,
-                 bool record_stats) {
+  void add_event(PendingState &state, const RegisterSet &local_ready_regs,
+                 ClassifiedEvent classification, const Instruction &inst, const InstDefUse &du,
+                 std::string section_name, uint64_t section_offset, uint64_t file_offset,
+                 std::string instruction, rj_code_arch_t arch, bool record_stats) {
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
+    event.produces_regs =
+        arch == ROCJITSU_CODE_ARCH_CDNA4 && classification.registers == TrackedRegisterSource::Defs;
+    if (event.produces_regs)
+      event.old_value_regs = event.regs & (state.ready_regs | local_ready_regs);
     event.special_reg = classification.special_reg;
     event.barrier_id = classification.barrier_id;
     event.check_uses = classification.check_uses;
@@ -2618,6 +2788,7 @@ private:
     if (auto existing = find_event(state.pending[idx], event);
         existing != state.pending[idx].end()) {
       existing->min_younger = 0;
+      existing->old_value_regs &= event.old_value_regs;
     } else {
       state.pending[idx].push_back(std::move(event));
     }
@@ -2625,9 +2796,10 @@ private:
       ++report_.memory_events_tracked;
   }
 
-  void analyze_instruction(PendingState &state, const Instruction &inst,
-                           const std::string &section_name, uint64_t section_offset,
-                           uint64_t file_offset, rj_code_arch_t arch, bool emit_diagnostics) {
+  void analyze_instruction(PendingState &state, RegisterSet &local_ready_regs,
+                           const Instruction &inst, const std::string &section_name,
+                           uint64_t section_offset, uint64_t file_offset, rj_code_arch_t arch,
+                           bool emit_diagnostics) {
     const bool record_stats = emit_diagnostics;
     const bool emit_report_diagnostics = emit_diagnostics && diagnostics_available();
     if (inst.mnemonic() == "s_delay_alu") {
@@ -2652,7 +2824,7 @@ private:
     }
     apply_expert_scheduling_mode(state, inst, arch);
     clear_matching_barrier_scc_write(state, inst);
-    if (tracks_gfx12_sgpr_hazards(arch))
+    if (tracks_gfx12_sgpr_hazards(arch) && expert_waits_enabled(state))
       apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
     apply_embedded_waitcnt(state, inst);
 
@@ -2668,7 +2840,7 @@ private:
       if (expert_waits_enabled(state))
         check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
     }
-    if (tracks_gfx12_sgpr_hazards(arch)) {
+    if (tracks_gfx12_sgpr_hazards(arch) && expert_waits_enabled(state)) {
       update_sgpr_hazards(state.sgpr_hazards, inst, du, section_name, section_offset, file_offset,
                           emit_report_diagnostics);
     }
@@ -2681,9 +2853,43 @@ private:
       return;
     }
 
+    RegisterSet asynchronous_defs;
     for (const ClassifiedEvent &event : events) {
-      add_event(state, event, inst, du, section_name, section_offset, file_offset,
+      if (event.registers == TrackedRegisterSource::Defs)
+        asynchronous_defs |= registers_for_event(inst, du, event, state.vgpr_msb, arch);
+      add_event(state, local_ready_regs, event, inst, du, section_name, section_offset, file_offset,
                 inst.disassemble(), arch, record_stats);
+    }
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      RegisterSet unavailable_regs;
+      for (const auto &pending : state.pending) {
+        for (const PendingEvent &pending_event : pending) {
+          if (pending_event.produces_regs)
+            unavailable_regs |= pending_event.regs - pending_event.old_value_regs;
+        }
+      }
+      // A register that is consumed without an outstanding producer already
+      // has a committed generation, including ABI/live-in VGPRs such as the
+      // workitem id. Remember it so a later asynchronous replacement does not
+      // make that old value appear unavailable. Do not bless a first use of a
+      // pending load result: it remains unavailable and is diagnosed above.
+      const RegisterSet committed_uses = du.uses - unavailable_regs;
+      committed_uses.for_each([&](RegisterRef reg) {
+        if (reg.cls == RegClass::VGPR || reg.cls == RegClass::ACC_VGPR)
+          local_ready_regs.expand(reg);
+      });
+      const RegisterSet synchronous_defs = du.defs - asynchronous_defs;
+      synchronous_defs.for_each([&](RegisterRef reg) {
+        if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
+          return;
+        state.ready_regs.expand(reg);
+        for (auto &pending : state.pending) {
+          for (PendingEvent &pending_event : pending) {
+            if (pending_event.produces_regs && pending_event.regs.contains(reg))
+              pending_event.old_value_regs.expand(reg);
+          }
+        }
+      });
     }
     finish_instruction();
   }
@@ -2704,7 +2910,6 @@ private:
                  uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, std::string, std::string>>
       diagnostic_keys_;
   std::vector<CfgBlockView> cfg_views_;
-  std::unordered_map<uint64_t, size_t> cfg_block_by_start_offset_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind>, bool> feasible_path_cache_;
   std::map<size_t, std::vector<uint8_t>> reverse_reachability_cache_;
   std::map<size_t, std::vector<uint8_t>> forward_reachability_cache_;
