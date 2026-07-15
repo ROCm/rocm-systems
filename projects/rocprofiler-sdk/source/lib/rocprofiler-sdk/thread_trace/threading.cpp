@@ -98,6 +98,9 @@ copy_data_sync(void*         dst,
     // Workaround for ROCM-25606
     if(dependency) signal_wait(*dependency);
 
+    // A 0-byte async copy can wedge on gfx11.5 (completion signal never raised); skip it.
+    if(size == 0) return;
+
     signal_reset(signal.sig);
     auto status = copy_fn(dst, dst_agent, src, src_agent, size, 0, nullptr, signal.sig);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
