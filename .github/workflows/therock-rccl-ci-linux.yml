@@ -12,7 +12,7 @@ on:
         default: ''
       package_version:
         type: string
-        required: true
+        default: ""
       cmake_options:
         type: string
       artifact_run_id:
