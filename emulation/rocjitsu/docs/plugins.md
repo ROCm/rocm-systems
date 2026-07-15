@@ -131,7 +131,7 @@ When `file` is in `types`, each plugin writes to
 ### Profiled execution
 
 Set the top-level `"profiled": true` key to wrap the plugins in a
-profiled execution group, which emits per-hook timing data
+profiled execution decorator, which emits per-hook timing data
 (`HOOK_PROFILE` lines) to the configured sinks. With the default sink, timing
 data goes to stderr; stdout sends it to stdout, and file sinks write it to
 `<dir>/profile.log`.
@@ -219,6 +219,22 @@ Asynchronous memory operations are modeled separately. The race detector
 records their register dependencies when they are issued. A later completion
 updates storage without emitting the same instruction-level write again.
 Synchronization retires the corresponding outstanding operations.
+
+### Dispatch threading
+
+Hook presence and callback policy are derived from the plugins contained by an
+`ExecutionPluginGroup`. An empty group has no hooks. A group requires serial
+command-processor callbacks when any contained plugin requires them.
+
+Plugins conservatively require serial callbacks by default because concurrent
+hook ordering is undefined and plugins may contain unsynchronized mutable
+state. A plugin may override `requires_serial_execution()` to return `false`
+only after its complete callback path has been audited and tested for
+concurrent command-processor callbacks.
+
+Hook profiling is implemented as `ProfiledExecutionPlugin`, a serial decorator
+around another plugin group. It therefore participates in the same
+capability aggregation instead of adding hidden hook behavior to the group.
 
 
 ## Adding a new plugin

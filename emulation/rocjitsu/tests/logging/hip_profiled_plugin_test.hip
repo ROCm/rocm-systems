@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// End-to-end test for ProfiledExecutionPluginGroup.
+// End-to-end test for ProfiledExecutionPlugin.
 // Runs under a config with "profiled": true and verifies that profile
 // output contains hook timing data.
 //
-// The profiled group writes HOOK_PROFILE lines to stderr by default.
+// The profiled plugin writes HOOK_PROFILE lines to stderr by default.
 // This test captures stderr by redirecting it to a temporary file.
 
 #include <gtest/gtest.h>

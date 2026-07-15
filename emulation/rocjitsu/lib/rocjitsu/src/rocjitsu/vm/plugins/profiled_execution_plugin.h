@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file profiled_execution_plugin_group.h
-/// @brief ExecutionPluginGroup subclass with adaptive-sampling hook profiling.
+/// @file profiled_execution_plugin.h
+/// @brief ExecutionPlugin decorator with adaptive-sampling hook profiling.
 ///
 /// Wraps each hook with timing instrumentation. Sampling frequency decreases
 /// as the hook fires more often (interval scales as sqrt(count/1000)), so
 /// hot hooks are profiled without dominating execution time. Enable by
-/// constructing a ProfiledExecutionPluginGroup instead of a plain
-/// ExecutionPluginGroup. On shutdown, prints per-hook timing summaries.
+/// wrapping a plugin group in ProfiledExecutionPlugin. On shutdown, prints
+/// per-hook timing summaries.
 
 #pragma once
 
@@ -18,16 +18,15 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <memory>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace rocjitsu {
 
-// NOT thread-safe: HookProfile counters are shared across all CUs without
-// synchronization. Use only with num_threads=1.
-
-class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
+class ProfiledExecutionPlugin final : public ExecutionPlugin {
   using Clock = std::chrono::steady_clock;
 
   struct HookProfile {
@@ -40,41 +39,39 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
   };
 
 public:
-  explicit ProfiledExecutionPluginGroup(PluginSinkConfig config)
-      : ExecutionPluginGroup(std::move(config)), start_time_(Clock::now()) {}
-
-  void onInit() override {
-    profile_sink_ = build_sink_bundle("profile.log");
-    if (auto *s = profile_sink_.get())
-      sink_ = s;
-    ExecutionPluginGroup::onInit();
+  explicit ProfiledExecutionPlugin(std::unique_ptr<ExecutionPluginGroup> plugins)
+      : ExecutionPlugin("profile"), plugins_(std::move(plugins)), start_time_(Clock::now()) {
+    if (!plugins_)
+      plugins_ = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
   }
+
+  ExecutionPluginGroup &plugins() { return *plugins_; }
+
+  void onInit() override { plugins_->onInit(); }
 
   void onShutdown() override {
     if (prof_before_exec_.count > 0)
       print_profile_summary();
-    ExecutionPluginGroup::onShutdown();
+    plugins_->onShutdown();
     double total = std::chrono::duration<double>(Clock::now() - start_time_).count();
     sink().write(std::format("[rocjitsu] total emulation time: {:.3f} s\n", total));
   }
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override {
-    profiled_dispatch(prof_before_exec_, [&]() {
-      ExecutionPluginGroup::onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
-    });
+    profiled_dispatch(prof_before_exec_,
+                      [&]() { plugins_->onAmdgpuBeforeExecuteInstruction(pc, inst, wf); });
   }
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override {
-    profiled_dispatch(prof_after_exec_, [&]() {
-      ExecutionPluginGroup::onAmdgpuAfterExecuteInstruction(pc, inst, wf);
-    });
+    profiled_dispatch(prof_after_exec_,
+                      [&]() { plugins_->onAmdgpuAfterExecuteInstruction(pc, inst, wf); });
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
     profiled_dispatch(prof_route_mem_,
-                      [&]() { ExecutionPluginGroup::onAmdgpuRouteMemoryInstruction(inst, wf); });
+                      [&]() { plugins_->onAmdgpuRouteMemoryInstruction(inst, wf); });
   }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override {
@@ -82,8 +79,12 @@ public:
       print_profile_summary();
     current_kernel_name_ = info.kernel_name;
     dispatch_kernel_names_[info.dispatch_id] = info.kernel_name;
-    ExecutionPluginGroup::onAmdgpuDispatchPacketProcessed(info);
+    plugins_->onAmdgpuDispatchPacketProcessed(info);
     reset_profiles();
+  }
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override {
+    plugins_->onAmdgpuDispatchExecutionBegin(dispatch_id);
   }
 
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override {
@@ -93,7 +94,7 @@ public:
         current_kernel_name_ = it->second;
       print_profile_summary();
     }
-    ExecutionPluginGroup::onAmdgpuDispatchExecutionEnd(dispatch_id);
+    plugins_->onAmdgpuDispatchExecutionEnd(dispatch_id);
     reset_profiles();
   }
 
@@ -101,31 +102,28 @@ public:
                                    uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override {
     profiled_dispatch(prof_wg_dispatched_, [&]() {
-      ExecutionPluginGroup::onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
-                                                        sgpr_count, wavefronts);
+      plugins_->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
+                                            wavefronts);
     });
   }
 
   void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override {
-    profiled_dispatch(prof_wg_completed_, [&]() {
-      ExecutionPluginGroup::onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
-    });
+    profiled_dispatch(prof_wg_completed_,
+                      [&]() { plugins_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id); });
   }
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
-    profiled_dispatch(prof_wf_dispatched_,
-                      [&]() { ExecutionPluginGroup::onAmdgpuWavefrontDispatched(wf); });
+    profiled_dispatch(prof_wf_dispatched_, [&]() { plugins_->onAmdgpuWavefrontDispatched(wf); });
   }
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
-    profiled_dispatch(prof_wf_halted_,
-                      [&]() { ExecutionPluginGroup::onAmdgpuWavefrontHalted(wf); });
+    profiled_dispatch(prof_wf_halted_, [&]() { plugins_->onAmdgpuWavefrontHalted(wf); });
   }
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
     profiled_dispatch(prof_read_vgpr_, [&]() {
-      ExecutionPluginGroup::onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      plugins_->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
   }
 
@@ -133,18 +131,16 @@ public:
                               uint64_t lane_mask,
                               uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
     profiled_dispatch(prof_write_vgpr_, [&]() {
-      ExecutionPluginGroup::onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      plugins_->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
   }
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override {
-    profiled_dispatch(prof_read_sgpr_,
-                      [&]() { ExecutionPluginGroup::onAmdgpuReadSgpr(wf, physical_reg); });
+    profiled_dispatch(prof_read_sgpr_, [&]() { plugins_->onAmdgpuReadSgpr(wf, physical_reg); });
   }
 
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
-    profiled_dispatch(prof_barrier_,
-                      [&]() { ExecutionPluginGroup::onAmdgpuBarrierResolved(wavefronts); });
+    profiled_dispatch(prof_barrier_, [&]() { plugins_->onAmdgpuBarrierResolved(wavefronts); });
   }
 
 private:
@@ -201,11 +197,8 @@ private:
     sink().write("HOOK_PROFILE ---\n");
   }
 
-  PluginSink &sink() { return *sink_; }
-
+  std::unique_ptr<ExecutionPluginGroup> plugins_;
   Clock::time_point start_time_;
-  SinkBundle profile_sink_;
-  PluginSink *sink_ = &StderrSink::instance();
   std::string current_kernel_name_;
   std::unordered_map<uint32_t, std::string> dispatch_kernel_names_;
 

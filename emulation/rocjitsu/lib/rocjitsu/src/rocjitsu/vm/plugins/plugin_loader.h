@@ -20,7 +20,7 @@
 /// the supplied configuration against the plugin's schema (filling in
 /// defaults), instantiates the plugin, and adds it to the supplied group.
 ///
-/// Output sinks and the profiling group are also configured from the same
+/// Output sinks and the profiling decorator are also configured from the same
 /// config file (see configure_plugin_group()):
 ///
 /// @code{.json}
@@ -61,14 +61,14 @@ public:
                               const std::string &plugin_dir = {});
 
   /// Build a fully configured plugin group from @p config_json: selects the
-  /// plain or profiled group (`"profiled"` flag), wires output sinks
+  /// plain group or profiling decorator (`"profiled"` flag), wires output sinks
   /// (`"sinks"` object), and loads the plugins (`"plugins"` object). Shared by
   /// the local (interposer) and daemon launch paths so a given config behaves
   /// identically regardless of how the VM is brought up.
   ///
   /// @p plugin_dir has the same meaning as in load_from_config().
-  /// @p engine_config is the simulation engine configuration. Profiled groups
-  /// require single-threaded execution because their counters are not synchronized.
+  /// @p engine_config is the simulation engine configuration. Profiled execution
+  /// requires a single thread because its counters are not synchronized.
   ///
   /// @returns A non-null group (empty if the config declares no plugins).
   static std::shared_ptr<ExecutionPluginGroup>

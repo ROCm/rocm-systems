@@ -19,6 +19,7 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -105,13 +106,22 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // -- Lifecycle --
-  virtual void onInit() {
+  /// Compute units only need to dispatch hooks when the group owns plugins.
+  bool has_hooks() const { return !empty(); }
+
+  /// Require serial callbacks if any contained plugin requires them.
+  bool requires_serial_execution() const {
+    return std::any_of(plugins_.begin(), plugins_.end(),
+                       [](const auto &entry) { return entry.plugin->requires_serial_execution(); });
+  }
+
+  // -- Lifecycle (non-virtual) --
+  void onInit() {
     for (auto &entry : plugins_)
       entry.plugin->onInit();
   }
 
-  virtual void onShutdown() {
+  void onShutdown() {
     for (auto &entry : plugins_)
       entry.plugin->onShutdown();
   }

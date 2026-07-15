@@ -6,7 +6,7 @@
 #include "rocjitsu/vm/plugins/plugin_abi.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/profiled_execution_plugin.h"
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
@@ -235,14 +235,14 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     throw std::invalid_argument("profiled plugin execution requires num_threads=1");
   }
 
-  PluginSinkConfig sink_config = parse_sink_config(root);
-  std::shared_ptr<ExecutionPluginGroup> group;
-  if (profiled)
-    group = std::make_shared<ProfiledExecutionPluginGroup>(std::move(sink_config));
-  else
-    group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugins = std::make_unique<ExecutionPluginGroup>(parse_sink_config(root));
+  load_from_config(config_json, *plugins, plugin_dir);
 
-  load_from_config(config_json, *group, plugin_dir);
+  if (!profiled)
+    return std::shared_ptr<ExecutionPluginGroup>(std::move(plugins));
+
+  auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
+  group->add(std::make_unique<ProfiledExecutionPlugin>(std::move(plugins)));
   return group;
 }
 

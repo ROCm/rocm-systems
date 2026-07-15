@@ -53,6 +53,10 @@ public:
   /// Output sink for this plugin. Use sink().write("msg") for all output.
   PluginSink &sink() { return *sink_; }
 
+  /// Whether concurrent command-processor callbacks are unsafe for this plugin.
+  /// Plugins are serial by default because hook ordering is otherwise undefined.
+  virtual bool requires_serial_execution() const { return true; }
+
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
