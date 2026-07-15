@@ -19,9 +19,7 @@ REFERENCE_OUTPUT_DIRS = (
     ("rocjitsu", Path("rocjitsu")),
 )
 
-EXPECTED_XFAILS = {
-    "monitor_load_ops": "EXPAND not yet implemented for global_load_monitor_b32",
-}
+EXPECTED_XFAILS = {}
 
 
 def parse_args():

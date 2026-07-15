@@ -17903,6 +17903,166 @@ TEST(BinaryTranslator, Gfx1250ClusterAndAsyncGlobalMemoryUseExplicitRdna4Sequenc
   EXPECT_EQ(std::ranges::count(words, 0xBFCA0000u), 0u);
 }
 
+TEST(BinaryTranslator, Gfx1250MonitorLoadsUseWidthMatchedRdna4LoadsAndImmediateWakeup) {
+  using namespace rocjitsu;
+
+  constexpr std::array<uint16_t, 3> guest_flat_ops{
+      gfx1250::kFlatLoadMonitorB32Vflat,
+      gfx1250::kFlatLoadMonitorB64Vflat,
+      gfx1250::kFlatLoadMonitorB128Vflat,
+  };
+  constexpr std::array<uint16_t, 3> guest_global_ops{
+      gfx1250::kGlobalLoadMonitorB32Vglobal,
+      gfx1250::kGlobalLoadMonitorB64Vglobal,
+      gfx1250::kGlobalLoadMonitorB128Vglobal,
+  };
+  constexpr std::array<uint16_t, 3> host_flat_ops{
+      rdna4::kFlatLoadB32Vflat,
+      rdna4::kFlatLoadB64Vflat,
+      rdna4::kFlatLoadB128Vflat,
+  };
+  constexpr std::array<uint16_t, 3> host_global_ops{
+      rdna4::kGlobalLoadB32Vglobal,
+      rdna4::kGlobalLoadB64Vglobal,
+      rdna4::kGlobalLoadB128Vglobal,
+  };
+
+  std::array<gfx1250::VflatMachineInst, 3> flat{};
+  std::array<gfx1250::VglobalMachineInst, 3> global{};
+  for (size_t i = 0; i < flat.size(); ++i) {
+    flat[i].encoding = 0xEC;
+    flat[i].op = guest_flat_ops[i];
+    flat[i].saddr = kNullSgprForTest;
+    flat[i].nv = 1;
+    flat[i].vdst = static_cast<uint8_t>(8u + i * 8u);
+    flat[i].scope = 1;
+    flat[i].th = 2;
+    flat[i].vaddr = static_cast<uint8_t>(2u + i * 2u);
+    flat[i].ioffset = static_cast<uint32_t>(64u + i * 32u);
+
+    global[i].encoding = 0xEE;
+    global[i].op = guest_global_ops[i];
+    global[i].saddr = kNullSgprForTest;
+    global[i].nv = 1;
+    global[i].vdst = static_cast<uint8_t>(40u + i * 8u);
+    global[i].scope = 1;
+    global[i].th = 2;
+    global[i].vaddr = static_cast<uint8_t>(12u + i * 2u);
+    global[i].ioffset = static_cast<uint32_t>(256u + i * 32u);
+  }
+
+  // Exercise both scaled-address paths in addition to the unscaled corpus
+  // forms. Flat scaling applies only when an SGPR base is present.
+  flat[1].saddr = 6;
+  flat[1].scale_offset = 1;
+  global[2].saddr = 10;
+  global[2].scale_offset = 1;
+
+  constexpr uint32_t monitor_sleep = 0xBF840007u;
+  std::array<uint32_t, 20> text_words{};
+  for (size_t i = 0; i < flat.size(); ++i)
+    std::memcpy(text_words.data() + i * 3u, &flat[i], sizeof(flat[i]));
+  for (size_t i = 0; i < global.size(); ++i)
+    std::memcpy(text_words.data() + 9u + i * 3u, &global[i], sizeof(global[i]));
+  text_words[18] = monitor_sleep;
+  text_words[19] = 0xBFB00000u;
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(has_error_diagnostic(result.diagnostics));
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto words = translated_executable_words_for_test(translated);
+  ASSERT_FALSE(words.empty());
+
+  std::array<bool, 3> found_flat{};
+  std::array<bool, 3> found_global{};
+  std::array<std::optional<size_t>, 3> flat_indices{};
+  std::array<std::optional<size_t>, 3> global_indices{};
+  std::optional<uint8_t> scaled_flat_vaddr;
+  std::optional<uint8_t> scaled_global_vaddr;
+  for (size_t word = 0; word + 2u < words.size(); ++word) {
+    rdna4::VflatMachineInst host_flat{};
+    std::memcpy(&host_flat, words.data() + word, sizeof(host_flat));
+    if (host_flat.encoding == 0xEC) {
+      for (size_t i = 0; i < flat.size(); ++i) {
+        if (host_flat.op != host_flat_ops[i] || host_flat.vdst != flat[i].vdst)
+          continue;
+        found_flat[i] = true;
+        flat_indices[i] = word;
+        EXPECT_EQ(host_flat.saddr, flat[i].saddr);
+        EXPECT_EQ(host_flat.nv, flat[i].nv);
+        EXPECT_EQ(host_flat.scope, flat[i].scope);
+        EXPECT_EQ(host_flat.th, flat[i].th);
+        EXPECT_EQ(host_flat.ioffset, flat[i].ioffset);
+        if (i == 1u)
+          scaled_flat_vaddr = static_cast<uint8_t>(host_flat.vaddr);
+        else
+          EXPECT_EQ(host_flat.vaddr, flat[i].vaddr);
+      }
+    }
+
+    rdna4::VglobalMachineInst host_global{};
+    std::memcpy(&host_global, words.data() + word, sizeof(host_global));
+    if (host_global.encoding == 0xEE) {
+      for (size_t i = 0; i < global.size(); ++i) {
+        if (host_global.op != host_global_ops[i] || host_global.vdst != global[i].vdst)
+          continue;
+        found_global[i] = true;
+        global_indices[i] = word;
+        EXPECT_EQ(host_global.saddr, global[i].saddr);
+        EXPECT_EQ(host_global.nv, global[i].nv);
+        EXPECT_EQ(host_global.scope, global[i].scope);
+        EXPECT_EQ(host_global.th, global[i].th);
+        EXPECT_EQ(host_global.ioffset, global[i].ioffset);
+        if (i == 2u)
+          scaled_global_vaddr = static_cast<uint8_t>(host_global.vaddr);
+        else
+          EXPECT_EQ(host_global.vaddr, global[i].vaddr);
+      }
+    }
+  }
+
+  EXPECT_TRUE(std::ranges::all_of(found_flat, [](bool found) { return found; }));
+  EXPECT_TRUE(std::ranges::all_of(found_global, [](bool found) { return found; }));
+  for (const auto index : flat_indices) {
+    ASSERT_TRUE(index.has_value());
+    ASSERT_LT(*index + 3u, words.size());
+    EXPECT_EQ(words[*index + 3u], pack_sopp(rdna4::kSWaitLoadcntSopp, 0));
+  }
+  for (const auto index : global_indices) {
+    ASSERT_TRUE(index.has_value());
+    ASSERT_LT(*index + 3u, words.size());
+    EXPECT_EQ(words[*index + 3u], pack_sopp(rdna4::kSWaitLoadcntSopp, 0));
+  }
+  ASSERT_TRUE(scaled_flat_vaddr.has_value());
+  ASSERT_TRUE(scaled_global_vaddr.has_value());
+  EXPECT_NE(*scaled_flat_vaddr, flat[1].vaddr);
+  EXPECT_NE(*scaled_global_vaddr, global[2].vaddr);
+
+  bool found_flat_scale = false;
+  bool found_global_scale = false;
+  for (uint32_t word : words) {
+    const auto shift = std::bit_cast<rdna4::Vop2MachineInst>(word);
+    if (shift.op != rdna4::kVLshlrevB32Vop2)
+      continue;
+    found_flat_scale |= shift.vdst == *scaled_flat_vaddr && shift.vsrc1 == flat[1].vaddr &&
+                        shift.src0 == 131u; // inline 3, for an 8-byte load
+    found_global_scale |= shift.vdst == *scaled_global_vaddr && shift.vsrc1 == global[2].vaddr &&
+                          shift.src0 == 132u; // inline 4, for a 16-byte load
+  }
+  EXPECT_TRUE(found_flat_scale);
+  EXPECT_TRUE(found_global_scale);
+  EXPECT_EQ(std::ranges::count(words, monitor_sleep), 0u);
+}
+
 TEST(BinaryTranslator, Gfx1250DsCountersAndBarrierArrivalsUseRdna4Atomics) {
   using namespace rocjitsu;
 

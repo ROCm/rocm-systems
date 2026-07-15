@@ -862,6 +862,15 @@ bool append_rdna4_vglobal_load(std::vector<uint32_t> &words, const VglobalFields
   return true;
 }
 
+bool append_rdna4_vflat_load(std::vector<uint32_t> &words, const VflatFields &fields,
+                             uint16_t rdna4_op) {
+  auto mem = gfx1250_to_rdna4::encode_vflat_rdna4(fields, rdna4_op);
+  if (mem.word_count != 3)
+    return false;
+  words.insert(words.end(), mem.words, mem.words + mem.word_count);
+  return true;
+}
+
 bool append_rdna4_vds_inst(std::vector<uint32_t> &words, const VdsFields &fields,
                            uint16_t rdna4_op) {
   auto mem = gfx1250_to_rdna4::encode_vds_rdna4(fields, rdna4_op);
@@ -1631,8 +1640,9 @@ struct AsyncVglobalLowering {
   }
 }
 
-void append_scaled_vglobal_address(std::vector<uint32_t> &words, VglobalFields &fields, uint8_t tmp,
-                                   uint8_t access_bytes) {
+template <typename Fields>
+void append_scaled_flat_global_address(std::vector<uint32_t> &words, Fields &fields, uint8_t tmp,
+                                       uint8_t access_bytes) {
   constexpr uint8_t kOpLshlrevB32 = 24;
   constexpr uint16_t kOpMulLoU32 = 812;
   const uint8_t source_vaddr = static_cast<uint8_t>(fields.vaddr);
@@ -1694,7 +1704,7 @@ ExpandResult expand_cluster_load_vglobal(const Instruction &inst, uint32_t, uint
     if (!tmp_opt)
       return ExpandResult::failed(std::string(inst.mnemonic()) +
                                   " cannot allocate a scaled-address VGPR");
-    append_scaled_vglobal_address(words, fields, static_cast<uint8_t>(*tmp_opt), access_bytes);
+    append_scaled_flat_global_address(words, fields, static_cast<uint8_t>(*tmp_opt), access_bytes);
     context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + 1u);
   } else {
     fields.scale_offset = 0;
@@ -1742,8 +1752,8 @@ ExpandResult expand_async_vglobal(const Instruction &inst, uint32_t, uint64_t,
   std::vector<uint32_t> words;
   words.reserve(12);
   if (needs_scaled_address) {
-    append_scaled_vglobal_address(words, global, static_cast<uint8_t>(data + data_words),
-                                  lowering->access_bytes);
+    append_scaled_flat_global_address(words, global, static_cast<uint8_t>(data + data_words),
+                                      lowering->access_bytes);
   } else {
     global.scale_offset = 0;
   }
@@ -1778,6 +1788,115 @@ ExpandResult expand_async_vglobal(const Instruction &inst, uint32_t, uint64_t,
   }
 
   context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + scratch_words);
+  return ExpandResult::success(std::move(words));
+}
+
+struct MonitorLoadLowering {
+  uint8_t access_bytes = 0;
+  uint8_t rdna4_op = 0;
+};
+
+static_assert(gfx1250::kFlatLoadMonitorB32Vflat == gfx1250::kGlobalLoadMonitorB32Vglobal);
+static_assert(gfx1250::kFlatLoadMonitorB64Vflat == gfx1250::kGlobalLoadMonitorB64Vglobal);
+static_assert(gfx1250::kFlatLoadMonitorB128Vflat == gfx1250::kGlobalLoadMonitorB128Vglobal);
+static_assert(rdna4::kFlatLoadB32Vflat == rdna4::kGlobalLoadB32Vglobal);
+static_assert(rdna4::kFlatLoadB64Vflat == rdna4::kGlobalLoadB64Vglobal);
+static_assert(rdna4::kFlatLoadB128Vflat == rdna4::kGlobalLoadB128Vglobal);
+
+[[nodiscard]] constexpr std::optional<MonitorLoadLowering> monitor_load_lowering(uint16_t op) {
+  switch (op) {
+  case gfx1250::kFlatLoadMonitorB32Vflat:
+    return MonitorLoadLowering{4, rdna4::kFlatLoadB32Vflat};
+  case gfx1250::kFlatLoadMonitorB64Vflat:
+    return MonitorLoadLowering{8, rdna4::kFlatLoadB64Vflat};
+  case gfx1250::kFlatLoadMonitorB128Vflat:
+    return MonitorLoadLowering{16, rdna4::kFlatLoadB128Vflat};
+  default:
+    return std::nullopt;
+  }
+}
+
+ExpandResult expand_monitor_vflat(const Instruction &inst, uint32_t, uint64_t,
+                                  std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                  TranslationContext &context, const LaneLayout *,
+                                  const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VflatMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VflatMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const auto lowering = monitor_load_lowering(src.op);
+  if (!lowering)
+    return ExpandResult::not_handled();
+
+  auto fields = gfx1250_to_rdna4::decode_vflat_gfx1250(raw[0], raw[1], raw[2]);
+  fields.op = lowering->rdna4_op;
+
+  std::vector<uint32_t> words;
+  const bool needs_scaled_address = src.scale_offset && src.saddr != kNullSgpr;
+  if (needs_scaled_address) {
+    std::vector<uint8_t> avoid;
+    add_avoid_vgpr(avoid, static_cast<uint8_t>(src.vaddr));
+    add_avoid_vgpr_run(avoid, static_cast<uint8_t>(src.vdst), lowering->access_bytes / 4u);
+    const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
+    if (!tmp_opt)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate a scaled-address VGPR");
+    append_scaled_flat_global_address(words, fields, static_cast<uint8_t>(*tmp_opt),
+                                      lowering->access_bytes);
+    context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + 1u);
+  } else {
+    fields.scale_offset = 0;
+  }
+
+  if (!append_rdna4_vflat_load(words, fields, lowering->rdna4_op))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 flat-load replacement");
+  // Monitor loads are atomic-return operations on gfx1250, so their result may
+  // be consumed without a separate guest wait. The ordinary RDNA4 VMEM load
+  // exposes completion through loadcnt and must be made ready here.
+  words.push_back(pack_sopp(rdna4::kSWaitLoadcntSopp, 0));
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_monitor_vglobal(const Instruction &inst, uint32_t, uint64_t,
+                                    std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                    TranslationContext &context, const LaneLayout *,
+                                    const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VglobalMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VglobalMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const auto lowering = monitor_load_lowering(src.op);
+  if (!lowering)
+    return ExpandResult::not_handled();
+
+  auto fields = gfx1250_to_rdna4::decode_vglobal_gfx1250(raw[0], raw[1], raw[2]);
+  fields.op = lowering->rdna4_op;
+
+  std::vector<uint32_t> words;
+  if (src.scale_offset && src.saddr != kNullSgpr) {
+    std::vector<uint8_t> avoid;
+    add_avoid_vgpr(avoid, static_cast<uint8_t>(src.vaddr));
+    add_avoid_vgpr_run(avoid, static_cast<uint8_t>(src.vdst), lowering->access_bytes / 4u);
+    const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
+    if (!tmp_opt)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate a scaled-address VGPR");
+    append_scaled_flat_global_address(words, fields, static_cast<uint8_t>(*tmp_opt),
+                                      lowering->access_bytes);
+    context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + 1u);
+  } else {
+    fields.scale_offset = 0;
+  }
+
+  if (!append_rdna4_vglobal_load(words, fields, lowering->rdna4_op))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 global-load replacement");
+  words.push_back(pack_sopp(rdna4::kSWaitLoadcntSopp, 0));
   return ExpandResult::success(std::move(words));
 }
 
@@ -3285,6 +3404,16 @@ std::vector<uint32_t> expand_native_global_transpose_load(const Instruction &ins
 std::vector<uint32_t> lower_s_clause_to_nop(const Instruction &, uint32_t host_arch, uint64_t,
                                             std::span<const uint8_t>, const LivenessAnalysis &,
                                             const LaneLayout *, const LaneLayout *) {
+  return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
+}
+
+std::vector<uint32_t> lower_s_monitor_sleep_to_nop(const Instruction &, uint32_t host_arch,
+                                                   uint64_t, std::span<const uint8_t>,
+                                                   const LivenessAnalysis &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  // RDNA4 has no cache-line monitor or monitor sleep. Treat the sleep as an
+  // immediate/spurious wakeup: the canonical monitor loop rechecks the value,
+  // so this preserves correctness while giving up only the power-saving wait.
   return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
 }
 
@@ -13300,6 +13429,7 @@ constexpr uint16_t kOpSAndB64 = 23;
 constexpr uint16_t kOpSOrB64 = 25;
 constexpr uint16_t kOpSAddNcU64 = 83;
 constexpr uint16_t kOpSSubNcU64 = 84;
+constexpr uint16_t kOpSMonitorSleep = 4;
 constexpr uint16_t kOpSClause = 5;
 constexpr uint16_t kOpSSetVgprMsb = 6;
 constexpr uint16_t kOpSWaitKmcnt = 0x47;
@@ -14050,6 +14180,8 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(lower_s_wakeup_barrier_to_nop), nullptr, nullptr},
     {kEncSopc, kOpSCmpLgU64, RuleAction::Expand, 0, 0, nullptr, lower_s_cmp_u64_literal64, nullptr,
      nullptr},
+    {kEncSopp, kOpSMonitorSleep, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_s_monitor_sleep_to_nop), nullptr, nullptr},
     {kEncSopp, kOpSClause, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_clause_to_nop), nullptr, nullptr},
     {kEncSopp, kOpSSetVgprMsb, RuleAction::Expand, 0, 0, nullptr,
@@ -14533,8 +14665,20 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_ds_transpose_load), nullptr, nullptr},
     {kEncVflat, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
+    {kEncVflat, gfx1250::kFlatLoadMonitorB32Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
+    {kEncVflat, gfx1250::kFlatLoadMonitorB64Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
+    {kEncVflat, gfx1250::kFlatLoadMonitorB128Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
     {kEncVflat1, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
+    {kEncVflat1, gfx1250::kFlatLoadMonitorB32Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
+    {kEncVflat1, gfx1250::kFlatLoadMonitorB64Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
+    {kEncVflat1, gfx1250::kFlatLoadMonitorB128Vflat, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vflat, nullptr, nullptr},
     {kEncVscratch, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vscratch,
      nullptr, nullptr},
     {kEncVscratch1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr,
@@ -14547,6 +14691,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
+    {kEncVglobal, gfx1250::kGlobalLoadMonitorB32Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
+    {kEncVglobal, gfx1250::kGlobalLoadMonitorB64Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
+    {kEncVglobal, gfx1250::kGlobalLoadMonitorB128Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr4B64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_global_load_tr4_b64), nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr6B96, RuleAction::Expand, 0, 0, nullptr,
@@ -14559,6 +14709,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal1, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
+    {kEncVglobal1, gfx1250::kGlobalLoadMonitorB32Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
+    {kEncVglobal1, gfx1250::kGlobalLoadMonitorB64Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
+    {kEncVglobal1, gfx1250::kGlobalLoadMonitorB128Vglobal, RuleAction::Expand, 0, 0, nullptr,
+     expand_monitor_vglobal, nullptr, nullptr},
     {kEncVglobal1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_special_vglobal,
      nullptr, nullptr},
     {kEncSmem0, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
