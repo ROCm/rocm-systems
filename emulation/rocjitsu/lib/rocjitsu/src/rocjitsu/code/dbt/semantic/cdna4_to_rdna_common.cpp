@@ -106,9 +106,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 } // namespace
 
 ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
-                                                  uint64_t, const LivenessAnalysis &,
-                                                  TranslationContext &, const LaneLayout *,
-                                                  const LaneLayout *) {
+                                                  uint64_t, std::span<const uint8_t>,
+                                                  const LivenessAnalysis &, TranslationContext &,
+                                                  const LaneLayout *, const LaneLayout *) {
   return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
 }
 

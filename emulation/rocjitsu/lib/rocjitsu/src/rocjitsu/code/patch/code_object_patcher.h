@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +15,12 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
+
+/// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
+struct AppendedSidecarDescriptor {
+  uint64_t file_offset = 0;
+  uint64_t vaddr = 0;
+};
 
 class CodeObjectPatcher {
 public:
@@ -50,6 +55,29 @@ public:
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                          rj_code_arch_t target_arch);
 
+  /// @brief Append non-symbolized sidecar descriptors in loaded memory after .text.
+  ///
+  /// @details Sidecar descriptors must be visible to the GPU loader, but they
+  /// do not need to be discoverable through the AMDHSA symbol table. The patcher
+  /// therefore places descriptor bytes in the executable LOAD tail immediately
+  /// after the translated .text payload, without growing the .text section
+  /// itself. Runtime metadata records the returned virtual addresses.
+  [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
+  append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
+                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+
+  /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
+  ///
+  /// @details DBT runtime metadata must not perturb code-object load addresses:
+  /// ROCR and the kernel descriptor ABI have already consumed those addresses.
+  /// This helper appends the payload, a copied section-string table, and a new
+  /// section-header table at EOF. Program headers and allocated sections are
+  /// left untouched, so the new section is available to tools and rocjitsu's
+  /// own loader-side metadata parser but is not mapped into GPU code memory.
+  [[nodiscard]] bool append_nonalloc_section(std::string_view name,
+                                             std::span<const uint8_t> contents,
+                                             uint64_t alignment = 1);
+
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
   /// new_entry_text_offset.
   ///
@@ -60,12 +88,15 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  std::vector<uint8_t> emit() const;
+  std::vector<uint8_t> emit() const &;
+  std::vector<uint8_t> emit() &&;
 
 private:
   std::vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
+  uint64_t text_vaddr_;
+  uint64_t text_tail_size_;
 };
 
 } // namespace rocjitsu
