@@ -49,24 +49,30 @@ jobs:
       options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
-    continue-on-error: true
+    continue-on-error: ${{ matrix.allow_failure }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: release
+            allow_failure: true
+            test_regex: ''
             build_type: Release
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 0
             enable_msan: 0
           - name: asan-ubsan
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
           - name: asan-ubsan-gcc
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
@@ -74,6 +80,17 @@ jobs:
             enable_msan: 0
             c_compiler: gcc
             cxx_compiler: g++
+          - name: tsan-sparse-memory
+            allow_failure: false
+            # The simulator-wide stress tests exceed TSan's fixed 128-lock
+            # deadlock-tracker capacity; keep the race gate on this change's
+            # concurrent SparseMemory surface.
+            test_regex: '^SparseMemory(Threading)?Test\.'
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            enable_msan: 0
 
     steps:
       - name: Install base dependencies
@@ -188,7 +205,12 @@ jobs:
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
+          CTEST_SELECTION=()
+          if [[ -n "${{ matrix.test_regex }}" ]]; then
+            CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
+          fi
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
             --output-on-failure \
             -j "${WORKERS}"
