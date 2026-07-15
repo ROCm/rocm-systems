@@ -642,6 +642,16 @@ __device__ int rocshmem_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
   return get_internal_ctx(ctx)->reduce<T, Op>(team, dest, source, nreduce);
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int rocshmem_reduce_scatter_wg(rocshmem_ctx_t ctx,
+                                          rocshmem_team_t team, T *dest,
+                                          const T *source, int nreduce) {
+  LOGD_API("device::reduce_scatter_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
+    ctx.ctx_opaque, team, dest, source, nreduce);
+
+  return get_internal_ctx(ctx)->reduce_scatter_wg<T, Op>(team, dest, source, nreduce);
+}
+
 template <typename T>
 __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team, T *dest,
@@ -650,7 +660,32 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
   LOGD_API("device::broadcast_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
     ctx.ctx_opaque, team, dest, source, nelem, pe_root);
 
-  get_internal_ctx(ctx)->broadcast<T>(team, dest, source, nelem, pe_root);
+  get_internal_ctx(ctx)->broadcast_wg<T>(team, dest, source, nelem, pe_root);
+}
+
+__device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, 
+  void *dest, const void *source, int nelement, int PE_root) {      
+    LOGD_API("device::broadcastmem_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
+      ctx.ctx_opaque, team, dest, source, nelem, PE_root);
+
+    get_internal_ctx(ctx)->broadcastmem_wg(team, dest, source, nelement, PE_root);
+}
+
+template <typename T>
+__device__ int rocshmem_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest,
+                                       const T *source, int nelem, int pe_root) {
+  LOGD_API("device::broadcast_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
+    ctx.ctx_opaque, team, dest, source, nelem, pe_root);
+
+  return get_internal_ctx(ctx)->broadcast_wave<T>(team, dest, source, nelem, pe_root);
+}
+
+__device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, 
+  void *dest, const void *source, int nelement, int PE_root) {      
+    LOGD_API("device::broadcastmem_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
+      ctx.ctx_opaque, team, dest, source, nelem, pe_root);
+
+    return get_internal_ctx(ctx)->broadcastmem_wave(team, dest, source, nelement, PE_root);
 }
 
 template <typename T>
@@ -810,27 +845,8 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
                                                            const void *source,
                                                            size_t size) {
-  // Create a context for this workgroup to avoid contention on default context
-  // This allows parallel execution across multiple streams without serialization
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0) {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device alltoall function with created context and provided team
-  // Using char type since size is in bytes (1 byte per element)
-  rocshmem_ctx_alltoall_wg<char>(ctx, team, (char *) dest,
+  rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
-
-  if (ctx_result == 0) {
-    rocshmem_wg_ctx_destroy(&ctx);
-  }
 }
 
 template <typename T, ROCSHMEM_OP Op>
@@ -839,24 +855,8 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
                                             const T *source,
                                             int nreduce)
 {
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0)
-  {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device reduce function with created context and provided team
-  rocshmem_reduce_wg<T, Op>(ctx, team, dest,
+  rocshmem_reduce_wg<T, Op>(ROCSHMEM_CTX_DEFAULT, team, dest,
                             source, nreduce);
-
-  if (ctx != ROCSHMEM_CTX_INVALID || ctx != ROCSHMEM_CTX_DEFAULT)
-    rocshmem_wg_ctx_destroy(&ctx);
 }
 
 #define REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, Op, Op_API) \
@@ -878,7 +878,7 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
   REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
 #define INT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) \
-  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME) \
   REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)
 
 #define FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)
@@ -886,25 +886,8 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0) {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device broadcast function with created context and provided team
-  // Using char type since nelems is in bytes (1 byte per element)
-  rocshmem_broadcast_wg<char>(ctx, team, (char *) dest, (const char *) source,
+  rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
-
-  if (ctx_result == 0) {
-    rocshmem_wg_ctx_destroy(&ctx);
-  }
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
@@ -1025,17 +1008,24 @@ __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx) {
   LOGD_API("device::ctx_n_pes (ctx=%zd)",
     ctx.ctx_opaque);
 
-  TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
-  return tinfo->size;
+  if (ctx.team_opaque) {
+    TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
+    return tinfo->size;
+  }
+  return constmem.num_pes;
 }
 
 __device__ int rocshmem_n_pes() {
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->num_pes;
+  return constmem.num_pes;
 }
 
 __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
   LOGD_API("device::ctx_my_pe (ctx=%zd)",
     ctx.ctx_opaque);
+
+  if (!ctx.team_opaque) {
+    return constmem.my_pe;
+  }
 
   TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
   int my_pe{get_internal_ctx(ctx)->my_pe};
@@ -1055,7 +1045,7 @@ __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
 }
 
 __device__ int rocshmem_my_pe() {
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->my_pe;
+  return constmem.my_pe;
 }
 
 __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
@@ -1415,6 +1405,9 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
 #define REDUCTION_GEN(T, Op)                                                   \
   template __device__ int rocshmem_reduce_wg<T, Op>(                           \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
+      int nreduce);                                                             \
+  template __device__ int rocshmem_reduce_scatter_wg<T, Op>(                   \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nreduce);
 
 /**
@@ -1444,6 +1437,9 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
                                                 size_t nelems, int pe);        \
   template __device__ T rocshmem_g<T>(const T *source, int pe);                \
   template __device__ void rocshmem_broadcast_wg<T>(                           \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
+      int nelem, int pe_root);                                                 \
+  template __device__ int rocshmem_broadcast_wave<T>(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelem, int pe_root);                                                 \
   template __device__ void rocshmem_ctx_alltoall_wg<T>(                        \
@@ -1636,16 +1632,30 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
     return rocshmem_reduce_wg<T, Op>(ctx, team, dest, source, nreduce);       \
   }
 
-#define ARITH_REDUCTION_DEF_GEN(T, TNAME)         \
-  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
-  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
-  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
-  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+#define REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                          \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(         \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
+      int nreduce) {                                                          \
+    return rocshmem_reduce_scatter_wg<T, Op>(ctx, team, dest, source, nreduce); \
+  }
 
-#define BITWISE_REDUCTION_DEF_GEN(T, TNAME)       \
-  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)   \
-  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
-  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+#define ARITH_REDUCTION_DEF_GEN(T, TNAME)                 \
+  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)         \
+  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)         \
+  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)         \
+  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)       \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)   \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)   \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)   \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define BITWISE_REDUCTION_DEF_GEN(T, TNAME)               \
+  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)           \
+  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)         \
+  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)         \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)     \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)   \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
 #define INT_REDUCTION_DEF_GEN(T, TNAME) \
   ARITH_REDUCTION_DEF_GEN(T, TNAME)     \
@@ -1768,6 +1778,12 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelem, int pe_root) {                                               \
     rocshmem_broadcast_wg<T>(ctx, team, dest, source, nelem, pe_root);        \
+  }                                                                           \
+  __device__ int rocshmem_ctx_##TNAME##_broadcast_wave(                       \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
+      int nelem, int pe_root) {                                               \
+    return rocshmem_broadcast_wave<T>(ctx, team, dest,                        \
+                                       source, nelem, pe_root);               \
   }                                                                           \
   __device__ void rocshmem_ctx_##TNAME##_alltoall_wg(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \

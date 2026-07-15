@@ -7,12 +7,12 @@ What is ROCm Compute Profiler?
 ******************************
 
 ROCm Compute Profiler is a kernel-level profiling tool for machine learning and high
-performance computing (HPC) workloads running on AMD Instinct™ accelerators.
+performance computing (HPC) workloads running on AMD Instinct™ GPUs.
 
-AMD Instinct MI-series accelerators are data center-class GPUs designed for
+AMD Instinct MI-Series GPUs are data center-class GPUs designed for
 compute and have some graphics capabilities disabled or removed.
 ROCm Compute Profiler primarily targets use with
-:doc:`accelerators in the MI300, MI200, and MI100 families <rocm:conceptual/gpu-arch>`.
+:doc:`GPUs in the AMD Instinct MI300, MI200, and MI100 Series <rocm:conceptual/gpu-arch>`.
 Development is in progress to support Radeon™ (RDNA) GPUs.
 
 ROCm Compute Profiler is built on top of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` to

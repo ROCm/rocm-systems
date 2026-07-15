@@ -68,7 +68,7 @@ upgrading mirage to refresh the bundled set.
 
 ### mirage state purge
 completely stop and purge all mirage processes and state.
-Removes the runtime, state, and cache directories; pass `--all`
+Removes the runtime and state directories; pass `--all`
 to also delete the config directory (profiles + topologies).
 
 ## mirage session

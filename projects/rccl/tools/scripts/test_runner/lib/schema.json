@@ -269,9 +269,9 @@
           "type": "string",
           "description": "Shared base command-line arguments for this configuration. A test's own 'command_args' is appended to this base at execution time (see test_executor.run_test). Inherited via 'extends': a child that omits command_args takes the parent's value."
         },
-        "_comment": {
+        "description": {
           "type": "string",
-          "description": "Informal annotation for this configuration block (not interpreted by the runner)"
+          "description": "Human-readable description of this configuration block (not interpreted by the runner)"
         },
         "tests": {
           "type": "array",

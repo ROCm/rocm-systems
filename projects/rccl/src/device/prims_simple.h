@@ -63,7 +63,7 @@ class Primitives<
   uint64_t* barriers_pat;
   uint64_t barrier_next_pat = 0;
   int repeat;
-  bool skip_fence = 0;
+  bool skip_fence = false;
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -208,9 +208,7 @@ class Primitives<
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
 #endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    }
-
-    if ((flags & RolePostSend) && dataStored && !skip_fence) {
+    } else if ((flags & RolePostSend) && dataStored) {
       __threadfence_system();
     }
 
@@ -772,24 +770,12 @@ public:
       }
       patBarrier();
     }
-    if(collWork){
-      skip_fence = !collWork -> gfx9CheapFenceOff;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-      // DWORDX4 builtins use system-scope cache-bypassing stores, so the
-      // cheap s_waitcnt fence is sufficient when UBR is active.
-      if (collWork->regUsed || collWork->netRegUsed) {
-        skip_fence = true;
-      }
-#endif
-    }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-    else if(p2pWork) {
-      // the postPeer fence is gated by RolePostSend and protects
-      // send-side stores only.
-      if (p2pWork->sendIpcReg || p2pWork->sendNetReg) {
-        skip_fence = true;
-      }
-    }
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+#else
+    // The cheap post-peer fence is only safe with global DWORDX4 builtins
+    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    skip_fence = false;
 #endif
   }
 

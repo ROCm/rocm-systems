@@ -22,5 +22,10 @@ rj_add_object_library(rocjitsu_code
     patch/code_object_patcher.cpp
     patch/kernel_text_layout.cpp
     patch/instruction_builder.cpp
+    patch/instrumentor.cpp
+    patch/probe_callable.cpp
+    patch/probe_clobber.cpp
+    patch/probe_symbol.cpp
     patch/spill_manager.cpp
+    patch/trampoline_builder.cpp
 )

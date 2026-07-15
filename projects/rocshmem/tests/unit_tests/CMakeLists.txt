@@ -88,11 +88,11 @@ endif()
 ###############################################################################
 # ROCSHMEM DEPENDENCY
 ###############################################################################
-find_package(hip REQUIRED PATHS /opt/rocm)
+find_package(hip REQUIRED)
 find_package(MPI REQUIRED)
 
 if (BUILD_TESTS_ONLY)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
+  find_package(rocshmem REQUIRED)
 
   target_include_directories(
     ${PROJECT_NAME}

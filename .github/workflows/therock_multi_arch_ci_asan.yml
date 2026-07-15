@@ -1,0 +1,116 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Multi-Arch CI ASAN for rocm-systems
+#
+# This workflow runs Address Sanitizer (ASAN) builds and tests using
+# TheRock's multi-arch CI pipeline.
+#
+# TheRock's configure_multi_arch_ci.py automatically selects:
+# - "host-asan" for push events (post-submit) - faster, host-only sanitization
+# - "asan" (full) for schedule/workflow_dispatch - comprehensive sanitization
+
+name: TheRock Multi-Arch CI ASAN
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+  # TODO: Enable postsubmit ASAN once we have capacity
+  # push:
+  #   branches:
+  #     - develop
+  workflow_dispatch:
+    inputs:
+      linux_amdgpu_families:
+        type: string
+        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
+        default: ""
+      linux_test_labels:
+        type: string
+        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
+        default: ""
+      prebuilt_stages:
+        type: string
+        default: ""
+        description: "Comma-separated build stages to skip (or 'all' for all stages); artifacts are copied from baseline_run_id instead"
+      baseline_run_id:
+        type: string
+        default: ""
+        description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only allow one run at a time for 'pull_request' events.
+  # Allow multiple runs for 'push' and 'workflow_dispatch'.
+  #
+  # `github.workflow`: each workflow gets its own concurrency group
+  # `github.head_ref`: the branch name (only defined for pull_request events)
+  # `github.run_id`  : fallback, unique for each run
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    with:
+      # TheRock's configure_multi_arch_ci.py automatically selects:
+      # - "host-asan" for push events (post-submit)
+      # - "asan" (full) for schedule and workflow_dispatch events
+      build_variant: "asan"
+      # targets gfx94X and gfx950 are selected to replicate the ASAN coverage in TheRock
+      # as ASAN builds and tests require more resources, we only target these two architectures for the timebeing.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      repository: ROCm/TheRock
+      ref: "main"
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+
+  linux_build_and_test:
+    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+    needs: setup
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    secrets: inherit
+    with:
+      build_config: ${{ needs.setup.outputs.linux_build_config }}
+      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: "main"
+    permissions:
+      contents: read
+      id-token: write
+
+  multi_arch_ci_summary:
+    name: Multi-Arch CI Summary
+    # always() is needed to show the job statuses regardless of failure
+    if: always()
+    needs:
+      - setup
+      - linux_build_and_test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: "main"
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Evaluate workflow results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json '${{ toJSON(needs) }}'

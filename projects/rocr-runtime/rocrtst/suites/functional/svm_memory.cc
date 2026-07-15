@@ -819,3 +819,197 @@ void SvmMemoryTestBasic::TestSVMDiscardNegative(hsa_agent_t agent) {
     }
   }
 }
+
+// Test to verify that HSA_AMD_SVM_ATTRIB_ACCESS_QUERY correctly returns access
+// status for all devices including the CPU agent.
+// This test mirrors the HIP test Unit_hipMemAdvise_AccessedBy_All_Devices
+// which validates that hipMemAdvise(hipMemAdviseSetAccessedBy, device) works
+// correctly for all devices (including hipCpuDeviceId) and can be queried back.
+void SvmMemoryTestBasic::TestAccessedByAllDevices(void) {
+  hsa_status_t err;
+
+  // Check if SVM is supported by the ROCr runtime
+  bool svm_supported = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping AccessedByAllDevices test ***" << std::endl;
+    return;
+  }
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("AccessedByAllDevices Test");
+  }
+
+  // Collect all agents (CPU and GPU)
+  std::vector<hsa_agent_t> all_agents;
+  hsa_agent_t cpu_agent = {0};
+
+  auto get_agents_callback = [](hsa_agent_t agent, void* data) -> hsa_status_t {
+    auto* agents = static_cast<std::vector<hsa_agent_t>*>(data);
+    agents->push_back(agent);
+    return HSA_STATUS_SUCCESS;
+  };
+
+  ASSERT_SUCCESS(hsa_iterate_agents(get_agents_callback, &all_agents));
+
+  if (all_agents.empty()) {
+    std::cout << "  *** No agents found - skipping test ***" << std::endl;
+    return;
+  }
+
+  // Find the CPU agent and separate GPU agents
+  // Note: Use first CPU agent found (handles multi-NUMA systems)
+  std::vector<hsa_agent_t> gpu_agents;
+  for (const auto& agent : all_agents) {
+    hsa_device_type_t device_type;
+    ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type));
+    if (device_type == HSA_DEVICE_TYPE_CPU) {
+      if (cpu_agent.handle == 0) {
+        cpu_agent = agent;
+      }
+    } else if (device_type == HSA_DEVICE_TYPE_GPU) {
+      gpu_agents.push_back(agent);
+    }
+  }
+
+  if (cpu_agent.handle == 0) {
+    std::cout << "  *** No CPU agent found - skipping test ***" << std::endl;
+    return;
+  }
+
+  if (gpu_agents.empty()) {
+    std::cout << "  *** No GPU agents found - skipping test ***" << std::endl;
+    return;
+  }
+
+  // Reserve SVM-managed virtual address range for attribute testing
+  static const size_t kPageSize = 4096;
+  void* svm_ptr = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_address_reserve(&svm_ptr, kPageSize, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  ASSERT_NE(svm_ptr, nullptr);
+
+  // Ensure cleanup on test exit (normal or via ASSERT failure)
+  auto cleanup_svm = [&]() {
+    if (svm_ptr) {
+      hsa_amd_vmem_address_free(svm_ptr, kPageSize);
+      svm_ptr = nullptr;
+    }
+  };
+  // Use a simple destructor-based guard for cleanup (avoids std::function overhead)
+  struct ScopeGuard {
+    decltype(cleanup_svm)& func;
+    ~ScopeGuard() { func(); }
+  } guard{cleanup_svm};
+
+  if (verbosity() > 0) {
+    std::cout << "    Reserved SVM address range at " << svm_ptr << std::endl;
+    std::cout << "    Testing with " << gpu_agents.size() << " GPU(s) and 1 CPU" << std::endl;
+  }
+
+  // Set AccessedBy for all agents (CPU + all GPUs)
+  // First set for CPU agent
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> cpu_attrs;
+    cpu_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, cpu_attrs.data(), cpu_attrs.size()));
+    if (verbosity() > 0) {
+      std::cout << "    Set AGENT_ACCESSIBLE for CPU agent" << std::endl;
+    }
+  }
+
+  // Set for all GPU agents
+  for (const auto& gpu : gpu_agents) {
+    std::vector<hsa_amd_svm_attribute_pair_t> gpu_attrs;
+    gpu_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, gpu.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, gpu_attrs.data(), gpu_attrs.size()));
+    if (verbosity() > 0) {
+      std::cout << "    Set AGENT_ACCESSIBLE for GPU agent handle=" << gpu.handle << std::endl;
+    }
+  }
+
+  // Query and verify AccessedBy for all agents
+  // First verify CPU agent access
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    // The attribute field should be changed to indicate the access type
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "CPU agent access query did not return AGENT_ACCESSIBLE (got attribute="
+        << query_attrs[0].attribute << ")";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent has AGENT_ACCESSIBLE set" << std::endl;
+    }
+  }
+
+  // Verify all GPU agents
+  for (const auto& gpu : gpu_agents) {
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, gpu.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "GPU agent (handle=" << gpu.handle << ") access query did not return AGENT_ACCESSIBLE";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified GPU agent handle=" << gpu.handle << " has AGENT_ACCESSIBLE set"
+                << std::endl;
+    }
+  }
+
+  // Test clearing CPU access and verify it returns NO_ACCESS
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> clear_attrs;
+    clear_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, clear_attrs.data(), clear_attrs.size()));
+
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS)
+        << "CPU agent access query after NO_ACCESS should return AGENT_NO_ACCESS";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent correctly returns NO_ACCESS after clearing" << std::endl;
+    }
+  }
+
+  // Re-enable CPU access for completeness
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> set_attrs;
+    set_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, set_attrs.data(), set_attrs.size()));
+
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "CPU agent access query after re-enabling should return AGENT_ACCESSIBLE";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent correctly returns ACCESSIBLE after re-enabling"
+                << std::endl;
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished successfully" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+
+  // Note: cleanup_svm() is automatically called by ScopeGuard destructor
+}

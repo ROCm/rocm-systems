@@ -22,7 +22,13 @@ struct tmaSmemStruct {
 #if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
 #define NCCL_SYMK_HAVE_ISSHARED 1
 static __device__ __forceinline__ bool __isShared(const void* p) {
+#if defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__
   return __builtin_amdgcn_is_shared((void*)p);
+#else
+  // __builtin_amdgcn_is_shared is a device-only intrinsic; host pass only needs a stub for the __builtin_assume hint.
+  (void)p;
+  return true;
+#endif
 }
 #endif
 

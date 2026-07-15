@@ -28,4 +28,5 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM

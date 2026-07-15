@@ -150,6 +150,16 @@ class BlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const = 0;
 
+  //! Copies pageable host-to-device operations in a batch
+  virtual bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const = 0;
+
+  //! Copies device-to-pageable-host operations in a batch
+  virtual bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
+  ) const = 0;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       Memory& srcMemory,                                    //!< Source memory object
@@ -353,6 +363,16 @@ class HostBlitManager : public device::BlitManager {
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+  ) const;
+
+  //! Copies pageable host-to-device operations in a batch
+  virtual bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const;
+
+  //! Copies device-to-pageable-host operations in a batch
+  virtual bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
   ) const;
 
   //! Copies an image object to a buffer object

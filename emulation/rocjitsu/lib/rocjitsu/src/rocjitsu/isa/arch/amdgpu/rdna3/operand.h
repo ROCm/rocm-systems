@@ -17,11 +17,19 @@ namespace rdna3 {
 
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
-  Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value,
+          bool packed_16bit_source = false);
+  Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
+          bool packed_16bit_source);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  bool simd_capable() const override;
+  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override;
+  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                        const uint32_t *vals, uint64_t mask) const override;
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
   void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
@@ -34,6 +42,7 @@ public:
 private:
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
+  bool packed_16bit_source_ = false;
 };
 
 } // namespace rdna3

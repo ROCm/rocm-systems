@@ -137,6 +137,12 @@ protected:
     int first_field_pic_idx_;
     int first_field_dec_buf_idx_;
 
+    // Byte offset (within the current packet) of the first slice of the picture currently
+    // being accumulated. A single demuxer packet may contain more than one coded picture
+    // (e.g. a complementary field pair), so slice data offsets and the picture bitstream
+    // span are computed relative to this.
+    uint32_t pic_data_start_offset_;
+
     // DPB
     AvcPicture curr_pic_;
     DecodedPictureBuffer dpb_buffer_;
@@ -162,6 +168,20 @@ protected:
      * \return <tt>ParserResult</tt>
      */
     ParserResult ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size);
+
+    /*! \brief Function to run the decode/marking/DPB-insertion cycle for the picture currently
+     *  accumulated in slice_info_list_. Called once per coded picture, which may be one of several
+     *  contained in a single demuxer packet.
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult DecodeCurrentPicture();
+
+    /*! \brief Determine whether a slice starts a new primary coded picture (H.264 clause 7.4.1.2.4)
+     *  by comparing it against the first slice of the picture currently being accumulated.
+     * \return true if the incoming slice begins a new coded picture
+     */
+    bool IsNewPicture(const AvcSliceHeader *prev_slice_header, const AvcNalUnitHeader *prev_nal_header,
+                      const AvcSliceHeader *curr_slice_header, const AvcNalUnitHeader *curr_nal_header);
 
     /*! \brief Function to parse the NAL unit header
      * \param [in] header_byte The AVC NAL unit header byte

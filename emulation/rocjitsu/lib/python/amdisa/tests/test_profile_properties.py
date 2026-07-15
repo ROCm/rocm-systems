@@ -10,6 +10,7 @@ import pytest
 from amdisa.codegen._generator import CodeGenerator, _SourceImplUnit
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
@@ -20,6 +21,67 @@ from amdisa.isa_profile import (
     Rdna3Profile,
     Rdna4Profile,
 )
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), False),
+        (Rdna1Profile(), True),
+        (Rdna3Profile(), True),
+        (Rdna4Profile(), True),
+        (Gfx1250Profile(), False),
+    ],
+)
+def test_supports_wgp_mode(profile, expected):
+    assert profile.supports_wgp_mode is expected
+
+
+def test_isa_properties_codegen_uses_profile_values(tmp_path):
+    specs = [
+        ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
+        ('rdna4', SimpleNamespace(profile=Rdna4Profile()), None),
+        ('gfx1250', SimpleNamespace(profile=Gfx1250Profile()), None),
+    ]
+
+    output = emit_isa_properties(str(tmp_path), specs).read_text()
+
+    assert 'case ROCJITSU_CODE_ARCH_CDNA3:\n    return {false};' in output
+    assert 'case ROCJITSU_CODE_ARCH_RDNA4:\n    return {true};' in output
+    assert 'case ROCJITSU_CODE_ARCH_GFX1250:\n    return {false};' in output
+
+
+@pytest.mark.parametrize(
+    ('arch', 'profile', 'raw_exec'),
+    [
+        ('cdna3', CdnaProfile(), False),
+        ('rdna4', Rdna4Profile(), True),
+    ],
+)
+def test_operand_exec_register_access_is_wave32_gated(
+    tmp_path, arch, profile, raw_exec
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name=arch,
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=profile,
+        ),
+        str(tmp_path),
+    )
+
+    generator.gen_operand()
+    operand_cpp = (tmp_path / arch / 'operand.cpp').read_text()
+
+    assert 'return static_cast<uint32_t>(wf.exec());' in operand_cpp
+    assert 'wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);' in operand_cpp
+    if raw_exec:
+        assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
+        assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
+    else:
+        assert 'exec_raw' not in operand_cpp
+        assert 'set_exec_raw' not in operand_cpp
 
 
 class TestCdnaProfile:
@@ -169,6 +231,30 @@ class TestRdna3Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
+    def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
+        generator = CodeGenerator(
+            SimpleNamespace(
+                arch_name='rdna3',
+                opnd_selectors=[],
+                operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+                profile=Rdna3Profile(),
+            ),
+            str(tmp_path),
+        )
+
+        generator.gen_operand()
+        operand_cpp = (tmp_path / 'rdna3' / 'operand.cpp').read_text()
+
+        assert (
+            'if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));'
+        ) in operand_cpp
+        assert 'return read_immediate64(opr_type_, ev);' in operand_cpp
+        assert 'return read_immediate64(opr_type_, encoding_value_);' in operand_cpp
+
 
 class TestRdna4Profile:
     def setup_method(self):
@@ -189,6 +275,9 @@ class TestRdna4Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
 
 class TestGfx1250Profile:
     def setup_method(self):
@@ -199,6 +288,9 @@ class TestGfx1250Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_has_vopd3(self):
+        assert self.p.has_vopd3 is True
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
@@ -309,7 +401,7 @@ class TestGfx1250Profile:
         )
 
         assert chunks[:2] == [
-            ('vop3_support_1', ['support-one']),
+            ('vop3_support', ['support-one']),
             ('vop3_support_2', ['support-two']),
         ]
 
@@ -324,7 +416,7 @@ class TestGfx1250Profile:
                 [
                     _SourceImplUnit('alu', ['first']),
                     _SourceImplUnit('alu', ['second']),
-                    _SourceImplUnit('alu_1', ['third']),
+                    _SourceImplUnit('alu_2', ['third']),
                 ],
                 max_bytes=len('first\n\nsecond\n\n') - 1,
                 chunk_overhead=0,

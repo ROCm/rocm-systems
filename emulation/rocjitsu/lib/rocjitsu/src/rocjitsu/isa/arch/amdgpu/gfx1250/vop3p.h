@@ -301,6 +301,7 @@ class VFmaMixloF16Vop3p : public Vop3p {
 public:
   VFmaMixloF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -311,6 +312,7 @@ class VFmaMixhiF16Vop3p : public Vop3p {
 public:
   VFmaMixhiF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -496,6 +498,7 @@ class VFmaMixloBf16Vop3p : public Vop3p {
 public:
   VFmaMixloBf16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -506,6 +509,7 @@ class VFmaMixhiBf16Vop3p : public Vop3p {
 public:
   VFmaMixhiBf16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -906,9 +910,9 @@ public:
   Operand src2;
 };
 
-class VWmmaScaleF3216x16x128F8f6f4Vop3px2 : public Vop3p {
+class VWmmaScaleF32Vop3px2 : public Vop3p {
 public:
-  VWmmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst);
+  VWmmaScaleF32Vop3px2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
 

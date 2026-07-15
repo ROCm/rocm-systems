@@ -9,6 +9,9 @@ on:
       - '.github/workflows/hipfile-*.yml'
       - '!**/*.md'
       - '!**/*.rst'
+      # ais-check is a self-contained Python tool with no dependency on the C++
+      # library, so its changes shouldn't trigger the full C++ build/test.
+      - '!projects/hipfile/tools/ais-check/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,10 +40,11 @@ jobs:
           "clang++",
           "g++"
         ]
+      # C++20 is the production standard. C++23 is a forward-compat smoke test
+      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 7.2.2), not fanned out.
       CXX_STANDARD: >-
         [
-          20,
-          23
+          20
         ]
       # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
@@ -60,14 +64,15 @@ jobs:
       # through to GHA's strategy.matrix include/exclude keys so non-rectangular
       # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
-        []
+        [
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.2.2", "cxx_compiler": "amdclang++", "cxx_standard": 23}
+        ]
       # 7.13.0 and nightly are ubuntu-only targets. They live in the base
       # ROCM_VERSIONS axis and are removed from every other distro via
       # MATRIX_EXCLUDE below. This is cleaner than specifying the full
       # combination of CI parameters in include as the matrix axes grow.
       MATRIX_EXCLUDE: >-
         [
-          {"supported_platforms": "rocky8", "cxx_standard": 23},
           {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
           {"supported_platforms": "rocky", "rocm_versions": "nightly"},
           {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
@@ -77,7 +82,7 @@ jobs:
         ]
     steps:
       - name: Fetching code repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: rocm-systems
@@ -85,7 +90,7 @@ jobs:
             projects/hipfile
             .github/workflows
       - name: Authenticating to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -229,3 +234,59 @@ jobs:
       cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
+
+  # CodeQL C/C++ findings are compiler- and standard-independent, so run the
+  # analysis exactly once against a single fixed image rather than fanning out
+  # across the build matrix. Change the image key below to retarget the ROCm
+  # version (the combo must exist in Precheck's matrix). Python and Actions are
+  # covered repo-wide by codeql.yml; this closes the C/C++ gap.
+  codeql:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/hipfile-codeql.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+
+  # Sanitizer-instrumented unit tests are clang-only and platform/standard
+  # independent, so run them exactly once against a single fixed image rather
+  # than fanning out across the build matrix. Change the image key below to
+  # retarget the ROCm version (the combo must exist in Precheck's matrix).
+  sanitizers:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-sanitizers.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+
+  # clang-tidy findings are compiler- and standard-independent, so run the
+  # analysis exactly once against a single fixed image rather than fanning out
+  # across the build matrix. Change the image key below to retarget the ROCm
+  # version (the combo must exist in Precheck's matrix).
+  clang_tidy:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-clang-tidy.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}

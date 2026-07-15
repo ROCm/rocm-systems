@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna1/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -383,6 +384,12 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VMadMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
 }
@@ -401,6 +408,12 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
   src_operands_[3] = &src2;
   num_src_ = 4;
   num_dst_ = 1;
+}
+
+void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMadMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {

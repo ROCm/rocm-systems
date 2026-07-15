@@ -20,9 +20,11 @@ test_categories:
       - "TransportTest.*"
       - "ArgCheckTest.*"
       - "DdaIpcEligibilityTest.*"
+      - "DdaFabricEligibilityTest.*"
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
+      - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
     exclude_windows:
       - "*"
