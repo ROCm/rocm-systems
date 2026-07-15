@@ -78,6 +78,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
+#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -2605,10 +2606,18 @@ hsa_status_t Runtime::Load() {
   }
 #endif
 
+  // Start the hotswap disk-cache background writer (no-op if unsupported or
+  // disabled via HSA_HOTSWAP_DISK_CACHE=0). Joined in Unload().
+  hotswap::HotswapCacheStartup();
+
   return HSA_STATUS_SUCCESS;
 }
 
 void Runtime::Unload() {
+  // Stop the hotswap disk-cache writer first, draining any pending writes and
+  // joining the thread before the rest of runtime teardown.
+  hotswap::HotswapCacheShutdown();
+
   // Close IPC socket server. Capture thread handle under lock to avoid race
   // with IPCCreate which may be restarting the server concurrently.
   os::Thread thread_to_close = nullptr;

@@ -22,9 +22,13 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 
+#include <filesystem>
+#include <memory>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -966,5 +970,109 @@ TEST(RetargetCacheLru, FailureSentinelConsumesNoBytesButParticipatesInLru) {
   EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 300u);
   ResetRetargetCacheForBudgetTest();
 }
+
+// --- Disk tier round-trip unit tests (POSIX only) ---------------------------
+//
+// Exercise the disk write/read format, salt validation, and atomic publish in
+// isolation via the synchronous testing hooks. No COMGR or device needed.
+
+#if !defined(_WIN32) && !defined(_WIN64)
+namespace {
+int g_next_test_dir_counter = 0;
+
+// A temp dir that removes itself on scope exit, so the disk-cache tests never
+// leak /tmp/hotswap-disk-test-* directories. Naming follows the rocrtst
+// convention (/tmp/<name>_<pid>, cf. gpu_coredump.cc) plus a counter so tests
+// in the same process don't collide.
+class ScopedTempDir {
+ public:
+  ScopedTempDir()
+      : path_("/tmp/hotswap-disk-test-" +
+              std::to_string(static_cast<long>(::getpid())) + "-" +
+              std::to_string(g_next_test_dir_counter++)) {}
+  ~ScopedTempDir() {
+    std::error_code ec;
+    std::filesystem::remove_all(path_, ec);  // best-effort; ignore errors
+  }
+  const std::string& str() const { return path_; }
+
+ private:
+  std::string path_;
+};
+}  // namespace
+
+TEST(RetargetDiskCache, WriteThenReadRoundTrips) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, /*key=*/0xABC,
+                                                      /*salt=*/0x555, payload));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(
+      rocr::hotswap::DiskCacheReadForTesting(dir, 0xABC, 0x555, &out));
+  EXPECT_EQ(out, payload);
+}
+
+TEST(RetargetDiskCache, SaltMismatchIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {1, 2, 3, 4};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 0x1, 0xAAAA, payload));
+  // Reading with a different salt (simulating a toolchain change) must miss.
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xBBBB, &out));
+  // Correct salt still hits.
+  EXPECT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xAAAA, &out));
+}
+
+TEST(RetargetDiskCache, MissingEntryIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0xDEADBEEF, 0x1, &out));
+}
+
+TEST(RetargetDiskCache, DistinctKeysDoNotCollide) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> a = {0xAA, 0xAA};
+  std::vector<uint8_t> b = {0xBB, 0xBB, 0xBB};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 1, 0x9, a));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 2, 0x9, b));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 1, 0x9, &out));
+  EXPECT_EQ(out, a);
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 2, 0x9, &out));
+  EXPECT_EQ(out, b);
+}
+
+TEST(RetargetDiskCache, OverwriteSameKeyIsIdempotent) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> v1 = {1, 1, 1};
+  std::vector<uint8_t> v2 = {2, 2, 2, 2, 2};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v1));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v2));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 7, 0x3, &out));
+  EXPECT_EQ(out, v2);
+}
+
+// Exercises the real async DiskWriter: many enqueued writes must ALL be
+// persisted, including the drain-at-shutdown path in Stop(). This is the
+// concurrency logic the adversarial review flagged (lost-task-at-shutdown).
+TEST(RetargetDiskCache, AsyncWriterDrainsAllOnShutdown) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  // Enqueue many sizeable writes so a good fraction are still queued when Stop()
+  // is entered, exercising the drain-at-shutdown path rather than only the
+  // already-drained happy path.
+  std::vector<uint8_t> payload(64 * 1024, 0x7E);
+  constexpr int kN = 512;
+  const int found =
+      rocr::hotswap::DiskWriterDrainRoundTripForTesting(dir, kN, payload);
+  EXPECT_EQ(found, kN);  // every enqueued write survived start->enqueue->stop
+}
+#endif  // POSIX
 
 }  // namespace

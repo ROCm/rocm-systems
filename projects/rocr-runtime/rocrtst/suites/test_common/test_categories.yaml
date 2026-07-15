@@ -39,6 +39,12 @@ test_categories:
       - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
       - "RetargetCacheLru.ZeroBudgetIsUnbounded"
       - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
+      - "RetargetDiskCache.WriteThenReadRoundTrips"
+      - "RetargetDiskCache.SaltMismatchIsMiss"
+      - "RetargetDiskCache.MissingEntryIsMiss"
+      - "RetargetDiskCache.DistinctKeysDoNotCollide"
+      - "RetargetDiskCache.OverwriteSameKeyIsIdempotent"
+      - "RetargetDiskCache.AsyncWriterDrainsAllOnShutdown"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     exclude_windows: []
@@ -126,6 +132,12 @@ test_categories:
       - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
       - "RetargetCacheLru.ZeroBudgetIsUnbounded"
       - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
+      - "RetargetDiskCache.WriteThenReadRoundTrips"
+      - "RetargetDiskCache.SaltMismatchIsMiss"
+      - "RetargetDiskCache.MissingEntryIsMiss"
+      - "RetargetDiskCache.DistinctKeysDoNotCollide"
+      - "RetargetDiskCache.OverwriteSameKeyIsIdempotent"
+      - "RetargetDiskCache.AsyncWriterDrainsAllOnShutdown"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -223,6 +235,12 @@ test_categories:
       - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
       - "RetargetCacheLru.ZeroBudgetIsUnbounded"
       - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
+      - "RetargetDiskCache.WriteThenReadRoundTrips"
+      - "RetargetDiskCache.SaltMismatchIsMiss"
+      - "RetargetDiskCache.MissingEntryIsMiss"
+      - "RetargetDiskCache.DistinctKeysDoNotCollide"
+      - "RetargetDiskCache.OverwriteSameKeyIsIdempotent"
+      - "RetargetDiskCache.AsyncWriterDrainsAllOnShutdown"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -322,6 +340,12 @@ test_categories:
       - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
       - "RetargetCacheLru.ZeroBudgetIsUnbounded"
       - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
+      - "RetargetDiskCache.WriteThenReadRoundTrips"
+      - "RetargetDiskCache.SaltMismatchIsMiss"
+      - "RetargetDiskCache.MissingEntryIsMiss"
+      - "RetargetDiskCache.DistinctKeysDoNotCollide"
+      - "RetargetDiskCache.OverwriteSameKeyIsIdempotent"
+      - "RetargetDiskCache.AsyncWriterDrainsAllOnShutdown"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

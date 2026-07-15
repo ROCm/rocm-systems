@@ -135,6 +135,19 @@ void RetainRewrittenElfBuffer(hsa_executable_t executable,
                               OwnedElfBuffer elf_buffer);
 void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
 
+// Lifecycle hooks for the background disk-cache writer thread. Called by the
+// ROCr Runtime: HotswapCacheStartup() from Runtime::Load(), and
+// HotswapCacheShutdown() from Runtime::Unload(). Both are idempotent and safe
+// to call when the disk cache is unsupported/disabled (they become no-ops).
+//
+// Fork note: like ROCr generally, the writer is not fork-safe. A child forked
+// while a write is in flight inherits a locked mutex and no writer thread; the
+// child must not call these or trigger a retarget until it re-inits the runtime
+// (Runtime::Unload/Load). HotswapCacheShutdown() in the child is unsafe if the
+// mutex was held at fork; a fresh Runtime init in the child starts a new writer.
+void HotswapCacheStartup();
+void HotswapCacheShutdown();
+
 #ifdef ROCR_HOTSWAP_TESTING
 std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
     const AgentGfxRevision& gfx, const std::string& source_isa,
@@ -158,6 +171,20 @@ bool RetargetCacheContainsForTesting(uint64_t key);
 // a success hit and, if `out_bytes` is non-null, the shared buffer handle.
 bool RetargetCacheGetForTesting(uint64_t key,
                                 std::shared_ptr<std::vector<uint8_t>>* out_bytes);
+// Synchronously writes a disk cache entry under `dir` (bypasses the async
+// writer). Returns false if disk cache support is compiled out.
+bool DiskCacheWriteForTesting(const std::string& dir, uint64_t key,
+                              uint64_t salt,
+                              const std::vector<uint8_t>& payload);
+// Reads a disk cache entry; returns true and fills `out_payload` on a validated
+// hit, false on miss/mismatch/unsupported.
+bool DiskCacheReadForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+                             std::vector<uint8_t>* out_payload);
+// Drives the async DiskWriter: start, enqueue `n` writes, Stop() (must drain
+// all before joining), then count readable-back entries. Returns that count
+// (== n if the drain-at-shutdown path is correct), or -1 if unsupported.
+int DiskWriterDrainRoundTripForTesting(const std::string& dir, int n,
+                                       const std::vector<uint8_t>& payload);
 #endif
 
 }  // namespace hotswap
