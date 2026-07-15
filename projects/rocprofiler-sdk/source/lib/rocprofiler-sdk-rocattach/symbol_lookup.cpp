@@ -522,10 +522,10 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto first_load_segment =
-        std::min_element(elf.load_segments.begin(),
-                         elf.load_segments.end(),
-                         [](const auto& lhs, const auto& rhs) { return lhs.p_vaddr < rhs.p_vaddr; });
+    auto first_load_segment = std::min_element(
+        elf.load_segments.begin(), elf.load_segments.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.p_vaddr < rhs.p_vaddr;
+        });
     if(first_load_segment == elf.load_segments.end())
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF has no PT_LOAD segments: "
@@ -533,7 +533,7 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
         return std::nullopt;
     }
 
-    auto first_mapping         = object.mappings.front();
+    auto first_mapping        = object.mappings.front();
     auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
     auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);
     // Match the maps entry to the PT_LOAD segment by file page before using it
@@ -609,12 +609,12 @@ lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
         ELFIO::const_symbol_section_accessor symbols{elf.reader, section.get()};
         if(symbols.get_symbols_num() > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
 
-        auto                                 value = ELFIO::Elf64_Addr{0};
-        auto                                 size  = ELFIO::Elf_Xword{0};
-        auto                                 bind  = static_cast<unsigned char>(0);
-        auto                                 type  = static_cast<unsigned char>(0);
-        auto                                 index = ELFIO::Elf_Half{0};
-        auto                                 other = static_cast<unsigned char>(0);
+        auto value = ELFIO::Elf64_Addr{0};
+        auto size  = ELFIO::Elf_Xword{0};
+        auto bind  = static_cast<unsigned char>(0);
+        auto type  = static_cast<unsigned char>(0);
+        auto index = ELFIO::Elf_Half{0};
+        auto other = static_cast<unsigned char>(0);
         if(symbols.get_symbol(name, value, size, bind, type, index, other) &&
            symbol_is_supported_function(bind, type, index, other))
         {

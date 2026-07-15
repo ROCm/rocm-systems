@@ -323,7 +323,7 @@ setup(int pid)
     {
         tool_lib_path_env = *tool_lib_path_override;
     }
-    const char* tool_lib_path     = tool_lib_path_env.c_str();
+    const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
     status = validate_target_tool_path(pid, tool_lib_path_env);
     if(status != ROCATTACH_STATUS_SUCCESS)
