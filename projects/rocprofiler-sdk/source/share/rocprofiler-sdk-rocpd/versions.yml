@@ -16,6 +16,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.1/data_views.sql
       rocpd_summary_views: versions/3.0.1/summary_views.sql
     - version: "3.0.2"
+      rocpd_metadata: versions/3.0.2/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.2/rocpd_tables.sql
+      rocpd_views: versions/3.0.2/rocpd_views.sql
+      rocpd_indexes: versions/3.0.2/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.2/data_views.sql
+      rocpd_summary_views: versions/3.0.2/summary_views.sql
+    - version: "3.0.3"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql

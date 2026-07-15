@@ -261,7 +261,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 2};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1038,11 +1038,18 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
+<<<<<<< HEAD
     const generator<tool_spm_counter_record_t>&                            spm_collection_gen,
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&             ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&        graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen,
     const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&  hipfile_api_gen)
+=======
+    const generator<tool_spm_counter_record_t>&                             spm_collection_gen,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
+    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen)
+>>>>>>> 816301cff3 (update versioning)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1610,6 +1617,8 @@ write_rocpd(
                                      0,                    // end_timestamp
                                      info.grid_size,       // grid
                                      info.workgroup_size,  // workgroup
+                                     0,                    // graph_exec_id
+                                     0,                    // graph_node_id
                                      false                 // enable_duplicate_check
                     );
                 }
