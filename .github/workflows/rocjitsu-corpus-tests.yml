@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/07/07.
-        default: "3278883f548e1353ffbda1a8090219d866eca035"
+        # Last updated on 2026/07/15.
+        default: "441f97b633933bb44520b50a96004270c163d359"
         required: true
 
 concurrency:
@@ -102,8 +102,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/07.
-          ref: 3278883f548e1353ffbda1a8090219d866eca035
+          # Last updated on 2026/07/15.
+          ref: ${{ github.event.inputs.corpus_ref || '441f97b633933bb44520b50a96004270c163d359' }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -222,20 +222,11 @@ jobs:
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          corpus_status=0
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config skip_tests_config <<< "${target}"
-            echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              tests/test_corpus.py -vv \
-              --target "${name}" \
-              --suite iree,kernels,cts \
-              --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
-              corpus_status=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "${corpus_status}"
+          export ROCJITSU_SOURCE_DIR
+
+          export SOFT_TIMEOUT_SECONDS=25
+          export HARD_TIMEOUT_SECONDS=40
+
+          corpus_test_status=0
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${targets[@]}" || corpus_test_status=$?
+          exit "${corpus_test_status}"
