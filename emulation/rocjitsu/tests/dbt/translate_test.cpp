@@ -3051,14 +3051,14 @@ TEST(BinaryTranslator, Gfx1250DppSemanticExpansionsMaterializePermutedSources) {
   ashr.src1 = 256 + 5;
   ashr.src2 = 256 + 6;
   ashr.vsrc0 = 4;
-  ashr.lane_sel_0 = 1;
-  ashr.lane_sel_1 = 0;
-  ashr.lane_sel_2 = 3;
-  ashr.lane_sel_3 = 2;
-  ashr.lane_sel_4 = 5;
-  ashr.lane_sel_5 = 4;
-  ashr.lane_sel_6 = 7;
-  ashr.lane_sel_7 = 6;
+  ashr.lane_sel_0 = 7;
+  ashr.lane_sel_1 = 6;
+  ashr.lane_sel_2 = 5;
+  ashr.lane_sel_3 = 4;
+  ashr.lane_sel_4 = 3;
+  ashr.lane_sel_5 = 2;
+  ashr.lane_sel_6 = 1;
+  ashr.lane_sel_7 = 0;
   append(ashr);
 
   gfx1250::Vop1VopDpp16MachineInst tanh{};
@@ -3140,6 +3140,7 @@ TEST(BinaryTranslator, Gfx1250DppSemanticExpansionsMaterializePermutedSources) {
 
   size_t dpp_move_count = 0;
   bool saw_true16_physical_vsrc = false;
+  bool saw_dpp8_reverse_payload = false;
   for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
     const auto move = std::bit_cast<rdna4::Vop1MachineInst>(cave_words[i]);
     if (move.encoding != 0x3Fu || move.op != rdna4::kVMovB32Vop1 ||
@@ -3148,10 +3149,13 @@ TEST(BinaryTranslator, Gfx1250DppSemanticExpansionsMaterializePermutedSources) {
     }
     ++dpp_move_count;
     const uint32_t payload = cave_words[i + 1u];
-    EXPECT_EQ(payload & (0xFu << 20u), 0u);
+    if (move.src0 == amdgpu::SRC_DPP)
+      EXPECT_EQ(payload & (0xFu << 20u), 0u);
+    saw_dpp8_reverse_payload |= payload == 0x0539'7704u;
     saw_true16_physical_vsrc |= (payload & 0xFFu) == 8u;
   }
   EXPECT_EQ(dpp_move_count, 5u);
+  EXPECT_TRUE(saw_dpp8_reverse_payload);
   EXPECT_TRUE(saw_true16_physical_vsrc);
   EXPECT_NE(std::ranges::find(cave_words, 0xFFFE'FFFEu), cave_words.end())
       << "DPP16 row-shift lowering must preserve lanes with invalid source data";

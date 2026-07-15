@@ -923,9 +923,12 @@ void append_dpp_source_materialization(std::vector<uint32_t> &words, const Gfx12
   if (resources.exec_save)
     append_save_exec(words, *resources.exec_save);
   append_vop1(words, kOpMovB32, resources.source_vgpr, dpp.marker);
-  // The DPP source modifiers belong to the guest operation, not to the move
+  uint32_t payload = dpp.payload;
+  // DPP16 source modifiers belong to the guest operation, not to the move
   // used to materialize its permuted source. Callers apply them explicitly.
-  uint32_t payload = dpp.payload & ~(0xFu << 20u);
+  // The same bit positions encode lane selectors in DPP8 and must be kept.
+  if (dpp.marker == amdgpu::SRC_DPP)
+    payload &= ~(0xFu << 20u);
   payload = (payload & ~0xFFu) | physical_vsrc0;
   words.push_back(payload);
   append_wait_valu_vgpr(words);
