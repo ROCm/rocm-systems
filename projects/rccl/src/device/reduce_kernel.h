@@ -104,43 +104,39 @@ struct RedOpArg<FuncMinMax<T>> {
 // of elements. These classes are intended to be specialized for specific
 // combinations of reduction function and pack size.
 
-template <typename A, typename B, int EltPerPackA>
+// clang-format off: commented struct body will result in semicolon be put on a newline
+template<typename A, typename B, int EltPerPackA>
 struct Apply_Cast/*{
-       static BytePack<EltPerPackA*sizeof(B)/sizeof(A)> cast(BytePack<EltPerPackA*sizeof(A)> a);
-     }*/
-  ;
+  static BytePack<EltPerPackA*sizeof(B)/sizeof(A)> cast(BytePack<EltPerPackA*sizeof(A)> a);
+}*/;
 
-template <typename Fn, int EltPerPack>
+template<typename Fn, int EltPerPack>
 struct Apply_Reduce /*{
   static BytePack<EltPerPack*sizeof(T)> reduce(
     Fn fn, BytePack<EltPerPack*sizeof(T)> a, BytePack<EltPerPack*sizeof(T)> b
   );
-}*/
-  ;
-template <typename Fn, int EltPerPack>
+}*/;
+template<typename Fn, int EltPerPack>
 struct Apply_PreOp/*{
-       static constexpr bool IsIdentity;
-       static BytePack<EltPerPack*sizeof(T)> preOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
-     }*/
-  ;
-template <typename Fn, int EltPerPack>
+  static constexpr bool IsIdentity;
+  static BytePack<EltPerPack*sizeof(T)> preOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
+}*/;
+template<typename Fn, int EltPerPack>
 struct Apply_PostOp/*{
-       static constexpr bool IsIdentity;
-       static BytePack<EltPerPack*sizeof(T)> postOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
-     }*/
-  ;
-template <typename Fn>
+  static constexpr bool IsIdentity;
+  static BytePack<EltPerPack*sizeof(T)> postOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
+}*/;
+template<typename Fn>
 struct LoadMultimem_BigPackSize/*{
-       // If non-zero, then this and sizeof(T) are valid pack sizes for LoadMultimem,
-       // otherwise there are no valid pack sizes for LoadMultimem.
-       static constexpr int BigPackSize = 0;
-     }*/
-  ;
-template <typename Fn, int BytePerPack>
+  // If non-zero, then this and sizeof(T) are valid pack sizes for LoadMultimem,
+  // otherwise there are no valid pack sizes for LoadMultimem.
+  static constexpr int BigPackSize = 0;
+}*/;
+template<typename Fn, int BytePerPack>
 struct Apply_LoadMultimem/*{
-       static BytePack<BytePerPack> load(Fn fn, uintptr_t addr);
-     }*/
-  ;
+  static BytePack<BytePerPack> load(Fn fn, uintptr_t addr);
+}*/;
+// clang-format on
 
 // Helpers for dealing with BytePack<0>'s
 template <typename A, typename B, int EltPerPack>
