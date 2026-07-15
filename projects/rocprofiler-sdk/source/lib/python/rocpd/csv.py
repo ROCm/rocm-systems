@@ -221,14 +221,18 @@ def get_kernel_csv_query(importData, config) -> str:
     else:
         kernel_name = "name"
 
+    # check schema version and add new fields:
+    hip_graph_fields = ()
+    if get_schema_version(importData) >= (3, 0, 2):
+        hip_graph_fields = ("graph_exec_id", "graph_node_id")
+
     select_columns = [
         "guid",
         "'KERNEL_DISPATCH' AS Kind",
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "stream_id",
-        "graph_exec_id AS Graph_Exec_Id",
-        "graph_node_id AS Graph_Node_Id",
+        *hip_graph_fields,
         "tid AS Thread_Id",
         "dispatch_id",
         "kernel_Id",
@@ -275,14 +279,21 @@ def write_memory_copy_csv(importData, config) -> None:
     src_agent_id = build_agent_id_string(config.agent_index_value, "src")
     dst_agent_id = build_agent_id_string(config.agent_index_value, "dst")
 
+    # check schema version and add new fields:
+    hip_graph_fields = []
+    if get_schema_version(importData) >= (3, 0, 2):
+        hip_graph_fields = [
+            "graph_exec_id",
+            "graph_node_id",
+        ]
+
     query = f"""
         SELECT
             guid,
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id,
-            graph_exec_id AS Graph_Exec_Id,
-            graph_node_id AS Graph_Node_Id,
+            {(','.join(hip_graph_fields) + ',') if hip_graph_fields else ''}
             {src_agent_id} AS Source_Agent_Id,
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
@@ -296,6 +307,13 @@ def write_memory_copy_csv(importData, config) -> None:
 
 
 def write_graph_launch_csv(importData, config) -> None:
+
+    if get_schema_version(importData) < (
+        3,
+        0,
+        2,
+    ):  # graph_launch view was introduced in schema 3.0.2
+        return
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
