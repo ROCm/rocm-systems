@@ -888,7 +888,8 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -934,7 +935,8 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -982,7 +984,8 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1028,7 +1031,8 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1074,7 +1078,8 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1120,7 +1125,8 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1166,7 +1172,8 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1212,7 +1219,8 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1258,7 +1266,8 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1304,7 +1313,8 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1350,7 +1360,8 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1396,7 +1407,8 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1442,7 +1454,8 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1488,7 +1501,8 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1534,7 +1548,8 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1582,7 +1597,8 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1634,7 +1650,8 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1682,7 +1699,8 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1730,7 +1748,8 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1778,7 +1797,8 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1826,7 +1846,8 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1874,7 +1895,8 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1922,7 +1944,8 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1970,7 +1993,8 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2018,7 +2042,8 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2066,7 +2091,8 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2114,7 +2140,8 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2162,7 +2189,8 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2208,7 +2236,8 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2254,7 +2283,8 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2300,7 +2330,8 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2348,7 +2379,8 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2394,7 +2426,8 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2440,7 +2473,8 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2486,7 +2520,8 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2534,7 +2569,8 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &vdata;
+  num_src_ = 4;
   num_dst_ = 1;
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);

@@ -1861,7 +1861,8 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -1892,7 +1893,8 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -1922,7 +1924,8 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -1953,7 +1956,8 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -3928,7 +3932,8 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -3960,7 +3965,8 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -3992,7 +3998,8 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -4025,7 +4032,8 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -4058,7 +4066,8 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
@@ -4090,7 +4099,8 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }

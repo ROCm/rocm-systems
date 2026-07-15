@@ -40,7 +40,8 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &sdst;
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
 }
@@ -235,7 +236,8 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &sdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -255,7 +257,8 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &sdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 

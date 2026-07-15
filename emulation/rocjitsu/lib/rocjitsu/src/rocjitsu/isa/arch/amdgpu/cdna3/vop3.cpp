@@ -159,7 +159,8 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -838,7 +839,8 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -870,7 +872,8 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -902,7 +905,8 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -940,7 +944,8 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -979,7 +984,8 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1032,7 +1038,8 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1090,7 +1097,8 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1143,7 +1151,8 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1196,7 +1205,8 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1250,7 +1260,8 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1310,7 +1321,8 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1373,7 +1385,8 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1426,7 +1439,8 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1480,7 +1494,8 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1534,7 +1549,8 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1588,7 +1604,8 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1644,7 +1661,8 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1695,7 +1713,8 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1747,7 +1766,8 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1784,7 +1804,8 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -1821,7 +1842,8 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -2337,7 +2359,8 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2403,7 +2426,8 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2470,7 +2494,8 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2536,7 +2561,8 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2672,7 +2698,8 @@ VAddU16Vop3::VAddU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2707,7 +2734,8 @@ VSubU16Vop3::VSubU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2743,7 +2771,8 @@ VSubrevU16Vop3::VSubrevU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2779,7 +2808,8 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2816,7 +2846,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2848,7 +2879,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2880,7 +2912,8 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2913,7 +2946,8 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2981,7 +3015,8 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -3049,7 +3084,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -3085,7 +3121,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -3121,7 +3158,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -3157,7 +3195,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -3194,7 +3233,8 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -4077,7 +4117,8 @@ VMadLegacyF16Vop3::VMadLegacyF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4153,7 +4194,8 @@ VMadLegacyU16Vop3::VMadLegacyU16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4191,7 +4233,8 @@ VMadLegacyI16Vop3::VMadLegacyI16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4250,7 +4293,8 @@ VFmaLegacyF16Vop3::VFmaLegacyF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4328,7 +4372,8 @@ VDivFixupLegacyF16Vop3::VDivFixupLegacyF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4516,7 +4561,8 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4594,7 +4640,8 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4644,7 +4691,8 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4691,7 +4739,8 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4769,7 +4818,8 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4819,7 +4869,8 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4866,7 +4917,8 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4946,7 +4998,8 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -4998,7 +5051,8 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5158,7 +5212,8 @@ VMadF16Vop3::VMadF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5233,7 +5288,8 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5267,7 +5323,8 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5304,7 +5361,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5382,7 +5440,8 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vdst;
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -5946,7 +6005,8 @@ VAddI16Vop3::VAddI16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -5980,7 +6040,8 @@ VSubI16Vop3::VSubI16Vop3(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
-  num_src_ = 2;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
