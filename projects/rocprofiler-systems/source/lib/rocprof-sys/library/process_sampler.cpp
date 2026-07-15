@@ -39,10 +39,10 @@ get_thread()
     return _v;
 }
 
-std::atomic<State>&
+std::atomic<process_state::State>&
 get_sampler_state()
 {
-    static std::atomic<State> _v{ State::PreInit };
+    static std::atomic<process_state::State> _v{ process_state::State::PreInit };
     return _v;
 }
 
@@ -55,12 +55,13 @@ get_sampler_is_sampling()
 }  // namespace
 
 void
-sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
+sampler::poll(std::atomic<process_state::State>* _state, nsec_t _interval,
+              promise_t* _ready)
 {
     threading::offset_this_id(true);
     threading::set_thread_name("omni.sampler");
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     // notify thread started
     if(_ready) _ready->set_value();
@@ -80,12 +81,13 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     auto _end =
         _now +
         std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
-    while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
+    while(_state && _state->load() < process_state::State::Finalized &&
+          process_state::get() < process_state::State::Finalized)
     {
         std::this_thread::sleep_until(_now);
-        if(_state->load() != State::Active) continue;
-        if(get_state() >= State::Finalized) break;
-        if(get_state() != State::Active) continue;
+        if(_state->load() != process_state::State::Active) continue;
+        if(process_state::get() >= process_state::State::Finalized) break;
+        if(process_state::get() != process_state::State::Active) continue;
         if(sampler_paused.load(std::memory_order_relaxed)) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
@@ -98,7 +100,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     // ensure this is always false
     get_sampler_is_sampling().store(false);
 
-    if(_has_duration && _now >= _end && get_state() < State::Finalized)
+    if(_has_duration && _now >= _end &&
+       process_state::get() < process_state::State::Finalized)
     {
         LOG_DEBUG("Background process sampling duration of {:.2f} seconds has elapsed. "
                   "Shutting down process sampling...",
@@ -144,19 +147,19 @@ sampler::setup()
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    set_state(State::PreInit);
-    using poll_fn = void (*)(std::atomic<State>*, nsec_t, promise_t*);
+    set_state(process_state::State::PreInit);
+    using poll_fn = void (*)(std::atomic<process_state::State>*, nsec_t, promise_t*);
     get_thread()  = std::make_unique<std::thread>(
         static_cast<poll_fn>(&poll), &get_sampler_state(), _interval, nullptr);
 
-    set_state(State::Active);
+    set_state(process_state::State::Active);
 }
 
 void
 sampler::shutdown()
 {
     // set the local sampler state to finalized
-    set_state(State::Finalized);
+    set_state(process_state::State::Finalized);
 
     // shutdown all components
     for(auto& itr : instances)

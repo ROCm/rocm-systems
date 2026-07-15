@@ -297,7 +297,8 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };
     rocprofsys::mpi::is_finalized()            = true;
 #else
-    if(is_root_process() && rocprofsys::get_state() < rocprofsys::State::Finalized)
+    if(is_root_process() &&
+       rocprofsys::process_state::get() < rocprofsys::process_state::State::Finalized)
         rocprofsys_finalize_hidden();
 #endif
 }

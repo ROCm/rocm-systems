@@ -45,14 +45,17 @@ struct default_pthread_mutex_policy
     static bool get_trace_barriers() { return config::get_trace_thread_barriers(); }
     static bool get_trace_join() { return config::get_trace_thread_join(); }
 
-    static bool inactive_state() { return get_state() != State::Active; }
+    static bool inactive_state()
+    {
+        return process_state::get() != process_state::State::Active;
+    }
 
     static bool is_disabled_check()
     {
         static thread_local const auto& t_info = thread_info::get();
         return (!t_info || t_info->is_offset ||
-                get_state() != ::rocprofsys::State::Active ||
-                get_thread_state() != ThreadState::Enabled);
+                process_state::get() != ::rocprofsys::process_state::State::Active ||
+                thread_state::get() != thread_state::State::Enabled);
     }
 
     static uintptr_t get_thread_id() { return threading::get_id(); }

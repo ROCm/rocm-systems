@@ -97,7 +97,7 @@ perf_event::~perf_event() { close(); }
 perf_event&
 perf_event::operator=(perf_event&& rhs) noexcept
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
     if(&rhs == this) return *this;
 
     // Release resources if the current perf_event is initialized and not equal to this
@@ -124,10 +124,10 @@ perf_event::operator=(perf_event&& rhs) noexcept
 std::optional<std::string>
 perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_sample_type = _pe.sample_type;
-    m_read_format = _pe.read_format;
-    m_batch_size  = _pe.wakeup_events;
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    m_sample_type            = _pe.sample_type;
+    m_read_format            = _pe.read_format;
+    m_batch_size             = _pe.wakeup_events;
 
     // Set some mandatory fields
     _pe.size     = sizeof(struct perf_event_attr);
@@ -178,7 +178,7 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 std::optional<std::string>
 perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard       = thread_state::scoped(thread_state::State::Internal);
     std::uint64_t          _period = (1.0 / _freq) * units::sec;
     struct perf_event_attr _pe;
 
@@ -235,7 +235,7 @@ perf_event::start() const
 {
     if(m_fd != -1)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) == -1)
         {
             LOG_CRITICAL("Failed to start perf event: {}", strerror(errno));
@@ -251,7 +251,7 @@ perf_event::stop() const
 {
     if(m_fd != -1)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) == -1)
         {
             LOG_CRITICAL("Failed to stop perf event: {}", strerror(errno));
@@ -270,7 +270,7 @@ perf_event::is_open() const
 void
 perf_event::close()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
     stop();
 
     if(m_fd != -1)
@@ -289,7 +289,7 @@ perf_event::close()
 void
 perf_event::set_ready_signal(int sig) const
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
     // Set the perf_event file to async
     if(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) == -1)
     {
@@ -316,7 +316,7 @@ perf_event::set_ready_signal(int sig) const
 void
 perf_event::iterator::next()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     struct perf_event_header _hdr;
 
@@ -368,7 +368,7 @@ perf_event::iterator::operator!=(const iterator& other) const
 perf_event::record
 perf_event::iterator::get()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     // Copy out the record header
     perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf,
@@ -415,7 +415,7 @@ void
 perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff_t _index,
                                   void* _dest, size_t _nbytes)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
     size_t    _beg_idx = _index % sizes.data;
@@ -531,7 +531,7 @@ template <sample SampleT, typename Tp>
 Tp
 perf_event::record::locate_field() const
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     uintptr_t p =
         reinterpret_cast<uintptr_t>(m_header) + sizeof(struct perf_event_header);
@@ -687,7 +687,7 @@ get_instance(std::int64_t _tid)
 
     if(static_cast<size_t>(_tid) >= _data->size())
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
         _data->resize(_tid + 1);
     }
     return _data->at(_tid);

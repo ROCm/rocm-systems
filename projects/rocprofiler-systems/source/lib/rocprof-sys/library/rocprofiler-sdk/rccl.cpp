@@ -188,7 +188,7 @@ write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
     if(rocprofsys::get_use_perfetto() &&
-       rocprofsys::get_state() == rocprofsys::State::Active)
+       rocprofsys::process_state::get() == rocprofsys::process_state::State::Active)
     {
         const size_t _idx = 0;
 

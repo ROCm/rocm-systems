@@ -168,7 +168,8 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
                              "{} which is outside of acceptable range [{}, {}]",
                              _annotation.name, _annotation.type,
                              ROCPROFSYS_VALUE_NONE + 1, ROCPROFSYS_VALUE_LAST - 1);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::process_state::set(
+                    ::rocprofsys::process_state::State::Finalized);
                 std::exit(1);
             }
         }

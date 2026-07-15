@@ -235,7 +235,7 @@ configure(bool _setup, std::int64_t _tid)
         if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
-           get_thread_state() == ThreadState::Disabled)
+           thread_state::get() == thread_state::State::Disabled)
             return std::set<int>{};
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
@@ -292,7 +292,8 @@ configure(bool _setup, std::int64_t _tid)
         if(!_causal)
         {
             LOG_CRITICAL("nullptr to causal profiling instance");
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            ::rocprofsys::process_state::set(
+                ::rocprofsys::process_state::State::Finalized);
             std::abort();
         }
 
@@ -300,7 +301,7 @@ configure(bool _setup, std::int64_t _tid)
         _causal->set_verbose(_verbose);
         _causal->set_offload(&causal_offload_buffer);
 
-        if(get_causal_backend() == CausalBackend::Perf)
+        if(get_causal_backend() == process_state::CausalBackend::Perf)
         {
             auto _perf_error = _activate_perf_backend();
             if(_perf_error)
@@ -310,7 +311,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == CausalBackend::Timer)
+        else if(get_causal_backend() == process_state::CausalBackend::Timer)
         {
             if(!_activate_timer_backend())
             {
@@ -318,7 +319,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == CausalBackend::Auto)
+        else if(get_causal_backend() == process_state::CausalBackend::Auto)
         {
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)
@@ -557,7 +558,7 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     if(get_debug_sampling())
     {

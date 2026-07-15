@@ -238,9 +238,10 @@ extern "C"
 
     void kokkosp_parse_args(int argc, char** argv)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         if(!rocprofsys::config::settings_are_configured() &&
-           rocprofsys::get_state() < rocprofsys::State::Active)
+           rocprofsys::process_state::get() < rocprofsys::process_state::State::Active)
         {
             _standalone_initialized = true;
 
@@ -258,7 +259,8 @@ extern "C"
 
     void kokkosp_declare_metadata(const char* key, const char* value)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         tim::manager::add_metadata(key, value);
     }
 
@@ -272,7 +274,8 @@ extern "C"
                               [[maybe_unused]] const std::uint64_t interfaceVer,
                               const std::uint32_t devInfoCount, void* deviceInfo)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         tim::consume_parameters(devInfoCount, deviceInfo);
 
         LOG_DEBUG(
@@ -281,7 +284,7 @@ extern "C"
 
         if(_standalone_initialized ||
            (!rocprofsys::config::settings_are_configured() &&
-            rocprofsys::get_state() < rocprofsys::State::Active))
+            rocprofsys::process_state::get() < rocprofsys::process_state::State::Active))
         {
             auto _kokkos_profile_lib =
                 rocprofsys::get_env<std::string>("KOKKOS_TOOLS_LIBS");
@@ -311,7 +314,8 @@ extern "C"
                             "is an error, please set KOKKOS_TOOLS_LIBS={}.Loaded "
                             "libraries: {}",
                             __FUNCTION__, itr, _libs_str.str());
-                        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                        ::rocprofsys::process_state::set(
+                            ::rocprofsys::process_state::State::Finalized);
                         std::abort();
                     }
                 }
@@ -354,7 +358,8 @@ extern "C"
 
     void kokkosp_finalize_library()
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         if(_standalone_initialized)
         {
             rocprofsys_pop_trace_hidden("kokkos_main");
@@ -376,7 +381,8 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         auto pname =
             (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
                 ? fmt::format("{} {} [for]", _kp_prefix, name)
@@ -391,7 +397,8 @@ extern "C"
     {
         if(is_invalid_id(kernid)) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
         kokkosp::destroy_profiler<kokkosp_region>(kernid);
@@ -405,7 +412,8 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         auto pname =
             (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
                 ? fmt::format("{} {} [reduce]", _kp_prefix, name)
@@ -420,7 +428,8 @@ extern "C"
     {
         if(is_invalid_id(kernid)) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
         kokkosp::destroy_profiler<kokkosp_region>(kernid);
@@ -434,7 +443,8 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         auto pname =
             (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
                 ? fmt::format("{} {} [scan]", _kp_prefix, name)
@@ -449,7 +459,8 @@ extern "C"
     {
         if(is_invalid_id(kernid)) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
         kokkosp::destroy_profiler<kokkosp_region>(kernid);
@@ -462,7 +473,8 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         auto pname =
             (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
                 ? fmt::format("{} {} [fence]", _kp_prefix, name)
@@ -477,7 +489,8 @@ extern "C"
     {
         if(is_invalid_id(kernid)) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
         kokkosp::destroy_profiler<kokkosp_region>(kernid);
@@ -488,7 +501,8 @@ extern "C"
     void kokkosp_push_profile_region(const char* name)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
         kokkosp::get_profiler_stack<kokkosp_region>()
             .emplace_back(kokkosp::profiler_t<kokkosp_region>(name))
@@ -497,7 +511,8 @@ extern "C"
 
     void kokkosp_pop_profile_region()
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         if(kokkosp::get_profiler_stack<kokkosp_region>().empty()) return;
         kokkosp::get_profiler_stack<kokkosp_region>().back().stop();
@@ -508,7 +523,8 @@ extern "C"
 
     void kokkosp_create_profile_section(const char* name, std::uint32_t* secid)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         *secid     = kokkosp::get_unique_id();
         auto pname = std::string{ name };
         kokkosp::create_profiler<kokkosp_region>(name, *secid);
@@ -516,7 +532,8 @@ extern "C"
 
     void kokkosp_destroy_profile_section(std::uint32_t secid)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::destroy_profiler<kokkosp_region>(secid);
     }
 
@@ -525,14 +542,16 @@ extern "C"
     void kokkosp_start_profile_section(std::uint32_t secid)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, secid);
         kokkosp::start_profiler<kokkosp_region>(secid);
     }
 
     void kokkosp_stop_profile_section(std::uint32_t secid)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, secid);
         kokkosp::stop_profiler<kokkosp_region>(secid);
     }
@@ -546,7 +565,8 @@ extern "C"
         if(violates_name_rules(label)) return;
         if(rocprofsys::config::get_use_causal()) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
                                  fmt::format("[{}]", ptr), size);
         auto pname = fmt::format("{} {} [allocate][{}]", _kp_prefix, label, space.name);
@@ -561,7 +581,8 @@ extern "C"
         if(violates_name_rules(label)) return;
         if(rocprofsys::config::get_use_causal()) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
                                  fmt::format("[{}]", ptr), size);
         auto pname = fmt::format("{} {} [deallocate][{}]", _kp_prefix, label, space.name);
@@ -580,7 +601,8 @@ extern "C"
         if(!_kp_deep_copy || rocprofsys::config::get_use_causal()) return;
         if(violates_name_rules(dst_name, src_name)) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, dst_handle.name, dst_name,
                                  fmt::format("[{}]", dst_ptr), src_handle.name, src_name,
                                  fmt::format("[{}]", src_ptr), size);
@@ -601,7 +623,8 @@ extern "C"
     {
         if(!_kp_deep_copy || rocprofsys::config::get_use_causal()) return;
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         if(_data.empty()) return;
@@ -616,7 +639,8 @@ extern "C"
     void kokkosp_profile_event(const char* name)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(name));
         kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
     }
@@ -630,7 +654,8 @@ extern "C"
 
         auto timestamp = tim::get_clock_real_now<std::uint64_t, std::nano>();
 
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
             auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
@@ -657,7 +682,8 @@ extern "C"
         if(violates_name_rules(label)) return;
 
         auto timestamp = tim::get_clock_real_now<std::uint64_t, std::nano>();
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard =
+            rocprofsys::thread_state::scoped(rocprofsys::thread_state::State::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
             auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(

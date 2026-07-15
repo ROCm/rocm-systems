@@ -16,7 +16,7 @@
 
 namespace rocprofsys::pmc
 {
-std::atomic<State>&
+std::atomic<process_state::State>&
 get_state();
 
 void
@@ -34,7 +34,7 @@ shutdown();
 void
 post_process();
 
-void set_state(State);
+void set_state(process_state::State);
 
 void
 pause();

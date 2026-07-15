@@ -185,7 +185,7 @@ struct comm_data : base<comm_data, void>
 private:
     static auto& add(tracker_t& _t, data_type value)
     {
-        if(rocprofsys::get_state() != rocprofsys::State::Active)
+        if(rocprofsys::process_state::get() != rocprofsys::process_state::State::Active)
         {
             _t.invoke<operation::set_is_invalid>(true);
             return _t;

@@ -126,17 +126,23 @@ get_clock_now(clockid_t clock_id) noexcept
 //--------------------------------------------------------------------------------------//
 
 stages::stages()
-: init{ [](const spec&) { return get_state() < State::Finalized; } }
+: init{ [](const spec&) {
+    return process_state::get() < process_state::State::Finalized;
+} }
 , wait{ [](const spec& _spec) {
     sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
-    return get_state() < State::Finalized;
+    return process_state::get() < process_state::State::Finalized;
 } }
-, start{ [](const spec&) { return get_state() < State::Finalized; } }
+, start{ [](const spec&) {
+    return process_state::get() < process_state::State::Finalized;
+} }
 , collect{ [](const spec& _spec) {
     sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
-    return get_state() < State::Finalized;
+    return process_state::get() < process_state::State::Finalized;
 } }
-, stop{ [](const spec&) { return get_state() < State::Finalized; } }
+, stop{ [](const spec&) {
+    return process_state::get() < process_state::State::Finalized;
+} }
 {}
 
 //--------------------------------------------------------------------------------------//
@@ -242,7 +248,7 @@ spec::operator()(const stages& _stages) const
     auto _n = repeat;
     if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
-    while(get_state() < State::Active)
+    while(process_state::get() < process_state::State::Active)
         sleep(1 * units::usec);
 
     for(std::uint64_t i = 0; i < _n; ++i)
@@ -329,17 +335,23 @@ get_trace_stages()
 {
     auto _v = stages{};
 
-    _v.init = [](const spec&) { return get_state() < State::Finalized; };
+    _v.init = [](const spec&) {
+        return process_state::get() < process_state::State::Finalized;
+    };
     _v.wait = [](const spec& _spec) {
         sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
-        return get_state() < State::Finalized;
+        return process_state::get() < process_state::State::Finalized;
     };
-    _v.start   = [](const spec&) { return get_state() < State::Finalized; };
+    _v.start = [](const spec&) {
+        return process_state::get() < process_state::State::Finalized;
+    };
     _v.collect = [](const spec& _spec) {
         sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
-        return get_state() < State::Finalized;
+        return process_state::get() < process_state::State::Finalized;
     };
-    _v.stop = [](const spec&) { return get_state() < State::Finalized; };
+    _v.stop = [](const spec&) {
+        return process_state::get() < process_state::State::Finalized;
+    };
 
     return _v;
 }

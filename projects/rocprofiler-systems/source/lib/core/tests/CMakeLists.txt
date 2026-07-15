@@ -40,7 +40,7 @@ add_library(parse-numeric-range-tests OBJECT test_parse_numeric_range.cpp)
 
 target_link_libraries(
     parse-numeric-range-tests
-    PRIVATE
+        PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
         rocprofiler-systems-logger
@@ -67,5 +67,23 @@ target_link_libraries(
 
 target_include_directories(
     rank-passes-filter-tests
+    state-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
+
+add_library(state-tests OBJECT test_state.cpp)
+
+target_link_libraries(
+    state-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    state-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )

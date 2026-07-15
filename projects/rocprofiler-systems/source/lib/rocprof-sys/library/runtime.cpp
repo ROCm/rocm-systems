@@ -65,7 +65,8 @@ sampling_on_child_threads()
     // inherit the last state
     static thread_local bool _v =
         (_thr_info) ? !_thr_info->is_offset
-        : (get_state() != State::Active || get_thread_state() != ThreadState::Enabled)
+        : (process_state::get() != process_state::State::Active ||
+           thread_state::get() != thread_state::State::Enabled)
             ? false
             : (get_sampling_on_child_threads_history().empty()
                    ? false
@@ -121,7 +122,7 @@ create_cpu_cid_entry(std::int64_t _tid)
 {
     using tim::auto_lock_t;
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     // unique lock for _tid
     auto&       _mtx = get_cpu_cid_stack_lock(_tid);

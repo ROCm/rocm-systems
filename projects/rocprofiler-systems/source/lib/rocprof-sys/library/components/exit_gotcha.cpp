@@ -46,7 +46,7 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 {
     threading::clear_callbacks();
 
-    if(get_state() < State::Finalized && !is_child_process())
+    if(process_state::get() < process_state::State::Finalized && !is_child_process())
     {
         LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(), _data.tool_id,
                   fmt::join(std::forward_as_tuple(_args...), ", "));

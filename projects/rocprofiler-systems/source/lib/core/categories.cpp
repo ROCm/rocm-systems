@@ -5,6 +5,7 @@
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 
@@ -80,20 +81,20 @@ setup()
 
         _trace_stages.init = [](const constraint::spec& _spec) {
             if(_spec.delay > 1.0e-3) disable_categories(config::get_enabled_categories());
-            return get_state() < State::Finalized;
+            return process_state::get() < process_state::State::Finalized;
         };
 
         _trace_stages.start = [](const constraint::spec&) {
             enable_categories(config::get_enabled_categories());
-            return get_state() < State::Finalized;
+            return process_state::get() < process_state::State::Finalized;
         };
 
         _trace_stages.stop = [](const constraint::spec&) {
             // only disable categories if not finalized since this might run in background
             // during finalization and disable output of data in those categories
-            if(get_state() < State::Finalized)
+            if(process_state::get() < process_state::State::Finalized)
                 disable_categories(config::get_enabled_categories());
-            return get_state() < State::Finalized;
+            return process_state::get() < process_state::State::Finalized;
         };
 
         auto _promise = std::promise<void>();

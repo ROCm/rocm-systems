@@ -39,7 +39,7 @@ struct sampler
     using nsec_t    = std::chrono::nanoseconds;
     using promise_t = std::promise<void>;
     using future_t  = std::future<void>;
-    using state_t   = State;
+    using state_t   = process_state::State;
 
     using timestamp_t = std::int64_t;
 

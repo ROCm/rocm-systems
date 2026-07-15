@@ -167,7 +167,7 @@ backtrace::sample(int signo)
     if(signo == get_sampling_overflow_signal()) return;
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;

@@ -78,7 +78,7 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -147,9 +147,9 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_index = causal::experiment::get_index();
-    m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    m_index                  = causal::experiment::get_index();
+    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
     auto _set_current_selection = [](auto _stack) {
         // save the former selection count

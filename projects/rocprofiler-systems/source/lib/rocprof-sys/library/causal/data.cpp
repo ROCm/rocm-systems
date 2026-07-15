@@ -130,7 +130,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
-    if(config::get_causal_mode() == CausalMode::Function &&
+    if(config::get_causal_mode() == process_state::CausalMode::Function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
@@ -145,7 +145,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         // symbols starting with leading underscore are generally system functions
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "^_" });
 
-        if(config::get_causal_mode() == CausalMode::Function)
+        if(config::get_causal_mode() == process_state::CausalMode::Function)
         {
             // exclude STL implementation functions
             _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "::_M" });
@@ -155,7 +155,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to claim
     // "make main function" faster since it contains everything
     // that could be made faster
-    if(config::get_causal_mode() == CausalMode::Function &&
+    if(config::get_causal_mode() == process_state::CausalMode::Function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
@@ -453,7 +453,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     using duration_sec_t  = std::chrono::duration<double, std::ratio<1>>;
 
     const auto& _thr_info = thread_info::init(true);
-    set_thread_state(ThreadState::Disabled);
+    thread_state::set(thread_state::State::Disabled);
     if(!_thr_info->is_offset)
     {
         throw std::runtime_error("Error! causal profiling thread should be offset");
@@ -518,7 +518,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         return false;
     };
 
-    while(get_state() < State::Finalized)
+    while(process_state::get() < process_state::State::Finalized)
     {
         auto _impl_no = _impl_count++;
         auto _experim = experiment{};
@@ -526,7 +526,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         // loop until started or finalized
         while(!_experim.start())
         {
-            if(get_state() == State::Finalized)
+            if(process_state::get() == process_state::State::Finalized)
             {
                 if(_impl_no > 0) return;
 
@@ -652,7 +652,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(config::get_causal_end_to_end())
         {
             mark_progress_point(config::get_exe_name(), true);
-            while(get_state() < State::Finalized)
+            while(process_state::get() < process_state::State::Finalized)
             {
                 std::this_thread::yield();
                 std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
@@ -666,7 +666,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
         while(!_experim.stop())
         {
-            if(get_state() == State::Finalized) return;
+            if(process_state::get() == process_state::State::Finalized) return;
         }
 
         if(_exceeded_duration()) return;
@@ -771,7 +771,7 @@ reset_sample_selection()
 selected_entry
 sample_selection(size_t _nitr, size_t _wait_ns)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     auto _select_address = [&](auto& _address_vec) {
         // this isn't necessary bc of check before calling this lambda but
@@ -798,7 +798,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             eligible_pc_history[_addr] += 1;
 
-            if(get_causal_mode() == CausalMode::Function)
+            if(get_causal_mode() == process_state::CausalMode::Function)
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
 
             // lookup the PC line info at either the address or the symbol address
@@ -829,9 +829,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 }
             }
 
-            auto& _linfo_v = (config::get_causal_mode() == CausalMode::Function)
-                                 ? linfo.front()
-                                 : linfo.back();
+            auto& _linfo_v =
+                (config::get_causal_mode() == process_state::CausalMode::Function)
+                    ? linfo.front()
+                    : linfo.back();
             return selected_entry{ _addr, _sym_addr, _linfo_v };
         }
         return selected_entry{};
@@ -906,7 +907,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                 if(!_ipaddr.contains(_addr)) continue;
 
                 if(_include_discarded ||
-                   config::get_causal_mode() == CausalMode::Function)
+                   config::get_causal_mode() == process_state::CausalMode::Function)
                 {
                     // check if the primary symbol satisfy the constraints
                     if(ditr(_filters)) _local_data.emplace_back(ditr);
@@ -916,7 +917,8 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     utility::combine(_local_data, ditr.get_inline_symbols(_filters));
                 }
 
-                if(_include_discarded || config::get_causal_mode() == CausalMode::Line)
+                if(_include_discarded ||
+                   config::get_causal_mode() == process_state::CausalMode::Line)
                 {
                     auto _debug_data = std::deque<binary::symbol>{};
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
@@ -1036,7 +1038,7 @@ sample_virtual_speedup()
 void
 start_experimenting()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
 
     auto _user_speedup_dist = config::get_causal_fixed_speedup();
     if(!_user_speedup_dist.empty())
@@ -1057,7 +1059,7 @@ start_experimenting()
     delay::setup();
     compute_eligible_lines();
 
-    if(get_state() < State::Finalized)
+    if(process_state::get() < process_state::State::Finalized)
     {
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
         auto _promise = std::make_shared<std::promise<void>>();

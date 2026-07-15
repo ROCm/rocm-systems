@@ -49,10 +49,11 @@ prefork_setup()
 {
     if(prefork_lock) return;
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    if(get_state() < State::Active && !config::settings_are_configured())
+    if(process_state::get() < process_state::State::Active &&
+       !config::settings_are_configured())
         rocprofsys_init_library_hidden();
 
     rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
@@ -124,7 +125,7 @@ postfork_child()
         std::exit(1);
     }
 
-    set_state(State::Finalized);
+    process_state::set(process_state::State::Finalized);
 
     // Clean up AMD SMI in child process before other shutdowns
     if(config::get_use_sampling())
@@ -138,7 +139,7 @@ postfork_child()
     settings::debug()   = false;
     rocprofsys::sampling::shutdown();
     rocprofsys::categories::shutdown();
-    set_thread_state(::rocprofsys::ThreadState::Disabled);
+    thread_state::set(thread_state::State::Disabled);
 
     rocprofsys::get_perfetto_session(process::get_parent_id()).release();
 
