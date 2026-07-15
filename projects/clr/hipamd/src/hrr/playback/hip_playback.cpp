@@ -107,6 +107,17 @@ hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what) {
 
 namespace {
 
+static hipError_t hrr_sync_after_replayed_h2d(PlaybackContext& ctx,
+                                                const char* what) {
+    // Replay substitutes captured blobs for capture-time host pointers. Drain
+    // the restore so following kernels see the replayed input bytes. This is
+    // skipped during graph capture because device/stream sync is illegal there.
+    if (ctx.in_graph_capture) return hipSuccess;
+    hipError_t r = hrr_watchdog_device_sync(ctx, what);
+    if (r == hipSuccess) r = hipGetLastError();
+    return r;
+}
+
 static std::string compact_kernel_name(const std::string& name) {
     constexpr size_t kMax = 120;
     if (name.size() <= kMax) return name;
@@ -1714,9 +1725,12 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else
             r = hipMemcpy(dst, blob, copy_sz, hipMemcpyHostToDevice);
-        if (r != hipSuccess)
+        if (r != hipSuccess) {
             fprintf(stderr, "[HRR] H2D memcpy failed: %d (%s) dst=%p copy_sz=%zu blob_sz=%zu avail=%zu\n",
                     r, hipGetErrorString(r), dst, copy_sz, blob_sz, avail);
+        } else {
+            r = hrr_sync_after_replayed_h2d(ctx, "replayed H2D memcpy");
+        }
     } else if (kind == hipMemcpyDeviceToDevice) {
         void* src = ctx.translate_ptr(src_rec);
         if (!dst) fprintf(stderr, "[HRR] D2D dst 0x%llx not mapped\n", (unsigned long long)dst_rec);
@@ -2320,7 +2334,10 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
         if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-        return hipMemcpy3D(&parms);
+        hipError_t r = hipMemcpy3D(&parms);
+        if (r == hipSuccess)
+            r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D H2D memcpy");
+        return r;
     }
     if (parms.kind == hipMemcpyDeviceToHost) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
@@ -2354,7 +2371,10 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
         if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-        return hipMemcpy3DAsync(&parms, stream);
+        hipError_t r = hipMemcpy3DAsync(&parms, stream);
+        if (r == hipSuccess)
+            r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D async H2D memcpy");
+        return r;
     }
     if (parms.kind == hipMemcpyDeviceToHost) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
@@ -2415,11 +2435,17 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
                     is_async ? "Async" : "");
             return hipSuccess;
         }
+        hipError_t r = hipSuccess;
         if (is_async)
-            return hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
-                                    hipMemcpyHostToDevice, stream);
-        return hipMemcpy2D(dst, dpitch, blob, spitch, width, height,
-                           hipMemcpyHostToDevice);
+            r = hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
+                                 hipMemcpyHostToDevice, stream);
+        else
+            r = hipMemcpy2D(dst, dpitch, blob, spitch, width, height,
+                            hipMemcpyHostToDevice);
+        if (r == hipSuccess)
+            r = hrr_sync_after_replayed_h2d(ctx, is_async ? "replayed 2D async H2D memcpy"
+                                                          : "replayed 2D H2D memcpy");
+        return r;
     }
 
     if (kind == hipMemcpyDeviceToHost) {
