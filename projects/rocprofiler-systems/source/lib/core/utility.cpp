@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
-#include <cstdint>
 
+#include "common/delimit.hpp"
 #include "logger/debug.hpp"
+
+#include <cstdint>
 
 namespace rocprofsys
 {
@@ -47,7 +49,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     for(auto& itr : _input_string)
         itr = tolower(itr);
     auto _result = ContainerT{};
-    for(auto _v : tim::delimit(_input_string, ",; \t\n\r"))
+    for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
@@ -72,7 +74,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         {
             // split the string into two parts at the '-' character and check if the
             // result is valid
-            auto _vv = tim::delimit(_v, "-");
+            auto _vv = rocprofsys::delimit(_v, "-");
             if(_vv.size() != 2)
             {
                 LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "

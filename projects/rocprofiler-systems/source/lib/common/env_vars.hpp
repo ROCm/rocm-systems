@@ -292,6 +292,8 @@ inline constexpr const char* IGNORE_DYNINST_TRAMPOLINE =
     "ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE";
 inline constexpr const char* DEFAULT_MIN_INSTRUCTIONS =
     "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS";
+inline constexpr const char* DEFAULT_MAX_LIBRARY_FUNCTIONS =
+    "ROCPROFSYS_DEFAULT_MAX_LIBRARY_FUNCTIONS";
 
 // --- Runtime / launcher (set by instrumenter / read by the loaded library) ---
 inline constexpr const char* PATH                   = "ROCPROFSYS_PATH";

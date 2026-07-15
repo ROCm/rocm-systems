@@ -31,6 +31,17 @@
 #endif
 #endif
 
+// rocshmem-gda uses QueuePair methods from librocshmem.a device bitcode.
+// Only enable in TUs that link librocshmem.a (ENABLE_ROCSHMEM), not in
+// librccl.so (ENABLE_ROCSHMEM_GIN), to avoid duplicate device state.
+#ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
+#else
+#define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
+#endif
+#endif
+
 enum ncclGinOptFlags {
   ncclGinOptFlagsDefault = 0,
   ncclGinOptFlagsMaySkipCreditCheck = (1 << 0),
@@ -39,7 +50,8 @@ enum ncclGinOptFlags {
 
 #define NCCL_GIN_BACKEND_MASK_ALL                                               \
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
-   ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI)
+   ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI | \
+   ((NCCL_GIN_ROCSHMEM_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
 
 // Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
 // This mode is selected at construction time and is carried by the ncclGin
@@ -177,6 +189,11 @@ NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGi
     case (int)NCCL_NET_DEVICE_GIN_GDAKI:
       if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_GDAKI))) __builtin_unreachable();
       return ApiFn<NCCL_NET_DEVICE_GIN_GDAKI>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE
+    case (int)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA:
+      if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA))) __builtin_unreachable();
+      return ApiFn<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ctx, static_cast<Arg&&>(arg)...);
 #endif
     default:
       __builtin_unreachable();
