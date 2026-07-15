@@ -16,7 +16,7 @@ import re
 import sys
 import time
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -24,6 +24,157 @@ import requests
 import yaml
 
 NOT_READY_LABEL = "Not ready to Review"
+
+# ---------------------------------------------------------------------------
+# Testing declaration (Unit Test policy)
+# ---------------------------------------------------------------------------
+# The Unit Test policy is satisfied by an explicit, human-authored declaration
+# in the PR DESCRIPTION rather than by test-filename heuristics. The bot only
+# verifies that the declaration is PRESENT and well-formed for every changed
+# code file — it never checks whether the referenced tests exist, runs any
+# command, or inspects test contents. Test-list items are opaque, non-empty
+# human-readable strings.
+TESTING_MARKER = "<!-- systems-pr-bot:testing:v1 -->"
+
+# A "### File: `path`" header (1-6 leading '#', optional backticks around path).
+_TESTING_FILE_HEADER_RE = re.compile(
+    r"^\s{0,3}#{1,6}\s+File\s*:\s*(?P<path>.+?)\s*$", re.IGNORECASE
+)
+# Any Markdown ATX header — used to detect the end of an entry.
+_TESTING_ANY_HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
+# Top-level list item (0-1 leading spaces): the "Description:" / "Tests:" lines.
+_TESTING_TOP_LIST_RE = re.compile(r"^\s{0,1}[-*+]\s+(?P<content>.+?)\s*$")
+# Nested list item (2+ leading spaces): an individual Tests entry.
+_TESTING_NESTED_LIST_RE = re.compile(r"^\s{2,}[-*+]\s+(?P<item>.+?)\s*$")
+# "Label: rest" splitter (after emphasis characters are stripped).
+_TESTING_LABEL_RE = re.compile(r"^(?P<label>[A-Za-z ]+?)\s*:\s*(?P<rest>.*)$")
+
+
+@dataclass
+class TestingEntry:
+    """One declared file entry: a path, a description, and >=1 test items."""
+
+    path: str
+    description: str
+    tests: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TestingDeclaration:
+    """Parsed result of the PR-body testing declaration.
+
+    - marker_present: whether the exact TESTING_MARKER was found.
+    - entries: normalized-path -> VALID entry (non-empty description + >=1 test).
+    - invalid_paths: declared paths that were malformed (empty description or no
+      tests) and have no other valid entry.
+    - duplicate_paths: paths declared more than once (last valid entry wins).
+    """
+
+    marker_present: bool
+    entries: Dict[str, "TestingEntry"]
+    invalid_paths: List[str]
+    duplicate_paths: List[str]
+
+
+def _strip_md_emphasis(text: str) -> str:
+    """Strip Markdown emphasis/code markers (`*`, backtick) for robust matching."""
+    return text.replace("*", "").replace("`", "").strip()
+
+
+def _normalize_declared_path(raw: str) -> str:
+    """Normalize a declared file path for comparison with changed-file paths."""
+    raw = (raw or "").strip()
+    raw = raw.strip("`").strip()
+    raw = _strip_md_emphasis(raw)
+    if not raw:
+        return ""
+    return Path(raw).as_posix().lstrip("./")
+
+
+def parse_testing_declarations(body: str) -> TestingDeclaration:
+    """Deterministically parse the PR-body testing declaration.
+
+    The parser is intentionally simple and marker-anchored. It NEVER evaluates
+    or trusts the content of descriptions/tests — those are opaque strings. If
+    the exact marker is absent, an empty declaration is returned. Malformed and
+    duplicate entries are collected so callers can produce useful messages.
+    """
+    body = body or ""
+    if TESTING_MARKER not in body:
+        return TestingDeclaration(False, {}, [], [])
+
+    lines = body.splitlines()
+    raw_entries: List[TestingEntry] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        header = _TESTING_FILE_HEADER_RE.match(lines[i])
+        if not header:
+            i += 1
+            continue
+        entry = TestingEntry(
+            path=_normalize_declared_path(header.group("path")),
+            description="",
+            tests=[],
+        )
+        i += 1
+        in_tests = False
+        while i < n:
+            line = lines[i]
+            if _TESTING_ANY_HEADER_RE.match(line):
+                break  # next header ends this entry
+            nested = _TESTING_NESTED_LIST_RE.match(line)
+            if nested and in_tests:
+                item = _strip_md_emphasis(nested.group("item"))
+                if item:
+                    entry.tests.append(item)
+                i += 1
+                continue
+            top = _TESTING_TOP_LIST_RE.match(line)
+            if top:
+                label_match = _TESTING_LABEL_RE.match(
+                    _strip_md_emphasis(top.group("content").strip())
+                )
+                if label_match:
+                    label = label_match.group("label").strip().lower()
+                    rest = label_match.group("rest").strip()
+                    if label == "description":
+                        entry.description = rest
+                        in_tests = False
+                        i += 1
+                        continue
+                    if label == "tests":
+                        in_tests = True
+                        if rest:
+                            entry.tests.append(rest)
+                        i += 1
+                        continue
+                # Any other top-level bullet ends the tests block.
+                in_tests = False
+                i += 1
+                continue
+            if line.strip() == "":
+                i += 1
+                continue
+            # Any other non-empty line ends the tests capture.
+            in_tests = False
+            i += 1
+        raw_entries.append(entry)
+
+    entries: Dict[str, TestingEntry] = {}
+    invalid: List[str] = []
+    seen: Dict[str, int] = {}
+    for e in raw_entries:
+        if e.path:
+            seen[e.path] = seen.get(e.path, 0) + 1
+        if e.path and e.description and e.tests:
+            entries[e.path] = e  # last valid entry for a path wins
+        elif e.path:
+            invalid.append(e.path)
+    duplicate_paths = sorted(p for p, c in seen.items() if c > 1)
+    invalid_paths = sorted({p for p in invalid if p not in entries})
+    return TestingDeclaration(True, entries, invalid_paths, duplicate_paths)
+
 
 # Anchor file paths to THIS script's location rather than the current working
 # directory or a ".git"/".github" walk-up (which breaks with nested repos /
@@ -113,7 +264,6 @@ class Policy:
     max_single_file_changes: int
     forbidden_paths: List[str]
     unit_test_code_extensions: List[str]
-    unit_test_patterns: List[str]
     unit_test_exempt_paths: List[str]
     bump_bot_authors: List[str]
     required_checks: List[str]
@@ -174,9 +324,6 @@ def load_policy(policy_path: Path) -> Policy:
     unit_test_code_extensions = [
         str(e).lower() for e in (unit_cfg.get("code_extensions", []) or [])
     ]
-    unit_test_patterns = [
-        str(p) for p in (unit_cfg.get("test_file_patterns", []) or [])
-    ]
     unit_test_exempt_paths = [str(p) for p in (unit_cfg.get("exempt_paths", []) or [])]
 
     # Bump-PR bot authors that bypass all policy checks.
@@ -207,7 +354,6 @@ def load_policy(policy_path: Path) -> Policy:
         max_single_file_changes=max_single_file_changes,
         forbidden_paths=forbidden_paths,
         unit_test_code_extensions=unit_test_code_extensions,
-        unit_test_patterns=unit_test_patterns,
         unit_test_exempt_paths=unit_test_exempt_paths,
         bump_bot_authors=bump_bot_authors,
         required_checks=required_checks,
@@ -479,80 +625,108 @@ def ensure_no_forbidden_files(
 
 
 def ensure_unit_tests(
-    policy: Policy, pr_files: Iterable[Dict[str, Any]], errors: List[str]
+    policy: Policy,
+    pr_files: Iterable[Dict[str, Any]],
+    body: str,
+    errors: List[str],
 ) -> None:
-    """
-    Require a unit test when real source code changes.
+    """Require a testing declaration in the PR body for every changed code file.
 
-    - Doc/config files (anything NOT in code_extensions, e.g. .md/.txt/.yml/.ini)
-      never trigger the requirement — a doc/config-only PR passes automatically.
-    - If any code file is changed, the PR must also add/modify at least one
-      test file (basename matching test_file_patterns, e.g. test_xxx.py).
+    - Doc/config files (extensions NOT in code_extensions) never trigger the
+      requirement — a doc/config-only PR passes automatically.
+    - Removed files are ignored.
+    - For every changed, non-removed code file, the PR body must contain a
+      well-formed declaration entry (non-empty Description + >=1 Tests item)
+      keyed by that file's path.
+
+    The bot does NOT verify that the referenced tests exist, run any command, or
+    inspect test contents. Test-list items are opaque, non-empty strings.
     """
     if not policy.unit_test_code_extensions:
         return
 
     code_files: List[str] = []
-    has_test = False
-
     for f in pr_files:
         status = str(f.get("status") or "")
         if status == "removed":
             continue
-        filename = Path(str(f.get("filename") or "")).as_posix()
+        filename = Path(str(f.get("filename") or "")).as_posix().lstrip("./")
         if not filename:
             continue
-
-        # Files under exempt paths never require an accompanying unit test.
         if any(
             _matches_forbidden(filename, pat) for pat in policy.unit_test_exempt_paths
         ):
             continue
-
-        base = Path(filename).name
         ext = Path(filename).suffix.lower()
-
-        # A test file satisfies the requirement.
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
-            has_test = True
-            continue
-
-        # A real source/code file triggers the requirement.
         if ext in policy.unit_test_code_extensions:
             code_files.append(filename)
 
-    if code_files and not has_test:
+    if not code_files:
+        return  # no code files -> auto-pass
+
+    declaration = parse_testing_declarations(body)
+    if not declaration.marker_present:
         listed = ", ".join(f"`{c}`" for c in code_files[:5])
         more = "" if len(code_files) <= 5 else f" (+{len(code_files) - 5} more)"
         errors.append(
-            "**Error:** Source/code files changed without an accompanying unit test.\n"
-            "**Expected:** add at least one test file named like "
-            "`test_<name>.py` / `test_<name>.cpp` (or `<name>_test.*`).\n"
-            f"**Current:** code file(s) changed: {listed}{more}; no test file found"
+            "**Error:** No testing declaration found in the PR description.\n"
+            "**Expected:** add a `## Testing` section that begins with the exact "
+            f"marker `{TESTING_MARKER}` and declares, for every changed code "
+            "file, a `### File: `path`` entry with a non-empty **Description** "
+            "and a non-empty **Tests** list.\n"
+            f"**Current:** code file(s) changed: {listed}{more}; no declaration marker present"
+        )
+        return
+
+    missing: List[str] = []
+    invalid: List[str] = []
+    for c in code_files:
+        if c in declaration.entries:
+            continue
+        if c in declaration.invalid_paths:
+            invalid.append(c)
+        else:
+            missing.append(c)
+
+    if missing:
+        listed = ", ".join(f"`{c}`" for c in missing[:5])
+        more = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
+        errors.append(
+            "**Error:** Changed code file(s) have no testing declaration entry.\n"
+            "**Expected:** add a `### File: `path`` entry (with a non-empty "
+            "**Description** and a non-empty **Tests** list) for each listed file.\n"
+            f"**Current:** missing entries for: {listed}{more}"
+        )
+
+    if invalid:
+        listed = ", ".join(f"`{c}`" for c in invalid[:5])
+        more = "" if len(invalid) <= 5 else f" (+{len(invalid) - 5} more)"
+        errors.append(
+            "**Error:** Testing declaration entry is incomplete.\n"
+            "**Expected:** each `### File: `path`` entry needs a non-empty "
+            "**Description** and at least one **Tests** list item.\n"
+            f"**Current:** incomplete entries for: {listed}{more}"
         )
 
 
 def pr_has_code_files(policy: Policy, pr_files: Iterable[Dict[str, Any]]) -> bool:
     """True if the PR changes at least one real source/code file.
 
-    Doc/config files (.md, .txt, .yml, .ini, ...), exempt paths, and test files
-    do NOT count as code.
+    Doc/config files (.md, .txt, .yml, .ini, ...) and exempt paths do NOT count
+    as code. Removed files are ignored.
     """
     for f in pr_files:
         status = str(f.get("status") or "")
         if status == "removed":
             continue
-        filename = Path(str(f.get("filename") or "")).as_posix()
+        filename = Path(str(f.get("filename") or "")).as_posix().lstrip("./")
         if not filename:
             continue
         if any(
             _matches_forbidden(filename, pat) for pat in policy.unit_test_exempt_paths
         ):
             continue
-        base = Path(filename).name
         ext = Path(filename).suffix.lower()
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
-            continue
         if ext in policy.unit_test_code_extensions:
             return True
     return False
@@ -787,7 +961,9 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/tree/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = (
+        "https://github.com/ROCm/rocm-systems/tree/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    )
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -1105,7 +1281,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     results.append(CheckResult("Forbidden Files", "⛔", not check_errors, check_errors))
 
     check_errors = []
-    ensure_unit_tests(policy, pr_files, check_errors)
+    ensure_unit_tests(policy, pr_files, body, check_errors)
     ut_note = None
     if not check_errors and not pr_has_code_files(policy, pr_files):
         ut_note = "PR does not contain code files — Unit Test auto-passed"

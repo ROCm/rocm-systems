@@ -93,13 +93,19 @@ pr:
       # GitHub issue URL, e.g. https://github.com/org/repo/issues/123
       - '(?i)https?:\/\/github\.com\/[^\/\s]+\/[^\/\s]+\/issues\/\d+'
 
-  # Unit test requirement:
-  #   - Doc/config-only PRs (e.g. .md, .txt, .yml, .ini) never need a unit test
-  #     and PASS automatically.
-  #   - PRs that change real source code (.py, .cpp, .js, ...) must include at
-  #     least one accompanying test file (e.g. test_xxx.py, test_xxx.cpp).
+  # Unit test requirement (testing declaration):
+  #   - Doc/config-only PRs (e.g. .md, .txt, .yml, .ini) never need a testing
+  #     declaration and PASS automatically.
+  #   - PRs that change real source code (.py, .cpp, .js, ...) must include a
+  #     `## Testing` section in the PR DESCRIPTION that begins with the exact
+  #     marker `<!-- systems-pr-bot:testing:v1 -->` and declares, for every
+  #     changed code file, a `### File: `path`` entry with a non-empty
+  #     Description and a non-empty Tests list.
+  #   - The bot only checks that the declaration is PRESENT and well-formed. It
+  #     never verifies that the referenced tests exist, runs any command, or
+  #     inspects test contents. Test-list items are opaque human-readable text.
   unit_tests:
-    # Source/code file extensions that REQUIRE an accompanying unit test.
+    # Source/code file extensions that REQUIRE a testing declaration entry.
     code_extensions:
       - .py
       - .cpp
@@ -116,16 +122,9 @@ pr:
       - .java
       - .rb
       - .rs
-    # A changed file is treated as a unit test if its basename matches one of
-    # these glob patterns (e.g. test_parser.py, parser_test.cpp).
-    test_file_patterns:
-      - 'test_*'
-      - '*_test.*'
-    # Unit tests are required for source code ANYWHERE in the repository — there
-    # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.*), not its location.
-    # Doc/config files are still skipped by EXTENSION (they are simply not in
-    # `code_extensions`), not by path.
+    # Testing declarations are required for source code ANYWHERE in the repo —
+    # there are NO folder-based exemptions. Doc/config files are skipped by
+    # EXTENSION (they are simply not in `code_extensions`), not by path.
     exempt_paths: []
 
 diff:

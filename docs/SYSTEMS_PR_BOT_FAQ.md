@@ -185,30 +185,34 @@ ______________________________________________________________________
 ## 🧪 Unit Test
 
 **What does it check?**
-PRs that change real source code must include at least one accompanying unit test.
+PRs that change real source code must include a **testing declaration** in the PR **description** that explains, per changed code file, what changed and how it was tested. The bot only checks that the declaration is **present and well-formed** — it does **not** verify that the referenced tests exist, run any commands, or inspect test contents.
 
 **Rules**
 
 - **Doc / config-only PRs are exempt.** If your PR only touches files like
-  `.md`, `.txt`, `.yml`, `.yaml`, `.ini`, the check **passes automatically** — no test required.
-- **Code PRs require a test.** If your PR changes source files such as
-  `.py`, `.cpp`, `.cc`, `.c`, `.h`, `.js`, `.ts`, `.go`, `.java`, it must also
-  include changes to a test file (a new test, or edits to an existing one).
+  `.md`, `.txt`, `.yml`, `.yaml`, `.ini`, the check **passes automatically** — no declaration required.
+- **Code PRs require a declaration.** If your PR changes source files such as
+  `.py`, `.cpp`, `.cc`, `.c`, `.h`, `.js`, `.ts`, `.go`, `.java`, the PR description must contain a `## Testing` section with one entry per changed code file.
+- Each entry needs a non-empty **Description** and a **Tests** list with **at least one** item. Removed files are ignored.
 
-**How a test file is recognised**
+**Declaration format**
 
-| Pattern    | Example          |
-| ---------- | ---------------- |
-| `test_*`   | `test_parser.py` |
-| `*_test.*` | `parser_test.py` |
+Add this to your PR description (the marker line must appear exactly):
+
+<pre><code>&lt;!-- systems-pr-bot:testing:v1 --&gt;
+## Testing
+
+### File: `path/to/changed_file.cpp`
+- **Description:** Explain the behavior changed in this file.
+- **Tests:**
+  - `path/to/test_or_validation`
+  - `ctest --test-dir build -R relevant_test`
+</code></pre>
+
+Repeat the `### File:` block for every changed code file. The **Tests** items are free-form, human-readable references (a test path, a `ctest`/`pytest` command, a manual validation note, etc.) — they are treated as opaque text and are not executed or verified.
 
 **How to fix**
-Add a unit test for the code you changed, named `test_<something>`:
-
-```bash
-# example for Python
-touch tests/test_my_feature.py
-```
+Add the `## Testing` section above (including the exact `<!-- systems-pr-bot:testing:v1 -->` marker) to your PR description, with one `### File:` entry per changed code file, each with a Description and at least one Tests item.
 
 ______________________________________________________________________
 
