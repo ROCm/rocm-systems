@@ -22,6 +22,8 @@
 
 #include "symbol_lookup.hpp"
 
+#include "lib/common/scope_destructor.hpp"
+
 #include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
@@ -46,9 +48,26 @@ constexpr auto ATTACH_SYMBOL_NAME    = "rocprofiler_register_attach";
 
 struct loaded_library
 {
-    std::string path   = {};
-    void*       handle = nullptr;
+    std::string path              = {};
+    void*       handle            = nullptr;
+    bool        remove_on_cleanup = false;
 };
+
+void
+cleanup_loaded_library(loaded_library& library)
+{
+    if(library.handle != nullptr)
+    {
+        dlclose(library.handle);
+        library.handle = nullptr;
+    }
+
+    if(library.remove_on_cleanup && !library.path.empty())
+    {
+        std::error_code ec;
+        std::filesystem::remove(library.path, ec);
+    }
+}
 
 loaded_library
 load_library(const char* path)
@@ -179,7 +198,9 @@ create_and_load_sectionless_copy(const loaded_library& source, std::string_view 
         std::exit(1);
     }
 
-    return load_library(path_buffer.c_str());
+    auto library              = load_library(path_buffer.c_str());
+    library.remove_on_cleanup = true;
+    return library;
 }
 
 void
@@ -252,12 +273,19 @@ main(int argc, char** argv)
     expect_resolves_to_dlsym(libraries.at(2));
     expect_resolves_to_dlsym(libraries.at(3));
     expect_different_symbol_offsets(libraries.at(0), libraries.at(3));
-    auto sectionless_normal = create_and_load_sectionless_copy(libraries.at(0), "normal");
-    auto sectionless_gnu    = create_and_load_sectionless_copy(libraries.at(1), "gnu");
-    auto sectionless_sysv   = create_and_load_sectionless_copy(libraries.at(2), "sysv");
-    expect_resolves_to_dlsym(sectionless_normal);
-    expect_resolves_to_dlsym(sectionless_gnu);
-    expect_resolves_to_dlsym(sectionless_sysv);
+    {
+        auto sectionless_normal  = create_and_load_sectionless_copy(libraries.at(0), "normal");
+        auto sectionless_gnu     = create_and_load_sectionless_copy(libraries.at(1), "gnu");
+        auto sectionless_sysv    = create_and_load_sectionless_copy(libraries.at(2), "sysv");
+        auto cleanup_sectionless = rocprofiler::common::scope_destructor{[&]() {
+            cleanup_loaded_library(sectionless_sysv);
+            cleanup_loaded_library(sectionless_gnu);
+            cleanup_loaded_library(sectionless_normal);
+        }};
+        expect_resolves_to_dlsym(sectionless_normal);
+        expect_resolves_to_dlsym(sectionless_gnu);
+        expect_resolves_to_dlsym(sectionless_sysv);
+    }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
 
