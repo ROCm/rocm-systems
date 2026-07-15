@@ -1735,12 +1735,21 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
   return ROCSHMEM_SUCCESS;
 }
 
+// Returns 0 if any dimension has boundary < start_coord (underflow guard) or
+// if the product overflows size_t (overflow guard).
 __device__ inline size_t ipc_tile_num_elements(const size_t* start_coord,
                                                const size_t* boundary,
                                                int ndim) {
   size_t total = 1;
   for (int dim = 0; dim < ndim; dim++) {
-    total *= boundary[dim] - start_coord[dim];
+    if (boundary[dim] < start_coord[dim]) {
+      return 0;
+    }
+    const size_t extent = boundary[dim] - start_coord[dim];
+    if (extent != 0 && total > SIZE_MAX / extent) {
+      return 0;
+    }
+    total *= extent;
   }
   return total;
 }
@@ -1904,6 +1913,11 @@ __device__ inline int IPCContext::tile_reduce_typed(
       (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
   const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
 
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
+
   if (segment_capacity == 0) {
     LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
     return ROCSHMEM_ERROR;
@@ -1963,6 +1977,11 @@ __device__ inline int IPCContext::tile_reduce_typed_wave(
   const size_t pwrk_capacity =
       (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
   const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
 
   if (segment_capacity == 0) {
     LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
@@ -2028,6 +2047,11 @@ __device__ inline int IPCContext::tile_reduce_typed_wg(
   const size_t pwrk_capacity =
       (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
   const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
 
   if (segment_capacity == 0) {
     LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
