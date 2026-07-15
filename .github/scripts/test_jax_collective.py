@@ -17,8 +17,12 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
+import re
+import smtplib
 import subprocess
 import sys
+from datetime import datetime, timezone
+from email.mime.text import MIMEText
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -61,7 +65,7 @@ def find_rccl_library(artifact_dir: Path) -> Path:
         log.error("librccl.so not found in %s", artifact_dir)
         log.error("Shared libraries found: %s", [str(f) for f in so_files])
         sys.exit(1)
-    lib_path = matches[0]
+    lib_path = matches[0].resolve()
     log.info("Found librccl.so at: %s", lib_path)
     return lib_path
 
@@ -165,8 +169,8 @@ def print_environment_info() -> None:
     log.info("--- End Environment Info ---")
 
 
-def run_tests(jax_src: Path, results_log: Path) -> int:
-    """Run pytest on the 10 collective smoke tests and return exit code."""
+def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
+    """Run pytest on the 10 collective smoke tests and return (exit_code, summary)."""
     cmd = [
         sys.executable, "-m", "pytest",
         "-sv",
@@ -176,20 +180,124 @@ def run_tests(jax_src: Path, results_log: Path) -> int:
 
     log.info("Running: %s", " ".join(cmd))
 
+    passed_tests = []
+    failed_tests = []
+    summary_line = ""
+    current_test = ""
+
     with open(results_log, "w") as log_file:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=jax_src,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
-        log_file.write(proc.stdout)
-        print(proc.stdout, end="")
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_file.write(line)
+            test_header = re.match(r"tests/.*?::([\w:]+)", line)
+            if test_header:
+                current_test = test_header.group(1)
+            if "PASSED" in line and re.search(r"PASSED\s+\[", line):
+                dur_match = re.search(r"\[(\d+\.\d+s)\]", line)
+                duration = dur_match.group(1) if dur_match else ""
+                passed_tests.append((current_test, duration))
+                current_test = ""
+            elif "FAILED" in line and re.search(r"FAILED\s+\[", line):
+                failed_tests.append(current_test)
+                current_test = ""
+            elif line.strip().startswith("=") and "passed" in line:
+                summary_line = line.strip()
+        proc.wait()
 
     log.info("Test exit code: %d", proc.returncode)
     log.info("Results written to: %s", results_log)
-    return proc.returncode
+
+    summary = {
+        "exit_code": proc.returncode,
+        "passed": passed_tests,
+        "failed": failed_tests,
+        "summary_line": summary_line.strip("= "),
+    }
+    return proc.returncode, summary
+
+
+def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
+    """Generate a plain-text summary report."""
+    import jax
+
+    status = "PASSED" if summary["exit_code"] == 0 else "FAILED"
+    devices = jax.devices()
+    gpu_name = str(devices[0]) if devices else "unknown"
+
+    lines = [
+        "RCCL JAX Collective Test Report",
+        "=" * 40,
+        f"Status:     {status}",
+        f"Date:       {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "",
+        f"JAX:        {jax.__version__}",
+        f"RCCL:       {rccl_lib}",
+        f"GPUs:       {len(devices)}x {gpu_name}",
+        "",
+        f"Results:    {summary['summary_line']}",
+        "",
+    ]
+
+    if summary["failed"]:
+        lines.append(f"FAILED tests ({len(summary['failed'])}):")
+        for name in summary["failed"]:
+            lines.append(f"  FAIL  {name}")
+        lines.append("")
+
+    if summary["passed"]:
+        lines.append(f"PASSED tests ({len(summary['passed'])}):")
+        for name, duration in summary["passed"]:
+            lines.append(f"  OK    {name:60s} {duration}")
+        lines.append("")
+
+    run_url = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_url and repo and run_id:
+        lines.append(f"CI run: {run_url}/{repo}/actions/runs/{run_id}")
+
+    return "\n".join(lines)
+
+
+def write_github_summary(report: str) -> None:
+    """Write report to GITHUB_STEP_SUMMARY if available."""
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a") as f:
+            f.write("```\n")
+            f.write(report)
+            f.write("\n```\n")
+        log.info("Summary written to GITHUB_STEP_SUMMARY")
+
+
+def send_email_report(report: str, recipient: str, status: str) -> None:
+    """Send the summary report via email."""
+    subject = f"RCCL JAX Collective Test: {status}"
+    msg = MIMEText(report)
+    msg["Subject"] = subject
+    msg["From"] = "rccl-ci@amd.com"
+    msg["To"] = recipient
+
+    smtp_servers = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
+    for server in smtp_servers:
+        try:
+            with smtplib.SMTP(server, timeout=10) as s:
+                s.sendmail(msg["From"], [recipient], msg.as_string())
+            log.info("Email sent to %s via %s", recipient, server)
+            return
+        except Exception as e:
+            log.debug("SMTP %s failed: %s", server, e)
+            continue
+    log.warning("Could not send email to %s (tried: %s)", recipient, ", ".join(smtp_servers))
 
 
 def set_github_output(key: str, value: str) -> None:
@@ -219,6 +327,12 @@ def main() -> None:
         type=Path,
         default=Path("jax_collective_results.log"),
         help="Path for test results log file",
+    )
+    parser.add_argument(
+        "--notify-email",
+        type=str,
+        default="",
+        help="Send summary report to this email address",
     )
     parser.add_argument(
         "--discover-only",
@@ -252,7 +366,21 @@ def main() -> None:
 
     # Step 5: Print environment info and run tests
     print_environment_info()
-    exit_code = run_tests(args.jax_src, args.results_log)
+    exit_code, summary = run_tests(args.jax_src, args.results_log)
+
+    # Step 6: Generate and distribute summary report
+    report = generate_summary_report(summary, rccl_lib)
+    log.info("\n%s", report)
+    write_github_summary(report)
+
+    summary_path = args.results_log.parent / "jax_collective_summary.txt"
+    summary_path.write_text(report)
+    log.info("Summary written to: %s", summary_path)
+
+    if args.notify_email:
+        status = "PASSED" if exit_code == 0 else "FAILED"
+        send_email_report(report, args.notify_email, status)
+
     sys.exit(exit_code)
 
 

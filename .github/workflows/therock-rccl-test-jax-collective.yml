@@ -11,6 +11,9 @@ on:
         type: string
       artifact_run_id:
         type: string
+      notify_email:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -21,6 +24,10 @@ on:
         type: string
       artifact_run_id:
         type: string
+      notify_email:
+        description: 'Email address to send test summary report'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -96,15 +103,22 @@ jobs:
         env:
           NCCL_DEBUG: INFO
         run: |
+          NOTIFY_ARGS=""
+          if [ -n "${{ inputs.notify_email }}" ]; then
+            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
+          fi
           python rocm-systems/.github/scripts/test_jax_collective.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --jax-src ${{ env.JAX_SRC }} \
-            --results-log ${{ env.JAX_SRC }}/jax_collective_results.log
+            --results-log ${{ env.JAX_SRC }}/jax_collective_results.log \
+            $NOTIFY_ARGS
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: jax-collective-results-${{ inputs.amdgpu_families }}
-          path: ${{ env.JAX_SRC }}/jax_collective_results.log
+          path: |
+            ${{ env.JAX_SRC }}/jax_collective_results.log
+            ${{ env.JAX_SRC }}/jax_collective_summary.txt
           retention-days: 14
