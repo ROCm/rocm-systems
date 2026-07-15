@@ -1,6 +1,5 @@
 {
   "iree": [
-    "iree.gfx942.e2e.pack_i8.static_pack_vnni_lhs_large"
   ],
   "cts": [
     "cts.gfx942.fpsan.fpsan_smfmac_cdna3_test",
@@ -22,7 +21,6 @@
     "cts.gfx942.fpsan.fpsan_mfma_cdna3_f32_32x32_test"
   ],
   "kernels": [
-    "hip_streamk_two_tile::m256_n256_k256",
     "llama_mul_mat_vec_q::default",
     "llama_rms_norm::default"
   ]
