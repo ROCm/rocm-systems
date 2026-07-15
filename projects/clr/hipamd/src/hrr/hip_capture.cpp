@@ -92,6 +92,35 @@ static thread_local dim3        g_pushed_block{};
 static thread_local size_t      g_pushed_shared{};
 static thread_local hipStream_t g_pushed_stream{};
 
+// ROCclr dispatch-time kernarg capture (see hip_hrr_aql_hook.h / rocvirtual.cpp).
+struct DispatchLaunchTls {
+  bool          valid   = false;
+  bool          is_ext  = false;
+  hipFunction_t func    = nullptr;
+  hipStream_t   stream  = nullptr;
+  uint32_t    gx = 0, gy = 0, gz = 0;
+  uint32_t    bx = 0, by = 0, bz = 0;
+  uint32_t    shared_mem = 0;
+};
+static thread_local DispatchLaunchTls g_dispatch_tls{};
+static thread_local bool              g_skip_record_launch_cijk = false;
+
+static bool dispatch_kernarg_capture_enabled() {
+  static const bool on = []() {
+    const char* v = std::getenv("HIP_HRR_CAPTURE_DISPATCH_KERNARG");
+    return v != nullptr && v[0] != '\0' && v[0] != '0';
+  }();
+  return on && hip_capture_enabled();
+}
+
+static void stash_dispatch_launch_ctx(hipFunction_t f, bool is_ext, hipStream_t stream,
+                                    uint32_t gx, uint32_t gy, uint32_t gz,
+                                    uint32_t bx, uint32_t by, uint32_t bz,
+                                    uint32_t shared_mem) {
+  if (!dispatch_kernarg_capture_enabled()) return;
+  g_dispatch_tls = {true, is_ext, f, stream, gx, gy, gz, bx, by, bz, shared_mem};
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -275,6 +304,19 @@ static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
   hip::tls.last_error_         = saved_err;
 }
 
+static void append_kernarg_snapshot(std::vector<uint8_t>& payload,
+                                    const hrr_cap::Hash128& hash, size_t sz) {
+  auto push_u64 = [&](uint64_t v) {
+    for (int i = 0; i < 8; i++) payload.push_back(static_cast<uint8_t>(v >> (i * 8)));
+  };
+  push_u64(0);
+  push_u64(0);
+  push_u64(sz);
+  push_u64(hash.lo);
+  push_u64(hash.hi);
+  payload.push_back(0);
+}
+
 static void serialize_kernel_launch(
     const char*                 kernel_name,
     const void*                 func_key,
@@ -286,7 +328,10 @@ static void serialize_kernel_launch(
     void**                      kernel_params,
     const void*                 kbuf,
     size_t                      ksz,
-    hrr_cap::Hash128            co_hash)
+    hrr_cap::Hash128            co_hash,
+    uint32_t                    api_id = HRR_API_HIPMODULELAUNCHKERNEL,
+    const hrr_cap::Hash128*     kernarg_snapshot = nullptr,
+    size_t                      kernarg_snapshot_sz = 0)
 {
   // Reserve space for hrr_event_header at front; payload body follows.
   std::vector<uint8_t> payload(sizeof(hrr_event_header), 0);
@@ -324,12 +369,13 @@ static void serialize_kernel_launch(
   // already populated from prior H2D transfers).
   uint32_t n_all = sig.numParametersAll();
   uint16_t num_args = 0;
-  if (kbuf || kernel_params) {
+  const bool snapshot_only = (kernarg_snapshot != nullptr);
+  if (!snapshot_only && (kbuf || kernel_params)) {
     for (uint32_t i = 0; i < n_all; i++)
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  push_u16(0);  // num_snapshots
+  push_u16(snapshot_only ? 1 : 0);
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -382,7 +428,7 @@ static void serialize_kernel_launch(
   // silently corrupting the event. Detect it and drop the launch loudly below.
   bool arg_oversized = false;
 
-  if (kbuf && ksz > 0) {
+  if (!snapshot_only && kbuf && ksz > 0) {
     const auto* buf_bytes = static_cast<const uint8_t*>(kbuf);
     if (dbg) {
       uint32_t need = 0;
@@ -405,7 +451,7 @@ static void serialize_kernel_launch(
           (desc.offset_ + sz <= ksz) ? buf_bytes + desc.offset_ : nullptr;
       emit_arg(i, desc.type_ == T_POINTER, bytes, sz);
     }
-  } else if (kernel_params) {
+  } else if (!snapshot_only && kernel_params) {
     uint32_t param_idx = 0;
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
@@ -417,6 +463,9 @@ static void serialize_kernel_launch(
       param_idx++;
     }
   }
+
+  if (snapshot_only && kernarg_snapshot)
+    append_kernarg_snapshot(payload, *kernarg_snapshot, kernarg_snapshot_sz);
 
   // payload_length is a uint32_t (wire v4), so the practical ceiling is ~4 GiB —
   // a real launch never approaches it. A per-arg size that exceeds the uint16_t
@@ -435,7 +484,7 @@ static void serialize_kernel_launch(
         "kernel launch payload exceeds wire-format limits");
     return;
   }
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
+  hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
 }
@@ -787,14 +836,23 @@ hipError_t capture_hipModuleLaunchKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra) {
+  stash_dispatch_launch_ctx(f, false, stream,
+                          gridDimX, gridDimY, gridDimZ,
+                          blockDimX, blockDimY, blockDimZ,
+                          static_cast<uint32_t>(sharedMemBytes));
   hipError_t r = g_real_table.hipModuleLaunchKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
       sharedMemBytes, stream, kernelParams, extra);
+  g_dispatch_tls.valid = false;
   if (r == hipSuccess) {
-    record_launch(f, gridDimX, gridDimY, gridDimZ,
-                     blockDimX, blockDimY, blockDimZ,
-                  sharedMemBytes, stream, kernelParams, extra);
+    if (g_skip_record_launch_cijk) {
+      g_skip_record_launch_cijk = false;
+    } else {
+      record_launch(f, gridDimX, gridDimY, gridDimZ,
+                       blockDimX, blockDimY, blockDimZ,
+                    sharedMemBytes, stream, kernelParams, extra);
+    }
   }
   return r;
 }
@@ -806,11 +864,19 @@ hipError_t capture_hipExtModuleLaunchKernel(
     size_t sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra,
     hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) {
+  stash_dispatch_launch_ctx(f, true, stream,
+                          globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+                          localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+                          static_cast<uint32_t>(sharedMemBytes));
   hipError_t r = g_real_table.hipExtModuleLaunchKernel_fn(
       f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
          localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
       sharedMemBytes, stream, kernelParams, extra, startEvent, stopEvent, flags);
+  g_dispatch_tls.valid = false;
   if (r == hipSuccess) {
+    if (g_skip_record_launch_cijk) {
+      g_skip_record_launch_cijk = false;
+    } else {
     // hipExtModuleLaunchKernel takes *global work-item counts* (HSA/OpenCL
     // semantics), whereas the unified launch event — and the
     // hipModuleLaunchKernel replay path — expects *workgroup counts*. Convert
@@ -827,6 +893,7 @@ hipError_t capture_hipExtModuleLaunchKernel(
                   ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
                   static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
+    }
   }
   return r;
 }
@@ -1449,6 +1516,37 @@ void hrr_install_clr_exception_handler() {
 }
 
 }  // namespace
+
+extern "C" void hip_hrr_record_dispatch_kernarg(const char* kernel_name,
+                                                uint64_t kernarg_dev_va,
+                                                const void* kernarg_host,
+                                                size_t kernarg_size,
+                                                uint32_t grid_x, uint32_t grid_y,
+                                                uint32_t grid_z, uint32_t block_x,
+                                                uint32_t block_y, uint32_t block_z,
+                                                uint32_t shared_mem) {
+  (void)kernarg_dev_va;
+  if (!dispatch_kernarg_capture_enabled()) return;
+  if (!kernel_name || std::strncmp(kernel_name, "Cijk_", 5) != 0) return;
+  if (!g_dispatch_tls.valid || !g_dispatch_tls.func || !kernarg_host || kernarg_size == 0)
+    return;
+  if (!hrr_cap::writer::is_open()) return;
+
+  amd::Kernel* kernel = hip::asKernel(g_dispatch_tls.func);
+  if (!kernel) return;
+
+  auto hash = hrr_cap::writer::write_blob(kernarg_host, kernarg_size);
+  const uint32_t api_id = g_dispatch_tls.is_ext ? HRR_API_HIPEXTMODULELAUNCHKERNEL
+                                                : HRR_API_HIPMODULELAUNCHKERNEL;
+  serialize_kernel_launch(
+      kernel_name, kernel,
+      grid_x, grid_y, grid_z, block_x, block_y, block_z, shared_mem,
+      g_dispatch_tls.stream, kernel->signature(), nullptr, nullptr, 0,
+      hrr_cap::Hash128{0, 0}, api_id, &hash, kernarg_size);
+  hrr_cap::writer::checkpoint();
+
+  g_skip_record_launch_cijk = true;
+}
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;

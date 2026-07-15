@@ -361,11 +361,13 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t, always 0)
+//   [+30..31] num_snapshots (uint16_t)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
 //             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
 //                         3=scalar/struct with embedded gpu pointer(s);
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
+//   per snapshot (dispatch-time kernarg): ptr_handle, offset, length,
+//             hash_lo, hash_hi, direction (41 bytes)
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
@@ -381,6 +383,76 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 // hipExtModuleLaunchKernel is declared via <hip/hip_ext.h> (included at the top
 // of this file behind a -Wattributes diagnostic guard) so the prototype always
 // tracks the library ABI instead of a hand-maintained copy.
+static bool replay_launch_snapshot_enabled() {
+    const char* v = std::getenv("HIP_HRR_REPLAY_LAUNCH_SNAPSHOT");
+    if (!v) return true;
+    return v[0] != '\0' && v[0] != '0';
+}
+
+struct LaunchWireSnapshot {
+    uint64_t ptr_handle = 0;
+    uint64_t offset     = 0;
+    uint64_t length     = 0;
+    uint64_t hash_lo    = 0;
+    uint64_t hash_hi    = 0;
+    uint8_t  direction  = 0;
+};
+
+static void translate_words_in_kernarg(std::vector<uint8_t>& buf, PlaybackContext& ctx) {
+    static const bool ptr_relax =
+        (std::getenv("HIP_HRR_PTR_RELAX") != nullptr);
+    auto pointer_like = [&](uint64_t v) -> bool {
+        if (ptr_relax) return true;
+        return (v & 0xFFFFFFFFULL) >= 0x10000ULL;
+    };
+    std::vector<char> handled(buf.size(), 0);
+    for (size_t off = 0; off + 8 <= buf.size(); ) {
+        if (handled[off]) { off += 1; continue; }
+        uint64_t rec = 0;
+        memcpy(&rec, buf.data() + off, 8);
+        if (rec < 0x10000ULL) { off += 1; continue; }
+        if (!pointer_like(rec)) { off += 1; continue; }
+        void* live = ctx.translate_ptr(rec);
+        if (live) {
+            memcpy(buf.data() + off, &live, sizeof(void*));
+            for (int b = 0; b < 8; b++) handled[off + b] = 1;
+            off += 8;
+        } else {
+            off += 1;
+        }
+    }
+}
+
+static void restore_launch_snapshots(PlaybackContext& ctx,
+                                     const std::vector<LaunchWireSnapshot>& snapshots,
+                                     std::vector<uint8_t>& packed_kernarg_out,
+                                     size_t& packed_kernarg_sz) {
+    packed_kernarg_out.clear();
+    packed_kernarg_sz = 0;
+    if (!replay_launch_snapshot_enabled() || snapshots.empty()) return;
+
+    for (const auto& snap : snapshots) {
+        if (snap.direction != 0) continue;
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(snap.hash_lo, snap.hash_hi, &blob_sz);
+        if (!blob || snap.length == 0) continue;
+        const size_t use_sz = std::min(static_cast<size_t>(snap.length), blob_sz);
+
+        if (snap.ptr_handle == 0) {
+            packed_kernarg_out.assign(static_cast<const uint8_t*>(blob),
+                                      static_cast<const uint8_t*>(blob) + use_sz);
+            translate_words_in_kernarg(packed_kernarg_out, ctx);
+            packed_kernarg_sz = use_sz;
+            continue;
+        }
+
+        void* dst = ctx.translate_ptr(snap.ptr_handle);
+        if (!dst) continue;
+        auto* live_dst = static_cast<uint8_t*>(dst) + snap.offset;
+        (void)HRR_HIP_CHECK(hipMemcpy(live_dst, blob, use_sz, hipMemcpyHostToDevice));
+    }
+}
+
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool ext_global_worksize = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
@@ -645,6 +717,23 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         arg_ptrs.push_back(storage.data());
     }
 
+    std::vector<LaunchWireSnapshot> launch_snaps;
+    for (uint16_t i = 0; i < num_snapshots; i++) {
+        if (p + 41 > end) break;
+        LaunchWireSnapshot snap{};
+        memcpy(&snap.ptr_handle, p, 8); p += 8;
+        memcpy(&snap.offset,     p, 8); p += 8;
+        memcpy(&snap.length,     p, 8); p += 8;
+        memcpy(&snap.hash_lo,    p, 8); p += 8;
+        memcpy(&snap.hash_hi,    p, 8); p += 8;
+        snap.direction = *p++;
+        launch_snaps.push_back(snap);
+    }
+
+    std::vector<uint8_t> packed_kernarg_buf;
+    size_t packed_kernarg_sz = 0;
+    restore_launch_snapshots(ctx, launch_snaps, packed_kernarg_buf, packed_kernarg_sz);
+
     hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
@@ -719,7 +808,30 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     {
         bool is_sp3 = (kernel_name.find("Sp3") != std::string::npos ||
                        kernel_name.find("sp3") != std::string::npos);
-        if (is_sp3 && !arg_ptrs.empty()) {
+        if (packed_kernarg_sz > 0) {
+            size_t extra_sz = packed_kernarg_sz;
+            void* extra[5] = {
+                HIP_LAUNCH_PARAM_BUFFER_POINTER, packed_kernarg_buf.data(),
+                HIP_LAUNCH_PARAM_BUFFER_SIZE,    &extra_sz,
+                HIP_LAUNCH_PARAM_END
+            };
+            if (ext_global_worksize) {
+                r = hipExtModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    nullptr, extra,
+                    nullptr, nullptr, 0);
+            } else {
+                r = hipModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    nullptr, extra);
+            }
+        } else if (is_sp3 && !arg_ptrs.empty()) {
             // Compute kernarg layout from captured arg sizes using natural alignment.
             // Each arg aligns to its own size (max 8). Hidden args are zero-padded
             // at the end by over-allocating the buffer.

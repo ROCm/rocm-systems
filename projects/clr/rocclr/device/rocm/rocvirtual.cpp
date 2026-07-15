@@ -20,6 +20,8 @@
 #include "platform/sampler.hpp"
 #include "utils/debug.hpp"
 #include "os/os.hpp"
+#include "device/rocm/rocrctx.hpp"
+#include "hip_hrr_aql_hook.h"
 
 #include <fstream>
 #include <limits>
@@ -4823,6 +4825,29 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
                                         gpuKernel.MetadataPreloadLength(),
                                         gpuKernel.MetadataPreloadOffset());
+
+    // HRR: record Cijk dispatch-time kernarg before GPU executes (survives MAF abort).
+    if (!isGraphCapture && argSize > 0) {
+      const char* kname = gpuKernel.getDemangledName().c_str();
+      if (kname[0] == 'C' && kname[1] == 'i' && kname[2] == 'j' && kname[3] == 'k' &&
+          kname[4] == '_') {
+        static const bool hrr_dispatch_snap = []() {
+          const char* cap = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+          const char* en  = std::getenv("HIP_HRR_CAPTURE_DISPATCH_KERNARG");
+          return cap && cap[0] != '\0' && en && en[0] != '\0' && en[0] != '0';
+        }();
+        if (hrr_dispatch_snap) {
+          std::vector<uint8_t> host_kernarg(argSize);
+          if (Hsa::memory_copy(host_kernarg.data(), argBuffer, argSize) == HSA_STATUS_SUCCESS) {
+            hip_hrr_record_dispatch_kernarg(
+                kname, reinterpret_cast<uint64_t>(argBuffer), host_kernarg.data(), argSize,
+                newGlobalSize[0], newGlobalSize[1], newGlobalSize[2],
+                dispatchPacket.workgroup_size_x, dispatchPacket.workgroup_size_y,
+                dispatchPacket.workgroup_size_z, static_cast<uint32_t>(sharedMemBytes));
+          }
+        }
+      }
+    }
 
     bool dispatched = extDispatchPacket
         ? dispatchAqlPacket(&dispatchPacketUnion.extKernelDispatch, aqlHeaderWithOrder, rest,
