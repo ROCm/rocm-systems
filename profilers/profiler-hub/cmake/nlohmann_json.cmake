@@ -5,7 +5,7 @@ include_guard(DIRECTORY)
 
 set(NLOHMANN_JSON_VERSION "3.11.3" CACHE STRING "nlohmann_json version")
 
-find_package(nlohmann_json QUIET)
+find_package(nlohmann_json ${NLOHMANN_JSON_VERSION} QUIET)
 
 if(nlohmann_json_FOUND)
     message(
