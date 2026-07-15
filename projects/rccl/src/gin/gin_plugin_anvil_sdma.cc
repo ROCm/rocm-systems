@@ -314,7 +314,7 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   uintptr_t* remote_vas_host =
       (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
   if (!remote_vas_host) {
-    (void)hipFree(mh->devHandle);
+    CUDACHECKIGNORE(hipFree(mh->devHandle));
     free(mh);
     return ncclSystemError;
   }
@@ -326,7 +326,7 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
       hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks,
                 hipMemcpyHostToDevice) != hipSuccess) {
     free(remote_vas_host);
-    (void)hipFree(mh->devHandle);
+    CUDACHECKIGNORE(hipFree(mh->devHandle));
     free(mh);
     return ncclSystemError;
   }
@@ -363,8 +363,8 @@ static ncclResult_t ginAnvilDeregMrSym(void* collComm, void* mhandle) {
       }
     }
   }
-  if (mh->devHandle) (void)hipFree(mh->devHandle);
-  if (mh->remote_vas_dev) (void)hipFree(mh->remote_vas_dev);
+  if (mh->devHandle) CUDACHECKIGNORE(hipFree(mh->devHandle));
+  if (mh->remote_vas_dev) CUDACHECKIGNORE(hipFree(mh->remote_vas_dev));
   free(mh);
   return ncclSuccess;
 }
@@ -422,7 +422,7 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
     return ncclSystemError;
   }
 
-  if (ctx->signal_remote_addrs_dev) (void)hipFree(ctx->signal_remote_addrs_dev);
+  if (ctx->signal_remote_addrs_dev) CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev));
   if (hipMalloc(&ctx->signal_remote_addrs_dev, sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess ||
       hipMemcpy(ctx->signal_remote_addrs_dev, hostAddrs, sizeof(uintptr_t) * (size_t)ctx->nRanks,
                 hipMemcpyHostToDevice) != hipSuccess) {
@@ -590,9 +590,9 @@ fail:
     if (ctx->signalsBound && ctx->gpuCtxHost.signals) {
       (void)ncclGinAnvilIpcTableUnregister(ctx->gpuCtxHost.signals);
     }
-    if (ctx->signal_remote_addrs_dev) (void)hipFree(ctx->signal_remote_addrs_dev);
-    if (ctx->gpuCtxHost.counters) (void)hipFree(ctx->gpuCtxHost.counters);
-    if (ctx->gpuCtxDev) (void)hipFree(ctx->gpuCtxDev);
+    if (ctx->signal_remote_addrs_dev) CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev));
+    if (ctx->gpuCtxHost.counters) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.counters));
+    if (ctx->gpuCtxDev) CUDACHECKIGNORE(hipFree(ctx->gpuCtxDev));
     free(ctx->devHandle);
     delete ctx;
   }
@@ -607,9 +607,9 @@ static ncclResult_t ginAnvilDestroyContext(void* ginCtx) {
   if (ctx->signalsBound && ctx->gpuCtxHost.signals) {
     (void)ncclGinAnvilIpcTableUnregister(ctx->gpuCtxHost.signals);
   }
-  if (ctx->signal_remote_addrs_dev) (void)hipFree(ctx->signal_remote_addrs_dev);
-  if (ctx->gpuCtxHost.counters) (void)hipFree(ctx->gpuCtxHost.counters);
-  if (ctx->gpuCtxDev) (void)hipFree(ctx->gpuCtxDev);
+  if (ctx->signal_remote_addrs_dev) CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev));
+  if (ctx->gpuCtxHost.counters) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.counters));
+  if (ctx->gpuCtxDev) CUDACHECKIGNORE(hipFree(ctx->gpuCtxDev));
   free(ctx->devHandle);
   delete ctx;
   return ncclSuccess;
