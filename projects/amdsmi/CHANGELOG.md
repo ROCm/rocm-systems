@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amd-smi --version` as an alias for the `amd-smi version` subcommand**.  
+  - `amd-smi --version` now produces the same output as `amd-smi version`, including its `--gpu_version`, `--cpu_version`, and `--nic_version` options.
+
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
   - `amdsmi_get_nic_processor_handles()` enumerates NIC processors by socket; the BDF, firmware, and port/vendor statistics getters are reserved and currently return `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`.

@@ -146,6 +146,11 @@ if __name__ == "__main__":
     else:
         sys.tracebacklimit = -1
 
+    # Treat a leading `--version` flag as the `version` subcommand so that
+    # `amd-smi --version` behaves identically to `amd-smi version`.
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "--version":
+        sys.argv[1] = "version"
+
     amd_smi_helpers = AMDSMIHelpers()
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(

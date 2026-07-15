@@ -33,6 +33,9 @@ class TestVersion(TestCliBase):
             ("amd-smi version", self.PASS),
             ("amd-smi version --cpu_version", self.PASS),
             ("amd-smi version --gpu_version", self.PASS),
+            # `--version` is an alias for the `version` subcommand.
+            ("amd-smi --version", self.PASS),
+            ("amd-smi --version --gpu_version", self.PASS),
         ]
 
         self.RunCmds(cmds)

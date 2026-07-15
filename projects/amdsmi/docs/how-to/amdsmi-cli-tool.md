@@ -77,7 +77,8 @@ amd-smi --rocm-smi
 For command-specific help, use `amd-smi [command] --help` for see more detailed
 usage information. See [Commands](#cmds).
 
-For more detailed version information, use `amd-smi version`.
+For more detailed version information, use `amd-smi version`. The `amd-smi
+--version` flag is an alias for this command.
 
 To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-smi`.
 See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
