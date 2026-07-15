@@ -7,7 +7,7 @@ Usage:
   run_waitcheck_gfx950_tensile_e2e.sh [options]
 
 Builds representative gfx950 TensileLite kernels and runs rj_waitcheck over the
-final loadable HSACO sidecars produced by Tensile.
+final loadable code objects produced by Tensile.
 
 Options:
   --waitcheck EXE       rj_waitcheck executable. Default: RJ_WAITCHECK or PATH.
@@ -21,7 +21,6 @@ Options:
   --config FILE         Tensile config, absolute or relative to TensileLite root.
                         May be passed more than once.
   --skip-generate       Scan existing work-dir outputs without rebuilding Tensile.
-  --scan-library-co     Also scan TensileLibrary_gfx950.co containers.
   -h, --help            Show this help.
 
 Environment:
@@ -61,7 +60,6 @@ rocm_path=${ROCM_PATH:-}
 python_exe=${PYTHON:-python}
 gpu_target=gfx950
 skip_generate=0
-scan_library_co=0
 configs=()
 
 if [[ -n "${WAITCHECK_TENSILE_CONFIGS:-}" ]]; then
@@ -110,7 +108,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --scan-library-co)
-      scan_library_co=1
+      # Retained as a no-op for compatibility. Library code objects are always scanned.
       shift
       ;;
     -h|--help)
@@ -230,13 +228,12 @@ for config in "${configs[@]}"; do
   mapfile -d '' objects < <(
     find "$case_work" -type f -name "Kernels.so-*-${gpu_target}*.hsaco" -print0 | sort -z
   )
-  if (( scan_library_co != 0 )); then
-    mapfile -d '' library_cos < <(
-      find "$case_work" -type f -name "TensileLibrary_${gpu_target}.co" -print0 | sort -z
-    )
-    objects+=("${library_cos[@]}")
-  fi
   [[ ${#objects[@]} -gt 0 ]] || die "no final HSACO sidecars found under $case_work"
+  mapfile -d '' library_cos < <(
+    find "$case_work" -type f -name "TensileLibrary_${gpu_target}.co" -print0 | sort -z
+  )
+  [[ ${#library_cos[@]} -gt 0 ]] || die "no final Tensile library code objects found under $case_work"
+  objects+=("${library_cos[@]}")
 
   for object in "${objects[@]}"; do
     "$rj_waitcheck" --target "$gpu_target" "$object"

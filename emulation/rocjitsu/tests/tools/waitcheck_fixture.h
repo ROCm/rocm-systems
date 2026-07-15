@@ -201,6 +201,14 @@ make_gfx1200_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
+[[nodiscard]] inline std::vector<uint8_t> make_relocatable_code_object(std::vector<uint8_t> image) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  ehdr.e_type = ET_REL;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  return image;
+}
+
 [[nodiscard]] inline std::vector<uint8_t>
 make_gfx942_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX942);

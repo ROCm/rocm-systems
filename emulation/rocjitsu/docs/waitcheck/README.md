@@ -150,15 +150,16 @@ rj_waitcheck path/to/generated/artifacts \
 ```
 
 Then rerun individual artifacts without `--summary-only` when you need the full
-diagnostic details. Prefer checking the final loadable code objects when a build
-also emits relocatable objects, container files, or other intermediate artifacts;
-intermediates may not have the same code-object shape as the image that is
-actually loaded.
+diagnostic details. Waitcheck rejects relocatable ELF objects because they are
+compiler intermediates rather than final loadable code objects. With
+`--skip-unsupported`, recursive corpus sweeps skip those intermediates and keep
+scanning loadable `.co` and `.hsaco` files.
 
 ## gfx950 Tensile E2E
 
 The optional `rj_waitcheck_gfx950_tensile_e2e` target builds a small TensileLite
-gfx950 corpus and checks the final loadable `Kernels.so-*.hsaco` sidecars:
+gfx950 corpus and checks both final loadable artifacts: the
+`TensileLibrary_gfx950.co` library and its `Kernels.so-*.hsaco` sidecars:
 
 ```sh
 ROCM_VENV=/path/to/therock/venv \
@@ -179,9 +180,11 @@ WAITCHECK_TENSILE_CONFIGS="Tensile/Tests/common/gemm/gfx950/bf16_cvt.yaml:Tensil
 cmake --build build --target rj_waitcheck_gfx950_tensile_e2e
 ```
 
-This target intentionally skips Tensile intermediate `.o` files and
-`TensileLibrary_gfx950.co` containers. Those artifacts need separate triage
-because they are not the final sidecar HSACOs loaded as individual kernels.
+This target intentionally skips Tensile intermediate `.o` files. The library
+`.co` is a loadable ELF code object (and is named by Tensile's generated client
+configuration), so waitcheck analyzes it rather than treating it as a container.
+Waitcheck analyzes each kernel entry point independently so large generated
+libraries do not retain whole-library CFG state in memory at once.
 
 ## Runtime HSA Tool
 

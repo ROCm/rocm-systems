@@ -438,18 +438,20 @@ struct CfgBlockView {
 };
 
 struct ScalarValueConstraint {
-  std::optional<int64_t> equal;
-  std::set<int64_t> not_equal;
+  std::optional<uint32_t> equal;
+  std::set<uint32_t> not_equal;
+  std::optional<uint32_t> unsigned_min;
+  std::optional<uint32_t> unsigned_max;
 };
 
 using ScalarConstraints = std::map<uint16_t, ScalarValueConstraint>;
 
 struct SccPredicate {
-  enum class Kind : uint8_t { EqImm };
+  enum class Kind : uint8_t { EqImm, GeUnsignedImm };
 
   Kind kind = Kind::EqImm;
   uint16_t sgpr = 0;
-  int64_t value = 0;
+  uint32_t value = 0;
 };
 
 struct Analyzer {
@@ -577,6 +579,8 @@ private:
     cfg_view_index_.clear();
     cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
+    reverse_reachability_cache_.clear();
+    forward_reachability_cache_.clear();
 
     cfg_views_.reserve(blocks.size());
     for (const auto &block : blocks) {
@@ -598,6 +602,8 @@ private:
     cfg_view_index_.clear();
     cfg_block_by_start_offset_.clear();
     feasible_path_cache_.clear();
+    reverse_reachability_cache_.clear();
+    forward_reachability_cache_.clear();
   }
 
   void record_diagnostic(WaitcheckDiagnostic diag) {
@@ -1767,6 +1773,58 @@ private:
     });
   }
 
+  [[nodiscard]] const std::vector<uint8_t> &blocks_reaching(size_t target_block_index) {
+    if (auto cached = reverse_reachability_cache_.find(target_block_index);
+        cached != reverse_reachability_cache_.end())
+      return cached->second;
+
+    std::vector<uint8_t> reachable(cfg_views_.size());
+    std::vector<size_t> worklist{target_block_index};
+    while (!worklist.empty()) {
+      const size_t block_index = worklist.back();
+      worklist.pop_back();
+      if (reachable[block_index] != 0)
+        continue;
+      reachable[block_index] = 1;
+      const BasicBlock *block = cfg_views_[block_index].block;
+      if (block == nullptr)
+        continue;
+      for (const BasicBlock *predecessor : block->predecessors()) {
+        const auto predecessor_it = cfg_view_index_.find(predecessor);
+        if (predecessor_it != cfg_view_index_.end())
+          worklist.push_back(predecessor_it->second);
+      }
+    }
+    return reverse_reachability_cache_.emplace(target_block_index, std::move(reachable))
+        .first->second;
+  }
+
+  [[nodiscard]] const std::vector<uint8_t> &blocks_reachable_from(size_t source_block_index) {
+    if (auto cached = forward_reachability_cache_.find(source_block_index);
+        cached != forward_reachability_cache_.end())
+      return cached->second;
+
+    std::vector<uint8_t> reachable(cfg_views_.size());
+    std::vector<size_t> worklist{source_block_index};
+    while (!worklist.empty()) {
+      const size_t block_index = worklist.back();
+      worklist.pop_back();
+      if (reachable[block_index] != 0)
+        continue;
+      reachable[block_index] = 1;
+      const BasicBlock *block = cfg_views_[block_index].block;
+      if (block == nullptr)
+        continue;
+      for (const BasicBlock *successor : block->successors()) {
+        const auto successor_it = cfg_view_index_.find(successor);
+        if (successor_it != cfg_view_index_.end())
+          worklist.push_back(successor_it->second);
+      }
+    }
+    return forward_reachability_cache_.emplace(source_block_index, std::move(reachable))
+        .first->second;
+  }
+
   [[nodiscard]] std::optional<size_t> cfg_block_index_containing(uint64_t section_offset) const {
     for (size_t i = 0; i < cfg_views_.size(); ++i) {
       const BasicBlock *block = cfg_views_[i].block;
@@ -1831,7 +1889,12 @@ private:
   }
 
   [[nodiscard]] static std::optional<SccPredicate> scalar_scc_predicate(const Instruction &inst) {
-    if (inst.mnemonic() != "s_cmp_eq_u32")
+    SccPredicate::Kind kind;
+    if (inst.mnemonic() == "s_cmp_eq_u32")
+      kind = SccPredicate::Kind::EqImm;
+    else if (inst.mnemonic() == "s_cmp_ge_u32")
+      kind = SccPredicate::Kind::GeUnsignedImm;
+    else
       return std::nullopt;
     const Operand *lhs = inst.src_operand(0);
     const Operand *rhs = inst.src_operand(1);
@@ -1840,10 +1903,12 @@ private:
 
     auto lhs_ref = lhs->to_register_ref();
     auto rhs_imm = parse_operand_immediate(rhs);
-    if (!lhs_ref || lhs_ref->cls != RegClass::SGPR || lhs_ref->width != 1 || !rhs_imm)
+    if (!lhs_ref || lhs_ref->cls != RegClass::SGPR || lhs_ref->width != 1 || !rhs_imm ||
+        *rhs_imm < std::numeric_limits<int32_t>::min() ||
+        *rhs_imm > std::numeric_limits<uint32_t>::max())
       return std::nullopt;
 
-    return SccPredicate{SccPredicate::Kind::EqImm, lhs_ref->index, *rhs_imm};
+    return SccPredicate{kind, lhs_ref->index, static_cast<uint32_t>(*rhs_imm)};
   }
 
   [[nodiscard]] static bool is_scc_conditional_branch(std::string_view mnemonic) {
@@ -1857,22 +1922,52 @@ private:
     if (!predicate)
       return true;
 
+    ScalarValueConstraint &constraint = constraints[predicate->sgpr];
+    auto is_satisfiable = [&]() {
+      if (constraint.unsigned_min && constraint.unsigned_max &&
+          *constraint.unsigned_min > *constraint.unsigned_max)
+        return false;
+      if (constraint.equal) {
+        if (constraint.not_equal.contains(*constraint.equal))
+          return false;
+        if (constraint.unsigned_min && *constraint.equal < *constraint.unsigned_min)
+          return false;
+        if (constraint.unsigned_max && *constraint.equal > *constraint.unsigned_max)
+          return false;
+      }
+      if (constraint.unsigned_min && constraint.unsigned_max &&
+          *constraint.unsigned_min == *constraint.unsigned_max &&
+          constraint.not_equal.contains(*constraint.unsigned_min))
+        return false;
+      return true;
+    };
+
     switch (predicate->kind) {
-    case SccPredicate::Kind::EqImm: {
-      ScalarValueConstraint &constraint = constraints[predicate->sgpr];
+    case SccPredicate::Kind::EqImm:
       if (branch_condition_true) {
         if (constraint.equal && *constraint.equal != predicate->value)
           return false;
         if (constraint.not_equal.contains(predicate->value))
           return false;
         constraint.equal = predicate->value;
-        return true;
+        return is_satisfiable();
       }
       if (constraint.equal && *constraint.equal == predicate->value)
         return false;
       constraint.not_equal.insert(predicate->value);
-      return true;
-    }
+      return is_satisfiable();
+    case SccPredicate::Kind::GeUnsignedImm:
+      if (branch_condition_true) {
+        if (!constraint.unsigned_min || *constraint.unsigned_min < predicate->value)
+          constraint.unsigned_min = predicate->value;
+      } else {
+        if (predicate->value == 0)
+          return false;
+        const uint32_t upper_bound = predicate->value - 1;
+        if (!constraint.unsigned_max || *constraint.unsigned_max > upper_bound)
+          constraint.unsigned_max = upper_bound;
+      }
+      return is_satisfiable();
     }
     return true;
   }
@@ -1885,12 +1980,17 @@ private:
       if (constraint.equal)
         os << *constraint.equal;
       os << '!';
-      for (int64_t value : constraint.not_equal)
+      for (uint32_t value : constraint.not_equal)
         os << value << ',';
+      if (constraint.unsigned_min)
+        os << ">=" << *constraint.unsigned_min;
+      if (constraint.unsigned_max)
+        os << "<=" << *constraint.unsigned_max;
       os << ';';
     }
     if (predicate)
-      os << "scc:eq:s" << predicate->sgpr << ':' << predicate->value;
+      os << "scc:" << static_cast<unsigned>(predicate->kind) << ":s" << predicate->sgpr << ':'
+         << predicate->value;
     return os.str();
   }
 
@@ -1926,41 +2026,30 @@ private:
       feasible_path_cache_[cache_key] = true;
       return true;
     }
-    std::set<size_t> can_reach_consumer;
-    std::vector<size_t> reverse_worklist{*consumer_block_index};
-    while (!reverse_worklist.empty()) {
-      const size_t block_index = reverse_worklist.back();
-      reverse_worklist.pop_back();
-      if (!can_reach_consumer.insert(block_index).second)
-        continue;
-      const BasicBlock *block = cfg_views_[block_index].block;
-      if (block == nullptr)
-        continue;
-      for (const BasicBlock *predecessor : block->predecessors()) {
-        const auto predecessor_it = cfg_view_index_.find(predecessor);
-        if (predecessor_it != cfg_view_index_.end())
-          reverse_worklist.push_back(predecessor_it->second);
-      }
-    }
-    if (!can_reach_consumer.contains(*producer_block_index)) {
+    (void)blocks_reaching(*consumer_block_index);
+    (void)blocks_reaching(*producer_block_index);
+    (void)blocks_reachable_from(*producer_block_index);
+    const auto &can_reach_consumer = reverse_reachability_cache_.at(*consumer_block_index);
+    const auto &can_reach_producer = reverse_reachability_cache_.at(*producer_block_index);
+    const auto &reachable_from_producer = forward_reachability_cache_.at(*producer_block_index);
+    if (can_reach_consumer[*producer_block_index] == 0) {
       feasible_path_cache_[cache_key] = false;
       return false;
     }
 
-    std::set<size_t> can_reach_producer;
-    reverse_worklist.push_back(*producer_block_index);
-    while (!reverse_worklist.empty()) {
-      const size_t block_index = reverse_worklist.back();
-      reverse_worklist.pop_back();
-      if (!can_reach_producer.insert(block_index).second)
+    // Only scalar predicates repeated after the producer can correlate the path
+    // that selected a producer with the path to its consumer. Tracking unrelated
+    // comparisons across large dispatch CFGs creates a combinatorial number of
+    // equivalent search states without improving feasibility precision.
+    std::set<std::tuple<SccPredicate::Kind, uint16_t, uint32_t>> relevant_predicates;
+    for (size_t block_index = 0; block_index < cfg_views_.size(); ++block_index) {
+      if (reachable_from_producer[block_index] == 0 || can_reach_consumer[block_index] == 0)
         continue;
-      const BasicBlock *block = cfg_views_[block_index].block;
-      if (block == nullptr)
-        continue;
-      for (const BasicBlock *predecessor : block->predecessors()) {
-        const auto predecessor_it = cfg_view_index_.find(predecessor);
-        if (predecessor_it != cfg_view_index_.end())
-          reverse_worklist.push_back(predecessor_it->second);
+      for (const CfgInstructionView &inst_view : cfg_views_[block_index].instructions) {
+        if (inst_view.section_offset < event.section_offset)
+          continue;
+        if (const auto predicate = scalar_scc_predicate(*inst_view.instruction))
+          relevant_predicates.emplace(predicate->kind, predicate->sgpr, predicate->value);
       }
     }
 
@@ -1978,7 +2067,7 @@ private:
     std::vector<SearchState> worklist;
     for (size_t i = 0; i < cfg_views_.size(); ++i) {
       const BasicBlock *block = cfg_views_[i].block;
-      if (block != nullptr && block->predecessors().empty() && can_reach_producer.contains(i))
+      if (block != nullptr && block->predecessors().empty() && can_reach_producer[i] != 0)
         worklist.push_back({i, 0, false, 0, {}, std::nullopt});
     }
     if (worklist.empty())
@@ -1987,8 +2076,7 @@ private:
     size_t states_processed = 0;
 
     auto can_continue_from = [&](size_t block_index, bool pending) {
-      return pending ? can_reach_consumer.contains(block_index)
-                     : can_reach_producer.contains(block_index);
+      return pending ? can_reach_consumer[block_index] != 0 : can_reach_producer[block_index] != 0;
     };
 
     while (!worklist.empty()) {
@@ -2044,7 +2132,10 @@ private:
       invalidate_redefined_scalar_constraints(state.constraints, du);
 
       if (const auto predicate = scalar_scc_predicate(inst)) {
-        state.scc_predicate = predicate;
+        if (relevant_predicates.contains({predicate->kind, predicate->sgpr, predicate->value}))
+          state.scc_predicate = predicate;
+        else
+          state.scc_predicate.reset();
       } else if (is_scc_conditional_branch(inst.mnemonic())) {
         const auto branch_delta = inst.branch_offset_bytes();
         const auto fallthrough_offset =
@@ -2541,6 +2632,8 @@ private:
   std::unordered_map<const BasicBlock *, size_t> cfg_view_index_;
   std::unordered_map<uint64_t, size_t> cfg_block_by_start_offset_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind>, bool> feasible_path_cache_;
+  std::map<size_t, std::vector<uint8_t>> reverse_reachability_cache_;
+  std::map<size_t, std::vector<uint8_t>> forward_reachability_cache_;
 };
 
 } // namespace
@@ -2616,6 +2709,16 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
     return report;
   }
 
+  if (code_object.image_size() >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr ehdr{};
+    std::memcpy(&ehdr, code_object.image_data(), sizeof(ehdr));
+    if (std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE) == 0 && ehdr.e_type == ET_REL) {
+      report.supported = false;
+      report.analysis_error = "relocatable AMDGPU objects are not final loadable code objects";
+      return report;
+    }
+  }
+
   Analyzer analyzer(report, options);
   auto decoder = Decoder::create(arch);
   if (!decoder) {
@@ -2633,7 +2736,10 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
-    } else if (options.stop_after_first_diagnostic) {
+    } else {
+      // Analyze each kernel independently. Building one combined CFG for a
+      // multi-kernel library keeps two large wait states per basic block alive
+      // at once; generated Tensile libraries can contain hundreds of kernels.
       for (uint64_t entry_offset : entry_offsets) {
         const std::array<uint64_t, 1> entry{entry_offset};
         std::vector<std::unique_ptr<BasicBlock>> blocks =
@@ -2642,10 +2748,6 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
         if (!report.supported || report.stopped_early)
           break;
       }
-    } else {
-      std::vector<std::unique_ptr<BasicBlock>> blocks =
-          BasicBlock::build_reachable(code_object, *decoder, entry_offsets);
-      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
     }
   } catch (const util::Exception &ex) {
     report.supported = false;
