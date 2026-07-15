@@ -224,18 +224,6 @@ set_target_properties(
     PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
-# fmt is the one third-party dependency exported in the install interface: the
-# static library calls into it and cannot resolve it on its own. Exporting a
-# link requirement is only valid when fmt is an imported package - a
-# FetchContent-built fmt target is not part of our export set and cannot be
-# referenced by the installed targets file. When fmt is vendored, keep it
-# build-only.
-if(fmt_FOUND)
-    set(profiler_hub_fmt_link fmt::fmt)
-else()
-    set(profiler_hub_fmt_link $<BUILD_INTERFACE:fmt::fmt>)
-endif()
-
 foreach(_target profiler-hub profiler-hub-static)
     target_include_directories(
         ${_target}
@@ -247,18 +235,17 @@ foreach(_target profiler-hub profiler-hub-static)
     target_link_libraries(
         ${_target}
         PRIVATE
-            $<BUILD_INTERFACE:profiler-hub_queries>
-            $<BUILD_INTERFACE:profiler-hub-sqlite3>
-            $<BUILD_INTERFACE:spdlog::spdlog>
-            ${profiler_hub_fmt_link}
-            $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+            profiler-hub_queries
+            profiler-hub-sqlite3
+            spdlog::spdlog
+            fmt::fmt
+            nlohmann_json::nlohmann_json
     )
 
     if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
         target_link_libraries(
             ${_target}
-            PRIVATE
-                $<BUILD_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>
+            PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
         )
     endif()
 
@@ -269,6 +256,30 @@ foreach(_target profiler-hub profiler-hub-static)
         )
     endif()
 endforeach()
+
+# CMake automatically copies a STATIC library's PRIVATE link dependencies
+# into its own INTERFACE_LINK_LIBRARIES, because a static archive does not
+# resolve its own undefined symbols - consumers must supply them at their
+# final link step. None of the dependencies above are part of this package's
+# export set (they are either vendored in-build-tree targets or otherwise
+# not installed/exported), so leaving them in the exported interface breaks
+# `install(EXPORT ...)`: wrapping the reference in `$<BUILD_INTERFACE:>`
+# genexps does not help, because CMake's export validation still resolves
+# and flags the underlying target even when the genexp only ever evaluates
+# to empty for the installed configuration. fmt is the sole exception
+# real consumers may need to resolve themselves, and only when it is a
+# genuine `find_package()`-imported target that they too can find.
+if(fmt_FOUND)
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:fmt::fmt>"
+    )
+else()
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES INTERFACE_LINK_LIBRARIES ""
+    )
+endif()
 
 # ------------------------------------------------------------ #
 # Install package support
