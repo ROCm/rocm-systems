@@ -238,7 +238,7 @@ resolve_attach_tid(pid_t pid)
 }
 
 rocattach_status_t
-validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
+validate_target_tool_path(pid_t pid, std::string_view tool_lib_path)
 {
     auto tool_path = std::filesystem::path{tool_lib_path};
     if(tool_path.empty()) return ROCATTACH_STATUS_SUCCESS;
@@ -261,11 +261,11 @@ validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
             return ROCATTACH_STATUS_SUCCESS;
         }
 
-        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
-                     << "' is absolute but is not visible at " << target_path.string()
-                     << " from the target process mount namespace. Attachment requires "
-                        "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
-                        "dlopen can resolve.";
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+                   << "' is absolute but is not visible at " << target_path.string()
+                   << " from the target process mount namespace. Attachment requires "
+                      "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
+                      "dlopen can resolve.";
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
@@ -282,9 +282,9 @@ validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
             return ROCATTACH_STATUS_SUCCESS;
         }
 
-        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
-                     << "' is absolute but does not refer to a regular file at "
-                     << target_path.string() << " from the target process mount namespace.";
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+                   << "' is absolute but does not refer to a regular file at "
+                   << target_path.string() << " from the target process mount namespace.";
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
@@ -306,10 +306,23 @@ setup(int pid)
     // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
     // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
     // helper to inject an arbitrary library.
-    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
-                                        ? std::string{"librocprofiler-sdk-tool.so"}
-                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
-                                                                "librocprofiler-sdk-tool.so");
+    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so"};
+    auto           tool_lib_path_env     = std::string{default_tool_lib_path};
+    auto           tool_lib_path_override =
+        rocprofiler::common::get_env_optional("ROCPROF_ATTACH_TOOL_LIBRARY");
+    if(rocprofiler::common::is_at_secure())
+    {
+        if(tool_lib_path_override)
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Ignoring ROCPROF_ATTACH_TOOL_LIBRARY "
+                            "override in secure-execution context; using generic tool library "
+                         << default_tool_lib_path;
+        }
+    }
+    else if(tool_lib_path_override)
+    {
+        tool_lib_path_env = *tool_lib_path_override;
+    }
     const char* tool_lib_path     = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
     status = validate_target_tool_path(pid, tool_lib_path_env);
