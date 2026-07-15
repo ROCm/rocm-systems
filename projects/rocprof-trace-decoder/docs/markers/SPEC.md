@@ -142,12 +142,12 @@ residue = (uint32_t(record_time) - sampled_window) & window_mask
 ```
 
 Within each `(shader engine, CU, SIMD, clock_bits, shader_clock_shift)` domain,
-sort residues, find the largest circular gap, and unwrap after it. If the
-unwrapped span exceeds half the window, emit one warning for that domain but
-still use the deterministic first largest-gap reference. With
-`relative = (residue - unwrap_start) & window_mask`, shift a header earlier by
-`max(0, relative - (bucket_size - 1))`. This cancels the unknown phase while
-never assuming the omitted low clock bits.
+the implementation assumes the delivery delay does not wrap the sampled
+window. Keep the smallest residue as the reference. With
+`relative = residue - minimum_residue`, shift a header earlier by
+`max(0, relative - (bucket_size - 1))`; the fixed phase cancels in that
+difference. If the delay range exceeds half the window, emit one warning for
+that domain but still correct it.
 
 `att_tool.py` applies this correction while writing JSON by default;
 `--no-decode-markers` preserves the packed values and arrival timestamps. It

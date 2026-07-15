@@ -231,23 +231,14 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         bits, shift = clock_domain[-2:]
         window_mask = (1 << (bits + shift)) - 1
         bucket_size = 1 << shift
-        residues = sorted({header[1] for header in domain_headers})
-        if len(residues) < 2:
-            continue
-        gaps = [
-            (residues[(i + 1) % len(residues)] - residue) & window_mask
-            for i, residue in enumerate(residues)
-        ]
-        largest_gap = max(gaps)
-        span = window_mask + 1 - largest_gap
-        if span > (window_mask + 1) // 2:
+        minimum = min(header[1] for header in domain_headers)
+        if max(header[1] for header in domain_headers) - minimum > (window_mask + 1) // 2:
             warnings.warn(
-                f"SQTT marker correction for {clock_domain}: clock phase span exceeds half the window",
+                f"SQTT marker correction for {clock_domain}: delay range exceeds half the window",
                 RuntimeWarning,
             )
-        start = residues[(gaps.index(largest_gap) + 1) % len(residues)]
         for record, residue, header_payloads in domain_headers:
-            correction = max(0, ((residue - start) & window_mask) - (bucket_size - 1))
+            correction = max(0, residue - minimum - (bucket_size - 1))
             if correction:
                 record.time -= correction
                 # TODO: sort one-payload blocks atomically; a final per-record

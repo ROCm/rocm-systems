@@ -484,8 +484,9 @@ packed form because their value is indistinguishable from a generated exit.
 
 The packed clock is a truncated sample at instruction issue. Shaderdata and
 shader clocks have an unknown fixed phase per physical SIMD, so `att_tool.py`
-circularly unwraps recognized header residues per SIMD/layout before applying a
-conservative relative correction. Apply this only to headers, never `R:`
+keeps the smallest residue per SIMD/layout and applies a conservative relative
+correction; the fixed phase cancels. A delay range over half the sampled window
+emits a warning but is still corrected. Apply this only to headers, never `R:`
 payloads. `Funcmap::marker_encoding` exposes
 `marker_id_mask()`, `packed_shader_clock_mask()`, and
 `shader_clock_source_mask()`; without `M:` metadata those describe the legacy
