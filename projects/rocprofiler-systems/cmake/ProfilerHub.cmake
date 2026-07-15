@@ -25,20 +25,13 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
     "Subdirectory inside the repository that contains profiler-hub"
 )
 
-set(ROCPROFSYS_PROFILER_HUB_SOURCE_DIR
-    "${PROJECT_SOURCE_DIR}/../../profilers/profiler-hub"
-    CACHE PATH
-    "Optional local in-tree path to profiler-hub source (used if it exists)"
-)
-
 option(ROCPROFSYS_PROFILER_HUB_ENABLE_LOGGING "Enable profiler-hub logging" OFF)
 option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 
 # ------------------------------------------------------------------------------
 # Resolution order:
 #   1. find_package(profiler-hub) - use installed package if present
-#   2. local in-tree source at ROCPROFSYS_PROFILER_HUB_SOURCE_DIR (CI / monorepo)
-#   3. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
+#   2. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
 
@@ -50,16 +43,10 @@ find_package(profiler-hub QUIET CONFIG)
 if(profiler-hub_FOUND)
     message(STATUS "[profiler-hub] Using installed package: ${profiler-hub_DIR}")
     set(_PROFILER_HUB_IS_EXTERNAL TRUE)
-elseif(EXISTS "${ROCPROFSYS_PROFILER_HUB_SOURCE_DIR}/CMakeLists.txt")
-    message(
-        STATUS
-        "[profiler-hub] Using in-tree source: ${ROCPROFSYS_PROFILER_HUB_SOURCE_DIR}"
-    )
-    set(_PROFILER_HUB_SOURCE_DIR "${ROCPROFSYS_PROFILER_HUB_SOURCE_DIR}")
 else()
     message(
         STATUS
-        "[profiler-hub] find_package failed and no in-tree source; falling back to "
+        "[profiler-hub] find_package failed; falling back to "
         "sparse checkout of ${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY} "
         "(${ROCPROFSYS_PROFILER_HUB_GIT_TAG})"
     )
