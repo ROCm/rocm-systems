@@ -99,7 +99,7 @@ TEST_F(DdaAlltoAllThresholdTest, StagingBytesAtThresholdMatches4Mb)
 {
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         kAlltoAllFloat32CountAt4MbThreshold,
-        nccl_dda_ipc_detail::kDdaNranks,
+        nccl_dda_detail::kDdaNranks,
         sizeof(float));
     EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
 }

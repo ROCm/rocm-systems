@@ -74,7 +74,7 @@ struct DdaAlltoAllMockComm
         std::strncpy(comm.archName, archName, sizeof(comm.archName) - 1);
         comm.archName[sizeof(comm.archName) - 1] = '\0';
         comm.nNodes = 1;
-        comm.nRanks = nccl_dda_ipc_detail::kDdaNranks;
+        comm.nRanks = nccl_dda_detail::kDdaNranks;
         comm.symmetricSupport = 0;
     }
 
@@ -84,6 +84,6 @@ struct DdaAlltoAllMockComm
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     kDdaAlltoAllGfx950ThresholdBytes /
-    (static_cast<size_t>(nccl_dda_ipc_detail::kDdaNranks) * sizeof(float));
+    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 } // namespace RcclUnitTesting

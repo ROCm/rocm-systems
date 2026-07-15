@@ -145,7 +145,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
         mockComm_.comm.nRanks,
         sizeof(float));
     EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
-    EXPECT_LE(stagingBytes, mockComm_.comm.ddaIpcScratchBytes);
+    EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
 }
 
 TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEligible)
