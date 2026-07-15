@@ -16,7 +16,7 @@ on:
       notify_email:
         description: 'Email address to send test summary report'
         type: string
-        default: ''
+        default: 'prmuruge@amd.com'
 
 permissions:
   contents: read
@@ -80,7 +80,7 @@ jobs:
       package_version: ADHOCBUILD
       artifact_run_id: ${{ inputs.artifact_run_id }}
       test_scope: ${{ inputs.test_scope || 'smoke' }}
-      notify_email: ${{ inputs.notify_email }}
+      notify_email: ${{ inputs.notify_email || 'prmuruge@amd.com' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON
