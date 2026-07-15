@@ -3643,6 +3643,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // enable ce allreduce for allreduce with size >= 4MB and <= 256MB
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      bool graphCapturing = ncclCudaGraphValid(comm->planner.capturingGraph);
       bool ceAllReduceFits = true;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
@@ -3658,7 +3659,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                  totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
-      }*/
+      }
 
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable = !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
@@ -3667,10 +3668,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);      
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                       comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
-      } else if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
+      } else if (!graphCapturing && ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
         INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr, opDev));
-      } else if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && ceAllReduceFits) {
+      } else if (!graphCapturing && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && ceAllReduceFits) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr, opDev));
       // Append kernel-based collective 

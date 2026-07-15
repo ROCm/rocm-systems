@@ -46,16 +46,6 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
         requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       }
     }
-    int requestedHandleTypes = ncclCuMemHandleType;
-    if (requestedHandleTypes == CU_MEM_HANDLE_TYPE_FABRIC) {
-      flag = 0;
-      // Check if the device supports FABRIC handles
-      CUresult err = CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
-      if (err != CUDA_SUCCESS || !flag) {
-        WARN("ncclMemAlloc: device %d has no FABRIC handles support, falling back to POSIX", cudaDev);
-        requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-      }
-    }
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
