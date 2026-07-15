@@ -2723,6 +2723,19 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   // ensured.
   queues_[QueueUtility].touch();
 
+  // DRM/UKI mode: the DRM user queue's CPF runs in the DRM VM, but the queue
+  // descriptor (amd_queue_v2_t rptr/wptr) and AQL ring default to system memory,
+  // which lands in the KFD VM and page-faults the CPF. Route them through the
+  // device-memory path so they are DRM-allocated/mapped. Requires LargeBAR
+  // (CPU-accessible VRAM); gfx1200 has it.
+  // NOTE(UKI): umr shows the descriptor still resolves to system memory even with
+  // these flags set — the CPF descriptor fault is gone, but the intended VRAM
+  // placement is unconfirmed. Workaround pending KFD/DRM VM unification.
+  if (core::Runtime::runtime_singleton_->flag().enable_drm() && LargeBarEnabled()) {
+    flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR |
+             HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+  }
+
   bool dev_mem_queue_descriptor = (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
 
   // Create an HW AQL queue
