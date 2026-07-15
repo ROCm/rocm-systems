@@ -37,7 +37,7 @@ roctx::roctx(session& sess, std::string_view trace_regions)
 
 roctx::~roctx()
 {
-    m_session.detach(*this);
+    m_session.unregister_trigger(*this);
 }
 
 vote
@@ -160,6 +160,6 @@ void
 roctx::refresh_state()
 {
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    m_session.publish(*this, compute_vote());
+    m_session.publish_vote(*this, compute_vote());
 }
 }  // namespace rocprofsys::control::triggers

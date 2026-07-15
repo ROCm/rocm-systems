@@ -45,8 +45,8 @@ public:
 
     void configure_services(rocprofiler_context_id_t ctx);
 
-    std::shared_ptr<control::session> get_session() const { return m_session; }
-    control::triggers::roctx&         get_trigger() { return *m_trigger; }
+    const std::shared_ptr<control::session>& get_session() const { return m_session; }
+    control::triggers::roctx&                get_trigger() const { return *m_trigger; }
 
 private:
     struct marker_range_entry
@@ -101,7 +101,7 @@ roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_
 , m_trigger{ std::make_unique<control::triggers::roctx>(
       *m_session, roctx_cfg.selected_trace_regions) }
 {
-    m_session->attach(*m_trigger);
+    m_session->register_trigger(*m_trigger);
 }
 
 }  // namespace rocprofiler_sdk
