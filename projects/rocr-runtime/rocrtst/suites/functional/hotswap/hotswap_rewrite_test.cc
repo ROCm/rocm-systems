@@ -199,6 +199,7 @@ void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
   rocr::hotswap::ResetAgentGfxRevisionCache();
+  rocr::hotswap::ClearRetargetCacheForTesting();
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
