@@ -153,6 +153,7 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             marker_ids[codeobj].add(marker_id)
 
     payloads: dict[tuple[int, int], int] = {}
+    multi_payload_codeobjs: set[int] = set()
     for row in document.get("sqtt_funcmap_payloads", []):
         try:
             codeobj, marker_id, count = map(int, row[:3])
@@ -160,6 +161,8 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             continue
         if marker_id in marker_ids.get(codeobj, ()) and count > 0:
             payloads[codeobj, marker_id] = count
+            if count > 1:
+                multi_payload_codeobjs.add(codeobj)
 
     shaderdata: dict[tuple[int, int, int, int], list[object]] = defaultdict(list)
     occupancy: dict[tuple[int, int, int, int], list[object]] = defaultdict(list)
@@ -210,9 +213,17 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             header_payloads = []
             if marker_id in known_ids:
                 payload_remaining = payloads.get((codeobj, marker_id), 0)
-            mask = ((1 << bits) - 1) << shift
+            # New producers disable clock packing for multi-payload protocols.
+            # Keep old traces readable by normalizing their headers, but do
+            # not shift timestamps: sorting corrected headers independently
+            # can break the declared header/payload record adjacency.
+            if codeobj in multi_payload_codeobjs:
+                continue
+            window_mask = (1 << (bits + shift)) - 1
+            bucket_size = 1 << shift
             sampled = ((raw >> (32 - bits)) & ((1 << bits) - 1)) << shift
-            delay = ((int(record.time) & mask) - sampled) & mask
+            delta = ((int(record.time) & window_mask) - sampled) & window_mask
+            delay = max(0, delta - (bucket_size - 1))
             # shader_cycles_lo samples are only comparable on one physical
             # SIMD. Keep differently encoded clock windows independent too.
             clock_domain = (*location[:3], bits, shift)

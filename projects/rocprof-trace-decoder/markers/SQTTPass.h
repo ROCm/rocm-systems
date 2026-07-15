@@ -232,6 +232,9 @@ private:
         llvm::Function& F,
         GfxGen gen
     );
+    // One ordering boundary on each side of a complete address-trace block.
+    // This deliberately does not put a boundary around every raw payload.
+    void emitTraceBlockBoundary(llvm::IRBuilder<>& B, bool after);
     // Source location for an instruction.  Walks the inline chain via
     // DILocation::getInlinedAt() and joins entries with " -> " (innermost
     // first, then each outward call site).  Matches the format used by
@@ -276,8 +279,8 @@ private:
     uint32_t compactFuncIDs(llvm::Module& M);
     void rewriteMarkerIDs(llvm::Function& F, const std::map<uint32_t, uint32_t>& IDMap, GfxGen gen);
     bool applyShaderClockPacking(llvm::Function& F, GfxGen gen);
-    // gfx10+ do not provide the needed M0 hazard spacing for this intrinsic.
-    // Lower their full traces after all marker transformations to explicit asm.
+    // Lower full traces after all marker transformations to explicit asm with
+    // the required M0 hazard spacing.
     bool lowerFullTracesWithM0Nop(llvm::Function& F);
     void removeFuncMarkersFromModule(llvm::Module& M, uint32_t id);
     void removeAdjacentBarriers(llvm::CallInst* CI);
@@ -285,6 +288,7 @@ private:
     // -----------------------------------------------------------------
     // -O0 fallback: direct function instrumentation
     // -----------------------------------------------------------------
+    static bool hasMustTailCall(const llvm::Function& F);
     bool instrumentFunctionDirect(llvm::Function& F, GfxGen gen);
 
     // -----------------------------------------------------------------

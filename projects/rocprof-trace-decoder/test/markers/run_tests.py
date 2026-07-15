@@ -382,6 +382,21 @@ TESTS = [
         "custom_asm_check": "gfx9_m0_trace_spacing",
     },
     {
+        "name": "gfx9_full_m0_trace_nop",
+        "desc": "gfx9: every full M0 trace has s_nop 0 before s_ttracedata",
+        "env": {},
+        "mode": "asm",
+        "source": "marker",
+        "flags": ["--offload-arch=gfx90a"],
+        "expect_ir": [
+            r"s_ttracedata\b",
+        ],
+        "reject_ir": [],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+        "custom_asm_check": "m0_nop_before_ttracedata",
+    },
+    {
         "name": "gfx10_full_m0_trace_nop",
         "desc": "gfx10: every full M0 trace has s_nop 0 before s_ttracedata",
         "env": {"SQTT_TRACE_ADDRESSES": "memory"},

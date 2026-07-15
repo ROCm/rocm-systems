@@ -27,6 +27,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/ErrorHandling.h"
 #if __has_include("llvm/Plugins/PassPlugin.h")
 #    include "llvm/Plugins/PassPlugin.h"
 #else
@@ -112,11 +113,11 @@ PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
         if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL) continue;
 
         if (Config.FunctionThreshold == 0) continue;
+        if (hasMustTailCall(F)) continue;
 
         uint32_t id = NextEventID++;
-
-        insertBareMarkers(F, id, Gen);
         storeFuncMetadata(F, id, Ctx);
+        insertBareMarkers(F, id, Gen);
 
         Changed = true;
     }
@@ -166,7 +167,7 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
 
         if (Config.needsScopeCheck()) Changed |= wrapExistingMarkers(F, Gen);
 
-        if (hadEarlyPass) Changed |= addBarriersToExistingMarkers(F);
+        Changed |= addBarriersToExistingMarkers(F);
 
         Changed |= processNamedMarkers(F, Gen);
 
@@ -177,11 +178,28 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
         if (Config.hasAddressTracing()) Changed |= instrumentAddressTraces(F, Gen);
 
         if (!hadEarlyPass && Config.FunctionThreshold > 0 && !IsKernel) Changed |= instrumentFunctionDirect(F, Gen);
+    }
 
+    // Address records have R:extra_payload_count > 1. Do not create a packed
+    // header layout whose JSON timestamp correction could split those blocks.
+    if (!AddrTraceEntries.empty())
+    {
+        if (Config.ShaderClockBits == SQTTConfig::AutoShaderClockBits)
+            Config.ShaderClockBits = 0;
+        else if (Config.ShaderClockBits != 0)
+            report_fatal_error(
+                "SQTT_TRACE_ADDRESSES emits multi-payload records; set SQTT_SHADER_CLOCK_BITS=0"
+            );
+    }
+
+    // Packing must happen after the address decision for the entire module.
+    for (auto& F : M)
+    {
+        if (F.isDeclaration()) continue;
+        GfxGen Gen = getGfxGen(F);
+        if (Gen == GfxGen::Unknown) continue;
         Changed |= applyShaderClockPacking(F, Gen);
-        // gfx9's backend already provides the required M0 hazard spacing.
-        // RDNA/gfx12 need the explicit asm form.
-        if (Gen != GfxGen::GFX9) Changed |= lowerFullTracesWithM0Nop(F);
+        Changed |= lowerFullTracesWithM0Nop(F);
     }
 
     // Clean up sentinel declarations

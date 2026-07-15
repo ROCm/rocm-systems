@@ -57,9 +57,12 @@ SQTTInstrumentPass::AddrTraceKind SQTTInstrumentPass::classifyAddrTraceOp(
     // Helper lambda for pointer-based address space classification
     auto classifyAS = [&](unsigned AS) -> AddrTraceKind
     {
-        if (AS == 5) return AddrTraceKind::None; // private
         if (AS == 3) return traceLDS ? AddrTraceKind::LDS : AddrTraceKind::None;
-        return traceMemory ? AddrTraceKind::Memory : AddrTraceKind::None;
+        // The memory address protocol is defined only for flat (0) and
+        // global (1) pointers.  Other AMDGPU address spaces have different
+        // representations and must not be reinterpreted as global addresses.
+        if (AS == 0 || AS == 1) return traceMemory ? AddrTraceKind::Memory : AddrTraceKind::None;
+        return AddrTraceKind::None;
     };
 
     if (auto* LI = dyn_cast<LoadInst>(I)) return classifyAS(LI->getPointerAddressSpace());
@@ -72,7 +75,12 @@ SQTTInstrumentPass::AddrTraceKind SQTTInstrumentPass::classifyAddrTraceOp(
         Function* Callee = CI->getCalledFunction();
         if (!Callee) return AddrTraceKind::None;
         StringRef Name = Callee->getName();
-        if (traceMemory && isBufferOp(Name)) return AddrTraceKind::Buffer;
+        // buffer.load.lds has a distinct operand layout (including an LDS
+        // destination pointer), so the ordinary buffer component protocol is
+        // not valid for it.  Leave it uninstrumented until it has its own
+        // protocol.
+        if (traceMemory && isBufferOp(Name) && !Name.ends_with(".buffer.load.lds"))
+            return AddrTraceKind::Buffer;
         auto IID = Callee->getIntrinsicID();
         if (traceLDS && (IID == Intrinsic::amdgcn_ds_permute || IID == Intrinsic::amdgcn_ds_bpermute ||
                          IID == Intrinsic::amdgcn_ds_bpermute_fi_b32))
@@ -154,15 +162,19 @@ void SQTTInstrumentPass::emitAddressTrace(
     Type* I32 = Type::getInt32Ty(Ctx);
     Type* I64 = Type::getInt64Ty(Ctx);
 
+    emitTraceBlockBoundary(B, /*after=*/false);
+
     // Buffer and permute ops use specialized trace protocols
     if (kind == AddrTraceKind::Buffer)
     {
         emitBufferTrace(B, cast<CallInst>(memOp), headerID, F, gen);
+        emitTraceBlockBoundary(B, /*after=*/true);
         return;
     }
     if (kind == AddrTraceKind::Permute)
     {
         emitPermuteTrace(B, cast<CallInst>(memOp), headerID, F, gen);
+        emitTraceBlockBoundary(B, /*after=*/true);
         return;
     }
 
@@ -244,6 +256,7 @@ void SQTTInstrumentPass::emitAddressTrace(
 
     // Restore insertion point to AfterBB
     B.SetInsertPoint(AfterBB, AfterBB->begin());
+    emitTraceBlockBoundary(B, /*after=*/true);
 }
 
 bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)

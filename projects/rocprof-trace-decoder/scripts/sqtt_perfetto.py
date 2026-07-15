@@ -68,6 +68,7 @@ from sqtt_data import (
     load_funcmaps,
     load_occupancy,
     load_shaderdata,
+    make_funcmap_resolver,
     merge_funcmaps,
     preprocess_records,
 )
@@ -77,13 +78,13 @@ from sqtt_data import (
 # Wave grouping helpers
 # ---------------------------------------------------------------------------
 
-WaveKey = tuple[int, int, int, int]  # (cu, simd, wave_id, instance)
+WaveKey = tuple[int, int, int, int, int]  # (se, cu, simd, wave_id, instance)
 
 
 def _build_slot_launches(
     wave_spans: dict[tuple, list[WaveSpan]],
 ) -> dict[tuple, list[int]]:
-    """Sorted launch times per (cu, simd, wave_slot). Used to assign instance
+    """Sorted launch times per (SE, CU, SIMD, wave_slot). Used to assign instance
     indices to records that share a physical wave slot across relaunches."""
     slot_launches: dict[tuple, list[int]] = defaultdict(list)
     for wk, spans in wave_spans.items():
@@ -95,9 +96,9 @@ def _build_slot_launches(
 
 
 def _wave_instance(slot_launches: dict[tuple, list[int]],
-                   cu: int, simd: int, wave_id: int, time: int) -> int:
+                   shader_engine: int, cu: int, simd: int, wave_id: int, time: int) -> int:
     """Index of the most recent launch at or before `time` for this slot."""
-    launches = slot_launches.get((cu, simd, wave_id), [])
+    launches = slot_launches.get((shader_engine, cu, simd, wave_id), [])
     if not launches:
         return 0
     lo, hi = 0, len(launches) - 1
@@ -119,32 +120,34 @@ def group_by_wave_instance(
     filter_simd: Optional[int] = None,
     filter_wave: Optional[int] = None,
 ) -> dict[WaveKey, list[ShaderRecord]]:
-    """Group records by (cu, simd, wave_id, instance), preserving time order."""
+    """Group records by (SE, CU, SIMD, wave_id, instance), preserving time order."""
     slot_launches = _build_slot_launches(wave_spans)
     grouped: dict[WaveKey, list[ShaderRecord]] = defaultdict(list)
     for rec in records:
+        if rec.flags & 2:
+            continue
         if filter_cu is not None and rec.cu != filter_cu:
             continue
         if filter_simd is not None and rec.simd != filter_simd:
             continue
         if filter_wave is not None and rec.wave_id != filter_wave:
             continue
-        inst = _wave_instance(slot_launches, rec.cu, rec.simd,
+        inst = _wave_instance(slot_launches, rec.shader_engine, rec.cu, rec.simd,
                               rec.wave_id, rec.time)
-        grouped[(rec.cu, rec.simd, rec.wave_id, inst)].append(rec)
+        grouped[(rec.shader_engine, rec.cu, rec.simd, rec.wave_id, inst)].append(rec)
     for k in grouped:
         grouped[k].sort(key=lambda r: r.time)
     return grouped
 
 
-def pack_tid(cu: int, simd: int, wave_id: int, instance: int) -> int:
-    """Pack a wave key into a 32-bit thread id.
+def pack_tid(shader_engine: int, cu: int, simd: int, wave_id: int, instance: int) -> int:
+    """Pack a shader-engine-aware wave key into a 64-bit thread id.
 
-    Layout: (cu << 20) | (simd << 16) | (wave_id << 8) | instance.
-    Collision-free for cu<4096, simd<16, wave_id<256, instance<256 -- all
-    well above hardware limits.
+    The lower 32 bits retain the old CU/SIMD/wave/instance layout; shader
+    engine occupies the high bits so equal wave slots on two engines do not
+    share a Perfetto track.
     """
-    return (cu << 20) | (simd << 16) | (wave_id << 8) | instance
+    return (shader_engine << 32) | (cu << 20) | (simd << 16) | (wave_id << 8) | instance
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +198,9 @@ def emit_wave_events(
     """
     events: list[dict] = []
     unmatched = 0
-    cu, simd, wave_id, instance = wave_key
-    tid = pack_tid(cu, simd, wave_id, instance)
-    base_wk = (cu, simd, wave_id)
+    shader_engine, cu, simd, wave_id, instance = wave_key
+    tid = pack_tid(shader_engine, cu, simd, wave_id, instance)
+    base_wk = wave_key[:4]
     spans = wave_spans.get(base_wk, [])
 
     stack: list[tuple[str, str]] = []   # (name, mtype) pairs we've pushed
@@ -208,10 +211,6 @@ def emit_wave_events(
         return cycles * ts_scale
 
     for rec in wave_records:
-        marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
-        if marker_id == 0 and not exit_prev:
-            continue   # noop / reserved value
-
         # Update dispatch context. When the dispatch changes mid-stream
         # we synthesize E events for anything still on the stack -- a
         # function entered under dispatch A doesn't outlive A.
@@ -227,6 +226,10 @@ def emit_wave_events(
             cur_dispatch = dispatch_id
             cur_funcmap = _funcmap_for_dispatch(
                 dispatch_id, dispatches, kernel_to_co, per_co, merged_fm)
+
+        marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
+        if marker_id == 0 and not exit_prev:
+            continue   # noop / reserved value
 
         name, mtype = cur_funcmap.resolve(marker_id)
 
@@ -274,7 +277,7 @@ def emit_wave_events(
 
 def build_metadata_events(
     pids_seen: set[int],
-    tids_seen: set[tuple[int, int, tuple[int, int, int, int]]],
+    tids_seen: set[tuple],
     dispatches: dict[str, str],
     do_demangle: bool,
 ) -> list[dict]:
@@ -282,7 +285,7 @@ def build_metadata_events(
     each thread (wave instance).
 
     tids_seen is a set of (pid, tid, wave_key) triples so we can recover
-    the (cu, simd, wave_id, instance) tuple for the thread name.
+    the (SE, CU, SIMD, wave_id, instance) tuple for the thread name.
     """
     metadata: list[dict] = []
 
@@ -299,8 +302,8 @@ def build_metadata_events(
         })
 
     for pid, tid, wave_key in sorted(tids_seen):
-        cu, simd, wave_id, instance = wave_key
-        thread_name = f"CU{cu}/SIMD{simd}/W{wave_id}#{instance}"
+        shader_engine, cu, simd, wave_id, instance = wave_key
+        thread_name = f"SE{shader_engine}/CU{cu}/SIMD{simd}/W{wave_id}#{instance}"
         metadata.append({
             "ph": "M", "name": "thread_name", "pid": pid, "tid": tid,
             "args": {"name": thread_name},
@@ -333,11 +336,11 @@ def export_trace_dir(
     records = load_shaderdata(trace_dir)
     if not records:
         return None
-    records, _addr = preprocess_records(records, merged_fm)
+    dispatches, wave_spans = load_occupancy(trace_dir)
+    resolver = make_funcmap_resolver(per_co, dispatches, kernel_to_co, wave_spans, merged_fm)
+    records, _addr = preprocess_records(records, merged_fm, resolver)
     if not records:
         return None
-
-    dispatches, wave_spans = load_occupancy(trace_dir)
 
     grouped = group_by_wave_instance(
         records, wave_spans,
@@ -352,7 +355,7 @@ def export_trace_dir(
 
     all_events: list[dict] = []
     pids_seen: set[int] = set()
-    tids_seen: set[tuple[int, int, tuple[int, int, int, int]]] = set()
+    tids_seen: set[tuple] = set()
     total_unmatched = 0
 
     for wave_key, recs in grouped.items():
@@ -361,8 +364,8 @@ def export_trace_dir(
             wave_spans, ts_scale)
         total_unmatched += unmatched
         all_events.extend(evs)
-        cu, simd, wave_id, instance = wave_key
-        tid = pack_tid(cu, simd, wave_id, instance)
+        shader_engine, cu, simd, wave_id, instance = wave_key
+        tid = pack_tid(shader_engine, cu, simd, wave_id, instance)
         for ev in evs:
             pids_seen.add(ev["pid"])
             tids_seen.add((ev["pid"], tid, wave_key))
@@ -424,19 +427,19 @@ def _self_test() -> int:
     exit_prev = 0x1
     point_barrier = (2 << 2)
 
-    # One wave (cu=0, simd=1, wave_id=3) running dispatch 7.
+    # One wave (SE=0, cu=0, simd=1, wave_id=3) running dispatch 7.
     recs = [
         ShaderRecord(time=100, value=enter_compute, cu=0, simd=1, wave_id=3, flags=0),
         ShaderRecord(time=200, value=point_barrier, cu=0, simd=1, wave_id=3, flags=0),
         ShaderRecord(time=300, value=exit_prev,    cu=0, simd=1, wave_id=3, flags=0),
     ]
-    wave_spans = {(0, 1, 3): [WaveSpan(launch_time=0, retire_time=1000, dispatch_id=7)]}
+    wave_spans = {(0, 0, 1, 3): [WaveSpan(launch_time=0, retire_time=1000, dispatch_id=7)]}
     dispatches = {"7": "compute_kernel<int>"}
 
     grouped = group_by_wave_instance(recs, wave_spans)
     assert len(grouped) == 1, f"expected 1 wave group, got {len(grouped)}"
     wave_key = next(iter(grouped))
-    assert wave_key == (0, 1, 3, 0), wave_key
+    assert wave_key == (0, 0, 1, 3, 0), wave_key
 
     events, unmatched = emit_wave_events(
         grouped[wave_key], wave_key, dispatches, kernel_to_co={},
@@ -450,7 +453,7 @@ def _self_test() -> int:
     assert events[1]["name"] == "barrier" and events[1]["cat"] == "sqtt.point"
     assert events[1]["s"] == "t"
     assert all(e["pid"] == 7 for e in events)
-    expected_tid = pack_tid(0, 1, 3, 0)
+    expected_tid = pack_tid(0, 0, 1, 3, 0)
     assert all(e["tid"] == expected_tid for e in events)
 
     # B/E pairing (per (pid, tid))

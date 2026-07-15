@@ -64,7 +64,7 @@ bool SQTTInstrumentPass::instrumentBarriers(Function& F, GfxGen gen)
         auto [CI, kind] = Barriers[i];
 
         if (kind == BarrierKind::Signal && i + 1 < Barriers.size() && Barriers[i + 1].second == BarrierKind::Wait &&
-            CI->getParent() == Barriers[i + 1].first->getParent())
+            CI->getNextNode() == Barriers[i + 1].first)
         {
             CallInst* WaitCI = Barriers[i + 1].first;
             IRBuilder<> B(WaitCI);

@@ -446,8 +446,18 @@ void SQTTInstrumentPass::removeAdjacentBarriers(CallInst* CI)
     }
 }
 
+bool SQTTInstrumentPass::hasMustTailCall(const Function& F)
+{
+    for (const auto& BB : F)
+        for (const auto& I : BB)
+            if (const auto* CB = dyn_cast<CallBase>(&I); CB && CB->isMustTailCall()) return true;
+    return false;
+}
+
 bool SQTTInstrumentPass::instrumentFunctionDirect(Function& F, GfxGen gen)
 {
+    if (hasMustTailCall(F)) return false;
+
     unsigned size = computeFunctionSize(F, Config.Mode);
     if (size <= Config.FunctionThreshold) return false;
 

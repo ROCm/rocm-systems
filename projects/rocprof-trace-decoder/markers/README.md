@@ -177,6 +177,12 @@ to report only active lanes. The parser demultiplexes interleaved records from
 concurrent waves by grouping on `(cu, simd, wave_id)` before parsing each
 wave's address block.
 
+Address blocks always have `extra_payload_count > 1`, so automatic gfx12
+shader-clock packing is disabled for the whole module when one is emitted. An
+explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an error in that configuration.
+This does not apply to `sqtt_marker_data()`, whose single raw payload remains
+eligible for clock packing.
+
 ### Everything together
 
 All options compose. User markers, auto-function, auto-barrier, memory ops,
@@ -280,9 +286,9 @@ directly via `getenv()`.
 | `SQTT_INSTRUMENT_FUNCTIONS` | `N` or `cost:N` | off | Instrument device functions exceeding threshold. `20` = instruction count > 20. `cost:100` = weighted cost > 100. |
 | `SQTT_INSTRUMENT_BARRIERS` | `0`, `1` | `0` | Instrument barriers. Consecutive signal+wait pairs fuse to a single marker. |
 | `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
-| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = global/buffer/flat, `lds` = LDS (AS=3). Expensive. |
+| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = flat/global (AS=0/1) and buffer, `lds` = LDS (AS=3). Expensive. |
 | `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
-| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | auto (`12` on gfx12, `0` elsewhere) | Number of gfx12 marker header high bits reserved for shader clock. `0` disables clock packing. |
+| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | auto (`12` on gfx12 unless an address block is emitted, then `0`) | Number of gfx12 marker header high bits reserved for shader clock. `0` disables clock packing; a nonzero explicit value is invalid with address blocks. |
 | `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for the packed shader clock field. |
 
 ## Examples
@@ -445,10 +451,9 @@ Marker values are packed into 2 flag bits so that small IDs can use the faster
 packing is inactive. Larger IDs fall back to `s_ttracedata` (32-bit m0, all
 targets).
 
-For full M0-based traces, gfx10+ explicitly emits `s_mov_b32 m0`, `s_nop 0`,
-then `s_ttracedata`; gfx9's backend already provides the required hazard
-spacing for ordinary traces. Address EXEC tracing uses the explicit sequence
-on every target.
+For full M0-based traces, the pass explicitly emits `s_mov_b32 m0`, `s_nop 0`,
+then `s_ttracedata` on every target. Address EXEC tracing uses the same
+sequence.
 
 ```
 Both instructions share the same bit layout:
@@ -488,6 +493,8 @@ full-width ID layout.
 `att_tool.py` applies that correction by default and masks each recognized
 header to its ordinary legacy-form marker value for existing viewers. Use
 `--no-decode-markers` to preserve packed values and arrival timestamps.
+For externally packed multi-payload blocks it may normalize a recognized
+header, but does not apply timestamp correction.
 
 For packed code objects, `att_tool.py` adds six-column `sqtt_funcmap` rows and
 packed-layout/payload tables to `code.json`. Readers that do not know them

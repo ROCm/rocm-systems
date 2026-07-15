@@ -89,6 +89,26 @@ static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
     F->setMetadata(LLVMContext::MD_mmra, MDNode::get(Ctx, LocalSyncAS));
 }
 
+void SQTTInstrumentPass::emitTraceBlockBoundary(IRBuilder<>& B, bool after)
+{
+    Module* M = B.GetInsertBlock()->getParent()->getParent();
+    Type* I32 = Type::getInt32Ty(B.getContext());
+    Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
+
+    // Keep the complete address block between two scheduling boundaries,
+    // rather than adding one around every raw payload.
+    if (after)
+    {
+        emitMemBarrier(B, Config.MemBarrier);
+        B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
+    }
+    else
+    {
+        B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
+        emitMemBarrier(B, Config.MemBarrier);
+    }
+}
+
 void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen)
 {
     insertTraceMarkerWithPayload(B, markerID, nullptr, F, gen);

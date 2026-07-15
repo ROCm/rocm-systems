@@ -85,9 +85,8 @@ Where `flags` is the OR of applicable bits: `EXIT_PREV=1`, `ENTER=2`.
 
 - If `encoded <= 0xFF`, the target supports it, and shader-clock packing is
   inactive: emit `s_ttracedata_imm` (8-bit immediate, no m0 setup, ~1 cycle faster)
-- Otherwise: emit `s_ttracedata` through M0. On gfx10+, the pass explicitly
-  emits `s_mov_b32 m0, <value>` + `s_nop 0` + `s_ttracedata`; gfx9's backend
-  already provides the required hazard spacing for ordinary traces.
+- Otherwise: emit `s_ttracedata` through M0. The pass explicitly emits
+  `s_mov_b32 m0, <value>` + `s_nop 0` + `s_ttracedata` on every target.
 
 With the 2-bit encoding, IDs 1-63 fit in `s_ttracedata_imm` (previously
 limited to IDs 1-15 with 4-bit flags).
@@ -124,29 +123,41 @@ gfx12 uses the no-clock full-ID layout and may use `s_ttracedata_imm`.
 A nonzero `shader_clock_bits` value requires `shader_clock_shift`; a malformed
 packed row uses the no-clock full-ID layout.
 
+Address trace blocks have `R:extra_payload_count > 1`. If a module emits any
+such block, the automatic gfx12 clock width is `0`; an explicit nonzero
+`SQTT_SHADER_CLOCK_BITS` is an error. A named `sqtt_marker_data()` record has
+exactly one payload (`R:...=1`) and remains eligible for clock packing.
+
 The sampled window lets a decoder compensate for the variable delay between
 the trace instruction issuing and its shaderdata record appearing in SQTT.
 For each **marker header** (never an `R:`-declared raw payload), restore the
-sampled field to its source positions and calculate the delay modulo the
-source-clock window:
+sampled field to its source positions and calculate a safe lower bound for the
+delay modulo the source-clock window:
 
 ```text
-arrival_window = uint32_t(record_time) & shader_clock_source_mask
+window_mask = (1ULL << (clock_bits + shader_clock_shift)) - 1
+bucket_size = 1ULL << shader_clock_shift
+arrival_window = uint32_t(record_time) & window_mask
 sampled_window = packed_clock_field << shader_clock_shift
-delay = (arrival_window - sampled_window) & shader_clock_source_mask
+delta = (arrival_window - sampled_window) & window_mask
+delay_lower_bound = max(0, delta - (bucket_size - 1))
 ```
 
-Only a relative delay is knowable from this truncated clock. Keep the smallest
-observed delay for each shader-engine clock domain and compatible layout as the
-reference, then shift every header earlier by `delay - minimum_delay`. This
-preserves that stream's unknown common time origin while removing the extra
-delivery latency. The actual delivery delay must be shorter than the sampled
-clock window (the default 12-bit field at shift 4 has a 65,536-cycle window),
-otherwise the modulo value is ambiguous.
+Only a relative delay is knowable from this truncated clock. The low
+`shader_clock_shift` bits were not sampled, so the lower bound avoids moving a
+record before any possible issue time; it leaves at most
+`(1 << shader_clock_shift) - 1` cycles of residual jitter. Keep the smallest
+observed lower bound for each shader-engine clock domain and compatible layout
+as the reference, then shift every header earlier by
+`delay_lower_bound - minimum_delay`. The actual delivery delay must be shorter
+than the sampled clock window (the default 12-bit field at shift 4 has a
+65,536-cycle window), otherwise the modulo value is ambiguous.
 
 `att_tool.py` applies this correction while writing JSON by default;
 `--no-decode-markers` preserves the packed values and arrival timestamps. It
-rewrites each corrected header to the legacy `(id << 2) | flags` form.
+rewrites each corrected header to the legacy `(id << 2) | flags` form. For an
+externally produced packed multi-payload block, JSON output may normalize a
+recognized header but does not apply timestamp correction.
 
 ### Semantic rules
 
@@ -327,7 +338,7 @@ All variables are read at **compile time** by the pass plugin.
 | `SQTT_INSTRUMENT_FUNCTIONS`| `0`     | Function entry/exit threshold (0=disabled)     |
 | `SQTT_INSTRUMENT_MEMORY`   | off     | Memory op markers. Format: `N:M` (N=ops per marker, M=max gap) |
 | `SQTT_MEM_BARRIER`         | `fence` | Reordering boundary around markers (`none`/`asm`/`fence` or `0`/`1`/`2`) |
-| `SQTT_SHADER_CLOCK_BITS`   | auto    | Gfx12 shader clock bits in marker headers (`12` on gfx12, `0` elsewhere; `0` disables) |
+| `SQTT_SHADER_CLOCK_BITS`   | auto    | Gfx12 shader clock bits (`12` on gfx12 unless an address block is emitted, then `0`; `0` disables). A nonzero explicit value is invalid with address blocks. |
 | `SQTT_SHADER_CLOCK_SHIFT`  | `4`     | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for shader clock packing |
 
 ### Marker reorder boundary (`SQTT_MEM_BARRIER`)
@@ -805,7 +816,7 @@ as cache line utilization, stride detection, and memory coalescing analysis.
 
 | Variable | Format | Default | Description |
 |---|---|---|---|
-| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or `memory,lds` | off | Trace per-lane addresses. `memory` = global/buffer/flat/atomics. `lds` = LDS (AS=3), LDS atomics, ds_permute/ds_bpermute. |
+| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or `memory,lds` | off | Trace per-lane addresses. `memory` = flat/global (AS=0/1), buffer, and matching atomics. `lds` = LDS (AS=3), LDS atomics, ds_permute/ds_bpermute. |
 
 `SQTT_TRACE_ADDRESSES` and `SQTT_INSTRUMENT_MEMORY` are mutually exclusive —
 setting both produces an error. Address tracing already emits a header marker
@@ -823,7 +834,9 @@ for every memory op, so `SQTT_INSTRUMENT_MEMORY` is redundant.
 | `struct_buffer` | buffer | 32-bit | 2 (voffset+vindex) | 3 (rsrc_lo, rsrc_hi, soffset) | 67 |
 | `ds_permute`/`ds_bpermute` | LDS hw | 32-bit | 1 (index) | 0 | 32 |
 
-Private/scratch (AS=5) is always excluded. All categories also emit exec_lo + exec_hi (2 tokens) and a header marker (1 token) before the data tokens shown above.
+Pointer address spaces other than 0, 1, and selected LDS AS=3 (including
+private/scratch AS=5) are excluded. All categories also emit exec_lo + exec_hi
+(2 tokens) and a header marker (1 token) before the data tokens shown above.
 
 ### Wave size
 
@@ -913,9 +926,9 @@ unified ID counter. The funcmap records each ID with:
 
 | Funcmap name prefix | Instruction type | Gated by |
 |---|---|---|
-| `addr_trace_load` | Global/flat load | `memory` |
-| `addr_trace_store` | Global/flat store | `memory` |
-| `addr_trace_atomic` | Global/flat atomic (AtomicRMW, CmpXchg) | `memory` |
+| `addr_trace_load` | Flat/global (AS=0/1) load | `memory` |
+| `addr_trace_store` | Flat/global (AS=0/1) store | `memory` |
+| `addr_trace_atomic` | Flat/global (AS=0/1) atomic (AtomicRMW, CmpXchg) | `memory` |
 | `addr_trace_lds_load` | LDS load | `lds` |
 | `addr_trace_lds_store` | LDS store | `lds` |
 | `addr_trace_lds_atomic` | LDS atomic | `lds` |
@@ -987,11 +1000,13 @@ in post-processing.
 The pass handles operand layout differences across load, store, atomic, and
 cmpswap variants. The rsrc operand may be `<4 x i32>` (legacy) or
 `ptr addrspace(8)` (modern) — both are supported.
+`*.buffer.load.lds` is excluded because its LDS-destination operand layout is
+not this protocol.
 
 ### Atomic operations
 
 `AtomicRMWInst` and `AtomicCmpXchgInst` are classified by address space the
-same way as loads/stores (AS=3 → LDS, AS=5 → excluded, otherwise → memory).
+same way as loads/stores (AS=3 → LDS, AS=0/1 → memory, all others excluded).
 They receive distinct funcmap names (`addr_trace_atomic`, `addr_trace_lds_atomic`)
 rather than being folded into load/store categories, so the decoder can
 distinguish atomic access patterns.

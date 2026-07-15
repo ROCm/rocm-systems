@@ -137,6 +137,9 @@ inline unsigned computeFunctionSize(const llvm::Function& F, CostMode mode)
     {
         for (auto& I : BB)
         {
+            // Pass-owned marker calls must not make a function appear large
+            // enough to retain the instrumentation that introduced them.
+            if (I.getMetadata("sqtt.marker_header") || I.getMetadata("sqtt.raw_payload")) continue;
             if (mode == CostMode::WeightedCost)
                 total += instructionCost(I);
             else

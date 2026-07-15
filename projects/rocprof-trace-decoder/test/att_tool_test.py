@@ -186,6 +186,24 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual(fast_simd.time, 0x1010)
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
+    def test_correction_does_not_precede_the_sampled_clock_at_wrap(self):
+        marker_id = 3 << 2
+        reference = _shaderdata(0x43FF, (0x10 << 20) | marker_id)
+        wrapped = _shaderdata(0x400010, (0xFFF << 20) | marker_id)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0)], shaderdata=[reference, wrapped])
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 10]],
+            },
+        )
+
+        self.assertEqual([record.time for record in records.shaderdata], [0x43FF, 0x3FFFFF])
+        self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
+
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
         value = (0x100 << 20) | (3 << 2)
         before_retirement = _shaderdata(0x1010, value)
@@ -230,6 +248,30 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
 
         self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x1020])
         self.assertEqual([record.value for record in records.shaderdata], [16, 16])
+
+    def test_multi_payload_headers_are_normalized_without_clock_correction(self):
+        value = (0x100 << 20) | (3 << 2)
+        header = _shaderdata(0x1080, value)
+        payload0 = _shaderdata(0x1084, 0xDEADBEEF)
+        payload1 = _shaderdata(0x1088, 0xCAFEBABE)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0)],
+            shaderdata=[header, payload0, payload1],
+        )
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "multi", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 4]],
+                "sqtt_funcmap_payloads": [[7, 3, 2]],
+            },
+        )
+
+        self.assertEqual(header.value, 12)
+        self.assertEqual(header.time, 0x1080)
+        self.assertEqual([payload0.time, payload1.time], [0x1084, 0x1088])
+        self.assertEqual([payload0.value, payload1.value], [0xDEADBEEF, 0xCAFEBABE])
 
     def test_no_decode_markers_preserves_packed_values(self):
         value = (0x100 << 20) | (3 << 2)
