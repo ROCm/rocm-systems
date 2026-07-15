@@ -125,7 +125,7 @@ convert_arg_type(Tp&& val)
     }
     else if constexpr(std::is_same<data_type, const char*>::value)
     {
-        return common::get_string_entry(val ? val : "")->c_str();
+        return common::get_string_entry(val)->c_str();
     }
     else
     {

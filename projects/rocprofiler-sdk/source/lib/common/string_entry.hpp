@@ -34,6 +34,9 @@ const std::string*
 get_string_entry(std::string_view name);
 
 const std::string*
+get_string_entry(const char* name);
+
+const std::string*
 get_string_entry(size_t hash);
 
 size_t

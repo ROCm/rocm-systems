@@ -104,7 +104,7 @@ convert_arg(Tp&& val)
     using data_type = common::mpl::unqualified_type_t<Tp>;
     if constexpr(std::is_same<data_type, const char*>::value)
     {
-        return common::get_string_entry(val ? val : "")->c_str();
+        return common::get_string_entry(val)->c_str();
     }
     else
     {
