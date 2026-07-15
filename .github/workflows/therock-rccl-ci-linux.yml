@@ -192,3 +192,15 @@ jobs:
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
+
+  therock-test-rocprof:
+    name: "Test rocprofv3 smoke"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      notify_email: ${{ inputs.notify_email }}
