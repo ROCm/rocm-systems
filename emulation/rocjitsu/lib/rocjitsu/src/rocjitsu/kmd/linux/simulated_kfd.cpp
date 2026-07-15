@@ -229,6 +229,12 @@ int SimulatedKfd::open() {
   }
   uint32_t pid = next_process_id_++;
   auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+  // client_pid_ caches getpid() at open() time; DBG_TRAP uses it to resolve a
+  // self-debug target, so it must match the caller's live pid. A fork() child
+  // inherits this cache stale, but the interposer's reset_after_fork() drops the
+  // driver so the child re-open()s (and re-caches here) before any ioctl —
+  // DBG_TRAP self-resolution therefore requires a post-fork re-open.
+  proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
@@ -548,7 +554,7 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg) {
 }
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
-  util::Logger::cp("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
+  util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_GET_VERSION:
@@ -591,6 +597,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     return get_available_memory_ioctl(proc, arg);
   case AMDKFD_IOC_RUNTIME_ENABLE:
     return runtime_enable_ioctl(proc, arg);
+  case AMDKFD_IOC_DBG_TRAP:
+    return debug_trap_ioctl(proc, arg);
   case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
     auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
     uint32_t ord = gpu_ordinal(a->gpu_id);
@@ -1739,6 +1747,170 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
   proc.runtime_state_ = KfdProcess::RuntimeState{};
   args->capabilities_mask = 0;
   return 0;
+}
+
+std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) const {
+  if (pid == 0)
+    return nullptr;
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  for (auto &[id, proc] : processes_)
+    if (proc->client_pid() == pid)
+      return proc;
+  return nullptr;
+}
+
+// in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
+int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
+  auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+  util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
+
+  KfdProcess *target = nullptr;
+  std::shared_ptr<KfdProcess> target_ref;
+  if (caller.client_pid() != 0 && static_cast<pid_t>(args->pid) == caller.client_pid()) {
+    target = &caller; // self-debug (local mode)
+  } else {
+    target_ref = find_process_by_client_pid(static_cast<pid_t>(args->pid));
+    target = target_ref.get();
+  }
+  if (target == nullptr)
+    return -ESRCH;
+
+  const bool self_debug = (target == &caller);
+
+  std::lock_guard<std::mutex> lk(target->debug_mutex_);
+  auto &sess = target->debug_session_;
+
+  // Cross-process authorization is by-pid only: a non-self caller is admitted
+  // solely when it is the debugger already attached to this session
+  // (sess.debugger_pid, set by a prior successful ENABLE). This gate therefore
+  // only re-admits re-entrant ops from an already-attached debugger. Because a
+  // fresh session has debugger_pid == 0, it structurally rejects the *first*
+  // cross-process ENABLE with EPERM: cross-process attach is intentionally
+  // closed until it is implemented (#8364). Self-debug (local mode, the only
+  // supported path today) and DISABLE are exempt. The real kernel instead gates
+  // the first attach on a live ptrace relationship, which is deferred with the
+  // rest of cross-process support.
+  if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
+      sess.debugger_pid != caller.client_pid())
+    return -EPERM;
+
+  // Non-ENABLE ops require an active debug session (kernel: EINVAL).
+  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !sess.enabled)
+    return -EINVAL;
+
+  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE.
+  const bool runtime_enabled = [&] {
+    std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
+    return target->runtime_state_.enabled;
+  }();
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3132-L3142
+  switch (args->op) {
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_SET_FLAGS:
+    if (!runtime_enabled)
+      return -EPERM;
+    break;
+  default:
+    break;
+  }
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3144
+  if (args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH ||
+      args->op == KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH) {
+    const uint32_t gpu_id = args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH
+                                ? args->set_node_address_watch.gpu_id
+                                : args->clear_node_address_watch.gpu_id;
+    if (find_gpu(gpu_id) == nullptr)
+      return -ENODEV;
+  }
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3158
+  switch (args->op) {
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_debug.c#L788-L847
+  case KFD_IOC_DBG_TRAP_ENABLE: {
+    if (sess.enabled)
+      return -EALREADY; // target process is already debug enabled
+
+    const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
+    // Validate the notifier before trusting it. In daemon mode the fd was
+    // received via SCM_RIGHTS and already substituted into our fd space; in
+    // local mode it is the debugger's own descriptor. Either way the driver
+    // *writes* to it to wake the debugger, so it must be a live, writable
+    // descriptor. fcntl(F_GETFL) both proves the fd is open (EBADF otherwise)
+    // and reports its access mode, so a read-only or otherwise unusable fd —
+    // e.g. one a client passed over SCM_RIGHTS that is not a real event target —
+    // is rejected instead of being stored on the session.
+    const int fl = fcntl(dbg_fd, F_GETFL);
+    if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
+      return -EBADF;
+
+    sess.enabled = true;
+    sess.debugger_pid = caller.client_pid();
+    sess.dbg_fd = dbg_fd;
+    // In daemon mode the session owns the transferred fd and releases it via
+    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
+    // debugger's own descriptor, left for the debugger to close.
+    if (daemon_mode_)
+      sess.owned_dbg_fd = UniqueFd(dbg_fd);
+    sess.exception_enable_mask = args->enable.exception_mask;
+
+    // Snapshot the runtime-enable state under a single lock so the marshaled
+    // runtime_state, r_debug and ttmp_setup stay mutually consistent: a
+    // concurrent RUNTIME_ENABLE/DISABLE must not change them between reads.
+    // Lock order debug_mutex_ -> runtime_mutex_ is already held that way.
+    // Kernel: kfd_dbg_trap_enable copies the saved runtime info and returns its
+    // size.
+    kfd_runtime_info info{};
+    {
+      std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
+      const auto &rt = target->runtime_state_;
+      sess.runtime_state = rt.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
+      info.r_debug = rt.r_debug;
+      info.ttmp_setup = (rt.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
+    }
+    info.runtime_state = sess.runtime_state;
+    size_t copy_size = std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(info));
+    if (args->enable.rinfo_ptr != 0 && copy_size > 0)
+      std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
+                  copy_size);
+    args->enable.rinfo_size = sizeof(info);
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_DISABLE:
+    // Resetting the session releases the debugger notifier: in daemon mode the
+    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
+    // mode nothing is owned, so the debugger's own fd is left untouched.
+    sess = KfdProcess::DebugSession{};
+    return 0;
+
+  // Recognized ops whose handlers are not wired up yet. The kernel dispatches
+  // each to a real implementation; the skeleton reports ENOSYS ("not
+  // implemented") so a debugger can tell a stubbed-but-valid op apart from a
+  // genuinely unknown one (EINVAL below). Each case graduates out of this group
+  // as its handler lands.
+  case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
+  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_SET_FLAGS:
+  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
+  case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return -ENOSYS;
+  default:
+    return -EINVAL;
+  }
 }
 
 int SimulatedKfd::set_xnack_mode_ioctl(void *arg) {
