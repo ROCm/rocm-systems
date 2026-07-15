@@ -25,9 +25,12 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/output/format_path.hpp"
+#include "lib/output/output_key.hpp"
 
 #include <fmt/format.h>
 
+#include <string>
 #include <string_view>
 #include <unordered_set>
 
@@ -44,28 +47,41 @@ namespace
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
 
-// True if the *raw* (unexpanded) output-file format contains a token that expands to this
-// process's pid: %pid%, {pid}, or the %p shorthand. We scan raw tokens rather than the
-// expanded string so we never false-match coincidental digits (e.g. a hostname like
-// "a7d0fdf91494" containing the pid's digits). This mirrors format_path's own precedence:
-// longer %p-prefixed tokens (%ppid%, %pgid%, %psid%, %psize%) are distinct from the %p
-// shorthand and must not be treated as a pid.
-bool
-format_has_pid_token(std::string_view raw)
-{
-    if(raw.find("%pid%") != std::string_view::npos) return true;
-    if(raw.find("{pid}") != std::string_view::npos) return true;
+// Control-char sentinel: contains no %, {, or $, so it cannot perturb
+// format_path's token/env parsing, and cannot appear in real path text.
+constexpr auto pid_sentinel = std::string_view{"\001ROCPROF_PID\001"};
 
-    // %p shorthand: any "%p" that is not the start of a longer non-pid %p-token.
-    for(auto pos = raw.find("%p"); pos != std::string_view::npos; pos = raw.find("%p", pos + 1))
+// True if the output-file format contains a token that expands to THIS process's
+// pid. Rather than re-implement (and keep in sync with) format_path's token
+// grammar -- the %p shorthand vs. %ppid%/%pgid% delimiters, shared-% overlaps,
+// etc. -- in a second parser, we ask output_keys() for the same table format_path
+// uses, redirect every key whose value IS our pid to a sentinel, and let
+// format_path expand: if the sentinel survives, some pid token rendered our pid.
+//
+// Matching by value (not a hard-coded token list) keeps this in lockstep with
+// output_key.cpp -- any present/future pid alias (%pid%, {pid}, %p, %nid%, ...)
+// is covered automatically, and %nid% is treated as a pid only when it actually
+// resolves to one (i.e. not under MPI). It is also coincidence-proof: a hostname
+// or %ppid% can never equal the sentinel, and a token that renders our (unique)
+// pid necessarily yields a unique filename.
+bool
+output_name_encodes_pid(std::string_view output_file)
+{
+    const auto _pid  = std::to_string(getpid());
+    auto       _keys = output_keys();
+
+    bool _has_pid_key = false;
+    for(auto& _key : _keys)
     {
-        auto rest = raw.substr(pos);
-        if(rest.rfind("%ppid%", 0) == 0 || rest.rfind("%pgid%", 0) == 0 ||
-           rest.rfind("%psid%", 0) == 0 || rest.rfind("%psize%", 0) == 0)
-            continue;
-        return true;
+        if(_key.value == _pid)
+        {
+            _key.value   = std::string{pid_sentinel};
+            _has_pid_key = true;
+        }
     }
-    return false;
+
+    if(!_has_pid_key) return false;
+    return format_path(std::string{output_file}, _keys).find(pid_sentinel) != std::string::npos;
 }
 }  // namespace
 
@@ -85,13 +101,13 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     // Descendants of the root append their PID so they don't overwrite the root's
     // output; recomputed per call so a process that forks later still gets its PID.
-    // We skip the suffix only when the raw format already asks for this process's pid
-    // (%pid%/{pid}/%p) -- checking raw tokens rather than expanded digits avoids
-    // false-matching coincidental digits from %hostname% or %ppid%.
+    // We skip the suffix only when the output-file format already resolves to this
+    // process's pid (%pid%/{pid}/%p/%nid%); detection is delegated to format_path
+    // so a coincidental digit (e.g. in %hostname%) can never suppress the suffix.
     auto _pid           = std::to_string(getpid());
     auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
     bool _is_descendant = _root_pid.has_value() && *_root_pid != _pid;
-    if(_is_descendant && !format_has_pid_token(cfg.output_file))
+    if(_is_descendant && !output_name_encodes_pid(cfg.output_file))
     {
         output_prefix += fmt::format("_{}", _pid);
     }
