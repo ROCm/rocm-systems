@@ -3850,11 +3850,11 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 
 // ================================================================================================
 device::Signal* Device::createIpcSignal() const {
-  #if defined(__linux__)
-    return new roc::IpcSignal();
-  #else
-    return nullptr;  // mimic PAL windows path
-  #endif
+#if defined(__linux__)
+  return new roc::IpcSignal();
+#else
+  return nullptr;  // mimic PAL windows path
+#endif
 }
 
 // ================================================================================================
