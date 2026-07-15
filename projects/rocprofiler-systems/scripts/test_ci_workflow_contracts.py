@@ -6,6 +6,9 @@
 """Local sanity checks for rocprofiler-systems GitHub workflows."""
 
 import argparse
+import base64
+import gzip
+import importlib.util
 import json
 import os
 import shutil
@@ -13,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -636,6 +640,195 @@ def run_ci_command(
     )
 
 
+def _load_run_ci_module():
+    """Import run-ci.py as a module (its filename isn't a valid identifier,
+    so it can't use a normal `import`) to unit test its pure functions
+    directly, without a subprocess."""
+    spec = importlib.util.spec_from_file_location("run_ci", RUN_CI)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _gzip_base64_value(text: str) -> str:
+    """Encode `text` the way CDash measurement values are encoded: gzip then
+    base64, matching what run-ci.py's _decode_ctest_value expects to
+    reverse."""
+    return base64.b64encode(gzip.compress(text.encode("utf-8"))).decode("ascii")
+
+
+def check_summarize_skipped_tests_unit(verbose: bool) -> None:
+    """Unit-test the pure skip-reason resolution functions directly against
+    constructed XML fixtures — no subprocess needed, unlike every other
+    check in this file, since these are pure functions over ElementTree
+    elements and bytes (see run-ci.py's "Skipped-test reporting" section).
+    """
+    run_ci = _load_run_ci_module()
+
+    def test_el(xml: str):
+        return ET.fromstring(xml)
+
+    # Completion Status carries a real reason: used directly, no fallback.
+    reason = run_ci._skip_reason(
+        test_el("""<Test Status="notrun"><Name>test_a</Name><Results>
+                 <NamedMeasurement name="Completion Status">
+                   <Value>Julia not available</Value>
+                 </NamedMeasurement>
+               </Results></Test>""")
+    )
+    require(
+        reason == "Julia not available", "expected the direct Completion Status reason"
+    )
+
+    # SKIP_RETURN_CODE placeholder + a matching captured-output pattern: the
+    # regex-extracted reason wins.
+    encoded = _gzip_base64_value(
+        "some pytest noise\nSKIPPED [1] test_b.py:12: real skip reason\nmore noise"
+    )
+    reason = run_ci._skip_reason(
+        test_el(f"""<Test Status="notrun"><Name>test_b</Name><Results>
+                 <NamedMeasurement name="Completion Status"><Value>SKIP_RETURN_CODE: 5</Value></NamedMeasurement>
+                 <Measurement><Value encoding="base64" compression="gzip">{encoded}</Value></Measurement>
+               </Results></Test>""")
+    )
+    require(reason == "real skip reason", "expected the regex-extracted reason to win")
+
+    # SKIP_RETURN_CODE placeholder + no matching pattern anywhere: keep the
+    # SKIP_RETURN_CODE text rather than falling back to the generic default.
+    encoded = _gzip_base64_value("no recognizable skip marker in this output")
+    reason = run_ci._skip_reason(
+        test_el(f"""<Test Status="notrun"><Name>test_c</Name><Results>
+                 <NamedMeasurement name="Completion Status"><Value>SKIP_RETURN_CODE: 5</Value></NamedMeasurement>
+                 <Measurement><Value encoding="base64" compression="gzip">{encoded}</Value></Measurement>
+               </Results></Test>""")
+    )
+    require(
+        reason == "SKIP_RETURN_CODE: 5",
+        "expected the SKIP_RETURN_CODE placeholder to survive when nothing better is found",
+    )
+
+    # No Completion Status measurement and no matching output at all: fall
+    # back to the generic default.
+    reason = run_ci._skip_reason(
+        test_el("<Test Status='notrun'><Name>test_d</Name></Test>")
+    )
+    require(reason == "(no reason captured)", "expected the generic fallback reason")
+
+    # _collect_skip_reasons only reports "notrun" tests.
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-skip-unit-") as temp_dir:
+        xml_path = Path(temp_dir) / "Test.xml"
+        xml_path.write_text(
+            """<Site><Testing>
+                 <Test Status="notrun"><Name>skipped_one</Name><Results>
+                   <NamedMeasurement name="Completion Status"><Value>no GPU</Value></NamedMeasurement>
+                 </Results></Test>
+                 <Test Status="passed"><Name>passed_one</Name></Test>
+               </Testing></Site>""",
+            encoding="utf-8",
+        )
+        reasons = run_ci._collect_skip_reasons(str(xml_path))
+    require(
+        reasons == {"skipped_one": "no GPU"},
+        f"expected only the notrun test to be collected, got {reasons}",
+    )
+
+    if verbose:
+        print(reasons)
+    ok("run-ci.py skip-reason resolution functions behave correctly")
+
+
+_SKIP_TEST_SENTINEL_NAME = "annotate-parallel-overhead-sys-run"
+_SKIP_TEST_SENTINEL_REASON = "Requires perf_event_paranoid at most 2 or CAP_SYS_ADMIN"
+
+
+def write_fake_test_xml_with_skip(bin_dir: Path, binary_dir: Path) -> None:
+    """Fake ctest producing Testing/TAG + Testing/<TAG>/Test.xml with one
+    skipped test (Status="notrun") carrying a Completion Status reason, and
+    one passed test that must NOT show up in the skip summary.
+    """
+    tag_dir = binary_dir / "Testing" / "20260202-0000"
+    tool_path = bin_dir / "ctest"
+    xml_path = tag_dir / "Test.xml"
+    xml_content = (
+        "<Site><Testing>"
+        f'<Test Status="notrun"><Name>{_SKIP_TEST_SENTINEL_NAME}</Name><Results>'
+        '<NamedMeasurement name="Completion Status">'
+        f"<Value>{_SKIP_TEST_SENTINEL_REASON}</Value>"
+        "</NamedMeasurement>"
+        "</Results></Test>"
+        '<Test Status="passed"><Name>some-other-test</Name></Test>'
+        "</Testing></Site>\n"
+    )
+    tool_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        f"mkdir -p {str(tag_dir)!r}\n"
+        f"printf '20260202-0000\\n' > {str(binary_dir / 'Testing' / 'TAG')!r}\n"
+        f"cat > {str(xml_path)!r} <<'FAKE_TEST_XML_EOF'\n"
+        f"{xml_content}"
+        "FAKE_TEST_XML_EOF\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
+
+
+def check_run_ci_skipped_tests_summary(verbose: bool) -> None:
+    """A test-stage run must report skipped tests with their resolved
+    reason (see run-ci.py summarize_skipped_tests()), and must not list
+    tests that actually passed."""
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-skip-check-") as temp_dir:
+        temp_path = Path(temp_dir)
+        binary_dir = temp_path / "build"
+        fake_bin_dir = temp_path / "bin"
+        fake_bin_dir.mkdir()
+        fake_tool_log = temp_path / "fake-tools.log"
+
+        for tool in ("cmake", "git", "gcov"):
+            write_fake_tool(fake_bin_dir, tool, fake_tool_log)
+        write_fake_test_xml_with_skip(fake_bin_dir, binary_dir)
+
+        common_args = [
+            "--name",
+            "local-ci-skip-check",
+            "--site",
+            "Local",
+            "-B",
+            str(binary_dir),
+        ]
+        env = {"TERM": "dumb", "GITHUB_ACTIONS": "true"}
+        run_ci_command(
+            ["--stage", "generate", *common_args], binary_dir, fake_bin_dir, env
+        )
+
+        test = run_ci_command(
+            ["--stage", "test", *common_args], binary_dir, fake_bin_dir, env
+        )
+        require(
+            "Skipped tests (1)" in test.stdout,
+            "run-ci.py must report exactly one skipped test",
+        )
+        # Scope the remaining assertions to the "Skipped tests" group only —
+        # collect_test_artifacts separately dumps the raw Test.xml (which
+        # legitimately mentions the passed test) elsewhere in stdout.
+        section_start = test.stdout.index("Skipped tests (1)")
+        section_end = test.stdout.find("::endgroup::", section_start)
+        skip_section = test.stdout[section_start:section_end]
+        require(
+            _SKIP_TEST_SENTINEL_NAME in skip_section
+            and _SKIP_TEST_SENTINEL_REASON in skip_section,
+            "run-ci.py must print the skipped test's name and resolved reason",
+        )
+        require(
+            "some-other-test" not in skip_section,
+            "run-ci.py must not list a passed test in the skip summary",
+        )
+
+        if verbose:
+            print(test.stdout)
+    ok("run-ci.py reports skipped tests with their resolved reason")
+
+
 def check_run_ci_split_stage_contract(verbose: bool) -> None:
     with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-check-") as temp_dir:
         temp_path = Path(temp_dir)
@@ -749,6 +942,7 @@ def write_fake_build_xml_failure(bin_dir: Path, binary_dir: Path) -> None:
         "#!/usr/bin/env bash\n"
         "set -e\n"
         f"mkdir -p {str(tag_dir)!r}\n"
+        f"printf '20260101-0000\\n' > {str(binary_dir / 'Testing' / 'TAG')!r}\n"
         f"cat > {str(xml_path)!r} <<'FAKE_BUILD_XML_EOF'\n"
         f"{xml_content}"
         "FAKE_BUILD_XML_EOF\n"
@@ -906,6 +1100,8 @@ def run_checks(args: argparse.Namespace) -> None:
     check_run_ci_split_stage_contract(args.verbose)
     check_run_ci_failure_colored_log(args.verbose)
     check_run_ci_build_success_annotation(args.verbose)
+    check_summarize_skipped_tests_unit(args.verbose)
+    check_run_ci_skipped_tests_summary(args.verbose)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

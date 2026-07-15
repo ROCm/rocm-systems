@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import glob
+import zlib
+import base64
 import socket
 import shutil
 import argparse
@@ -610,6 +612,23 @@ def _newest_match(pattern: str):
     return max(matches, key=os.path.getmtime) if matches else None
 
 
+def _current_run_tag_dir(args):
+    """Resolve Testing/<TAG> for the run currently in progress.
+
+    CTest writes the tag name as the first line of Testing/TAG on
+    ctest_start(), and every later ctest_start(APPEND) in the same job
+    reuses it — this is the exact directory for the current run, unlike
+    picking a Testing/*/ subdirectory by mtime.
+    """
+    tag_path = os.path.join(args.binary_dir, "Testing", "TAG")
+    try:
+        with open(tag_path, encoding="utf-8") as f:
+            tag = f.readline().strip()
+    except OSError:
+        return None
+    return os.path.join(args.binary_dir, "Testing", tag) if tag else None
+
+
 def _read_raw_stage_log(args, stage_label: str):
     """Read Testing/Temporary/Last<Stage>*.log, or None if it doesn't exist.
 
@@ -634,8 +653,11 @@ def _read_build_xml_failures(args):
     list of text blocks, one per <Failure>/<Warning> entry; empty if
     Build.xml doesn't exist (e.g. the build was never reached).
     """
-    path = _newest_match(os.path.join(args.binary_dir, "Testing", "*", "Build.xml"))
-    if path is None:
+    tag_dir = _current_run_tag_dir(args)
+    if tag_dir is None:
+        return []
+    path = os.path.join(tag_dir, "Build.xml")
+    if not os.path.isfile(path):
         return []
     try:
         root = ET.parse(path).getroot()
@@ -706,6 +728,121 @@ def annotate_build_diagnostics(args, failed: bool) -> None:
             f"Build: {errors} error(s), {warnings} warning(s) — expand step for details",
             level="warning",
         )
+
+
+# ---------------------------------------------------------------------------
+# Skipped-test reporting
+#
+# CTest only reports "<test> (Skipped)" with no reason. The real reason is
+# recorded by the pytest harness as a CDash "Completion Status" measurement
+# (or, failing that, embedded in pytest's own captured output) inside
+# Testing/<TAG>/Test.xml, base64/gzip-encoded per CDash's XML schema.
+# ---------------------------------------------------------------------------
+
+_SKIP_REASON_PATTERNS = (
+    # pytest's untruncated summary line: "SKIPPED [1] file:line: reason", or
+    # "SKIPPED [1] file: reason" (no line number for collection-time skips).
+    re.compile(r"SKIPPED \[\d+\][^:\n]+:(?:\d+:)?\s*(.+)"),
+    # Fallback: the verbose progress line, which pytest truncates with "..."
+    # to the terminal width.
+    re.compile(r"SKIPPED \(([^)]*)\)"),
+)
+
+
+def _gzip_decompress_any(raw: bytes):
+    """Try each zlib/gzip wbits convention CTest's compressed payloads use."""
+    for wbits in (zlib.MAX_WBITS | 16, zlib.MAX_WBITS, -zlib.MAX_WBITS):
+        try:
+            return zlib.decompress(raw, wbits)
+        except zlib.error:
+            continue
+    return None
+
+
+def _decode_ctest_value(value_el) -> str:
+    """Decode a CTest <Value>: base64+gzip for Measurements, plain text for
+    NamedMeasurements (no "encoding" attribute)."""
+    text = value_el.text or ""
+    if value_el.get("encoding") != "base64":
+        return text
+    try:
+        raw = base64.b64decode(text)
+    except (ValueError, TypeError):
+        return ""
+    if value_el.get("compression"):
+        raw = _gzip_decompress_any(raw)
+        if raw is None:
+            return ""
+    return raw.decode("utf-8", errors="replace")
+
+
+def _completion_status(test_el) -> str:
+    """Return the "Completion Status" NamedMeasurement's value, if present."""
+    measurement = next(
+        (
+            nm
+            for nm in test_el.iter("NamedMeasurement")
+            if nm.get("name") == "Completion Status"
+        ),
+        None,
+    )
+    return (
+        (measurement.findtext("Value") or "").strip() if measurement is not None else ""
+    )
+
+
+def _reason_from_output(output: str) -> str:
+    """Extract a skip reason from pytest's captured output, preferring the
+    untruncated summary line over the truncated progress line."""
+    for pattern in _SKIP_REASON_PATTERNS:
+        match = pattern.search(output)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _skip_reason(test_el) -> str:
+    """Resolve a skipped test's reason: prefer CDash's "Completion Status"
+    measurement; fall back to parsing pytest's captured output if it's
+    missing or just the generic SKIP_RETURN_CODE placeholder."""
+    reason = _completion_status(test_el)
+    if reason and not reason.startswith("SKIP_RETURN_CODE"):
+        return reason
+    output = "\n".join(_decode_ctest_value(v) for v in test_el.iter("Value"))
+    return _reason_from_output(output) or reason or "(no reason captured)"
+
+
+def _collect_skip_reasons(xml_path) -> dict:
+    """Map skipped test name -> reason, from a single Test.xml."""
+    try:
+        root = ET.parse(xml_path).getroot()
+    except ET.ParseError:
+        return {}
+    return {
+        test.findtext("Name") or "<unknown>": _skip_reason(test)
+        for test in root.iter("Test")
+        if test.get("Status") == "notrun"
+    }
+
+
+def summarize_skipped_tests(args) -> None:
+    """Print a concise "test -> skip reason" section from CTest's Test.xml."""
+    tag_dir = _current_run_tag_dir(args)
+    if tag_dir is None:
+        return
+    xml_path = os.path.join(tag_dir, "Test.xml")
+    if not os.path.isfile(xml_path):
+        return
+
+    reasons = _collect_skip_reasons(xml_path)
+    if not reasons:
+        return
+
+    log_group_start(f"Skipped tests ({len(reasons)})")
+    width = max(len(name) for name in reasons)
+    for name in sorted(reasons):
+        log(f"{name.ljust(width)}  {reasons[name]}")
+    log_group_end()
 
 
 def collect_test_artifacts(args, ctest_args, print_xml: bool = True):
@@ -815,6 +952,8 @@ def do_stage(args, script_name, stage_label, ctest_args=None):
 
         if stage_label == "build":
             annotate_build_diagnostics(args, failed)
+        elif stage_label == "test":
+            summarize_skipped_tests(args)
 
 
 def do_all(args, ctest_args):
