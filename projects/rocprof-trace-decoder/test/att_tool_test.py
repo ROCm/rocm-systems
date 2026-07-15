@@ -17,12 +17,12 @@ from rocprof_trace_decoder.code_index import CodeIndex
 from rocprof_trace_decoder.records import Occupancy, Pc, ShaderData, ShaderDataFlags, TraceRecords
 
 
-def _shaderdata(time: int, value: int, flags: int = 0) -> ShaderData:
-    return ShaderData(time, value, cu=1, simd=2, wave_id=3, flags=flags, reserved=0)
+def _shaderdata(time: int, value: int, flags: int = 0, simd: int = 2) -> ShaderData:
+    return ShaderData(time, value, cu=1, simd=simd, wave_id=3, flags=flags, reserved=0)
 
 
-def _occupancy(start: int, time: int, codeobj: int = 7) -> Occupancy:
-    return Occupancy(Pc(0, codeobj), time, 0, 1, 2, 3, start, 0, 0, 0, 0, 0)
+def _occupancy(start: int, time: int, codeobj: int = 7, simd: int = 2) -> Occupancy:
+    return Occupancy(Pc(0, codeobj), time, 0, 1, simd, 3, start, 0, 0, 0, 0, 0)
 
 
 class _Decoder:
@@ -164,6 +164,72 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
 
         self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x1010])
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
+
+    def test_correction_does_not_share_the_reference_between_simds(self):
+        value = (0x100 << 20) | (3 << 2)
+        slow_simd = _shaderdata(0x1080, value, simd=2)
+        fast_simd = _shaderdata(0x1010, value, simd=3)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0, simd=2), _occupancy(1, 0, simd=3)],
+            shaderdata=[slow_simd, fast_simd],
+        )
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 4]],
+            },
+        )
+
+        self.assertEqual(slow_simd.time, 0x1080)
+        self.assertEqual(fast_simd.time, 0x1010)
+        self.assertEqual([record.value for record in records.shaderdata], [12, 12])
+
+    def test_late_header_after_retirement_is_normalized_and_corrected(self):
+        value = (0x100 << 20) | (3 << 2)
+        before_retirement = _shaderdata(0x1010, value)
+        after_retirement = _shaderdata(0x1080, value)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0), _occupancy(0, 0x1020)],
+            shaderdata=[before_retirement, after_retirement],
+        )
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 4]],
+            },
+        )
+
+        self.assertEqual(before_retirement.time, 0x1010)
+        self.assertEqual(after_retirement.time, 0x1010)
+        self.assertEqual([record.value for record in records.shaderdata], [12, 12])
+
+    def test_later_launch_supersedes_a_retired_wave_slot(self):
+        value = (0x80 << 21) | (4 << 2)
+        first = _shaderdata(0x1020, value)
+        second = _shaderdata(0x1080, value)
+        records = TraceRecords(
+            occupancy=[
+                _occupancy(1, 0, codeobj=7),
+                _occupancy(0, 0x20, codeobj=7),
+                _occupancy(1, 0x40, codeobj=8),
+            ],
+            shaderdata=[first, second],
+        )
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "first", "", 0], [8, 4, "P", "second", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 4], [8, 11, 5]],
+            },
+        )
+
+        self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x1020])
+        self.assertEqual([record.value for record in records.shaderdata], [16, 16])
 
     def test_no_decode_markers_preserves_packed_values(self):
         value = (0x100 << 20) | (3 << 2)

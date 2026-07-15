@@ -169,10 +169,9 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         for record in records.occupancy:
             occupancy[se, record.cu, record.simd, record.wave_id].append(record)
 
-    headers: list[tuple[object, int, int, int, list[object]]] = []
-    minimum_delay: dict[tuple[int, int], int] = {}
+    headers: list[tuple[object, tuple[int, int, int, int, int], int, list[object]]] = []
+    minimum_delay: dict[tuple[int, int, int, int, int], int] = {}
     for location, stream in shaderdata.items():
-        se = location[0]
         stream.sort(key=lambda record: record.time)
         intervals = _active_codeobj_intervals(occupancy.get(location, ()))
         interval = 0
@@ -214,13 +213,15 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             mask = ((1 << bits) - 1) << shift
             sampled = ((raw >> (32 - bits)) & ((1 << bits) - 1)) << shift
             delay = ((int(record.time) & mask) - sampled) & mask
-            headers.append((record, se, mask, delay, header_payloads))
-            key = se, mask
-            minimum_delay[key] = min(minimum_delay.get(key, delay), delay)
+            # shader_cycles_lo samples are only comparable on one physical
+            # SIMD. Keep differently encoded clock windows independent too.
+            clock_domain = (*location[:3], bits, shift)
+            headers.append((record, clock_domain, delay, header_payloads))
+            minimum_delay[clock_domain] = min(minimum_delay.get(clock_domain, delay), delay)
 
     changed = False
-    for record, se, mask, delay, header_payloads in headers:
-        correction = delay - minimum_delay[se, mask]
+    for record, clock_domain, delay, header_payloads in headers:
+        correction = delay - minimum_delay[clock_domain]
         if correction:
             record.time -= correction
             # The output writer sorts shaderdata after correction. Move raw
@@ -235,18 +236,15 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
 
 
 def _active_codeobj_intervals(occupancy: Iterable[object]) -> list[tuple[int, int, int]]:
-    events = sorted(occupancy, key=lambda record: (record.time, record.start))
+    """Associate a wave slot with its last launch until its next launch."""
+    events = sorted((record for record in occupancy if record.start), key=lambda record: record.time)
     intervals: list[tuple[int, int, int]] = []
     begin = 0
     codeobj: int | None = None
     for record in events:
-        if record.start:
-            if codeobj is not None:
-                intervals.append((begin, record.time, codeobj))
-            begin, codeobj = record.time, record.pc.code_object_id
-        elif codeobj is not None:
+        if codeobj is not None:
             intervals.append((begin, record.time, codeobj))
-            codeobj = None
+        begin, codeobj = record.time, record.pc.code_object_id
     if codeobj is not None:
         intervals.append((begin, (1 << 63) - 1, codeobj))
     return intervals
