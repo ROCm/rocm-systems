@@ -35,6 +35,8 @@ constexpr const char* kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
 constexpr const char* kGfx12_5GenericIsa =
     "amdgcn-amd-amdhsa--gfx12-5-generic";
 constexpr const char* kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
+constexpr const char* kGfx1030Isa = "amdgcn-amd-amdhsa--gfx1030";
+constexpr const char* kGfx1200Isa = "amdgcn-amd-amdhsa--gfx1200";
 constexpr const char* kGfx1250B0Isa =
     "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+";
 constexpr const char* kGfx1250A0Isa =
@@ -399,6 +401,72 @@ TEST(HotswapRewriteDecision, EntryTrampolinesBlockNonGfx12_5) {
   options.entry_trampolines_enabled = true;
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx942", 0), kGfx942Isa, kGfx942Isa, options);
+
+  EXPECT_FALSE(decision.has_value());
+}
+
+// Without any option set, gfx10.3 / gfx12.0 are not rewritten: entry
+// trampolines are driven by AMD_COMGR_HOTSWAP_FORCE_ENTRY_TRAMPOLINES (or the
+// gfx12.5 opt-in), not hardcoded per target.
+TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOffForGfx1030) {
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1030", 0), kGfx1030Isa, kGfx1030Isa, {});
+
+  EXPECT_FALSE(decision.has_value());
+}
+
+// Force-all routes gfx10.3 to entry trampolines: best-effort (rewrite not
+// required), with the source ISA reused as the target.
+TEST(HotswapRewriteDecision, ForceAllRoutesGfx1030) {
+  rocr::hotswap::RewriteOptions options;
+  options.force_all_entry_trampolines = true;
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1030", 0), kGfx1030Isa, kGfx1030Isa, options);
+
+  ASSERT_TRUE(decision.has_value());
+  EXPECT_EQ(decision->source_isa, kGfx1030Isa);
+  EXPECT_EQ(decision->target_isa, kGfx1030Isa);
+  EXPECT_TRUE(decision->request_entry_trampolines);
+  EXPECT_FALSE(decision->request_strict_mode);
+  EXPECT_FALSE(decision->rewrite_required);
+}
+
+// Force-all also routes gfx12.0.
+TEST(HotswapRewriteDecision, ForceAllRoutesGfx1200) {
+  rocr::hotswap::RewriteOptions options;
+  options.force_all_entry_trampolines = true;
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1200", 0), kGfx1200Isa, kGfx1200Isa, options);
+
+  ASSERT_TRUE(decision.has_value());
+  EXPECT_EQ(decision->source_isa, kGfx1200Isa);
+  EXPECT_EQ(decision->target_isa, kGfx1200Isa);
+  EXPECT_TRUE(decision->request_entry_trampolines);
+  EXPECT_FALSE(decision->request_strict_mode);
+  EXPECT_FALSE(decision->rewrite_required);
+}
+
+// Force-all is best-effort for every target: even a target COMGR does not
+// support (gfx942) yields a decision; COMGR rejects it at rewrite time and the
+// loader falls back to the original code object.
+TEST(HotswapRewriteDecision, ForceAllRoutesUnsupportedTargetBestEffort) {
+  rocr::hotswap::RewriteOptions options;
+  options.force_all_entry_trampolines = true;
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx942", 0), kGfx942Isa, kGfx942Isa, options);
+
+  ASSERT_TRUE(decision.has_value());
+  EXPECT_TRUE(decision->request_entry_trampolines);
+  EXPECT_FALSE(decision->rewrite_required);
+}
+
+// Force-all still requires the code object's ISA to match the agent's gfx
+// target (a gfx1200 ELF on a gfx1030 agent is not rewritten).
+TEST(HotswapRewriteDecision, ForceAllRequiresMatchingIsa) {
+  rocr::hotswap::RewriteOptions options;
+  options.force_all_entry_trampolines = true;
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1030", 0), kGfx1200Isa, kGfx1200Isa, options);
 
   EXPECT_FALSE(decision.has_value());
 }

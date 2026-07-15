@@ -71,6 +71,12 @@ inline constexpr bool kDefaultEntryTrampolinesEnabled = false;
 struct RewriteOptions {
   bool entry_trampolines_enabled = kDefaultEntryTrampolinesEnabled;
   bool strict_mode_enabled = false;
+  // When set (AMD_COMGR_HOTSWAP_FORCE_ENTRY_TRAMPOLINES), request entry
+  // trampolines for every agent whose loaded code object's ISA matches, not
+  // just gfx12.5. This is best-effort: COMGR applies the rewrite only on
+  // targets it supports and reports an error otherwise, so unsupported targets
+  // fall back to the original code object.
+  bool force_all_entry_trampolines = false;
 };
 
 struct RewriteDecision {

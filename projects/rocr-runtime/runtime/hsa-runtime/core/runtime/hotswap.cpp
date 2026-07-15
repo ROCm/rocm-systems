@@ -108,6 +108,12 @@ bool AreEntryTrampolinesRequested() {
   return IsEnvFlagEnabled(kEnvName);
 }
 
+// Opt-in override to force the entry-trampoline rewrite on every agent (not
+// only gfx12.5). Best-effort: COMGR gates actual support per target.
+bool AreEntryTrampolinesForcedForAll() {
+  return IsEnvFlagEnabled("AMD_COMGR_HOTSWAP_FORCE_ENTRY_TRAMPOLINES");
+}
+
 bool IsStrictModeRequested() {
   return IsEnvFlagEnabled("HSA_HOTSWAP_STRICT_MODE");
 }
@@ -290,7 +296,8 @@ bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
   return IsHotswapSupportedGfxRevision(gfx) ||
       (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
-      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target));
+      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target)) ||
+      (options.force_all_entry_trampolines && !gfx.gfx_target.empty());
 }
 
 std::optional<RewriteDecision> DecideHotswapRewrite(
@@ -316,8 +323,14 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
     return decision;
   }
 
-  const bool request_entry_trampolines = options.entry_trampolines_enabled &&
-      IsGfx12_5Target(gfx.gfx_target) && IsGfx12_5Target(source_gfx);
+  // Force-all: request entry trampolines for any agent whose loaded code
+  // object's ISA matches, independent of the gfx12.5 opt-in. Best-effort --
+  // COMGR gates actual per-target support and the load falls back on error.
+  const bool force_all_trampolines = options.force_all_entry_trampolines &&
+      !source_gfx.empty() && source_gfx == gfx.gfx_target;
+  const bool request_entry_trampolines = force_all_trampolines ||
+      (options.entry_trampolines_enabled &&
+       IsGfx12_5Target(gfx.gfx_target) && IsGfx12_5Target(source_gfx));
   const bool request_strict_mode =
       options.strict_mode_enabled && gfx.gfx_target == kGfx1250 &&
       source_gfx == kGfx1250;
@@ -485,6 +498,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   RewriteOptions options;
   options.entry_trampolines_enabled = AreEntryTrampolinesRequested();
   options.strict_mode_enabled = IsStrictModeRequested();
+  options.force_all_entry_trampolines = AreEntryTrampolinesForcedForAll();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return {};
   }
