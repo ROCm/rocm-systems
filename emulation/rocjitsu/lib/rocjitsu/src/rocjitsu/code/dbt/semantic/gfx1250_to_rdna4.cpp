@@ -4270,6 +4270,47 @@ ExpandResult lower_vop2_f64_literal64(const Instruction &inst, uint32_t, uint64_
   return ExpandResult::success(std::move(words));
 }
 
+ExpandResult lower_v_fmac_f64_e32(const Instruction &inst, uint32_t, uint64_t,
+                                  std::span<const uint8_t>, const LivenessAnalysis &,
+                                  TranslationContext &, const LaneLayout *, const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < static_cast<int>(sizeof(uint32_t)))
+    return ExpandResult::not_handled();
+
+  const auto src = std::bit_cast<gfx1250::Vop2MachineInst>(raw[0]);
+  if (src.vdst > 254 || src.vsrc1 > 254)
+    return ExpandResult::failed("v_fmac_f64_e32 has an out-of-range VGPR pair");
+  if (const auto src0_vgpr = vgpr_index(static_cast<uint16_t>(src.src0));
+      src0_vgpr && *src0_vgpr > 254)
+    return ExpandResult::failed("v_fmac_f64_e32 has an out-of-range src0 VGPR pair");
+  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(src.src0))
+    return ExpandResult::failed(
+        "v_fmac_f64_e32 DPP and SDWA source forms need explicit operand lowering");
+
+  std::optional<uint32_t> literal32;
+  std::optional<uint64_t> literal64;
+  if (src.src0 == 255)
+    literal32 = simm32_literal_word(inst, 0);
+  else if (src.src0 == 254)
+    literal64 = simm64_literal_value(inst, 0);
+  if ((src.src0 == 255 && !literal32) || (src.src0 == 254 && !literal64))
+    return ExpandResult::failed("v_fmac_f64_e32 is missing its literal operand");
+
+  constexpr uint16_t kOpFmaF64 = 532;
+  auto [w0, w1] =
+      build_vop3(kOpFmaF64, static_cast<uint8_t>(src.vdst), static_cast<uint16_t>(src.src0),
+                 vgpr_src(src.vsrc1), vgpr_src(src.vdst));
+  std::vector<uint32_t> words{w0, w1};
+  if (literal32)
+    words.push_back(*literal32);
+  else if (literal64) {
+    words.push_back(static_cast<uint32_t>(*literal64));
+    words.push_back(static_cast<uint32_t>(*literal64 >> 32u));
+  }
+  return ExpandResult::success(std::move(words));
+}
+
 std::vector<uint32_t> expand_v_cvt_f32_f16_e32_high_src(const Instruction &inst, uint32_t, uint64_t,
                                                         std::span<const uint8_t>,
                                                         const LivenessAnalysis &liveness,
@@ -9587,6 +9628,65 @@ ExpandResult expand_v_wmma_f32_16x16x128_f8f6f4(const Instruction &inst, uint32_
 
 enum class PermlaneFamilyOp : uint8_t { Bcast, Up, Down, Xor };
 
+ExpandResult expand_v_permlane16_swap_b32_e32(const Instruction &inst, uint32_t, uint64_t,
+                                              std::span<const uint8_t>,
+                                              const LivenessAnalysis &liveness,
+                                              TranslationContext &context, const LaneLayout *,
+                                              const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop1MachineInst))
+    return ExpandResult::not_handled();
+
+  const auto src = std::bit_cast<gfx1250::Vop1MachineInst>(raw[0]);
+  const auto source = vgpr_index(static_cast<uint16_t>(src.src0));
+  if (!source)
+    return ExpandResult::failed(
+        "v_permlane16_swap_b32_e32 requires a plain VGPR source",
+        {"Add explicit scalar, literal, DPP, or SDWA operand materialization before enabling "
+         "those forms."});
+
+  std::vector<uint8_t> avoid{static_cast<uint8_t>(src.vdst), *source};
+  const auto scratch = find_free_vgpr_run_avoiding(inst, liveness, 3, avoid);
+  if (!scratch || *scratch > 253)
+    return ExpandResult::failed("v_permlane16_swap_b32_e32 cannot allocate three temporary VGPRs");
+  const auto exec_save = liveness.find_free_sgpr_pair(&inst);
+  if (!exec_save || *exec_save > 124)
+    return ExpandResult::failed(
+        "v_permlane16_swap_b32_e32 cannot allocate an SGPR pair to preserve EXEC");
+
+  const uint8_t lane_addr = static_cast<uint8_t>(*scratch);
+  const uint8_t from_dst_high = static_cast<uint8_t>(*scratch + 1u);
+  const uint8_t from_src_low = static_cast<uint8_t>(*scratch + 2u);
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpWaitDscnt = 70;
+
+  std::vector<uint32_t> words;
+  words.reserve(32);
+  append_save_exec(words, static_cast<uint8_t>(*exec_save));
+  // The architectural swap ignores EXEC. Gather the old values from both
+  // half waves before either read/write operand is changed.
+  append_set_exec_lo_mask(words, 0xFFFFFFFFu);
+  append_lane_xor16_byte_addr(words, lane_addr);
+  const auto [dst_w0, dst_w1] =
+      build_ds_bpermute(from_dst_high, lane_addr, static_cast<uint8_t>(src.vdst));
+  words.push_back(dst_w0);
+  words.push_back(dst_w1);
+  const auto [src_w0, src_w1] = build_ds_bpermute(from_src_low, lane_addr, *source);
+  words.push_back(src_w0);
+  words.push_back(src_w1);
+  words.push_back(pack_sopp(kOpWaitDscnt, 0));
+
+  append_set_exec_lo_mask(words, 0x0000FFFFu);
+  append_vop1(words, kOpMovB32, *source, vgpr_src(from_dst_high));
+  append_set_exec_lo_mask(words, 0xFFFF0000u);
+  append_vop1(words, kOpMovB32, static_cast<uint8_t>(src.vdst), vgpr_src(from_src_low));
+  append_restore_exec(words, static_cast<uint8_t>(*exec_save));
+
+  context.require_vgprs(static_cast<uint32_t>(*scratch) + 3u);
+  context.require_sgprs(static_cast<uint32_t>(*exec_save) + 2u);
+  return ExpandResult::success(std::move(words));
+}
+
 [[nodiscard]] std::optional<PermlaneFamilyOp> permlane_family_op(uint16_t op) {
   switch (op) {
   case 0x270:
@@ -12985,6 +13085,11 @@ struct VopdXyFields {
   std::optional<uint32_t> literal_word;
 };
 
+[[nodiscard]] constexpr uint8_t vopd_slot_word_width(uint16_t op) {
+  // The gfx1250 VOPD3 F64 operations read and write adjacent VGPR pairs.
+  return op >= 32 && op <= 36 ? 2 : 1;
+}
+
 [[nodiscard]] std::optional<Vopd3Fields> decode_vopd3(const Instruction &inst) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != 3 * sizeof(uint32_t) || (raw[0] >> 24) != 0xCF)
@@ -13044,7 +13149,7 @@ struct VopdXyFields {
 }
 
 [[nodiscard]] constexpr bool vopd_slot_reads_vsrc2(uint16_t op) {
-  return op == 19; // v_dual_fma_f32
+  return op == 19 || op == 32; // v_dual_fma_f32 / v_dual_fma_f64
 }
 
 [[nodiscard]] constexpr bool vopd_slot_reads_old_dst(uint16_t op) {
@@ -13069,9 +13174,10 @@ struct VopdXyFields {
 }
 
 [[nodiscard]] constexpr uint8_t vopd_neg_mask(const Vopd3Slot &slot) {
-  if (!vopd_is_float32_op(slot.op))
+  const bool is_f64 = slot.op >= 32 && slot.op <= 36;
+  if (!vopd_is_float32_op(slot.op) && !is_f64)
     return 0;
-  return static_cast<uint8_t>(slot.neg & (slot.op == 19 ? 0x7u : 0x3u));
+  return static_cast<uint8_t>(slot.neg & ((slot.op == 19 || slot.op == 32) ? 0x7u : 0x3u));
 }
 
 [[nodiscard]] std::optional<uint16_t> rdna4_vop3_op_for_vopd_slot(const Vopd3Slot &slot) {
@@ -13110,6 +13216,10 @@ struct VopdXyFields {
     return 273;
   case 19: // v_dual_fma_f32
     return 531;
+  case 33: // v_dual_add_f64
+    return 258;
+  case 34: // v_dual_mul_f64
+    return 262;
   default:
     return std::nullopt;
   }
@@ -13176,20 +13286,40 @@ struct VopdXyFields {
 
 [[nodiscard]] std::vector<uint8_t> vopd_slot_vgpr_uses(const Vopd3Slot &slot) {
   std::vector<uint8_t> uses;
+  const auto add_run = [&](uint8_t base, uint8_t width) {
+    for (uint8_t word = 0; word < width && static_cast<uint16_t>(base) + word < 256u; ++word)
+      uses.push_back(static_cast<uint8_t>(base + word));
+  };
+  const uint8_t width = vopd_slot_word_width(slot.op);
   if (auto src0_vgpr = vgpr_index(slot.src0))
-    uses.push_back(*src0_vgpr);
+    add_run(*src0_vgpr, width);
   if (vopd_slot_reads_src1(slot.op))
-    uses.push_back(slot.vsrc1);
+    add_run(slot.vsrc1, width);
   if (vopd_slot_reads_vsrc2(slot.op))
-    uses.push_back(slot.vsrc2);
+    add_run(slot.vsrc2, width);
   if (vopd_slot_reads_old_dst(slot.op))
-    uses.push_back(slot.vdst);
+    add_run(slot.vdst, width);
   return uses;
 }
 
 [[nodiscard]] bool vopd_slot_uses_vgpr(const Vopd3Slot &slot, uint8_t vgpr) {
   const auto uses = vopd_slot_vgpr_uses(slot);
   return std::ranges::find(uses, vgpr) != uses.end();
+}
+
+[[nodiscard]] bool vopd_slot_clobbers_uses(const Vopd3Slot &writer, const Vopd3Slot &reader) {
+  for (uint8_t word = 0; word < vopd_slot_word_width(writer.op); ++word) {
+    const uint16_t written = static_cast<uint16_t>(writer.vdst) + word;
+    if (written < 256u && vopd_slot_uses_vgpr(reader, static_cast<uint8_t>(written)))
+      return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool vopd_slot_destinations_overlap(const Vopd3Slot &x, const Vopd3Slot &y) {
+  const uint16_t x_end = static_cast<uint16_t>(x.vdst) + vopd_slot_word_width(x.op);
+  const uint16_t y_end = static_cast<uint16_t>(y.vdst) + vopd_slot_word_width(y.op);
+  return x.vdst < y_end && y.vdst < x_end;
 }
 
 [[nodiscard]] std::vector<uint32_t> lower_vopd_slot(const Vopd3Slot &slot,
@@ -13214,6 +13344,19 @@ struct VopdXyFields {
     append_vop2(words, *rdna4_op, slot.vdst, slot.src0, slot.vsrc1,
                 slot.src0 == 255 ? literal_word : std::nullopt);
     return words;
+  }
+
+  if (slot.op == 33 || slot.op == 34) {
+    if (slot.vdst > 254 || slot.vsrc1 > 254)
+      return {};
+    if (const auto src0_vgpr = vgpr_index(slot.src0); src0_vgpr && *src0_vgpr > 254)
+      return {};
+    if (slot.src0 == 254 || slot.src0 == 255)
+      return {};
+    const uint16_t op = slot.op == 33 ? 258 : 262;
+    auto [w0, w1] = build_vop3_mod(op, slot.vdst, slot.src0, vopd_vgpr_src(slot.vsrc1), 0, 0, 0,
+                                   false, 0, vopd_neg_mask(slot));
+    return {w0, w1};
   }
 
   if ((slot.op == 1 || slot.op == 2) && (!literal_word || slot.src0 == 255))
@@ -13262,11 +13405,11 @@ std::vector<uint32_t> expand_vopd3(const Instruction &inst, uint32_t host_arch, 
                                    std::span<const uint8_t>, const LivenessAnalysis &,
                                    const LaneLayout *, const LaneLayout *) {
   auto fields = decode_vopd3(inst);
-  if (!fields || fields->x.vdst == fields->y.vdst)
+  if (!fields || vopd_slot_destinations_overlap(fields->x, fields->y))
     return {};
 
-  const bool xclobbers_y = vopd_slot_uses_vgpr(fields->y, fields->x.vdst);
-  const bool yclobbers_x = vopd_slot_uses_vgpr(fields->x, fields->y.vdst);
+  const bool xclobbers_y = vopd_slot_clobbers_uses(fields->x, fields->y);
+  const bool yclobbers_x = vopd_slot_clobbers_uses(fields->y, fields->x);
   if (xclobbers_y && yclobbers_x)
     return {};
 
@@ -13290,11 +13433,11 @@ std::vector<uint32_t> expand_vopd_xy(const Instruction &inst, uint32_t host_arch
                                      std::span<const uint8_t>, const LivenessAnalysis &,
                                      const LaneLayout *, const LaneLayout *) {
   auto fields = decode_vopd_xy(inst);
-  if (!fields || fields->x.vdst == fields->y.vdst)
+  if (!fields || vopd_slot_destinations_overlap(fields->x, fields->y))
     return {};
 
-  const bool xclobbers_y = vopd_slot_uses_vgpr(fields->y, fields->x.vdst);
-  const bool yclobbers_x = vopd_slot_uses_vgpr(fields->x, fields->y.vdst);
+  const bool xclobbers_y = vopd_slot_clobbers_uses(fields->x, fields->y);
+  const bool yclobbers_x = vopd_slot_clobbers_uses(fields->y, fields->x);
   if (xclobbers_y && yclobbers_x)
     return {};
 
@@ -13349,6 +13492,10 @@ ExpandResult legacy_expand_adapter(const Instruction &inst, uint32_t host_arch, 
 constexpr uint16_t kEncVopd = 0x032;
 constexpr uint16_t kEncVop2MinNumF64 = 0x034;
 constexpr uint16_t kEncVop2MaxNumF64 = 0x038;
+constexpr uint16_t kEncVop2FmacF64_0 = 0x05C;
+constexpr uint16_t kEncVop2FmacF64_1 = 0x05D;
+constexpr uint16_t kEncVop2FmacF64_2 = 0x05E;
+constexpr uint16_t kEncVop2FmacF64_3 = 0x05F;
 constexpr uint16_t kEncVop1_0 = 0x0FC;
 constexpr uint16_t kEncVop1_1 = 0x0FD;
 constexpr uint16_t kEncVop1_2 = 0x0FE;
@@ -13438,6 +13585,8 @@ constexpr uint16_t kOpSWaitTensorcnt = 0x4B;
 constexpr uint16_t kOpVCvtF32F16E32 = 11;
 constexpr uint16_t kOpVMinNumF64E32 = 13;
 constexpr uint16_t kOpVMaxNumF64E32 = 14;
+constexpr uint16_t kOpVFmacF64E32 = 23;
+constexpr uint16_t kOpVPermlane16SwapB32E32 = 73;
 constexpr uint16_t kOpVMovB16Vop1 = 28;
 constexpr uint16_t kOpVMovB64Vop1 = 29;
 constexpr uint16_t kOpVCvtNormI16F16Vop1 = 99;
@@ -13656,15 +13805,12 @@ constexpr uint16_t kOpDsLoadTr8B64 = 0xFD;
    expand_gfx1250_transcendental_vop1,                                                             \
    nullptr,                                                                                        \
    nullptr},                                                                                       \
-      {ENC,                                                                                        \
-       gfx1250::kVTanhF16Vop1,                                                                     \
-       RuleAction::Expand,                                                                         \
-       0,                                                                                          \
-       0,                                                                                          \
-       nullptr,                                                                                    \
-       expand_gfx1250_transcendental_vop1,                                                         \
-       nullptr,                                                                                    \
-       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVTanhF16Vop1, RuleAction::Expand, 0, 0, nullptr,                                \
+        expand_gfx1250_transcendental_vop1, nullptr, nullptr                                       \
+  }
+
+#define RJ_VOP1_TANH_BF16_RULE(ENC)                                                                \
   {                                                                                                \
     ENC, gfx1250::kVTanhBf16Vop1, RuleAction::Expand, 0, 0, nullptr,                               \
         expand_gfx1250_transcendental_vop1, nullptr, nullptr                                       \
@@ -13969,6 +14115,14 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      lower_vop2_f64_literal64, nullptr, nullptr},
     {kEncVop2MaxNumF64, kOpVMaxNumF64E32, RuleAction::Expand, 0, 0, nullptr,
      lower_vop2_f64_literal64, nullptr, nullptr},
+    {kEncVop2FmacF64_0, kOpVFmacF64E32, RuleAction::Expand, 0, 0, nullptr, lower_v_fmac_f64_e32,
+     nullptr, nullptr},
+    {kEncVop2FmacF64_1, kOpVFmacF64E32, RuleAction::Expand, 0, 0, nullptr, lower_v_fmac_f64_e32,
+     nullptr, nullptr},
+    {kEncVop2FmacF64_2, kOpVFmacF64E32, RuleAction::Expand, 0, 0, nullptr, lower_v_fmac_f64_e32,
+     nullptr, nullptr},
+    {kEncVop2FmacF64_3, kOpVFmacF64E32, RuleAction::Expand, 0, 0, nullptr, lower_v_fmac_f64_e32,
+     nullptr, nullptr},
     {kEncVop2LshlrevB64, kOpVLshlrevB64E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_lshlrev_b64_e32), nullptr, nullptr},
     {kEncVop2AddNcU64_0, kOpVAddNcU64E32, RuleAction::Expand, 0, 0, nullptr,
@@ -14051,6 +14205,9 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
     {kEncVop1_0, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
     RJ_VOP1_TANH_RULES(kEncVop1_0),
+    {kEncVop1_0, kOpVPermlane16SwapB32E32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane16_swap_b32_e32, nullptr, nullptr},
+    RJ_VOP1_TANH_BF16_RULE(kEncVop1_0),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_0),
     {kEncVop1_0, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -14074,6 +14231,9 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
     {kEncVop1_1, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
     RJ_VOP1_TANH_RULES(kEncVop1_1),
+    {kEncVop1_1, kOpVPermlane16SwapB32E32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane16_swap_b32_e32, nullptr, nullptr},
+    RJ_VOP1_TANH_BF16_RULE(kEncVop1_1),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_1),
     {kEncVop1_1, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -14097,6 +14257,9 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
     {kEncVop1_2, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
     RJ_VOP1_TANH_RULES(kEncVop1_2),
+    {kEncVop1_2, kOpVPermlane16SwapB32E32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane16_swap_b32_e32, nullptr, nullptr},
+    RJ_VOP1_TANH_BF16_RULE(kEncVop1_2),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_2),
     {kEncVop1_2, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -14120,6 +14283,9 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
     {kEncVop1_3, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
     RJ_VOP1_TANH_RULES(kEncVop1_3),
+    {kEncVop1_3, kOpVPermlane16SwapB32E32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane16_swap_b32_e32, nullptr, nullptr},
+    RJ_VOP1_TANH_BF16_RULE(kEncVop1_3),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_3),
     {kEncVop1_3, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -14730,6 +14896,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
 #undef RJ_VOPD3_RULE
 #undef RJ_VOPD_RULE
 #undef RJ_VOP1_TANH_RULES
+#undef RJ_VOP1_TANH_BF16_RULE
 #undef RJ_VOP1_BF16_TRANSCENDENTAL_RULES
 #undef RJ_VOP1_CVT_NORM_F16_RULES
 #undef RJ_VOP3_TANH_RULES
