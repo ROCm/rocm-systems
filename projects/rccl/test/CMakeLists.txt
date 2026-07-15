@@ -232,6 +232,7 @@ if(BUILD_TESTS)
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixtures)
 
     set(TEST_FIXTURE_SOURCE_FILES
+      AllocHandleTypeTests.cpp
       BitOpsTests.cpp
       IommuPassthrough_test.cpp
       MiscTests.cpp

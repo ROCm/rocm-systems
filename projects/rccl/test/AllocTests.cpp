@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
+#include <cstring>
+
 #include "TestBed.hpp"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -237,4 +239,5 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
         }
     );
 }
+
 } // namespace RcclUnitTesting
