@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "common/md5sum.hpp"
+#include "common/units.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -12,29 +13,28 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
-
-#include "common/units.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
-#include <cstddef>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/version.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/version.h>
-
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
@@ -60,21 +60,21 @@ get_handle_from_code_object(
 std::string
 generate_db_output_path(int pid)
 {
-    auto _tag    = std::to_string(pid);
+    auto tag     = std::to_string(pid);
     auto db_name = std::string{ "rocpd" };
-    return rocprofsys::get_database_absolute_path(db_name, _tag);
+    return rocprofsys::get_database_absolute_path(db_name, tag);
 }
 
 }  // namespace
 
 void
-rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
+rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
 {
-    auto&       n_info    = node_info::get_instance();
+    const auto& n_info    = node_info::get_instance();
     auto        process   = m_metadata->get_process_info();
-    const auto& agent_ref = m_agent_manager->get_agent_by_handle(_kds.agent_id_handle);
+    const auto& agent_ref = m_agent_manager->get_agent_by_handle(kds.agent_id_handle);
 
-    auto kernel_symbol = m_metadata->get_kernel_symbol(_kds.kernel_id);
+    auto kernel_symbol = m_metadata->get_kernel_symbol(kds.kernel_id);
     if(!kernel_symbol.has_value())
     {
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
@@ -82,63 +82,63 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 
     auto kernel_name = rocprofsys::utility::demangle(kernel_symbol->kernel_name);
 
-    auto ev = make_event(_kds.correlation_id_internal, _kds.correlation_id_ancestor, 0,
-                         trait::name<category::rocm_kernel_dispatch>::value);
+    auto event = make_event(kds.correlation_id_internal, kds.correlation_id_ancestor, 0,
+                            trait::name<category::rocm_kernel_dispatch>::value);
 
-    profiler_hub::writer_types::kernel_dispatch_data_t kd;
-    kd.event                = ev;
-    kd.dispatch_id          = _kds.dispatch_id;
-    kd.start_timestamp      = _kds.start_timestamp;
-    kd.end_timestamp        = _kds.end_timestamp;
-    kd.kernel_symbol_id     = _kds.kernel_id;
-    kd.private_segment_size = _kds.private_segment_size;
-    kd.group_segment_size   = _kds.group_segment_size;
-    kd.workgroup_size_x     = _kds.workgroup_size_x;
-    kd.workgroup_size_y     = _kds.workgroup_size_y;
-    kd.workgroup_size_z     = _kds.workgroup_size_z;
-    kd.grid_size_x          = _kds.grid_size_x;
-    kd.grid_size_y          = _kds.grid_size_y;
-    kd.grid_size_z          = _kds.grid_size_z;
-    kd.name                 = kernel_name.c_str();
+    profiler_hub::writer_types::kernel_dispatch_data_t kernel_dispatch;
+    kernel_dispatch.event                = event;
+    kernel_dispatch.dispatch_id          = kds.dispatch_id;
+    kernel_dispatch.start_timestamp      = kds.start_timestamp;
+    kernel_dispatch.end_timestamp        = kds.end_timestamp;
+    kernel_dispatch.kernel_symbol_id     = kds.kernel_id;
+    kernel_dispatch.private_segment_size = kds.private_segment_size;
+    kernel_dispatch.group_segment_size   = kds.group_segment_size;
+    kernel_dispatch.workgroup_size_x     = kds.workgroup_size_x;
+    kernel_dispatch.workgroup_size_y     = kds.workgroup_size_y;
+    kernel_dispatch.workgroup_size_z     = kds.workgroup_size_z;
+    kernel_dispatch.grid_size_x          = kds.grid_size_x;
+    kernel_dispatch.grid_size_y          = kds.grid_size_y;
+    kernel_dispatch.grid_size_z          = kds.grid_size_z;
+    kernel_dispatch.name                 = kernel_name.c_str();
 
     auto env = make_trace_env_with_agent_queue_stream(
-        n_info.id, process.pid, _kds.thread_id, agent_ref, _kds.queue_id_handle,
-        _kds.stream_handle);
+        n_info.id, process.pid, kds.thread_id, agent_ref, kds.queue_id_handle,
+        kds.stream_handle);
 
-    m_writer->insert_kernel_dispatch_data(kd, env);
+    m_writer->insert_kernel_dispatch_data(kernel_dispatch, env);
 }
 
 void
-rocpd_processor_t::handle(const scratch_memory_sample& _sms)
+rocpd_processor_t::handle(const scratch_memory_sample& sms)
 {
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
     const auto* name = m_metadata->get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
-        static_cast<rocprofiler_tracing_operation_t>(_sms.operation));
+        static_cast<rocprofiler_buffer_tracing_kind_t>(sms.kind),
+        static_cast<rocprofiler_tracing_operation_t>(sms.operation));
 
-    const auto& agent_ref = m_agent_manager->get_agent_by_handle(_sms.agent_id_handle);
+    const auto& agent_ref = m_agent_manager->get_agent_by_handle(sms.agent_id_handle);
 
     auto [memory_operation, memory_type_val] = parse_memory_operation_name(name);
-    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", _sms.flags);
+    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", sms.flags);
 
-    auto event = make_event(_sms.correlation_id_internal, _sms.correlation_id_ancestor, 0,
+    auto event = make_event(sms.correlation_id_internal, sms.correlation_id_ancestor, 0,
                             trait::name<category::rocm_scratch_memory>::value);
 
     profiler_hub::writer_types::memory_alloc_data_t ma;
     ma.event           = event;
     ma.type            = memory_operation.c_str();
     ma.level           = memory_type_val.c_str();
-    ma.start_timestamp = _sms.start_timestamp;
-    ma.end_timestamp   = _sms.end_timestamp;
+    ma.start_timestamp = sms.start_timestamp;
+    ma.end_timestamp   = sms.end_timestamp;
     ma.address         = 0;
-    ma.size            = _sms.allocation_size;
+    ma.size            = sms.allocation_size;
     ma.extdata         = extdata_json_str;
 
     auto env = make_trace_env_with_agent_queue_stream(
-        n_info.id, process.pid, _sms.thread_id, agent_ref, _sms.queue_id_handle,
-        _sms.stream_handle);
+        n_info.id, process.pid, sms.thread_id, agent_ref, sms.queue_id_handle,
+        sms.stream_handle);
 
     m_writer->insert_memory_alloc_data(ma, env);
 }
@@ -179,38 +179,38 @@ rocpd_processor_t::handle(const memory_copy_sample& mcs)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
+rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& mas)
 {
 #if(ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
-    if(_mas.agent_id_handle != invalid_context.handle)
+    if(mas.agent_id_handle != invalid_context.handle)
     {
-        auto& agent_ref = m_agent_manager->get_agent_by_handle(_mas.agent_id_handle);
+        const auto& agent_ref = m_agent_manager->get_agent_by_handle(mas.agent_id_handle);
 
-        const auto* _name = m_metadata->get_buffer_name_info().at(
-            static_cast<rocprofiler_buffer_tracing_kind_t>(_mas.kind),
-            static_cast<rocprofiler_tracing_operation_t>(_mas.operation));
+        const auto* name = m_metadata->get_buffer_name_info().at(
+            static_cast<rocprofiler_buffer_tracing_kind_t>(mas.kind),
+            static_cast<rocprofiler_tracing_operation_t>(mas.operation));
 
-        auto [memory_operation, memory_type_val] = parse_memory_operation_name(_name);
+        auto [memory_operation, memory_type_val] = parse_memory_operation_name(name);
 
-        auto ev = make_event(_mas.correlation_id_internal, _mas.correlation_id_ancestor,
-                             0, trait::name<category::rocm_memory_allocate>::value);
+        auto ev = make_event(mas.correlation_id_internal, mas.correlation_id_ancestor, 0,
+                             trait::name<category::rocm_memory_allocate>::value);
 
         profiler_hub::writer_types::memory_alloc_data_t ma;
         ma.event           = ev;
         ma.type            = memory_operation.c_str();
         ma.level           = memory_type_val.c_str();
-        ma.start_timestamp = _mas.start_timestamp;
-        ma.end_timestamp   = _mas.end_timestamp;
-        ma.address         = _mas.address_value;
-        ma.size            = _mas.allocation_size;
+        ma.start_timestamp = mas.start_timestamp;
+        ma.end_timestamp   = mas.end_timestamp;
+        ma.address         = mas.address_value;
+        ma.size            = mas.allocation_size;
 
         auto env =
-            make_trace_env_with_agent(n_info.id, process.pid, _mas.thread_id, agent_ref);
-        env.stream_id = _mas.stream_handle;
+            make_trace_env_with_agent(n_info.id, process.pid, mas.thread_id, agent_ref);
+        env.stream_id = mas.stream_handle;
         env.queue_id  = 0;
 
         m_writer->insert_memory_alloc_data(ma, env);
@@ -219,84 +219,85 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 }
 
 void
-rocpd_processor_t::handle(const region_sample& _rs)
+rocpd_processor_t::handle(const region_sample& reg_sample)
 {
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    auto ev = make_event(_rs.correlation_id_internal, _rs.correlation_id_ancestor, 0,
-                         _rs.category.c_str());
+    auto ev =
+        make_event(reg_sample.correlation_id_internal, reg_sample.correlation_id_ancestor,
+                   0, reg_sample.category.c_str());
     ev.call_stack.push_back({});
     // call_stack and line_info are serialized JSON in the old code; in profiler-hub
     // they are structured types. For now pass the raw JSON via extdata.
-    ev.extdata = _rs.call_stack.c_str();
+    ev.extdata = reg_sample.call_stack;
 
     profiler_hub::writer_types::region_data_t region;
     region.event           = ev;
-    region.start_timestamp = _rs.start_timestamp;
-    region.end_timestamp   = _rs.end_timestamp;
-    region.name            = _rs.name.c_str();
+    region.start_timestamp = reg_sample.start_timestamp;
+    region.end_timestamp   = reg_sample.end_timestamp;
+    region.name            = reg_sample.name;
 
-    auto parsed_args = process_arguments_string(_rs.args_str);
+    auto parsed_args = process_arguments_string(reg_sample.args_str);
     for(const auto& arg : parsed_args)
     {
-        profiler_hub::writer_types::arg_data_t ad;
-        ad.position = arg.arg_number;
-        ad.type     = arg.arg_type.c_str();
-        ad.name     = arg.arg_name.c_str();
-        ad.value    = arg.arg_value.c_str();
-        region.args.push_back(ad);
+        profiler_hub::writer_types::arg_data_t arg_data;
+        arg_data.position = arg.arg_number;
+        arg_data.type     = arg.arg_type;
+        arg_data.name     = arg.arg_name;
+        arg_data.value    = arg.arg_value;
+        region.args.push_back(arg_data);
     }
 
-    auto env = make_trace_env(n_info.id, process.pid, _rs.thread_id);
+    auto env = make_trace_env(n_info.id, process.pid, reg_sample.thread_id);
     m_writer->insert_region_data(region, env);
 }
 
 void
-rocpd_processor_t::handle(const backtrace_region_sample& _bts)
+rocpd_processor_t::handle(const backtrace_region_sample& bts)
 {
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    auto ev = make_event(0, 0, 0, _bts.category.c_str());
-    ev.call_stack.push_back({});
+    auto event = make_event(0, 0, 0, bts.category.c_str());
+    event.call_stack.push_back({});
     // call_stack and line_info are serialized JSON in the old code; in profiler-hub
     // they are structured types. For now pass the raw JSON via extdata.
-    ev.extdata = _bts.call_stack.c_str();
+    event.extdata = bts.call_stack;
 
     profiler_hub::writer_types::region_data_t region;
-    region.event           = ev;
-    region.start_timestamp = _bts.start_timestamp;
-    region.end_timestamp   = _bts.end_timestamp;
-    region.name            = _bts.name.c_str();
+    region.event           = event;
+    region.start_timestamp = bts.start_timestamp;
+    region.end_timestamp   = bts.end_timestamp;
+    region.name            = bts.name;
 
-    auto env       = make_trace_env(n_info.id, process.pid, _bts.thread_id);
-    env.track_name = _bts.track_name.c_str();
+    auto env       = make_trace_env(n_info.id, process.pid, bts.thread_id);
+    env.track_name = bts.track_name;
 
     m_writer->insert_region_data(region, env);
 }
 
 void
-rocpd_processor_t::handle(const in_time_sample& _its)
+rocpd_processor_t::handle(const in_time_sample& its)
 {
-    auto ev    = make_event(_its.stack_id, _its.parent_stack_id, _its.correlation_id,
-                            _its.track_name.c_str());
-    ev.extdata = _its.event_metadata.c_str();
+    auto event    = make_event(its.stack_id, its.parent_stack_id, its.correlation_id,
+                               its.track_name.c_str());
+    event.extdata = its.event_metadata;
 
     profiler_hub::writer_types::pmc_event_data_t pmc_data;
-    pmc_data.event = ev;
+    pmc_data.event = event;
     pmc_data.value = 0.0;
 
     profiler_hub::writer_types::track_info_t track;
-    track.name = _its.track_name.c_str();
+    track.name = its.track_name;
 
     profiler_hub::writer_types::sample_data_t sample;
-    sample.timestamp = _its.timestamp_ns;
+    sample.timestamp = its.timestamp_ns;
     sample.track     = track;
     pmc_data.sample  = sample;
 
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-    pmc_uid.name = _its.track_name.c_str();
+    pmc_uid.name = its.track_name;
 
     m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
 }
@@ -335,23 +336,23 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
+rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 {
-    const auto* _name        = trait::name<category::amd_smi>::value;
+    const auto* name         = trait::name<category::amd_smi>::value;
     const auto& process_info = m_metadata->get_process_info();
     const auto& agent_ref =
-        m_agent_manager->get_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU);
+        m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::GPU);
 
     const auto agent_uid = make_agent_uid(agent_ref);
 
-    auto ev = make_event(0, 0, 0, _name);
+    auto event = make_event(0, 0, 0, name);
 
     auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
                                        const char* track_name, double value) {
         if(!is_enabled) return;
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = ev;
+        pmc_data.event = event;
         pmc_data.value = value;
 
         profiler_hub::writer_types::track_info_t track;
@@ -360,7 +361,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         track.process_id = process_info.pid;
 
         profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = _gpu_pmc.timestamp;
+        sample.timestamp = gpu_pmc.timestamp;
         sample.track     = track;
         pmc_data.sample  = sample;
 
@@ -371,8 +372,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
 
-    const auto& m       = _gpu_pmc.metric_values;
-    const auto& enabled = _gpu_pmc.enabled_metric;
+    const auto& m       = gpu_pmc.metric_values;
+    const auto& enabled = gpu_pmc.enabled_metric;
 
     auto insert_scalar = [&](const char* name, const std::string& track, bool is_enabled,
                              double value) {
@@ -629,7 +630,7 @@ rocpd_processor_t::handle(
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample)
+rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
 {
     struct core_freq_sample
     {
@@ -675,17 +676,17 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         return result;
     };
 
-    const auto* _name        = trait::name<category::cpu_freq>::value;
+    const auto* name         = trait::name<category::cpu_freq>::value;
     const auto& process_info = m_metadata->get_process_info();
 
-    const auto device_id = static_cast<size_t>(_cpu_pmc_sample.device_id);
+    const auto device_id = static_cast<size_t>(cpu_pmc_smpl.device_id);
 
     const auto& agent_ref =
         m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU);
 
     const auto agent_uid = make_agent_uid(agent_ref);
 
-    auto ev = make_event(0, 0, 0, _name);
+    auto ev = make_event(0, 0, 0, name);
 
     auto insert_event_and_sample = [&](const char* pmc_name, const char* track_name,
                                        double value) {
@@ -699,7 +700,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         track.process_id = process_info.pid;
 
         profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = _cpu_pmc_sample.timestamp;
+        sample.timestamp = cpu_pmc_smpl.timestamp;
         sample.track     = track;
         pmc_data.sample  = sample;
 
@@ -710,7 +711,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
 
-    const auto& _em = _cpu_pmc_sample.enabled_metric;
+    const auto& enabled_m = cpu_pmc_smpl.enabled_metric;
 
     // Process-level metrics are global — emit once from the lowest selected socket
     static auto s_process_device_id = device_id;
@@ -718,60 +719,60 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
 
     if(is_process_owner)
     {
-        if(_em.bits.page_rss)
+        if(enabled_m.bits.page_rss)
             insert_event_and_sample(
                 trait::name<category::process_page>::value,
                 trait::name<category::process_page>::value,
-                static_cast<double>(_cpu_pmc_sample.process_data.page_rss) /
+                static_cast<double>(cpu_pmc_smpl.process_data.page_rss) /
                     units::megabyte);
 
-        if(_em.bits.virt_mem)
+        if(enabled_m.bits.virt_mem)
             insert_event_and_sample(
                 trait::name<category::process_virt>::value,
                 trait::name<category::process_virt>::value,
-                static_cast<double>(_cpu_pmc_sample.process_data.virt_mem) /
+                static_cast<double>(cpu_pmc_smpl.process_data.virt_mem) /
                     units::megabyte);
 
-        if(_em.bits.peak_rss)
+        if(enabled_m.bits.peak_rss)
             insert_event_and_sample(
                 trait::name<category::process_peak>::value,
                 trait::name<category::process_peak>::value,
-                static_cast<double>(_cpu_pmc_sample.process_data.peak_rss) /
+                static_cast<double>(cpu_pmc_smpl.process_data.peak_rss) /
                     units::megabyte);
 
-        if(_em.bits.ctx_switches)
+        if(enabled_m.bits.ctx_switches)
             insert_event_and_sample(trait::name<category::process_context_switch>::value,
                                     trait::name<category::process_context_switch>::value,
-                                    _cpu_pmc_sample.process_data.context_switches);
+                                    cpu_pmc_smpl.process_data.context_switches);
 
-        if(_em.bits.page_faults)
+        if(enabled_m.bits.page_faults)
             insert_event_and_sample(trait::name<category::process_page_fault>::value,
                                     trait::name<category::process_page_fault>::value,
-                                    _cpu_pmc_sample.process_data.page_faults);
+                                    cpu_pmc_smpl.process_data.page_faults);
 
-        if(_em.bits.user_time)
+        if(enabled_m.bits.user_time)
             insert_event_and_sample(
                 trait::name<category::process_user_mode_time>::value,
                 trait::name<category::process_user_mode_time>::value,
-                static_cast<double>(_cpu_pmc_sample.process_data.user_mode_time) /
+                static_cast<double>(cpu_pmc_smpl.process_data.user_mode_time) /
                     units::sec);
 
-        if(_em.bits.kernel_time)
+        if(enabled_m.bits.kernel_time)
             insert_event_and_sample(
                 trait::name<category::process_kernel_mode_time>::value,
                 trait::name<category::process_kernel_mode_time>::value,
-                static_cast<double>(_cpu_pmc_sample.process_data.kernel_mode_time) /
+                static_cast<double>(cpu_pmc_smpl.process_data.kernel_mode_time) /
                     units::sec);
     }
 
-    if(_em.bits.frequency)
+    if(enabled_m.bits.frequency)
     {
         auto get_freq_track_name = [device_id](const auto& cpu_id) {
             return std::string(trait::name<category::cpu_freq>::value) + " [" +
                    std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
-        const auto core_freq_samples = deserialize_freqs(_cpu_pmc_sample.freqs);
+        const auto core_freq_samples = deserialize_freqs(cpu_pmc_smpl.freqs);
         for(const auto& core : core_freq_samples)
         {
             auto track_name = get_freq_track_name(core.id);
@@ -780,14 +781,14 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         }
     }
 
-    if(_em.bits.load)
+    if(enabled_m.bits.load)
     {
         auto get_load_track_name = [device_id](const auto& cpu_id) {
             return std::string(trait::name<category::cpu_load>::value) + " [" +
                    std::to_string(device_id) + "] Core [" + std::to_string(cpu_id) + "]";
         };
 
-        const auto core_load_samples = deserialize_loads(_cpu_pmc_sample.loads);
+        const auto core_load_samples = deserialize_loads(cpu_pmc_smpl.loads);
         for(const auto& core : core_load_samples)
         {
             auto track_name = get_load_track_name(core.id);
@@ -798,56 +799,56 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
 }
 
 void
-rocpd_processor_t::handle(const kfd_sample& _kfd)
+rocpd_processor_t::handle(const kfd_sample& kfd)
 {
     auto& n_info       = node_info::get_instance();
     auto  process_info = m_metadata->get_process_info();
 
-    auto ev    = make_event(0, 0, 0, _kfd.category.c_str());
-    ev.extdata = _kfd.event_metadata.c_str();
+    auto event    = make_event(0, 0, 0, kfd.category.c_str());
+    event.extdata = kfd.event_metadata;
 
     profiler_hub::writer_types::region_data_t region;
-    region.event           = ev;
-    region.start_timestamp = _kfd.start_timestamp;
-    region.end_timestamp   = _kfd.end_timestamp;
-    region.name            = _kfd.name.c_str();
+    region.event           = event;
+    region.start_timestamp = kfd.start_timestamp;
+    region.end_timestamp   = kfd.end_timestamp;
+    region.name            = kfd.name;
 
-    auto parsed_args = process_arguments_string(_kfd.args_str);
+    auto parsed_args = process_arguments_string(kfd.args_str);
     for(const auto& arg : parsed_args)
     {
-        profiler_hub::writer_types::arg_data_t ad;
-        ad.position = arg.arg_number;
-        ad.type     = arg.arg_type.c_str();
-        ad.name     = arg.arg_name.c_str();
-        ad.value    = arg.arg_value.c_str();
-        region.args.push_back(ad);
+        profiler_hub::writer_types::arg_data_t arg_data;
+        arg_data.position = arg.arg_number;
+        arg_data.type     = arg.arg_type;
+        arg_data.name     = arg.arg_name;
+        arg_data.value    = arg.arg_value;
+        region.args.push_back(arg_data);
     }
 
-    auto env = make_trace_env(n_info.id, process_info.pid, _kfd.thread_id);
+    auto env = make_trace_env(n_info.id, process_info.pid, kfd.thread_id);
     m_writer->insert_region_data(region, env);
 
     try
     {
         const auto& agent_ref = m_agent_manager->get_agent_by_type_index(
-            _kfd.device_id, static_cast<agent_type>(_kfd.device_type));
+            kfd.device_id, static_cast<agent_type>(kfd.device_type));
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = ev;
-        pmc_data.value = _kfd.value;
+        pmc_data.event = event;
+        pmc_data.value = kfd.value;
 
         profiler_hub::writer_types::track_info_t track;
-        track.name       = _kfd.track_name.c_str();
+        track.name       = kfd.track_name.c_str();
         track.node_id    = n_info.id;
         track.process_id = process_info.pid;
-        if(_kfd.system_tid.has_value()) track.thread_id = _kfd.system_tid.value();
+        if(kfd.system_tid.has_value()) track.thread_id = kfd.system_tid.value();
 
         profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = _kfd.start_timestamp;
+        sample.timestamp = kfd.start_timestamp;
         sample.track     = track;
         pmc_data.sample  = sample;
 
         profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-        pmc_uid.name     = _kfd.pmc_info_name.c_str();
+        pmc_uid.name     = kfd.pmc_info_name;
         pmc_uid.agent_id = make_agent_uid(agent_ref);
 
         m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
@@ -855,7 +856,7 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
     {
         LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
                     "device_type={}: {}",
-                    _kfd.device_id, _kfd.device_type, e.what());
+                    kfd.device_id, kfd.device_type, e.what());
     }
 }
 
@@ -1052,7 +1053,7 @@ rocpd_processor_t::post_process_metadata()
         ks.code_obj_id               = kernel_symbol.code_object_id;
         m_writer->register_kernel_symbol_info(ks);
 
-        m_writer->register_string(kernel_name.c_str());
+        m_writer->register_string(kernel_name);
     }
 
     // Register queue info
@@ -1116,7 +1117,7 @@ rocpd_processor_t::post_process_metadata()
             std::find(cpu_gpu_types.begin(), cpu_gpu_types.end(), pmc_info.type) !=
             cpu_gpu_types.end();
 
-        auto& pmc_agent =
+        const auto& pmc_agent =
             is_cpu_gpu_agent ? m_agent_manager->get_agent_by_type_index(
                                    pmc_info.agent_type_index, pmc_info.type)
                              : m_agent_manager->get_agent_by_id(pmc_info.agent_type_index,
@@ -1126,31 +1127,30 @@ rocpd_processor_t::post_process_metadata()
         LOG_TRACE("Inserting PMC description: agent_uid: {}, pmc_info: {}",
                   pmc_agent_uid.type_index, pmc_info.name);
 
-        profiler_hub::writer_types::pmc_info_t           pi;
+        profiler_hub::writer_types::pmc_info_t           pmc_info;
         profiler_hub::writer_types::pmc_info_unique_id_t uid;
-        uid.name            = pmc_info.name.c_str();
-        uid.agent_id        = pmc_agent_uid;
-        pi.unique_id        = uid;
-        pi.target_arch      = is_cpu_gpu_agent
-                                  ? std::optional<std::string_view>{ pmc_info.target_arch }
-                                  : std::nullopt;
-        pi.event_code       = pmc_info.event_code;
-        pi.instance_id      = pmc_info.instance_id;
-        pi.symbol           = pmc_info.symbol.c_str();
-        pi.description      = pmc_info.description.c_str();
-        pi.long_description = pmc_info.long_description.c_str();
-        pi.component        = pmc_info.component.c_str();
-        pi.units            = pmc_info.units.c_str();
-        pi.value_type       = pmc_info.value_type.c_str();
-        pi.block            = pmc_info.block.c_str();
-        pi.expression       = pmc_info.expression.c_str();
-        pi.is_constant      = pmc_info.is_constant;
-        pi.is_derived       = pmc_info.is_derived;
-        pi.node_id          = n_info.id;
-        pi.process_id       = process_info.pid;
-        m_writer->register_pmc_info(pi);
+        uid.name                  = pmc_info.name;
+        uid.agent_id              = pmc_agent_uid;
+        pmc_info.unique_id        = uid;
+        pmc_info.target_arch      = is_cpu_gpu_agent
+                                        ? std::make_optional<std::string>(pmc_info.target_arch)
+                                        : std::nullopt;
+        pmc_info.event_code       = pmc_info.event_code;
+        pmc_info.instance_id      = pmc_info.instance_id;
+        pmc_info.symbol           = pmc_info.symbol;
+        pmc_info.description      = pmc_info.description;
+        pmc_info.long_description = pmc_info.long_description;
+        pmc_info.component        = pmc_info.component;
+        pmc_info.units            = pmc_info.units;
+        pmc_info.value_type       = pmc_info.value_type;
+        pmc_info.block            = pmc_info.block;
+        pmc_info.expression       = pmc_info.expression;
+        pmc_info.is_constant      = pmc_info.is_constant;
+        pmc_info.is_derived       = pmc_info.is_derived;
+        pmc_info.node_id          = n_info.id;
+        pmc_info.process_id       = process_info.pid;
+        m_writer->register_pmc_info(pmc_info);
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache
