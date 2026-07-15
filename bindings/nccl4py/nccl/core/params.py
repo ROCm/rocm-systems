@@ -21,22 +21,14 @@ __all__ = ["params", "dump_params"]
 class _NcclParams(Mapping[str, str]):
     """Read-only mapping of NCCL parameter names to their current values."""
 
-    def __init__(self) -> None:
-        self._keys: list[str] | None = None
-
-    def _get_keys(self) -> list[str]:
-        if self._keys is None:
-            self._keys = _nccl_bindings.param_get_all_keys()
-        return self._keys
-
     def __getitem__(self, key: str) -> str:
         return _nccl_bindings.param_get_parameter(key)
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._get_keys())
+        return iter(_nccl_bindings.param_get_all_keys())
 
     def __len__(self) -> int:
-        return len(self._get_keys())
+        return len(_nccl_bindings.param_get_all_keys())
 
 
 params: _NcclParams = _NcclParams()
