@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -441,6 +441,7 @@ generate_csv(const output_config&                                           cfg,
         {
             auto row_ss   = std::stringstream{};
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
+
             rocprofiler::tool::csv::memory_copy_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
@@ -761,6 +762,9 @@ generate_csv(const output_config&                                           cfg,
     }
 }
 
+// NOTE: OMPT is rocpd-only; it is exported to CSV via `rocpd convert`, so there is
+// intentionally no generate_csv() overload for OMPT.
+
 void
 generate_csv(const output_config&                                                    cfg,
              const metadata&                                                         tool_metadata,
@@ -976,6 +980,14 @@ generate_csv(const output_config&                                               
         }
     }
 }
+
+// CSV output for HIP graph launch summary records is deprecated; consume via rocpd/JSON.
+void
+generate_csv(const output_config& /*cfg*/,
+             const metadata& /*tool_metadata*/,
+             const generator<rocprofiler_buffer_tracing_hip_graph_record_t>& /*data*/,
+             const stats_entry_t& /*stats*/)
+{}
 
 void
 generate_csv(const output_config& cfg,

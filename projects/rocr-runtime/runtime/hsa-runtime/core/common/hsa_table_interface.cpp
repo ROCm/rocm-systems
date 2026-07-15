@@ -1116,6 +1116,13 @@ hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t
                                                     ptr, metadata_size, metadata);
 }
 
+hsa_status_t HSA_API hsa_amd_interop_map_buffer_with_size(
+    uint32_t num_agents, hsa_agent_t* agents, hsa_handle_t interop_handle, uint32_t flags,
+    size_t size_hint, size_t* size, void** ptr, size_t* metadata_size, const void** metadata) {
+  return amdExtTable->hsa_amd_interop_map_buffer_with_size_fn(
+      num_agents, agents, interop_handle, flags, size_hint, size, ptr, metadata_size, metadata);
+}
+
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_interop_unmap_buffer(void* ptr) {
   return amdExtTable->hsa_amd_interop_unmap_buffer_fn(ptr);
@@ -1131,6 +1138,18 @@ hsa_status_t HSA_API hsa_amd_image_create(
   hsa_ext_image_t *image) {
   return amdExtTable->hsa_amd_image_create_fn(agent, image_descriptor,
                           image_layout, image_data, access_permission, image);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+  hsa_agent_t agent,
+  const hsa_ext_image_descriptor_v2_t* image_descriptor,
+  const hsa_amd_image_descriptor_t* image_layout,
+  const void* image_data,
+  hsa_access_permission_t access_permission,
+  hsa_ext_image_t* image) {
+  return amdExtTable->hsa_amd_image_create_v2_fn(agent, image_descriptor,
+                           image_layout, image_data, access_permission, image);
 }
 
 // Mirrors Amd Extension Apis

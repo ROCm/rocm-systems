@@ -1214,7 +1214,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     // If user didn't override, use requested channels; otherwise keep capped max.
     if (!userUpdatedMaxChannels) {
       maxNchannels = nc * comm->nChannels * channelMultiplier;
-      nc = singleNode? maxNchannels : std::min(maxNchannels, maxChannels);
+      // Cap the single-node count at MAXCHANNELS/2, the maximum WarpSpeed supports. Left unbounded it
+      // overruns the fixed comm->channels[MAXCHANNELS] array (for example nc reaches 1760 in CPX mode at 64 ranks).
+      nc = singleNode? std::min(maxNchannels, MAXCHANNELS/2) : std::min(maxNchannels, maxChannels);
     } else {
       nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
     }
@@ -1303,10 +1305,12 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   if (comm->sharedRes->owner != comm) {
     /* child comm #channels cannot exceed top parent #channels. */
     nChannels = comm->nChannels = std::min(std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs), comm->sharedRes->tpNChannels);
-    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::min(std::max(minNchannels, std::max(nc, comm->config.minCTAs)), comm->sharedRes->tpNChannels), ringPrev, ringNext);
+    // Bound the re-expansion target by maxCTAs (and the parent's tpNChannels) so the bandwidth channel count (nc) cannot exceed a user-requested maxCTAs.
+    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::min(std::min(comm->config.maxCTAs, comm->sharedRes->tpNChannels), std::max(minNchannels, std::max(nc, comm->config.minCTAs))), ringPrev, ringNext);
   } else {
     nChannels = comm->nChannels = std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs);
-    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::max(minNchannels, std::max(nc, comm->config.minCTAs)), ringPrev, ringNext);
+    // Bound the re-expansion target by maxCTAs so the bandwidth channel count (nc) cannot exceed a user-requested maxCTAs. No-op when maxCTAs is unset.
+    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::min(comm->config.maxCTAs, std::max(minNchannels, std::max(nc, comm->config.minCTAs))), ringPrev, ringNext);
   }
 
   if (comm->isGrow) {

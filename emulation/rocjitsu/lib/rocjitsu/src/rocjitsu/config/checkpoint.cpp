@@ -121,7 +121,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                               static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
           auto vgprs_vec = builder.CreateVector(cu->vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
 
-          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec(),
+          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec);
           wf_offsets.push_back(wfs);
@@ -236,7 +236,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           if (!wf)
             throw std::runtime_error("Failed to dispatch wavefront during checkpoint restoration");
 
-          wf->set_exec(wf_state->exec());
+          wf->set_exec_raw(wf_state->exec());
           wf->set_vcc(wf_state->vcc());
           wf->set_m0(wf_state->m0());
           // Halted wavefronts are never saved (see save_checkpoint skip above),

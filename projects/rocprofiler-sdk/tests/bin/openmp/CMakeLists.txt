@@ -33,10 +33,12 @@ set(DEFAULT_GPU_TARGETS
     "gfx1101"
     "gfx1102"
     "gfx1151"
-    "gfx1152")
+    "gfx1152"
+    "gfx1250")
 
 set(OPENMP_GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"
     CACHE STRING "GPU targets to compile for")
 
 add_subdirectory(target)
+add_subdirectory(host)

@@ -41,7 +41,9 @@
         "max_engine_clk_fcompute": 2350,
         "location_id": 49920,
         "hive_id": 0,
-        "domain": 0
+        "domain": 0,
+        "capability": 1745068672,
+        "debug_prop": 1495
       }
     }
   },

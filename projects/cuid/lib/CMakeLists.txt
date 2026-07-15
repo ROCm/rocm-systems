@@ -18,9 +18,26 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(amdcuid_lib)
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                   Cmake amdcuid library                           ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
-set(CMAKE_CXX_STANDARD 14)
+message("")
+message("Build Configuration:")
+message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
+message("------------Compiler: " ${CMAKE_CXX_COMPILER})
+message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
+message("-CMake inst. Bindir : " ${CMAKE_INSTALL_BINDIR})
+message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
+message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
+message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
+message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
+message("")
+
+# Configure source and include directories
+set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # When built as part of the top-level project, OpenSSL is already resolved
 # (either from the system or via FetchContent). QUIET prevents a redundant
@@ -83,11 +100,11 @@ target_include_directories(
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
 target_compile_definitions(
     amdcuid_static
-    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
 target_compile_definitions(
     amdcuid_shared
-    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
 
 if(WIN32)
@@ -110,19 +127,42 @@ install(
     ARCHIVE
         DESTINATION
             ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
-        COMPONENT library
+        COMPONENT ${LIB_COMPONENT}
 )
 
 # Static library
 install(
     TARGETS amdcuid_static
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT library
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
+    ARCHIVE
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
+        COMPONENT ${LIB_COMPONENT}
 )
 
 # Install public headers
-set(PUBLIC_HEADERS include/amd_cuid.h)
+set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
 install(
     FILES ${PUBLIC_HEADERS}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT library
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID}
+    COMPONENT ${LIB_COMPONENT}
 )
+
+if(UNIX AND NOT APPLE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdcuid_setup_hmac.sh.in
+        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
+        @ONLY
+    )
+    install(
+        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
+        COMPONENT ${LIB_COMPONENT}
+    )
+endif()
+
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                  Finished Cmake amdcuid library                   ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

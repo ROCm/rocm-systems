@@ -603,7 +603,8 @@ ErrorCode GpuMemory::OpenResourceFromNTHandle(HANDLE buffer_handle, D3DKMT_HANDL
   const size_t data_size = sizeof(D3DKMT_OPENRESOURCEFROMNTHANDLE) +
       query_args.PrivateRuntimeDataSize + query_args.TotalPrivateDriverDataSize +
       query_args.ResourcePrivateDriverDataSize +
-      sizeof(D3DDDI_OPENALLOCATIONINFO2) * query_args.NumAllocations;
+      sizeof(D3DDDI_OPENALLOCATIONINFO2) * query_args.NumAllocations +
+      Wkmi::GetProxyResourceInfoSize();  // extra room for pTotalPrivateDriverDataBuffer proxy info
   D3DKMT_OPENRESOURCEFROMNTHANDLE* open_resource =
       reinterpret_cast<D3DKMT_OPENRESOURCEFROMNTHANDLE*>(calloc(1, data_size));
 
@@ -728,11 +729,17 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     desc_.size = shared_info_ptr->size;
     desc_.client_size = shared_info_ptr->client_size;
     desc_.domain = shared_info_ptr->domain;
-    desc_.flags.reserved = shared_info_ptr->flags;
+    // Copy only cross-process-meaningful fields from shared_info; do not restore
+    // the exporter's process-local GpuMemoryDescFlags wholesale, as that would
+    // corrupt importer-side flag state (e.g. is_shared, is_queue_referenced).
     desc_.mem_flags = shared_info_ptr->mem_flags;
     desc_.adapter_luid = shared_info_ptr->adapter_luid;
-    is_phymem_created = 1;
 
+    if (desc_.size == 0) {
+      pr_err("import failed: could not determine allocation size from shared handle\n");
+      return ErrorCode::InvalidateParams;
+    }
+    is_phymem_created = 1;
     desc_.flags.is_va_required = create_info.flags.alloc_va;
     if (desc_.flags.is_va_required) {
       desc_.flags.is_imported_vram_ipc = 1;
@@ -758,20 +765,28 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
       return ErrorCode::InvalidateParams;
     }
 
-    if (open_resource->PrivateRuntimeDataSize > 0)
+    if (open_resource->PrivateRuntimeDataSize == sizeof(SharedHandleInfo))
       shared_info = *static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
 
     if (open_resource->NumAllocations > 1)
       alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
 
-    // Update shared_info if OpenResourceFromKMTHandle skips populating it.
-    if (open_resource->PrivateRuntimeDataSize == 0) {
+    // Update shared_info if not populated by a ROCr-created SharedHandleInfo.
+    if (open_resource->PrivateRuntimeDataSize != sizeof(SharedHandleInfo)) {
       for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
         const auto* const pPrivateDriverData =
             open_resource->pOpenAllocationInfo[alloc_index].pPrivateDriverData;
         auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
         shared_info_ptr->size += alloc_size;
         shared_info_ptr->client_size += alloc_size;
+      }
+      // If wkmi returned zero size the private data is not in UMDKMDIF format (e.g. a
+      // D3D11_USAGE_DYNAMIC constant buffer). Fall back to the caller-supplied size and
+      // treat as system memory — CPU-accessible D3D11 resources are always GTT-backed.
+      if (shared_info_ptr->size == 0 && create_info.size != 0) {
+        shared_info_ptr->size = create_info.size;
+        shared_info_ptr->client_size = create_info.size;
+        shared_info_ptr->domain = Wkmi::AllocDomain::kSystem;
       }
     }
 
@@ -790,20 +805,26 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
       return ErrorCode::InvalidateParams;
     }
 
-    if (open_resource->PrivateRuntimeDataSize > 0)
+    if (open_resource->PrivateRuntimeDataSize == sizeof(SharedHandleInfo))
       shared_info = *static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
 
     if (open_resource->NumAllocations > 1)
       alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
 
-    // Update shared_info if OpenResourceFromNtHandle skips populating it.
-    if (open_resource->PrivateRuntimeDataSize == 0) {
+    // Update shared_info if not populated by a ROCr-created SharedHandleInfo.
+    if (open_resource->PrivateRuntimeDataSize != sizeof(SharedHandleInfo)) {
       for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
         const auto* const pPrivateDriverData =
             open_resource->pOpenAllocationInfo2[alloc_index].pPrivateDriverData;
         auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
         shared_info_ptr->size += alloc_size;
         shared_info_ptr->client_size += alloc_size;
+      }
+      // Same fallback as the KMT path: foreign D3D11 resource with non-UMDKMDIF private data.
+      if (shared_info_ptr->size == 0 && create_info.size != 0) {
+        shared_info_ptr->size = create_info.size;
+        shared_info_ptr->client_size = create_info.size;
+        shared_info_ptr->domain = Wkmi::AllocDomain::kSystem;
       }
     }
 
