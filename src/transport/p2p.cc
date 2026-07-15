@@ -911,15 +911,16 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
   int* expFds = nullptr;
   int* impFds = nullptr;
   int capacity = 2;
+  *ipcInfos = nullptr;
   // Minimum of two segments in this codepath
   NCCLCHECK(ncclCalloc(ipcInfos, capacity));
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-    NCCLCHECK(ncclCalloc(&expFds, capacity));
+    NCCLCHECKGOTO(ncclCalloc(&expFds, capacity), ret, fail);
     for (int idx = 0; idx < capacity; idx++) {
       expFds[idx] = -1;
     }
   }
-  NCCLCHECK(ncclCalloc(&segmentHandles, capacity));
+  NCCLCHECKGOTO(ncclCalloc(&segmentHandles, capacity), ret, fail);
 
   while (mappedPtrEnd < userBuffEnd) {
     int segment = *numSegments;
