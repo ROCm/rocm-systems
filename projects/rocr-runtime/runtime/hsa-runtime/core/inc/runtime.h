@@ -656,6 +656,13 @@ class Runtime {
     std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
     std::vector<uint64_t> age_;         //!< The age list for KFD wait
     std::vector<void*> arg_;
+    //! Last-known KFD event_age, keyed by the HSA event. The hsa_events_/age_
+    //! arrays above form a compacted, per-iteration view whose slot indices do
+    //! not track a given event across reordering of the async list (handler
+    //! removal swap-removes entries, registration appends them). This map keeps
+    //! each event's baseline so the KFD wait stays edge-triggered instead of
+    //! being re-primed to 1 and spinning.
+    std::unordered_map<HsaEvent*, uint64_t> age_by_event_;
   };
 
   // Event item structure to hold all signal information

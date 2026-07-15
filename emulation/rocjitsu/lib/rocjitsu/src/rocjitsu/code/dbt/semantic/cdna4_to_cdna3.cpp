@@ -8,6 +8,7 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
@@ -29,100 +30,82 @@
 namespace rocjitsu {
 namespace {
 
-// CDNA3 instruction builders used by the narrow semantic rules below. These
-// helpers intentionally only cover the encodings the lowering emits; keeping
-// them local avoids adding a broad assembler abstraction for a handful of
-// code-cave sequences.
+// These small emission adapters describe the operands needed by each lowering;
+// the generated builders own the CDNA3 binary layouts and fixed encoding bits.
+// Keeping that split means semantic rules no longer serialize MachineInst
+// bitfields or repeat format constants, while remaining explicit about every
+// source value and scratch register they emit.
 
-[[nodiscard]] std::pair<uint32_t, uint32_t>
-build_cdna3_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t src2 = 0) {
-  cdna3::Vop3MachineInst dst{};
-  dst.encoding = 0x34;
-  dst.op = op;
-  dst.vdst = vdst;
-  dst.src0 = src0 & 0x1FF;
-  dst.src1 = src1 & 0x1FF;
-  dst.src2 = src2 & 0x1FF;
-
-  uint32_t words[2]{};
-  std::memcpy(words, &dst, sizeof(dst));
-  return {words[0], words[1]};
+[[nodiscard]] std::array<uint32_t, 2> build_cdna3_vop3(uint16_t op, uint8_t vdst, uint16_t src0,
+                                                       uint16_t src1 = 0, uint16_t src2 = 0) {
+  cdna3::Vop3BuilderFields fields{};
+  fields.vdst = vdst;
+  fields.src0 = src0;
+  fields.src1 = src1;
+  fields.src2 = src2;
+  return cdna3::build_vop3(op, fields);
 }
 
 /// @brief Build a CDNA3 VOP3P-MFMA instruction word pair.
 /// @details The wide-K lowering materializes A/B operands in ordinary VGPRs, so
 /// the emitted narrow MFMA clears the source ACC selector while preserving the
 /// destination AccVGPR selector from the CDNA4 instruction.
-[[nodiscard]] std::pair<uint32_t, uint32_t>
+[[nodiscard]] std::array<uint32_t, 2>
 build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8_t vdst,
                        uint8_t acc_cd, uint16_t src0, uint16_t src1, uint16_t src2) {
-  cdna3::Vop3pMfmaMachineInst dst{};
-  dst.encoding = cdna3::encoding::kVop3pMfma;
-  dst.op = op & 0x7F;
-  dst.vdst = vdst;
-  dst.cbsz = src.cbsz;
-  dst.abid = src.abid;
-  dst.acc_cd = acc_cd;
-  dst.src0 = src0 & 0x1FF;
-  dst.src1 = src1 & 0x1FF;
-  dst.src2 = src2 & 0x1FF;
-  dst.acc = 0;
-  dst.blgp = src.blgp;
-
-  uint32_t words[2]{};
-  std::memcpy(words, &dst, sizeof(dst));
-  return {words[0], words[1]};
+  cdna3::Vop3pMfmaBuilderFields fields{};
+  fields.vdst = vdst;
+  fields.cbsz = src.cbsz;
+  fields.abid = src.abid;
+  fields.acc_cd = acc_cd;
+  fields.src0 = src0;
+  fields.src1 = src1;
+  fields.src2 = src2;
+  fields.acc = 0;
+  fields.blgp = src.blgp;
+  return cdna3::build_vop3p_mfma(op, fields);
 }
 
-[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_ds(uint16_t op, uint8_t vdst, uint8_t addr,
-                                                           uint8_t data0 = 0, uint8_t data1 = 0,
-                                                           uint8_t offset0 = 0,
-                                                           uint8_t offset1 = 0) {
-  cdna3::DsMachineInst dst{};
-  dst.encoding = 0x36;
-  dst.op = op & 0xFF;
-  dst.offset0 = offset0;
-  dst.offset1 = offset1;
-  dst.addr = addr;
-  dst.data0 = data0;
-  dst.data1 = data1;
-  dst.vdst = vdst;
-
-  uint32_t words[2]{};
-  std::memcpy(words, &dst, sizeof(dst));
-  return {words[0], words[1]};
+[[nodiscard]] std::array<uint32_t, 2> build_cdna3_ds(uint16_t op, uint8_t vdst, uint8_t addr,
+                                                     uint8_t data0 = 0, uint8_t data1 = 0,
+                                                     uint8_t offset0 = 0, uint8_t offset1 = 0) {
+  cdna3::DsBuilderFields fields{};
+  fields.offset0 = offset0;
+  fields.offset1 = offset1;
+  fields.addr = addr;
+  fields.data0 = data0;
+  fields.data1 = data1;
+  fields.vdst = vdst;
+  return cdna3::build_ds(op, fields);
 }
 
-[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_mubuf(const cdna4::MubufMachineInst &src,
-                                                              uint16_t op, uint8_t vdata) {
-  cdna3::MubufMachineInst dst{};
-  dst.encoding = 0x38;
-  dst.op = op & 0x7F;
-  dst.offset = src.offset;
-  dst.offen = src.offen;
-  dst.idxen = src.idxen;
-  dst.sc0 = src.sc0;
-  dst.sc1 = src.sc1;
-  dst.lds = 0;
-  dst.nt = src.nt;
-  dst.vaddr = src.vaddr;
-  dst.vdata = vdata;
-  dst.srsrc = src.srsrc;
-  dst.acc = 0;
-  dst.soffset = src.soffset;
-
-  uint32_t words[2]{};
-  std::memcpy(words, &dst, sizeof(dst));
-  return {words[0], words[1]};
+[[nodiscard]] std::array<uint32_t, 2> build_cdna3_mubuf(const cdna4::MubufMachineInst &src,
+                                                        uint16_t op, uint8_t vdata) {
+  cdna3::MubufBuilderFields fields{};
+  fields.offset = src.offset;
+  fields.offen = src.offen;
+  fields.idxen = src.idxen;
+  fields.sc0 = src.sc0;
+  fields.sc1 = src.sc1;
+  fields.lds = 0;
+  fields.nt = src.nt;
+  fields.vaddr = src.vaddr;
+  fields.vdata = vdata;
+  fields.srsrc = src.srsrc;
+  fields.acc = 0;
+  fields.soffset = src.soffset;
+  return cdna3::build_mubuf(op, fields);
 }
 
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
-  return {pack_sop1(cdna3::kSMovB32, sdst, 0xFF), literal};
+  const auto inst = cdna3::build_sop1(cdna3::kSMovB32, {.ssrc0 = 0xFF, .sdst = sdst});
+  return {inst[0], literal};
 }
 
 [[nodiscard]] constexpr uint32_t build_s_mov_b64(uint8_t sdst, uint16_t ssrc0) {
-  return pack_sop1(cdna3::kSMovB64, sdst, ssrc0);
+  return cdna3::build_sop1(cdna3::kSMovB64,
+                           {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = sdst})[0];
 }
 
 constexpr uint8_t kExecLo = 126;
@@ -151,7 +134,7 @@ void emit_cdna3_lgkm_wait(std::vector<uint32_t> &words) {
   // GFX9/CDNA s_waitcnt encodes "lgkmcnt(0)" as lgkm=0 while leaving VM/EXP at
   // their no-wait maxima. The DS read/bpermute sequences below require the
   // loaded/permuted data before issuing dependent VALU instructions.
-  words.push_back(pack_sopp(cdna3::kSWaitcntSopp, kCdnaWaitcntLgkmcnt0));
+  words.push_back(cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = kCdnaWaitcntLgkmcnt0})[0]);
 }
 
 void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
@@ -159,7 +142,7 @@ void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
   // following DS write.  Waiting all counters is stronger than the hardware
   // `vmcnt(0)` dependency we strictly need, but it keeps this first lowering
   // conservative and matches the monolithic CDNA waitcnt encoding.
-  words.push_back(pack_sopp(cdna3::kSWaitcntSopp, kCdnaWaitcntAll0));
+  words.push_back(cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = kCdnaWaitcntAll0})[0]);
 }
 
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
