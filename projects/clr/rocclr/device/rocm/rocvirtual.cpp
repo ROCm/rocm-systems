@@ -1570,22 +1570,40 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   if (flatPacketData.size() != numPackets * 64) {
     return false;
   }
-
   std::scoped_lock lock(execution());
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
-  // Resolve kernel names only when profiling is active. Gated to preserve the
-  // fast path for non-profiled launches (no KernelMap lookup, no memcpy).
+  // Resolve kernel names only when a ReportActivity consumer is registered
+  // (roctracer-style callback) or when KERN2 debug logging is on.
+  // IsEnabled(OP_ID_DISPATCH) is the correct gate: it reflects whether
+  // report_activity is live right now, which is the same condition under which
+  // ReportActivity() will later call getKernelNames(). Unlike
+  // profilingInfo().enabled_, it is valid at dispatch time — EnableProfiling()
+  // runs inside enqueue(), which happens after all segments are dispatched in
+  // EnqueueSegmentedGraph, so profilingInfo().enabled_ is always 0 here.
   // One entry per kernel dispatch slot (base and AMD ext variants), parallel to
   // timestamps_ populated at signal completion. Non-dispatch slots are skipped.
-  if (vcmd->profilingInfo().enabled_) {
+  if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH) ||
+      IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2)) {
     static constexpr size_t kPacketSize = 64;
-    static constexpr size_t kBaseKernelObjectOffset =
+    // Both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t
+    // place kernel_object at the same byte offset — use a single constant.
+    static constexpr size_t kKernelObjectOffset =
         offsetof(hsa_kernel_dispatch_packet_t, kernel_object);
-    static constexpr size_t kExtKernelObjectOffset =
-        offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object);
+    static_assert(kKernelObjectOffset ==
+                      offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object),
+                  "kernel_object offset mismatch between base and ext dispatch packets");
     const auto& kernel_map = dev().KernelMap();
+
+    auto kernelObjectFromPacket = [&](size_t i) {
+      uint64_t kernel_object = 0;
+      memcpy(&kernel_object,
+             flatPacketData.data() + i * kPacketSize + kKernelObjectOffset,
+             sizeof(kernel_object));
+      return kernel_object;
+    };
+
     for (size_t i = 0; i < numPackets; ++i) {
       uint16_t header = static_cast<uint16_t>(validFullHeaders[i]);
       uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
@@ -1595,17 +1613,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       const bool is_ext_dispatch  = (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
                                      amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
       if (is_base_dispatch || is_ext_dispatch) {
-        size_t offset = is_base_dispatch ? kBaseKernelObjectOffset : kExtKernelObjectOffset;
-        uint64_t kernel_object = 0;
-        memcpy(&kernel_object,
-               flatPacketData.data() + i * kPacketSize + offset,
-               sizeof(kernel_object));
+        uint64_t kernel_object = kernelObjectFromPacket(i);
         auto it = kernel_map.find(kernel_object);
-        // Use a stable fallback string rather than nullptr to avoid crashes in
-        // downstream activity consumers that assume a non-null kernel name.
-        vcmd->addKernelName(it != kernel_map.end()
+        const char* kname = it != kernel_map.end()
                                 ? it->second.getDemangledName().c_str()
-                                : "<unknown>");
+                                : "<unknown>";
+        vcmd->addKernelName(kname);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
+                "Graph profiling: pkt[%zu] kernel_object=0x%llx name=%s",
+                i, static_cast<unsigned long long>(kernel_object), kname);
       }
     }
   }
