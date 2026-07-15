@@ -297,9 +297,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
 
-      const auto *desc = reinterpret_cast<const KD *>(image.data() + file_off);
+      KD desc;
+      std::memcpy(&desc, image.data() + file_off, sizeof(desc));
       const int64_t entry_vaddr_signed =
-          static_cast<int64_t>(symtab[j].st_value) + desc->kernel_code_entry_byte_offset;
+          static_cast<int64_t>(symtab[j].st_value) + desc.kernel_code_entry_byte_offset;
+
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
@@ -307,7 +309,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, entry_text_offset, *desc);
+      callback(file_off, entry_text_offset, desc);
     }
   }
 }

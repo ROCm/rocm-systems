@@ -446,12 +446,12 @@ def run(args):
             else:
                 outputs["run_linux_rccl_ci"] = "false"
 
-    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR changes)
+    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR or CI changes)
     if args.get("platform") == "linux":
         if args.get("is_pull_request"):
             base_ref = args.get("base_ref")
             modified_paths = get_modified_paths(base_ref)
-            if check_hip_rocr_changes(modified_paths):
+            if check_for_workflow_file_related_to_ci(modified_paths) or check_hip_rocr_changes(modified_paths):
                 outputs["run_mi455_test"] = "true"
             else:
                 outputs["run_mi455_test"] = "false"

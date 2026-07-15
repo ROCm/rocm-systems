@@ -537,6 +537,12 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VMadMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
 }
@@ -555,6 +561,12 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
   src_operands_[3] = &src2;
   num_src_ = 4;
   num_dst_ = 1;
+}
+
+void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMadMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {

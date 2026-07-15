@@ -112,20 +112,41 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
 
 } // namespace
 
-bool RemoteDriver::find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
-                                       off_t *offset_out) {
+RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
+                                                            int *memfd_out, off_t *offset_out) {
   *memfd_out = -1;
   *offset_out = 0;
   auto target = reinterpret_cast<uint64_t>(addr);
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   for (const auto &r : alloc_ranges_) {
-    if (target >= r.va && target + length <= r.va + r.size) {
-      *memfd_out = r.memfd;
+    // Overflow-safe containment test for [target, target+length) within
+    // [r.va, r.va+r.size). Rearranged to subtraction so neither target+length
+    // nor r.va+r.size can wrap uint64_t and admit an out-of-range address.
+    if (target >= r.va && length <= r.size && target - r.va <= r.size - length) {
+      // Return a DUP of the memfd, not the stored fd, so the caller owns a
+      // descriptor whose lifetime is independent of this RemoteDriver. Without
+      // this, a concurrent last-close -> RemoteDriver::close() (which closes the
+      // stored handle_memfds_ fds) could close the fd between this return and the
+      // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
+      // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
+      // fd is guaranteed still open here. The caller MUST close the returned fd.
+      int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.memfd, F_DUPFD_CLOEXEC, 0));
+      if (dup_fd < 0) {
+        // The range matched but we could not hand out a descriptor. Report this
+        // distinctly so the caller fails the mmap rather than silently falling
+        // back to an anonymous mapping and breaking the shared-memory invariant.
+        // The dup's errno (EMFILE/ENFILE/...) reaches the caller: the only code
+        // that runs before this returns is the rpc_mutex_ lock_guard unlock, and
+        // pthread_mutex_unlock does not touch errno on success. Do not add any
+        // errno-setting call after this point without saving/restoring it.
+        return MemfdLookup::kDupFailed;
+      }
+      *memfd_out = dup_fd;
       *offset_out = static_cast<off_t>(target - r.va);
-      return true;
+      return MemfdLookup::kFound;
     }
   }
-  return false;
+  return MemfdLookup::kNotFound;
 }
 
 RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
@@ -200,9 +221,13 @@ int RemoteDriver::open() {
       return -1;
   }
 
+  return reissue_synthetic_kfd_fd();
+}
+
+int RemoteDriver::reissue_synthetic_kfd_fd() {
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
-  // approach as SimulatedDriver::init_reserved_fd_range).
+  // approach as SimulatedKfd::init_reserved_fd_range).
   struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
@@ -211,7 +236,10 @@ int RemoteDriver::open() {
   auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
   if (raw_fd < 0)
     return -1;
-  int fd = fcntl(raw_fd, F_DUPFD_CLOEXEC, fd_min);
+  // Use the raw syscall, not fcntl(): this shared object exports an interposed
+  // fcntl with default visibility, so an unqualified call would re-enter the
+  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
+  int fd = static_cast<int>(syscall(SYS_fcntl, raw_fd, F_DUPFD_CLOEXEC, fd_min));
   syscall(SYS_close, raw_fd);
   return fd;
 }
@@ -243,18 +271,29 @@ int RemoteDriver::close() {
     }
     handle_memfds_.clear();
     alloc_ranges_.clear();
-    topology_path_.clear();
-    drm_path_.clear();
-    gpu_info_ = {};
-    has_gpu_info_ = false;
+    // Deliberately do NOT clear the handshake metadata (topology_path_,
+    // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
+    // is immutable for the rest of the object's life. The interposer publishes
+    // this RemoteDriver via an atomic shared_ptr and lets lock-free readers take
+    // snapshots that call the accessors (topology_path(), drm_path(),
+    // gpu_info()); a racing teardown clears the atomic and calls close() while
+    // such a snapshot may still be live. Clearing these strings/structs here
+    // would be a data race against those readers. Keeping the metadata
+    // immutable-after-open makes the reads safe without a lock; the storage is
+    // reclaimed when the last shared_ptr drops.
   }
 
   return 0;
 }
 
 int RemoteDriver::ioctl(unsigned long request, void *arg) {
-  assert(sock_ >= 0 && "ioctl called on disconnected RemoteDriver");
   assert(arg && "ioctl called with null arg");
+  // Do NOT assert(sock_ >= 0) here: sock_ is guarded by rpc_mutex_ and a
+  // concurrent teardown_remote() -> close() can set it to -1 while another
+  // thread holds a live shared_ptr snapshot and is entering this call. Reading
+  // sock_ unlocked would be a data race (and would abort in Debug on exactly the
+  // teardown-vs-in-flight-ioctl race this design tolerates). The locked send
+  // path (send_ioctl) handles a closed socket gracefully by returning -1.
 
   // WAIT_EVENTS is handled client-side to avoid rpc_mutex_ contention.
   // Multiple ROCR threads poll WAIT_EVENTS concurrently during init. If each
