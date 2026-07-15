@@ -60,6 +60,54 @@ build_vop3p(uint8_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src
   return (src0 & 0x1FFu) | ((op & 0x7Fu) << 9) | ((vdst & 0xFFu) << 17) | (0x3Fu << 25);
 }
 
+struct Gfx1250DppSource {
+  uint16_t marker = 0;
+  uint8_t vsrc0 = 0;
+  uint32_t payload = 0;
+  uint32_t write_mask = 0xFFFF'FFFFu;
+  bool src0_neg = false;
+  bool src0_abs = false;
+  bool src1_neg = false;
+  bool src1_abs = false;
+};
+
+[[nodiscard]] constexpr bool is_gfx1250_dpp_source(uint16_t src0) {
+  return src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src0);
+}
+
+[[nodiscard]] std::optional<Gfx1250DppSource>
+decode_gfx1250_dpp_source(uint16_t marker, size_t base_words, uint64_t offset,
+                          std::span<const uint8_t> source_text) {
+  if (!is_gfx1250_dpp_source(marker))
+    return std::nullopt;
+
+  const uint64_t payload_offset = offset + base_words * sizeof(uint32_t);
+  if (payload_offset < offset || payload_offset > source_text.size() ||
+      source_text.size() - payload_offset < sizeof(uint32_t)) {
+    return std::nullopt;
+  }
+
+  uint32_t payload = 0;
+  std::memcpy(&payload, source_text.data() + payload_offset, sizeof(payload));
+  Gfx1250DppSource result;
+  result.marker = marker;
+  result.vsrc0 = static_cast<uint8_t>(payload);
+  result.payload = payload;
+  if (marker == amdgpu::SRC_DPP) {
+    const uint32_t dpp_ctrl = (payload >> 8u) & 0x1FFu;
+    const uint32_t bound_ctrl = (payload >> 19u) & 0x1u;
+    const uint32_t bank_mask = (payload >> 24u) & 0xFu;
+    const uint32_t row_mask = (payload >> 28u) & 0xFu;
+    result.write_mask = static_cast<uint32_t>(
+        amdgpu::dpp::dpp_write_mask(32, dpp_ctrl, row_mask, bank_mask, bound_ctrl));
+    result.src0_neg = ((payload >> 20u) & 0x1u) != 0;
+    result.src0_abs = ((payload >> 21u) & 0x1u) != 0;
+    result.src1_neg = ((payload >> 22u) & 0x1u) != 0;
+    result.src1_abs = ((payload >> 23u) & 0x1u) != 0;
+  }
+  return result;
+}
+
 [[nodiscard]] constexpr uint16_t scalar_negative_inline_i32(int16_t value) {
   return static_cast<uint16_t>(192 - value);
 }
@@ -839,6 +887,64 @@ void append_save_exec(std::vector<uint32_t> &words, uint8_t exec_save) {
   constexpr uint8_t kExecLo = 126;
   words.push_back(build_s_mov_b64(exec_save, kExecLo));
   append_wait_salu_sgpr(words);
+}
+
+struct DppLoweringResources {
+  uint8_t source_vgpr = 0;
+  std::optional<uint8_t> exec_save;
+};
+
+[[nodiscard]] std::optional<DppLoweringResources>
+allocate_dpp_lowering_resources(const Instruction &inst, const LivenessAnalysis &liveness,
+                                TranslationContext &context, const Gfx1250DppSource &dpp,
+                                std::vector<uint8_t> avoid_vgprs = {}) {
+  add_avoid_vgpr(avoid_vgprs, dpp.vsrc0);
+  const auto source_vgpr = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid_vgprs);
+  if (!source_vgpr || *source_vgpr > 255u)
+    return std::nullopt;
+
+  DppLoweringResources resources;
+  resources.source_vgpr = static_cast<uint8_t>(*source_vgpr);
+  context.require_vgprs(static_cast<uint32_t>(resources.source_vgpr) + 1u);
+  if (dpp.write_mask != 0xFFFF'FFFFu) {
+    const auto exec_save = liveness.find_free_sgpr_pair(&inst);
+    if (!exec_save || *exec_save > 105u)
+      return std::nullopt;
+    resources.exec_save = static_cast<uint8_t>(*exec_save);
+    context.require_sgprs(static_cast<uint32_t>(*exec_save) + 2u);
+  }
+  return resources;
+}
+
+void append_dpp_source_materialization(std::vector<uint32_t> &words, const Gfx1250DppSource &dpp,
+                                       const DppLoweringResources &resources,
+                                       uint8_t physical_vsrc0) {
+  constexpr uint8_t kOpMovB32 = 1;
+  if (resources.exec_save)
+    append_save_exec(words, *resources.exec_save);
+  append_vop1(words, kOpMovB32, resources.source_vgpr, dpp.marker);
+  // The DPP source modifiers belong to the guest operation, not to the move
+  // used to materialize its permuted source. Callers apply them explicitly.
+  uint32_t payload = dpp.payload & ~(0xFu << 20u);
+  payload = (payload & ~0xFFu) | physical_vsrc0;
+  words.push_back(payload);
+  append_wait_valu_vgpr(words);
+  if (resources.exec_save)
+    append_set_exec_from_saved_mask(words, *resources.exec_save, dpp.write_mask);
+}
+
+ExpandResult wrap_dpp_lowering(ExpandResult result, const Gfx1250DppSource &dpp,
+                               const DppLoweringResources &resources, uint8_t physical_vsrc0) {
+  if (result.status != ExpandStatus::Success)
+    return result;
+
+  std::vector<uint32_t> words;
+  words.reserve(result.words.size() + 10u);
+  append_dpp_source_materialization(words, dpp, resources, physical_vsrc0);
+  words.insert(words.end(), result.words.begin(), result.words.end());
+  if (resources.exec_save)
+    append_restore_exec(words, *resources.exec_save);
+  return ExpandResult::success(std::move(words));
 }
 
 void append_restore_vcc(std::vector<uint32_t> &words, uint8_t vcc_save) {
@@ -4283,10 +4389,8 @@ ExpandResult lower_v_fmac_f64_e32(const Instruction &inst, uint32_t, uint64_t,
   if (const auto src0_vgpr = vgpr_index(static_cast<uint16_t>(src.src0));
       src0_vgpr && *src0_vgpr > 254)
     return ExpandResult::failed("v_fmac_f64_e32 has an out-of-range src0 VGPR pair");
-  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(src.src0))
-    return ExpandResult::failed(
-        "v_fmac_f64_e32 DPP and SDWA source forms need explicit operand lowering");
+  if (src.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src.src0))
+    return ExpandResult::failed("v_fmac_f64_e32 does not have a valid DPP source form");
 
   std::optional<uint32_t> literal32;
   std::optional<uint64_t> literal64;
@@ -5301,8 +5405,9 @@ std::vector<uint32_t> expand_v_max_i64_vop3(const Instruction &inst, uint32_t, u
   return expand_v_minmax_64_vop3(inst, liveness, kOpCmpGtI64);
 }
 
-ExpandResult expand_v_add_minmax_32_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                         std::span<const uint8_t>, const LivenessAnalysis &liveness,
+ExpandResult expand_v_add_minmax_32_vop3(const Instruction &inst, uint32_t, uint64_t offset,
+                                         std::span<const uint8_t> source_text,
+                                         const LivenessAnalysis &liveness,
                                          TranslationContext &context, const LaneLayout *,
                                          const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -5319,9 +5424,25 @@ ExpandResult expand_v_add_minmax_32_vop3(const Instruction &inst, uint32_t, uint
   if (src.src0 == 254 || src.src1 == 254 || src.src2 == 254)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " does not support literal64 operands");
-  if (src.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src.src0))
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support DPP source modifiers");
+
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
+  if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 2, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src0_neg || dpp->src0_abs || dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid integer DPP source modifiers");
+    std::vector<uint8_t> avoid{static_cast<uint8_t>(src.vdst), dpp->vsrc0};
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src1));
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src2));
+    dpp_resources = allocate_dpp_lowering_resources(inst, liveness, context, *dpp, avoid);
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
+  }
 
   std::optional<uint32_t> literal_word;
   if (src.src0 == 255)
@@ -5379,13 +5500,16 @@ ExpandResult expand_v_add_minmax_32_vop3(const Instruction &inst, uint32_t, uint
   append_wait_valu_vgpr(words);
   append_vop3(words, minmax_op, static_cast<uint8_t>(src.vdst), vgpr_src(sum),
               static_cast<uint16_t>(src.src2), 0, src.src2 == 255 ? literal_word : std::nullopt);
-  return ExpandResult::success(std::move(words));
+  auto result = ExpandResult::success(std::move(words));
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp->vsrc0);
+  return result;
 }
 
-ExpandResult expand_v_ashr_pk_i8_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
-                                      TranslationContext &context, const LaneLayout *,
-                                      const LaneLayout *) {
+ExpandResult expand_v_ashr_pk_i8_vop3(const Instruction &inst, uint32_t, uint64_t offset,
+                                      std::span<const uint8_t> source_text,
+                                      const LivenessAnalysis &liveness, TranslationContext &context,
+                                      const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
     return ExpandResult::not_handled();
@@ -5401,9 +5525,25 @@ ExpandResult expand_v_ashr_pk_i8_vop3(const Instruction &inst, uint32_t, uint64_
   if (src.src0 == 254 || src.src1 == 254 || src.src2 == 254)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " does not support literal64 operands");
-  if (src.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(src.src0))
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support DPP source modifiers");
+
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
+  if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 2, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src0_neg || dpp->src0_abs || dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid integer DPP source modifiers");
+    std::vector<uint8_t> avoid{static_cast<uint8_t>(src.vdst), dpp->vsrc0};
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src1));
+    add_avoid_src_vgpr(avoid, static_cast<uint16_t>(src.src2));
+    dpp_resources = allocate_dpp_lowering_resources(inst, liveness, context, *dpp, avoid);
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
+  }
 
   std::optional<uint32_t> literal_word;
   if (src.src0 == 255)
@@ -5481,7 +5621,10 @@ ExpandResult expand_v_ashr_pk_i8_vop3(const Instruction &inst, uint32_t, uint64_
   append_wait_valu_vgpr(words);
   append_vop2(words, kOpOrB32, static_cast<uint8_t>(src.vdst), vgpr_src(lo),
               static_cast<uint8_t>(src.vdst));
-  return ExpandResult::success(std::move(words));
+  auto result = ExpandResult::success(std::move(words));
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp->vsrc0);
+  return result;
 }
 
 [[nodiscard]] std::optional<uint16_t> pk_f32_lane_src(uint16_t src, bool select_high) {
@@ -10307,13 +10450,11 @@ void append_gfx1250_tanh_f32(std::vector<uint32_t> &words, uint8_t input, uint8_
   append_wait_valu_vgpr(words);
 }
 
-ExpandResult expand_gfx1250_transcendental(const Instruction &inst,
-                                           const LivenessAnalysis &liveness,
-                                           TranslationContext &context, uint8_t vdst, uint16_t src0,
-                                           std::optional<uint32_t> literal_word,
-                                           TranscendentalFormat format, bool src_high,
-                                           bool dst_high, bool src_abs, bool src_neg, uint8_t omod,
-                                           bool clamp, std::optional<uint8_t> native_f32_op) {
+ExpandResult expand_gfx1250_transcendental(
+    const Instruction &inst, const LivenessAnalysis &liveness, TranslationContext &context,
+    uint8_t vdst, uint16_t src0, std::optional<uint32_t> literal_word, TranscendentalFormat format,
+    bool src_high, bool dst_high, bool src_abs, bool src_neg, uint8_t omod, bool clamp,
+    std::optional<uint8_t> native_f32_op, std::span<const uint8_t> avoid_sgprs = {}) {
   std::vector<uint8_t> avoid{vdst};
   add_avoid_src_vgpr(avoid, src0);
   const bool correct_sin_argument = native_f32_op && *native_f32_op == rdna4::kVSinF32Vop1;
@@ -10327,7 +10468,8 @@ ExpandResult expand_gfx1250_transcendental(const Instruction &inst,
 
   std::optional<uint16_t> predicate;
   if (!native_f32_op) {
-    predicate = liveness.find_free_sgpr(&inst);
+    predicate = find_free_sgpr_avoiding(
+        inst, liveness, std::vector<uint8_t>(avoid_sgprs.begin(), avoid_sgprs.end()));
     if (!predicate || *predicate > 105u) {
       return ExpandResult::failed(std::string(inst.mnemonic()) +
                                   " cannot allocate a tanh predicate SGPR");
@@ -10392,8 +10534,8 @@ ExpandResult expand_gfx1250_transcendental(const Instruction &inst,
   return ExpandResult::success(std::move(words));
 }
 
-ExpandResult expand_gfx1250_transcendental_vop1(const Instruction &inst, uint32_t, uint64_t,
-                                                std::span<const uint8_t>,
+ExpandResult expand_gfx1250_transcendental_vop1(const Instruction &inst, uint32_t, uint64_t offset,
+                                                std::span<const uint8_t> source_text,
                                                 const LivenessAnalysis &liveness,
                                                 TranslationContext &context, const LaneLayout *,
                                                 const LaneLayout *) {
@@ -10409,10 +10551,40 @@ ExpandResult expand_gfx1250_transcendental_vop1(const Instruction &inst, uint32_
     return ExpandResult::not_handled();
   if (src.src0 == 254)
     return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
-  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(src.src0)) {
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support SDWA or DPP modifiers");
+
+  const TranscendentalFormat format = native_f32_op ? TranscendentalFormat::Bf16 : *tanh_format;
+  const bool is_narrow = format != TranscendentalFormat::F32;
+  const uint8_t vdst =
+      is_narrow ? static_cast<uint8_t>(src.vdst & 0x7Fu) : static_cast<uint8_t>(src.vdst);
+
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
+  uint8_t dpp_physical_vsrc0 = 0;
+  std::vector<uint8_t> avoid_sgprs;
+  bool src_abs = false;
+  bool src_neg = false;
+  bool src_high = false;
+  if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 1, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid unary DPP source modifiers");
+    src_abs = dpp->src0_abs;
+    src_neg = dpp->src0_neg;
+    src_high = is_narrow && (dpp->vsrc0 & 0x80u) != 0;
+    dpp_physical_vsrc0 = is_narrow ? static_cast<uint8_t>(dpp->vsrc0 & 0x7Fu) : dpp->vsrc0;
+    dpp_resources =
+        allocate_dpp_lowering_resources(inst, liveness, context, *dpp, {vdst, dpp_physical_vsrc0});
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
+    if (dpp_resources->exec_save) {
+      avoid_sgprs.push_back(*dpp_resources->exec_save);
+      avoid_sgprs.push_back(static_cast<uint8_t>(*dpp_resources->exec_save + 1u));
+    }
   }
 
   std::optional<uint32_t> literal_word;
@@ -10422,18 +10594,17 @@ ExpandResult expand_gfx1250_transcendental_vop1(const Instruction &inst, uint32_
       return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
   }
 
-  const TranscendentalFormat format = native_f32_op ? TranscendentalFormat::Bf16 : *tanh_format;
-  const bool is_narrow = format != TranscendentalFormat::F32;
-  const uint8_t vdst =
-      is_narrow ? static_cast<uint8_t>(src.vdst & 0x7Fu) : static_cast<uint8_t>(src.vdst);
-  return expand_gfx1250_transcendental(
+  auto result = expand_gfx1250_transcendental(
       inst, liveness, context, vdst, static_cast<uint16_t>(src.src0), literal_word, format,
-      /*src_high=*/false, /*dst_high=*/is_narrow && (src.vdst & 0x80u) != 0,
-      /*src_abs=*/false, /*src_neg=*/false, /*omod=*/0, /*clamp=*/false, native_f32_op);
+      src_high, /*dst_high=*/is_narrow && (src.vdst & 0x80u) != 0, src_abs, src_neg,
+      /*omod=*/0, /*clamp=*/false, native_f32_op, avoid_sgprs);
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp_physical_vsrc0);
+  return result;
 }
 
-ExpandResult expand_gfx1250_transcendental_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                                std::span<const uint8_t>,
+ExpandResult expand_gfx1250_transcendental_vop3(const Instruction &inst, uint32_t, uint64_t offset,
+                                                std::span<const uint8_t> source_text,
                                                 const LivenessAnalysis &liveness,
                                                 TranslationContext &context, const LaneLayout *,
                                                 const LaneLayout *) {
@@ -10455,10 +10626,27 @@ ExpandResult expand_gfx1250_transcendental_vop3(const Instruction &inst, uint32_
   }
   if (src.src0 == 254)
     return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
-  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(src.src0)) {
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support SDWA or DPP modifiers");
+
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
+  std::vector<uint8_t> avoid_sgprs;
+  if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 2, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src0_neg || dpp->src0_abs || dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid VOP3 DPP source modifiers");
+    dpp_resources = allocate_dpp_lowering_resources(inst, liveness, context, *dpp,
+                                                    {static_cast<uint8_t>(src.vdst), dpp->vsrc0});
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
+    if (dpp_resources->exec_save) {
+      avoid_sgprs.push_back(*dpp_resources->exec_save);
+      avoid_sgprs.push_back(static_cast<uint8_t>(*dpp_resources->exec_save + 1u));
+    }
   }
 
   std::optional<uint32_t> literal_word;
@@ -10468,10 +10656,14 @@ ExpandResult expand_gfx1250_transcendental_vop3(const Instruction &inst, uint32_
       return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
   }
 
-  return expand_gfx1250_transcendental(
+  auto result = expand_gfx1250_transcendental(
       inst, liveness, context, static_cast<uint8_t>(src.vdst), static_cast<uint16_t>(src.src0),
       literal_word, format, (src.opsel & 0x1u) != 0, (src.opsel & 0x8u) != 0, (src.abs & 0x1u) != 0,
-      (src.neg & 0x1u) != 0, static_cast<uint8_t>(src.omod), src.clamp != 0, native_f32_op);
+      (src.neg & 0x1u) != 0, static_cast<uint8_t>(src.omod), src.clamp != 0, native_f32_op,
+      avoid_sgprs);
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp->vsrc0);
+  return result;
 }
 
 std::vector<uint32_t> lower_v_cvt_f32_bf16_to_shift(uint8_t vdst, uint16_t src0, bool high_half,
@@ -10534,7 +10726,8 @@ std::vector<uint32_t> expand_v_cvt_f32_bf16_vop3(const Instruction &inst, uint32
 
 ExpandResult lower_v_cvt_norm_f16(const Instruction &inst, const LivenessAnalysis &liveness,
                                   uint8_t vdst, uint16_t src0, bool src_high, bool dst_high,
-                                  bool is_signed, std::optional<uint32_t> literal_word) {
+                                  bool is_signed, std::optional<uint32_t> literal_word,
+                                  bool src_abs = false, bool src_neg = false) {
   std::vector<uint8_t> avoid{vdst};
   add_avoid_src_vgpr(avoid, src0);
   const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
@@ -10563,6 +10756,7 @@ ExpandResult lower_v_cvt_norm_f16(const Instruction &inst, const LivenessAnalysi
   append_wait_valu_vgpr(words);
   append_vop1(words, kOpCvtF32F16, tmp, vgpr_src(tmp));
   append_wait_valu_vgpr(words);
+  append_apply_f32_source_modifiers(words, tmp, src_abs, src_neg);
   append_vop2(words, kOpMulF32, tmp, 255, tmp, is_signed ? kSignedScale : kUnsignedScale);
   append_wait_valu_vgpr(words);
   append_vop1(words, is_signed ? kOpCvtI32F32 : kOpCvtU32F32, tmp, vgpr_src(tmp));
@@ -10584,47 +10778,74 @@ ExpandResult lower_v_cvt_norm_f16(const Instruction &inst, const LivenessAnalysi
   return ExpandResult::success(std::move(words));
 }
 
-ExpandResult expand_v_cvt_norm_f16_vop1(const Instruction &inst, uint32_t, uint64_t,
-                                        std::span<const uint8_t>, const LivenessAnalysis &liveness,
-                                        TranslationContext &, const LaneLayout *,
+ExpandResult expand_v_cvt_norm_f16_vop1(const Instruction &inst, uint32_t, uint64_t offset,
+                                        std::span<const uint8_t> source_text,
+                                        const LivenessAnalysis &liveness,
+                                        TranslationContext &context, const LaneLayout *,
                                         const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < static_cast<int>(sizeof(gfx1250::Vop1MachineInst)))
     return ExpandResult::failed("Normalized f16 VOP1 has a malformed encoding");
 
-  const auto src = std::bit_cast<gfx1250::Vop1MachineInst>(raw[0]);
+  auto src = std::bit_cast<gfx1250::Vop1MachineInst>(raw[0]);
   const bool is_signed = src.op == 99u;
   if (!is_signed && src.op != 100u)
     return ExpandResult::not_handled();
   if (src.src0 == 254u)
     return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
 
+  const uint8_t vdst = static_cast<uint8_t>(src.vdst & 0x7Fu);
+  const bool dst_high = (src.vdst & 0x80u) != 0;
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
+  uint8_t dpp_physical_vsrc0 = 0;
+  bool src_abs = false;
+  bool src_neg = false;
   std::optional<uint32_t> literal_word;
   if (src.src0 == 255u) {
     literal_word = simm32_literal_word(inst, 0);
     if (!literal_word)
       return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  } else if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 1, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid unary DPP source modifiers");
+    src_abs = dpp->src0_abs;
+    src_neg = dpp->src0_neg;
+    dpp_physical_vsrc0 = static_cast<uint8_t>(dpp->vsrc0 & 0x7Fu);
+    dpp_resources =
+        allocate_dpp_lowering_resources(inst, liveness, context, *dpp, {vdst, dpp_physical_vsrc0});
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
   } else if (inst.size() != static_cast<int>(sizeof(gfx1250::Vop1MachineInst))) {
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support an extended DPP or SDWA source");
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " has an unexpected extension");
   }
 
-  const uint8_t vdst = static_cast<uint8_t>(src.vdst & 0x7Fu);
-  const bool dst_high = (src.vdst & 0x80u) != 0;
   uint16_t lowered_src = static_cast<uint16_t>(src.src0);
-  bool src_high = false;
+  bool src_high = dpp && (dpp->vsrc0 & 0x80u) != 0;
   if (const auto src_vgpr = vgpr_index(lowered_src)) {
-    src_high = (*src_vgpr & 0x80u) != 0;
-    lowered_src = vgpr_src(static_cast<uint8_t>(*src_vgpr & 0x7Fu));
+    if (!dpp) {
+      src_high = (*src_vgpr & 0x80u) != 0;
+      lowered_src = vgpr_src(static_cast<uint8_t>(*src_vgpr & 0x7Fu));
+    }
   }
 
-  return lower_v_cvt_norm_f16(inst, liveness, vdst, lowered_src, src_high, dst_high, is_signed,
-                              literal_word);
+  auto result = lower_v_cvt_norm_f16(inst, liveness, vdst, lowered_src, src_high, dst_high,
+                                     is_signed, literal_word, src_abs, src_neg);
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp_physical_vsrc0);
+  return result;
 }
 
-ExpandResult expand_v_cvt_norm_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                        std::span<const uint8_t>, const LivenessAnalysis &liveness,
-                                        TranslationContext &, const LaneLayout *,
+ExpandResult expand_v_cvt_norm_f16_vop3(const Instruction &inst, uint32_t, uint64_t offset,
+                                        std::span<const uint8_t> source_text,
+                                        const LivenessAnalysis &liveness,
+                                        TranslationContext &context, const LaneLayout *,
                                         const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
@@ -10642,19 +10863,36 @@ ExpandResult expand_v_cvt_norm_f16_vop3(const Instruction &inst, uint32_t, uint6
   if (src.src0 == 254u)
     return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
 
+  std::optional<Gfx1250DppSource> dpp;
+  std::optional<DppLoweringResources> dpp_resources;
   std::optional<uint32_t> literal_word;
   if (src.src0 == 255u) {
     literal_word = simm32_literal_word(inst, 0);
     if (!literal_word)
       return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  } else if (is_gfx1250_dpp_source(static_cast<uint16_t>(src.src0))) {
+    dpp = decode_gfx1250_dpp_source(static_cast<uint16_t>(src.src0), 2, offset, source_text);
+    if (!dpp)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " has a malformed DPP payload");
+    if (dpp->src0_neg || dpp->src0_abs || dpp->src1_neg || dpp->src1_abs)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " has invalid VOP3 DPP source modifiers");
+    dpp_resources = allocate_dpp_lowering_resources(inst, liveness, context, *dpp,
+                                                    {static_cast<uint8_t>(src.vdst), dpp->vsrc0});
+    if (!dpp_resources)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate DPP lowering resources");
+    src.src0 = vgpr_src(dpp_resources->source_vgpr);
   } else if (static_cast<size_t>(inst.size()) != sizeof(gfx1250::Vop3MachineInst)) {
-    return ExpandResult::failed(std::string(inst.mnemonic()) +
-                                " does not yet support an extended DPP source");
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " has an unexpected extension");
   }
 
-  return lower_v_cvt_norm_f16(inst, liveness, static_cast<uint8_t>(src.vdst),
-                              static_cast<uint16_t>(src.src0), (src.opsel & 0x1u) != 0,
-                              (src.opsel & 0x8u) != 0, is_signed, literal_word);
+  auto result = lower_v_cvt_norm_f16(inst, liveness, static_cast<uint8_t>(src.vdst),
+                                     static_cast<uint16_t>(src.src0), (src.opsel & 0x1u) != 0,
+                                     (src.opsel & 0x8u) != 0, is_signed, literal_word);
+  if (dpp)
+    return wrap_dpp_lowering(std::move(result), *dpp, *dpp_resources, dpp->vsrc0);
+  return result;
 }
 
 std::vector<uint32_t> expand_v_cvt_f32_fp8_e5m3_vop3(const Instruction &inst, uint32_t, uint64_t,

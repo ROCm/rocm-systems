@@ -1138,6 +1138,7 @@ def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
 def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     gfx1250_generated_root: Path,
 ):
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
     vop3_alu = '\n'.join(
         path.read_text()
@@ -1149,6 +1150,13 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     ]
     assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
     assert 'uint32_t dpp_fi_ = 1;' in vop3_base
+
+    vop3_ctor_start = encodings_cpp.index('Vop3::Vop3')
+    vop3_ctor_end = encodings_cpp.index('bool Vop3::has_lit_0()', vop3_ctor_start)
+    vop3_ctor = encodings_cpp[vop3_ctor_start:vop3_ctor_end]
+    assert 'has_dpp8()' in vop3_ctor
+    assert 'has_dpp16()' in vop3_ctor
+    assert 'size_ += sizeof(MachineInst);' in vop3_ctor
 
     start = vop3_alu.index('VAddF16Vop3::VAddF16Vop3')
     end = vop3_alu.index('void VAddF16Vop3::execute_impl', start)

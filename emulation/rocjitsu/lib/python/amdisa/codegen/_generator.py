@@ -1845,15 +1845,28 @@ class CodeGenerator:
                 if name.startswith('has_lit') and not name.startswith('has_lit64')
             ]
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
+            dpp_conds = [
+                name for name, _ in inst_enc.enc_conds if name.startswith('has_dpp')
+            ]
+            dpp_condition = ' || '.join(f'{name}()' for name in dpp_conds)
+            # A VOP3 base encoding already occupies two DWORDs, but DPP16 and
+            # DPP8 still append a third DWORD.  The default-encoding size check
+            # only applies to 32-bit bases, so include the DPP predicates in
+            # the explicit one-DWORD extension condition for 64-bit bases.
+            extension32_condition = ' || '.join(
+                condition
+                for condition in (literal32_condition, dpp_condition)
+                if condition
+            )
             if literal64_condition and size_condition is not None:
                 size_line += (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
                     f' else if ({size_condition}) size_ += sizeof(MachineInst);'
                 )
-            elif literal64_condition and literal32_condition:
+            elif literal64_condition and extension32_condition:
                 size_line += (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
-                    f' else if ({literal32_condition}) size_ += sizeof(MachineInst);'
+                    f' else if ({extension32_condition}) size_ += sizeof(MachineInst);'
                 )
             elif literal64_condition:
                 size_line += (
@@ -1861,9 +1874,9 @@ class CodeGenerator:
                 )
             elif size_condition is not None:
                 size_line += f' if ({size_condition})' f' size_ += sizeof(MachineInst);'
-            elif literal32_condition:
+            elif extension32_condition:
                 size_line += (
-                    f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
+                    f' if ({extension32_condition}) size_ += sizeof(MachineInst);'
                 )
             if inst_enc.has_implied_literal_ops:
                 size_line += (

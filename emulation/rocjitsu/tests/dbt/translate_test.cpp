@@ -71,6 +71,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -3017,6 +3018,143 @@ TEST(BinaryTranslator, Gfx1250IntegerTernaryOpsLowerToRdna4Sequences) {
     EXPECT_TRUE(section_contains_vop3_opcode(translations, opcode)) << "opcode " << opcode;
   EXPECT_FALSE(section_contains_vop3_opcode(translations, gfx1250::kVAddMaxI32Vop3));
   EXPECT_FALSE(section_contains_vop3_opcode(translations, gfx1250::kVAshrPkI8I32Vop3));
+}
+
+TEST(BinaryTranslator, Gfx1250DppSemanticExpansionsMaterializePermutedSources) {
+  std::vector<uint32_t> text_words;
+  const auto append = [&](const auto &inst) {
+    const size_t start = text_words.size();
+    text_words.resize(start + sizeof(inst) / sizeof(uint32_t));
+    std::memcpy(text_words.data() + start, &inst, sizeof(inst));
+  };
+
+  gfx1250::Vop3VopDpp16MachineInst add{};
+  add.vdst = 10;
+  add.op = gfx1250::kVAddMaxI32Vop3;
+  add.encoding = 0x35;
+  add.src0 = amdgpu::SRC_DPP;
+  add.src1 = 256 + 2;
+  add.src2 = 256 + 3;
+  add.vsrc0 = 1;
+  add.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  add.fi = 1;
+  add.bound_ctrl = 0;
+  add.bank_mask = 0xF;
+  add.row_mask = 0x3;
+  append(add);
+
+  gfx1250::Vop3VopDpp8MachineInst ashr{};
+  ashr.vdst = 11;
+  ashr.op = gfx1250::kVAshrPkI8I32Vop3;
+  ashr.encoding = 0x35;
+  ashr.src0 = amdgpu::SRC_DPP8_FI_1;
+  ashr.src1 = 256 + 5;
+  ashr.src2 = 256 + 6;
+  ashr.vsrc0 = 4;
+  ashr.lane_sel_0 = 1;
+  ashr.lane_sel_1 = 0;
+  ashr.lane_sel_2 = 3;
+  ashr.lane_sel_3 = 2;
+  ashr.lane_sel_4 = 5;
+  ashr.lane_sel_5 = 4;
+  ashr.lane_sel_6 = 7;
+  ashr.lane_sel_7 = 6;
+  append(ashr);
+
+  gfx1250::Vop1VopDpp16MachineInst tanh{};
+  tanh.vdst = 12;
+  tanh.op = gfx1250::kVTanhF32Vop1;
+  tanh.encoding = 0x3F;
+  tanh.src0 = amdgpu::SRC_DPP;
+  tanh.vsrc0 = 7;
+  tanh.dpp_ctrl = amdgpu::dpp::ROW_ROR1;
+  tanh.fi = 1;
+  tanh.bound_ctrl = 1;
+  tanh.src0_neg = 1;
+  tanh.src0_abs = 1;
+  tanh.bank_mask = 0xF;
+  tanh.row_mask = 0x3;
+  append(tanh);
+
+  gfx1250::Vop1VopDpp8MachineInst norm_e32{};
+  norm_e32.vdst = 13;
+  norm_e32.op = gfx1250::kVCvtNormI16F16Vop1;
+  norm_e32.encoding = 0x3F;
+  norm_e32.src0 = amdgpu::SRC_DPP8_FI_0;
+  norm_e32.vsrc0 = 0x80u | 8u; // True16 high half of v8.
+  norm_e32.lane_sel_0 = 0;
+  norm_e32.lane_sel_1 = 1;
+  norm_e32.lane_sel_2 = 2;
+  norm_e32.lane_sel_3 = 3;
+  norm_e32.lane_sel_4 = 4;
+  norm_e32.lane_sel_5 = 5;
+  norm_e32.lane_sel_6 = 6;
+  norm_e32.lane_sel_7 = 7;
+  append(norm_e32);
+
+  gfx1250::Vop3VopDpp16MachineInst norm_e64{};
+  norm_e64.vdst = 14;
+  norm_e64.op = gfx1250::kVCvtNormU16F16Vop3;
+  norm_e64.encoding = 0x35;
+  norm_e64.src0 = amdgpu::SRC_DPP;
+  norm_e64.vsrc0 = 9;
+  norm_e64.dpp_ctrl = amdgpu::dpp::ROW_SHL1;
+  norm_e64.fi = 1;
+  norm_e64.bound_ctrl = 1;
+  norm_e64.bank_mask = 0xF;
+  norm_e64.row_mask = 0x3;
+  append(norm_e64);
+
+  // Encoding 249 is SRC_POPS_EXITING_WAVE_ID on gfx1250, not SDWA. The
+  // semantic path must accept it as an ordinary scalar source.
+  gfx1250::Vop1MachineInst scalar_249{};
+  scalar_249.vdst = 15;
+  scalar_249.op = gfx1250::kVExpBf16Vop1;
+  scalar_249.encoding = 0x3F;
+  scalar_249.src0 = 249;
+  append(scalar_249);
+  text_words.push_back(0xBFB00000u); // s_endpgm
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> decoded(decoder->decode(text_words.data()));
+  ASSERT_NE(decoded, nullptr);
+  EXPECT_EQ(decoded->size(), static_cast<int>(sizeof(gfx1250::Vop3VopDpp16MachineInst)));
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *translations = find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  const auto cave_words = section_words_for_test(*translations);
+
+  size_t dpp_move_count = 0;
+  bool saw_true16_physical_vsrc = false;
+  for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
+    const auto move = std::bit_cast<rdna4::Vop1MachineInst>(cave_words[i]);
+    if (move.encoding != 0x3Fu || move.op != rdna4::kVMovB32Vop1 ||
+        (move.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(move.src0))) {
+      continue;
+    }
+    ++dpp_move_count;
+    const uint32_t payload = cave_words[i + 1u];
+    EXPECT_EQ(payload & (0xFu << 20u), 0u);
+    saw_true16_physical_vsrc |= (payload & 0xFFu) == 8u;
+  }
+  EXPECT_EQ(dpp_move_count, 5u);
+  EXPECT_TRUE(saw_true16_physical_vsrc);
+  EXPECT_NE(std::ranges::find(cave_words, 0xFFFE'FFFEu), cave_words.end())
+      << "DPP16 row-shift lowering must preserve lanes with invalid source data";
 }
 
 TEST(BinaryTranslator, Gfx1250Bf16AndTanhTranscendentalsLowerToRdna4Sequences) {

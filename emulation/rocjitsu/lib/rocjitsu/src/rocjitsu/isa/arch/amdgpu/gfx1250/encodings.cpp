@@ -249,7 +249,7 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
-      has_lit_0_and_has_lit_1_and_has_lit_2())
+      has_lit_0_and_has_lit_1_and_has_lit_2() || has_dpp8() || has_dpp16())
     size_ += sizeof(MachineInst);
 }
 
@@ -303,7 +303,7 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   opcode_ = inst_.op;
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
-      has_lit_0_and_has_lit_1_and_has_lit_2())
+      has_lit_0_and_has_lit_1_and_has_lit_2() || has_dpp8() || has_dpp16())
     size_ += sizeof(MachineInst);
 }
 
@@ -440,7 +440,7 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   opcode_ = inst_.op;
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
-      has_lit_0_and_has_lit_1_and_has_lit_2())
+      has_lit_0_and_has_lit_1_and_has_lit_2() || has_dpp8() || has_dpp16())
     size_ += sizeof(MachineInst);
 }
 
