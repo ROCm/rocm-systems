@@ -54,6 +54,7 @@ struct ncclPeerInfo {
   size_t totalGlobalMem;
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;
+  int fabricHandleSupport;
   int cuMemSupport;
   int version;
   uint64_t supportedGinTypeBitMask;
