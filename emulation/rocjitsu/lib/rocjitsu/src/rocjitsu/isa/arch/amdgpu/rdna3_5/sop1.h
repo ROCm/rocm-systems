@@ -599,6 +599,7 @@ class SCvtF16F32Sop1 : public Sop1 {
 public:
   SCvtF16F32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -623,6 +624,7 @@ class SCeilF16Sop1 : public Sop1 {
 public:
   SCeilF16Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -631,6 +633,7 @@ class SFloorF16Sop1 : public Sop1 {
 public:
   SFloorF16Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -639,6 +642,7 @@ class STruncF16Sop1 : public Sop1 {
 public:
   STruncF16Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -647,6 +651,7 @@ class SRndneF16Sop1 : public Sop1 {
 public:
   SRndneF16Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
 };
