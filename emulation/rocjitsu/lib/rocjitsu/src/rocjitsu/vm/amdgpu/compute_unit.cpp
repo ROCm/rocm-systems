@@ -316,11 +316,6 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
     return nullptr;
   }
 
-  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
-  // arguments from L2/memory rather than stale lines from a prior kernel.
-  // On real hardware, the driver issues s_dcache_inv at kernel launch.
-  l1_scalar_.invalidate_all();
-
   wf->wf_size_ = dispatched_wave_size;
   wf->wg_id_ = wg_id;
   wf->pc = pc;
@@ -462,13 +457,13 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
 
 void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                                       uint32_t num_named_barriers) {
-  // The driver's s_icache_inv rides the launch packet, so it lands once per
-  // dispatch, not once per wave: a kernel VA reused by a later dispatch still
-  // sees fresh code, while the sibling waves of one dispatch keep filling a
-  // shared I$ instead of cold-starting each other.
-  if (inst_cache_dispatch_id_ != dispatch_id) {
+  // Launch invalidation makes reused code and kernel arguments fresh once per
+  // dispatch. Sibling waves of the same dispatch retain shared I$ and scalar
+  // cache contents.
+  if (launch_cache_dispatch_id_ != dispatch_id) {
+    l1_scalar_.invalidate_all();
     inst_cache_.invalidate_all();
-    inst_cache_dispatch_id_ = dispatch_id;
+    launch_cache_dispatch_id_ = dispatch_id;
   }
 
   const uint64_t key = wg_key(dispatch_id, wg_id);

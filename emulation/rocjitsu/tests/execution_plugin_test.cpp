@@ -4936,6 +4936,64 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
 }
 
+TEST(ExecutionPluginTest, MemoryPipelineDwordCompletionHonorsWaveSizeAndMask) {
+  for (uint32_t wave_size : {32u, 64u}) {
+    const uint64_t full_mask = wave_size == 64 ? ~uint64_t{0} : 0xFFFFFFFFu;
+    for (uint32_t num_elems : {1u, 4u}) {
+      for (uint64_t mask : {uint64_t{0}, uint64_t{0x22}, full_mask}) {
+        SCOPED_TRACE(::testing::Message() << "wave_size=" << wave_size << " num_elems=" << num_elems
+                                          << " mask=" << mask);
+        PluginFixture f(/*num_wf_slots=*/1, wave_size == 32 ? "rdna4" : "cdna4", wave_size);
+        auto *plugin = f.attach_ordering_plugin();
+        auto *cu = f.cu();
+        auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave_size);
+        ASSERT_NE(wf, nullptr);
+        ASSERT_EQ(wf->wf_size(), wave_size);
+
+        constexpr uint64_t kAddress = 0x8000;
+        constexpr uint32_t kDst = 7;
+        constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+        std::array<uint32_t, 64 * 4> values{};
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < num_elems; ++reg) {
+            values[lane * num_elems + reg] = 0x12340000u | (lane << 8) | reg;
+            cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, lane, kSentinel);
+          }
+        }
+        f.mem->load_image(reinterpret_cast<const uint8_t *>(values.data()), sizeof(values),
+                          kAddress);
+
+        auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+        state->elem_size = sizeof(uint32_t);
+        state->num_elems = num_elems;
+        state->is_load = true;
+        state->wf_size = wave_size;
+        state->exec_mask = mask;
+        state->lane_mask = mask;
+        state->dst_reg_base = wf->vgpr_alloc().base + kDst;
+        for (uint32_t lane = 0; lane < wave_size; ++lane)
+          state->per_lane_addr[lane] = kAddress + lane * num_elems * sizeof(uint32_t);
+
+        // Completion must use the issue-time mask, not a later EXEC value.
+        wf->set_exec(full_mask ^ mask);
+        plugin->events.clear();
+        GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+        EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf),
+                  VmAccessOutcome::Complete);
+
+        EXPECT_TRUE(vgpr_write_events(*plugin).empty());
+        for (uint32_t reg = 0; reg < num_elems; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            const uint32_t expected =
+                (mask & (uint64_t{1} << lane)) ? values[lane * num_elems + reg] : kSentinel;
+            EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, lane), expected);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDirectly) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
