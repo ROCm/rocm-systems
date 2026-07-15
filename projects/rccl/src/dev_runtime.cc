@@ -2483,32 +2483,6 @@ static void listRemove(Obj* list, int* count, int index) {
   *count -= 1;
 }
 
-// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
-ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
-  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
-  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-  uintptr_t flatEnd  = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
-
-  // Already in the LSA flat range (resource window case)
-  if (a >= flatBase && a < flatEnd) {
-    *outAddr = addr;
-    return ncclSuccess;
-  }
-
-  // Search memHead for a memory whose primaryAddr matches (ncclMemAlloc case)
-  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
-    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
-    if (a >= mbase && a < mbase + mem->size) {
-      size_t off = a - mbase;
-      *outAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset + off;
-      return ncclSuccess;
-    }
-  }
-
-  *outAddr = nullptr;
-  return ncclSuccess;
-}
-
 ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr,
                                           uintptr_t* outLsaFlatBase, uint32_t* outStride4G) {
   if (!devr || !addr || !outLsaFlatBase || !outStride4G) return ncclInvalidArgument;
