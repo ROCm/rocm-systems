@@ -181,6 +181,7 @@ if(BUILD_TESTS)
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -267,6 +268,7 @@ if(BUILD_TESTS)
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       DdaIpcEligibilityTests.cpp
+      DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp

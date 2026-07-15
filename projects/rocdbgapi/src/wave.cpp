@@ -75,7 +75,7 @@ wave_t::dispatch () const
   return m_workgroup.dispatch ();
 }
 
-compute_queue_t &
+queue_t &
 wave_t::queue () const
 {
   return dispatch ().queue ();
@@ -283,7 +283,7 @@ wave_t::displaced_stepping_start (const void *saved_instruction_bytes)
       instruction_t original_instruction (
         architecture (), std::move (original_instruction_bytes));
 
-      std::optional<compute_queue_t::displaced_instruction_ptr_t>
+      std::optional<queue_t::displaced_instruction_ptr_t>
         displaced_instruction_ptr;
 
       if (architecture ().can_simulate (*this, original_instruction))

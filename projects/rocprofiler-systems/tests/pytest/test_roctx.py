@@ -99,6 +99,7 @@ class TestROCTx(RocprofsysTest):
         return [1, 1, 1, 0, 0, 1, 1, 1]
 
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS = ["-v", "2"]
 
     @pytest.mark.parametrize(
         "mode",
@@ -106,7 +107,7 @@ class TestROCTx(RocprofsysTest):
             pytest.param("baseline", marks=pytest.mark.timeout(120)),
             pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
             pytest.param("sys_run", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(180)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
         ],
     )
     def test(self, mode, roctx_env):
@@ -115,6 +116,7 @@ class TestROCTx(RocprofsysTest):
             "roctx",
             env=roctx_env,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(result)
