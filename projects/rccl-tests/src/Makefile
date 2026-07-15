@@ -150,6 +150,39 @@ endif
 ifeq ($(ENABLE_DEVICE_COVERAGE), 1)
 HIPCUFLAGS += -fprofile-instr-generate -fcoverage-mapping
 HIPLDFLAGS += -fprofile-generate
+
+# Toolchains that do NOT auto-link the amdgcn device profile runtime fail each
+# -c HIP embedded device link with "undefined symbol: __llvm_profile_instrument_gpu"
+# / __llvm_profile_raw_version. Locate the per-arch libclang_rt.profile.a and
+# forward it to the offload linker, mirroring rccl's cmake/DeviceLinker.cmake.
+DEVICE_RESOURCE_DIR := $(shell $(HIPCC) --target=amdgcn-amd-amdhsa -print-resource-dir 2>/dev/null)
+DEVICE_PROFILE_RT := $(firstword $(wildcard \
+  $(DEVICE_RESOURCE_DIR)/lib/amdgcn-amd-amdhsa/libclang_rt.profile.a \
+  $(DEVICE_RESOURCE_DIR)/lib/linux/libclang_rt.profile-amdgcn.a))
+ifeq ($(DEVICE_PROFILE_RT),)
+$(error ENABLE_DEVICE_COVERAGE=1 but no amdgcn libclang_rt.profile.a found under \
+$(DEVICE_RESOURCE_DIR); rebuild compiler-rt profile for the amdgcn device target)
+endif
+# Empty, retained __llvm_prf_{names,cnts,data,vnds} sections so the linker always
+# defines __start/__stop___llvm_prf_* for every device offload link, even when a
+# device object references those boundaries but provides none of the sections
+# itself (e.g. collector). Generic amdgcn bitcode (no mcpu), so each per-arch
+# device link LTO-compiles it.
+DEVICE_PROFILE_ANCHOR := $(BUILDDIR)/prf_section_anchor.bc
+$(shell mkdir -p $(BUILDDIR); [ -f $(DEVICE_PROFILE_ANCHOR) ] || printf \
+  '__attribute__((used, retain, section("__llvm_prf_names"))) static char __rccl_prf_names_anchor[0];\n__attribute__((used, retain, section("__llvm_prf_cnts"))) static char __rccl_prf_cnts_anchor[0];\n__attribute__((used, retain, section("__llvm_prf_data"))) static char __rccl_prf_data_anchor[0];\n__attribute__((used, retain, section("__llvm_prf_vnds"))) static char __rccl_prf_vnds_anchor[0];\n' \
+  | $(HIPCC) --target=amdgcn-amd-amdhsa -c -emit-llvm -O1 -x c - -o $(DEVICE_PROFILE_ANCHOR))
+# amdgpu-internalize-symbols (auto-injected into the offload link) would internalize
+# and dead-strip the hidden __llvm_profile_instrument_gpu that lives in the profile
+# RT's separate bitcode LTO module; disable it so the runtime symbol resolves.
+# Apply to both the per-.o embedded device link (HIPCUFLAGS) and the final
+# executable offload link (HIPLDFLAGS), which re-links all device objects.
+COVERAGE_DEVICE_LINK_FLAGS := \
+  -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false \
+  -Xoffload-linker $(DEVICE_PROFILE_ANCHOR) \
+  -Xoffload-linker $(DEVICE_PROFILE_RT)
+HIPCUFLAGS += $(COVERAGE_DEVICE_LINK_FLAGS)
+HIPLDFLAGS += $(COVERAGE_DEVICE_LINK_FLAGS)
 endif
 
 LIBRARIES += rccl dl

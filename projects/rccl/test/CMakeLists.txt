@@ -447,8 +447,13 @@ if(BUILD_TESTS)
 
     # Test TUs with __global__ kernels do their own embedded device link, which
     # must resolve __llvm_profile_instrument_gpu from the device profile RT.
+    # The profile RT is a separate bitcode LTO module, so clang's auto-injected
+    # -amdgpu-internalize-symbols dead-strips the hidden __llvm_profile_instrument_gpu; disable it.
+    # The anchor supplies empty __llvm_prf_{cnts,data} boundary sections (see cmake/DeviceLinker.cmake).
     if(ENABLE_DEVICE_COVERAGE AND RCCL_DEVICE_PROFILE_RT)
       target_compile_options(${test_executable} PRIVATE
+        "SHELL:-Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false"
+        "SHELL:-Xoffload-linker ${RCCL_DEVICE_PROFILE_ANCHOR}"
         "SHELL:-Xoffload-linker ${RCCL_DEVICE_PROFILE_RT}")
     endif()
     if(BUILD_ADDRESS_SANITIZER)
