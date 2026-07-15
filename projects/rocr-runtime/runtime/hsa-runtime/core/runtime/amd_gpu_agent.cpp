@@ -951,19 +951,33 @@ void GpuAgent::InitDma() {
       // xGMI engine exists.
       if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
           properties_.NumSdmaEngines > 0) {
+        // Seed for the round-robin pick. ROCR_SDMA_ENGINE_ID_OFFSET, when set
+        // to a valid non-negative integer, provides an explicit offset (e.g. a
+        // launcher-assigned local rank) so concurrent processes deterministically
+        // land on different engines. getpid() is only a fallback and can alias
+        // (pid_a % n == pid_b % n), colliding two processes on one engine.
+        const int64_t sdma_off =
+            core::Runtime::runtime_singleton_->flag().sdma_engine_id_offset();
+        const uint32_t sdma_seed =
+            (sdma_off >= 0) ? static_cast<uint32_t>(sdma_off)
+                            : static_cast<uint32_t>(getpid());
+        const char* sdma_seed_src =
+            (sdma_off >= 0) ? "ROCR_SDMA_ENGINE_ID_OFFSET" : "getpid()";
         if (core::Runtime::runtime_singleton_->flag().sdma_round_robin_pcie_xgmi() ==
             Flag::SDMA_ENABLE) {
           const uint32_t total_eng =
               properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
-          rec_eng = (static_cast<uint32_t>(getpid()) + rec_eng) % total_eng;
-          debug_print("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: queue rec_eng=%u of %u SDMA engines\n",
-                      rec_eng, total_eng);
+          rec_eng = (sdma_seed + rec_eng) % total_eng;
+          debug_print(
+              "ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) rec_eng=%u of %u SDMA engines\n",
+              sdma_seed, sdma_seed_src, rec_eng, total_eng);
         } else if (core::Runtime::runtime_singleton_->flag().sdma_round_robin() ==
                    Flag::SDMA_ENABLE) {
-          rec_eng = (static_cast<uint32_t>(getpid()) + rec_eng) % properties_.NumSdmaEngines;
-          debug_print("ROCR_SDMA_ROUND_ROBIN: queue rec_eng=%u of %u SDMA engines\n",
-                      rec_eng, properties_.NumSdmaEngines);
+          rec_eng = (sdma_seed + rec_eng) % properties_.NumSdmaEngines;
+          debug_print("ROCR_SDMA_ROUND_ROBIN: seed=%u (%s) rec_eng=%u of %u SDMA engines\n",
+                      sdma_seed, sdma_seed_src, rec_eng, properties_.NumSdmaEngines);
         } else {
+          (void)sdma_seed_src;
           rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
         }
       }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
@@ -86,4 +87,71 @@ TEST(RocrSdmaRoundRobinPcieXgmi, DefaultForUnrecognizedValue) {
   ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "yes", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnvPcieXgmi());
   unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+}
+
+// ROCR_SDMA_ENGINE_ID_OFFSET lets a launcher pass an explicit non-negative
+// engine-id offset that replaces the getpid() seed in the round-robin pick,
+// so concurrent processes do not alias onto the same engine. The parse mirrors
+// rocr::Flag::Refresh(): a value of 0 is a valid explicit offset; unset,
+// negative, non-numeric or out-of-range input yields the -1 "unset" sentinel
+// (fall back to getpid()).
+namespace {
+
+int64_t ParseSdmaEngineIdOffset(const char* raw) {
+  const std::string var = (raw != nullptr) ? std::string(raw) : std::string();
+  int64_t offset = -1;
+  if (!var.empty() && var.find_first_not_of("0123456789") == std::string::npos) {
+    int64_t parsed = 0;
+    bool valid = true;
+    for (char c : var) {
+      parsed = parsed * 10 + (c - '0');
+      if (parsed > 0x7fffffff) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) offset = parsed;
+  }
+  return offset;
+}
+
+int64_t ParseOffsetFromEnv() {
+  return ParseSdmaEngineIdOffset(std::getenv("ROCR_SDMA_ENGINE_ID_OFFSET"));
+}
+
+}  // namespace
+
+TEST(RocrSdmaEngineIdOffset, UnsetIsSentinel) {
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
+}
+
+TEST(RocrSdmaEngineIdOffset, ZeroIsExplicit) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "0", 1));
+  EXPECT_EQ(static_cast<int64_t>(0), ParseOffsetFromEnv());
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+}
+
+TEST(RocrSdmaEngineIdOffset, PositiveValue) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "5", 1));
+  EXPECT_EQ(static_cast<int64_t>(5), ParseOffsetFromEnv());
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+}
+
+TEST(RocrSdmaEngineIdOffset, NonNumericFallsBack) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "abc", 1));
+  EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+}
+
+TEST(RocrSdmaEngineIdOffset, NegativeFallsBack) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "-3", 1));
+  EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+}
+
+TEST(RocrSdmaEngineIdOffset, OutOfRangeFallsBack) {
+  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "99999999999", 1));
+  EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
+  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
 }

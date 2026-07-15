@@ -153,6 +153,32 @@ class Flag {
     sdma_round_robin_pcie_xgmi_ = (var == "1") ? SDMA_ENABLE :
                                   ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
+    // Explicit SDMA engine-id offset for the round-robin pick. When set to a
+    // valid non-negative integer it replaces the getpid() seed used by
+    // ROCR_SDMA_ROUND_ROBIN and ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI, so a launcher
+    // can hand each process a distinct offset (e.g. its local rank) and avoid
+    // the aliasing that getpid() % engine_count can cause (two pids reducing to
+    // the same engine). The modulus stays engine-count based (NumSdmaEngines,
+    // or NumSdmaEngines + NumSdmaXgmiEngines for the PCIE_XGMI variant). A value
+    // of 0 is a valid explicit offset; unset or malformed input (empty,
+    // negative, non-numeric, out of range) falls back to the getpid() seed and
+    // is stored as -1. Reviewer preference is to always pass an explicit
+    // offset; the getpid() fallback is retained only for ease of use.
+    var = os::GetEnvVar("ROCR_SDMA_ENGINE_ID_OFFSET");
+    sdma_engine_id_offset_ = -1;
+    if (!var.empty() && var.find_first_not_of("0123456789") == std::string::npos) {
+      int64_t parsed = 0;
+      bool valid = true;
+      for (char c : var) {
+        parsed = parsed * 10 + (c - '0');
+        if (parsed > 0x7fffffff) {  // clamp absurd values; treat as malformed
+          valid = false;
+          break;
+        }
+      }
+      if (valid) sdma_engine_id_offset_ = parsed;
+    }
+
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
@@ -447,6 +473,11 @@ class Flag {
 
   SDMA_OVERRIDE sdma_round_robin_pcie_xgmi() const { return sdma_round_robin_pcie_xgmi_; }
 
+  // Explicit round-robin engine-id offset, or -1 when unset/invalid (in which
+  // case the round-robin falls back to a getpid() seed). A value of 0 is a
+  // valid explicit offset, distinct from "unset".
+  int64_t sdma_engine_id_offset() const { return sdma_engine_id_offset_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -634,6 +665,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
   SDMA_OVERRIDE sdma_round_robin_;
   SDMA_OVERRIDE sdma_round_robin_pcie_xgmi_;
+  int64_t sdma_engine_id_offset_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
