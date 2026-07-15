@@ -62,7 +62,7 @@ HIP_TEST_CASE(Unit_hipStream_GracefulExitWithPendingWork) {
   }
 
   DWORD exitCode = 0;
-  GetExitCodeProcess(pi.hProcess, &exitCode);
+  REQUIRE(GetExitCodeProcess(pi.hProcess, &exitCode));
   CloseHandle(pi.hProcess);
   CloseHandle(pi.hThread);
   REQUIRE(exitCode == 0);
