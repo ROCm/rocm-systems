@@ -15,24 +15,28 @@ that still have enough information in assembled code.
   pseudo instructions, killed operands, or pass pipeline state not present in
   final object code.
 
-## LD_PRELOAD Hook
+## HSA Tools Hook
 
-The runtime prototype builds `librocjitsu_waitcheck.so`. Preload it into an HSA
-process to analyze code objects as ROCR creates readers:
+The runtime prototype builds `librocjitsu_waitcheck_hooks.so`. Load it through
+ROCR's environment-driven HSA tools path:
 
 ```sh
-LD_PRELOAD=/path/to/librocjitsu_waitcheck.so ROCJITSU_WAITCHECK_FAIL=1 ./app
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB=/path/to/librocjitsu_waitcheck_hooks.so \
+ROCJITSU_WAITCHECK_FAIL=1 ./app
 ```
 
-The shim intercepts `hsa_code_object_reader_create_from_memory`,
+The tool patches `hsa_code_object_reader_create_from_memory`,
 `hsa_code_object_reader_create_from_file`, and AMD's offset-size file reader
 `hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size`.
 It also wraps `hsa_system_get_extension_table` and
 `hsa_system_get_major_extension_table` so clients that fetch the AMD loader
-extension table get the same offset-size reader hook.
+extension table get the same offset-size reader hook. Analysis runs from the
+`hsa_executable_load_agent_code_object` wrapper, so a waitcheck tool installed
+before DBT or DBI sees the final replacement reader passed toward ROCR.
 `ROCJITSU_WAITCHECK=0` disables the checker. With `ROCJITSU_WAITCHECK_FAIL=1`,
 missing waits and supported-gfx12 analysis failures return
-`HSA_STATUS_ERROR_INVALID_CODE_OBJECT`; otherwise the shim reports diagnostics to
+`HSA_STATUS_ERROR_INVALID_CODE_OBJECT`; otherwise the tool reports diagnostics to
 stderr and chains to the real runtime reader.
 
 ## Implemented Coverage
@@ -64,7 +68,7 @@ below records how to handle those cases when expanding the RocJITsu corpus.
 | Wait preservation and redundancy optimization | `waitcnt-preexisting*.mir`, `waitcnt-no-redundant.mir`, and `preserve-user-waitcnt.ll`. | Treat correct final waits as accepted and missing final waits as diagnostics. Do not require the checker to prove whether LLVM preserved, removed, or avoided redundant waits. |
 | Scheduler latency and non-waitcnt hazard recognizer cases | `wmma-hazards*.mir`, `wmma-coexecution-valu-hazards.mir`, `trans-forwarding-hazards.mir`, `partial-forwarding-hazards.mir`, `gfx11-sgpr-hazard-latency.mir`, and `hazard-buffer-store-v-interp.mir`. | Mostly out of scope for the gfx12 wait-counter checker because the observable fix may be instruction scheduling, `s_nop`, or `s_delay_alu`, not a waitcnt counter. Promote only cases that leave an object-visible wait-like dependency. |
 | Non-gfx12 or non-RDNA4 hazards | GFX9/GFX10/GFX11 hazard files, `mai-hazards-gfx90a.mir`, `mai-hazards-gfx942.mir`, `mai-hazards-gfx950.mir`, and GWS/LDS-DMA tests without a gfx12 wait-counter analogue. | Out of current scope. Revisit when waitcheck grows architecture-specific modes outside `gfx1200`, `gfx1201`, and `gfx1250`. |
-| IR/codegen tests that incidentally print waits | `call-waitcnt.ll`, `call-waw-waitcnt.mir`, `insert-waitcnts-crash.ll`, `statepoint-insert-waitcnts.mir`, memory legalizer tests, and other lowering tests whose checks include `s_waitcnt`. | Use only when the final object can be reduced to an explicit correct-wait or missing-wait fixture. The broader lowering behavior belongs to LLVM tests, not the preload checker. |
+| IR/codegen tests that incidentally print waits | `call-waitcnt.ll`, `call-waw-waitcnt.mir`, `insert-waitcnts-crash.ll`, `statepoint-insert-waitcnts.mir`, memory legalizer tests, and other lowering tests whose checks include `s_waitcnt`. | Use only when the final object can be reduced to an explicit correct-wait or missing-wait fixture. The broader lowering behavior belongs to LLVM tests, not the runtime checker. |
 
 ## Corpus Evidence To Track
 

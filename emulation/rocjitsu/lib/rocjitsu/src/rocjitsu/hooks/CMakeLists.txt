@@ -8,8 +8,13 @@ add_library(
     sidecar_registry.cpp
     virtual_lds.cpp
 )
+add_library(rocjitsu_waitcheck_hooks SHARED rj_hsa_waitcheck_hooks.cpp)
 
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
+set_target_properties(
+    rocjitsu_waitcheck_hooks
+    PROPERTIES OUTPUT_NAME rocjitsu_waitcheck_hooks
+)
 
 target_include_directories(
     rocjitsu_hooks
@@ -21,6 +26,16 @@ target_include_directories(
 )
 
 target_include_directories(rocjitsu_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+
+target_include_directories(
+    rocjitsu_waitcheck_hooks
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
+)
+target_include_directories(
+    rocjitsu_waitcheck_hooks
+    SYSTEM
+    PRIVATE ${HSA_INCLUDE_DIR}
+)
 
 target_link_libraries(
     rocjitsu_hooks
@@ -48,11 +63,38 @@ target_link_libraries(
         ${CMAKE_DL_LIBS}
 )
 
+target_link_libraries(
+    rocjitsu_waitcheck_hooks
+    PRIVATE
+        rocjitsu_analysis
+        rocjitsu_code
+        rocjitsu_isa
+        rocjitsu_isa_cdna1
+        rocjitsu_isa_cdna2
+        rocjitsu_isa_cdna3
+        rocjitsu_isa_cdna4
+        rocjitsu_isa_rdna1
+        rocjitsu_isa_rdna2
+        rocjitsu_isa_rdna3
+        rocjitsu_isa_rdna3_5
+        rocjitsu_isa_rdna4
+        rocjitsu_isa_gfx1250
+        rocjitsu_vm_amdgpu
+        util
+        simdojo
+        Threads::Threads
+)
+
 if(MSVC)
     target_compile_options(rocjitsu_hooks PRIVATE /W4 /WX)
+    target_compile_options(rocjitsu_waitcheck_hooks PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(
         rocjitsu_hooks
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
+    target_compile_options(
+        rocjitsu_waitcheck_hooks
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
 endif()
