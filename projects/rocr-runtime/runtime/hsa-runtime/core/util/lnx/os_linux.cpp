@@ -344,7 +344,7 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    */
 
   if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
-    if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
+    if (std::string(info->dlpi_name).find("vdso64.so") != std::string::npos || std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
 
     /*
      * Iterate through the program headers of the loaded lib and check for PT_DYNAMIC program
