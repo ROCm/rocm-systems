@@ -54,6 +54,7 @@ stderr and chains to the real runtime reader.
 | `valu-read-sgpr-hazard.mir` and `AMDGPUWaitSGPRHazards.cpp` | gfx12 SGPR read hazards require `s_wait_alu` depctr waits; enough `ds_nop`s or eligible memory ops can clear tracked hazards. | Tests cover `depctr_sa_sdst`, `depctr_va_sdst`, `depctr_va_vcc`, four-`ds_nop` culling, SMEM/non-FLAT VMEM culling, and scratch non-culling. |
 | `waitcnt-kmcnt-scc-different-block.mir` | SCC writes from barrier operations are KM-counter hazards across blocks. | Barrier signal/wait tests cover same-block and cross-block SCC use/clear behavior. |
 | `waitcnt-loop-*.mir` | Backedges and joins can require stricter waits when event order is uncertain. | Object-level CFG tests cover skipped paths, mixed order at joins, and loop-carried DS hazards. |
+| CDNA3 and RDNA3 generated-code validation | LLVM-generated kernels must use the target's actual legacy wait layout, not only pass instruction-sequence unit tests. | `RjWaitcheck.LlvmKernel.*` compiles clean HIP vector-add and deliberately wait-perturbed HIP kernels for gfx942 and gfx1100. The clean objects report zero diagnostics; each perturbed object reports the missing `lgkmcnt(0)` wait. |
 
 ## Object-Code Parity Boundary
 
