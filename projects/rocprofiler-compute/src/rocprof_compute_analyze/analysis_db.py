@@ -17,6 +17,7 @@ from pc_sampling.code_object_analysis import (
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
+    InstructionLineRecord,
     load_aggregated_pc_sampling,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
@@ -408,43 +409,57 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(code_object_store)
             for line in code_object.instruction_lines:
-                instruction_line = orm.InstructionLine(
-                    code_object_offset=line.code_object_offset,
-                    comment=line.comment,
-                    instruction=line.instruction,
-                    code_object_store=code_object_store,
-                    kernel=kernel_objs.get(line.kernel_name),
-                )
-                Database.get_session().add(instruction_line)
+                self._add_instruction_line(line, code_object_store, kernel_objs)
 
-                sample_state = orm.PCSampleState(
-                    total_count=line.total_count,
-                    issue_count=line.issue_count,
-                    stall_count=line.stall_count,
-                    instruction_line=instruction_line,
-                )
-                Database.get_session().add(sample_state)
+    @staticmethod
+    def _add_instruction_line(
+        line: InstructionLineRecord,
+        code_object_store: orm.CodeObjectStore,
+        kernel_objs: dict[str, orm.Kernel],
+    ) -> None:
+        """Insert one instruction line, its sample state, and child counts."""
+        kernel = kernel_objs.get(line.kernel_name)
+        if kernel is None:
+            # Drop lines whose kernel was filtered out or never mapped.
+            return
 
-                for text, count in line.stall_reasons.items():
-                    Database.get_session().add(
-                        orm.PCSampleStallReason(
-                            pc_sample_state=sample_state,
-                            stall_reason_type=Database.get_or_create_type(
-                                orm.PCSampleStallReasonType, text
-                            ),
-                            count=count,
-                        )
-                    )
-                for text, count in line.inst_types.items():
-                    Database.get_session().add(
-                        orm.InstructionSample(
-                            pc_sample_state=sample_state,
-                            instruction_sample_type=Database.get_or_create_type(
-                                orm.InstructionSampleType, text
-                            ),
-                            count=count,
-                        )
-                    )
+        instruction_line = orm.InstructionLine(
+            code_object_offset=line.code_object_offset,
+            comment=line.comment,
+            instruction=line.instruction,
+            code_object_store=code_object_store,
+            kernel=kernel,
+        )
+        Database.get_session().add(instruction_line)
+
+        sample_state = orm.PCSampleState(
+            total_count=line.total_count,
+            issue_count=line.issue_count,
+            stall_count=line.stall_count,
+            instruction_line=instruction_line,
+        )
+        Database.get_session().add(sample_state)
+
+        for text, count in line.stall_reasons.items():
+            Database.get_session().add(
+                orm.PCSampleStallReason(
+                    pc_sample_state=sample_state,
+                    stall_reason_type=Database.get_or_create_type(
+                        orm.PCSampleStallReasonType, text
+                    ),
+                    count=count,
+                )
+            )
+        for text, count in line.inst_types.items():
+            Database.get_session().add(
+                orm.InstructionSample(
+                    pc_sample_state=sample_state,
+                    instruction_sample_type=Database.get_or_create_type(
+                        orm.InstructionSampleType, text
+                    ),
+                    count=count,
+                )
+            )
 
     def add_code_object_isa(
         self,

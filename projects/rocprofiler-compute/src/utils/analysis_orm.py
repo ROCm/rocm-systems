@@ -194,10 +194,9 @@ class InstructionLine(Base):
         ForeignKey(f"{PREFIX}code_object_store.code_object_uuid"),
         nullable=False,
     )
-    # Attributed per-sample via dispatch correlation; nullable when the sample's
-    # dispatch has no kernel mapping.
+    # Attributed per-sample to its dispatch's kernel via dispatch correlation.
     kernel_uuid = Column(
-        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=True
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     code_object_offset = Column(Integer)
     comment = Column(Text)
@@ -661,7 +660,7 @@ class Database:
                 CodeObjectStore,
                 InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
             )
-            .outerjoin(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,
