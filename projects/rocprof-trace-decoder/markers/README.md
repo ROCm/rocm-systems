@@ -445,6 +445,11 @@ Marker values are packed into 2 flag bits so that small IDs can use the faster
 packing is inactive. Larger IDs fall back to `s_ttracedata` (32-bit m0, all
 targets).
 
+For full M0-based traces, gfx10+ explicitly emits `s_mov_b32 m0`, `s_nop 0`,
+then `s_ttracedata`; gfx9's backend already provides the required hazard
+spacing for ordinary traces. Address EXEC tracing uses the explicit sequence
+on every target.
+
 ```
 Both instructions share the same bit layout:
 
@@ -467,8 +472,26 @@ On gfx12+, the default is to pack 12 shader-clock bits from
 `s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, 4, 12)` into marker bits 31-20,
 leaving 18 marker ID bits plus the two low flags. Configure this with
 `SQTT_SHADER_CLOCK_BITS` and `SQTT_SHADER_CLOCK_SHIFT`; set
-`SQTT_SHADER_CLOCK_BITS=0` to use the legacy layout on gfx12. The funcmap emits
+`SQTT_SHADER_CLOCK_BITS=0` to use the no-clock full-ID layout on gfx12. The funcmap emits
 `M:shader_clock_bits=N;shader_clock_shift=S` whenever clock packing is active.
+Numeric point and enter markers keep their legacy values; bare exits use the
+packed form because their value is indistinguishable from a generated exit.
+
+The packed clock is a truncated sample at instruction issue. Compare it with
+the record timestamp modulo its source-clock window and subtract only the
+excess over the smallest delay for that shader engine. Apply this only to
+headers, never `R:` payloads. `Funcmap::marker_encoding` exposes
+`marker_id_mask()`, `packed_shader_clock_mask()`, and
+`shader_clock_source_mask()`; without `M:` metadata those describe the legacy
+full-width ID layout.
+
+`att_tool.py` applies that correction by default and masks each recognized
+header to its ordinary legacy-form marker value for existing viewers. Use
+`--no-decode-markers` to preserve packed values and arrival timestamps.
+
+For packed code objects, `att_tool.py` adds six-column `sqtt_funcmap` rows and
+packed-layout/payload tables to `code.json`. Readers that do not know them
+continue using the original JSON; legacy `code.json` output is unchanged.
 
 The marker type (function, user, barrier, memory) is determined by looking up
 the ID in the `.sqtt_funcmap` section, not from encoding bits.

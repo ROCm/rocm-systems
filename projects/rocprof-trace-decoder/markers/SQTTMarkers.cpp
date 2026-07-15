@@ -31,6 +31,7 @@
 
 using namespace llvm;
 
+static constexpr const char* MarkerHeaderMetadataName = "sqtt.marker_header";
 static constexpr const char* RawPayloadMetadataName = "sqtt.raw_payload";
 static constexpr uint32_t GFX12_SHADER_CYCLES_LO = 29;
 
@@ -124,16 +125,18 @@ void SQTTInstrumentPass::insertTraceMarkerWithPayload(
         }
         emitMemBarrier(Builder, Config.MemBarrier);
 
+        CallInst* trace;
         if (canUseImm(markerID) && supportsImmTrace(gen))
         {
             Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-            Builder.CreateCall(TTDImm, {ConstantInt::get(I16, markerID)});
+            trace = Builder.CreateCall(TTDImm, {ConstantInt::get(I16, markerID)});
         }
         else
         {
             Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-            Builder.CreateCall(TTD, {ConstantInt::get(I32, markerID)});
+            trace = Builder.CreateCall(TTD, {ConstantInt::get(I32, markerID)});
         }
+        markMarkerHeaderTrace(trace);
 
         if (payload)
         {
@@ -399,16 +402,19 @@ bool SQTTInstrumentPass::addBarriersToExistingMarkers(Function& F)
 CallInst* SQTTInstrumentPass::emitBareTrace(IRBuilder<>& B, uint32_t encoded, Module* M, GfxGen gen)
 {
     LLVMContext& Ctx = M->getContext();
+    CallInst* CI;
     if (canUseImm(encoded) && supportsImmTrace(gen))
     {
         Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-        return B.CreateCall(TTDImm, {ConstantInt::get(Type::getInt16Ty(Ctx), encoded)});
+        CI = B.CreateCall(TTDImm, {ConstantInt::get(Type::getInt16Ty(Ctx), encoded)});
     }
     else
     {
         Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-        return B.CreateCall(TTD, {ConstantInt::get(Type::getInt32Ty(Ctx), encoded)});
+        CI = B.CreateCall(TTD, {ConstantInt::get(Type::getInt32Ty(Ctx), encoded)});
     }
+    markMarkerHeaderTrace(CI);
+    return CI;
 }
 
 CallInst* SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Module* M, GfxGen gen)
@@ -422,6 +428,17 @@ CallInst* SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Mod
 
 CallInst* SQTTInstrumentPass::emitRawTracePayload(IRBuilder<>& B, Value* val, Module* M)
 {
+    // Full s_ttracedata lowers through M0, so its input must be scalar. The
+    // intrinsic lowering normally inserts this readfirstlane for a divergent
+    // named data value; retain that behavior before the explicit asm lowering.
+    Type* I32 = Type::getInt32Ty(M->getContext());
+    if (val->getType() != I32) val = B.CreateZExtOrTrunc(val, I32);
+    if (!isa<ConstantInt>(val))
+    {
+        Function* ReadFirstLane =
+            Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readfirstlane, {I32});
+        val = B.CreateCall(ReadFirstLane, {val});
+    }
     Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
     CallInst* CI = B.CreateCall(TTD, {val});
     markRawPayloadTrace(CI);
@@ -437,6 +454,61 @@ void SQTTInstrumentPass::markRawPayloadTrace(CallInst* CI)
 bool SQTTInstrumentPass::isRawPayloadTrace(CallInst* CI)
 {
     return CI && CI->getMetadata(RawPayloadMetadataName) != nullptr;
+}
+
+void SQTTInstrumentPass::markMarkerHeaderTrace(CallInst* CI)
+{
+    if (!CI) return;
+    CI->setMetadata(MarkerHeaderMetadataName, MDNode::get(CI->getContext(), {}));
+}
+
+bool SQTTInstrumentPass::isMarkerHeaderTrace(CallInst* CI)
+{
+    return CI && CI->getMetadata(MarkerHeaderMetadataName) != nullptr;
+}
+
+bool SQTTInstrumentPass::lowerFullTracesWithM0Nop(Function& F)
+{
+    SmallVector<CallInst*, 16> traces;
+    for (auto& BB : F)
+    {
+        for (auto& I : BB)
+        {
+            auto* CI = dyn_cast<CallInst>(&I);
+            if (!CI) continue;
+            Function* Callee = CI->getCalledFunction();
+            if (Callee && Callee->getIntrinsicID() == Intrinsic::amdgcn_s_ttracedata) traces.push_back(CI);
+        }
+    }
+    if (traces.empty()) return false;
+
+    LLVMContext& Ctx = F.getContext();
+    Type* I32 = Type::getInt32Ty(Ctx);
+    // Model M0 as a fixed output instead of a clobber. M0 is reserved on
+    // AMDGPU and LLVM diagnoses `~{m0}` as undefined behavior.
+    FunctionType* TraceTy = FunctionType::get(I32, {I32}, false);
+    static constexpr const char TraceAsmText[] =
+        "s_mov_b32 m0, $1\n"
+        "s_nop 0\n"
+        "s_ttracedata";
+
+    // Constants can be encoded directly in the M0 move. Non-constant values
+    // reaching this helper are required to be scalar.
+    InlineAsm* ImmediateTrace =
+        InlineAsm::get(TraceTy, TraceAsmText, "={m0},i", /*hasSideEffects=*/true);
+    InlineAsm* ScalarTrace = InlineAsm::get(TraceTy, TraceAsmText, "={m0},s", /*hasSideEffects=*/true);
+
+    for (CallInst* CI : traces)
+    {
+        Value* value = CI->getArgOperand(0);
+        InlineAsm* TraceAsm = isa<ConstantInt>(value) ? ImmediateTrace : ScalarTrace;
+        IRBuilder<> B(CI);
+        CallInst* replacement = B.CreateCall(TraceAsm, {value});
+        replacement->setDebugLoc(CI->getDebugLoc());
+        replacement->copyMetadata(*CI);
+        CI->eraseFromParent();
+    }
+    return true;
 }
 
 bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
@@ -468,9 +540,13 @@ bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
             if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
 
             Value* encodedValue = CI->getArgOperand(0);
+            bool header = isMarkerHeaderTrace(CI);
             if (auto* Arg = dyn_cast<ConstantInt>(encodedValue))
             {
                 uint32_t encoded = Arg->getZExtValue();
+                // A bare exit has no ID and cannot be distinguished from the
+                // numeric API in trace data, so keep all of them packed.
+                if (!header && encoded != FLAG_EXIT_PREV) continue;
                 uint32_t markerID = encoded >> 2;
                 if (markerID > maxID)
                 {
@@ -480,6 +556,8 @@ bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
                     );
                 }
             }
+            else if (!header)
+                continue;
             Rewrites.push_back({CI, encodedValue});
         }
     }
@@ -502,7 +580,9 @@ bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
         Value* clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
         Value* shiftedClock = B.CreateShl(clock, ConstantInt::get(I32, clockDestShift));
         Value* packed = B.CreateOr(shiftedClock, markerAndFlags);
-        B.CreateCall(TTD, {packed});
+        CallInst* packedTrace = B.CreateCall(TTD, {packed});
+        packedTrace->setDebugLoc(CI->getDebugLoc());
+        packedTrace->copyMetadata(*CI);
         CI->eraseFromParent();
     }
 

@@ -177,6 +177,8 @@ private:
     llvm::CallInst* emitBareTrace(llvm::IRBuilder<>& B, uint32_t encoded, llvm::Module* M, GfxGen gen);
     llvm::CallInst* emitBareTraceValue(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M, GfxGen gen);
     llvm::CallInst* emitRawTracePayload(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M);
+    static void markMarkerHeaderTrace(llvm::CallInst* CI);
+    static bool isMarkerHeaderTrace(llvm::CallInst* CI);
     static void markRawPayloadTrace(llvm::CallInst* CI);
     static bool isRawPayloadTrace(llvm::CallInst* CI);
 
@@ -274,6 +276,9 @@ private:
     uint32_t compactFuncIDs(llvm::Module& M);
     void rewriteMarkerIDs(llvm::Function& F, const std::map<uint32_t, uint32_t>& IDMap, GfxGen gen);
     bool applyShaderClockPacking(llvm::Function& F, GfxGen gen);
+    // gfx10+ do not provide the needed M0 hazard spacing for this intrinsic.
+    // Lower their full traces after all marker transformations to explicit asm.
+    bool lowerFullTracesWithM0Nop(llvm::Function& F);
     void removeFuncMarkersFromModule(llvm::Module& M, uint32_t id);
     void removeAdjacentBarriers(llvm::CallInst* CI);
 

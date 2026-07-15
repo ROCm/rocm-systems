@@ -119,15 +119,15 @@ def extract_funcmap(binary: str, tmpdir: str) -> str:
 
     # Find extracted code object
     import glob
-    cos = glob.glob(os.path.join(tmpdir, "*.hipv4-amdgcn-amd-amdhsa--*"))
+    cos = glob.glob(os.path.join(tmpdir, "*.hip*-amdgcn-amd-amdhsa--*"))
     if not cos:
         # llvm-objdump extracts relative to cwd or next to the binary
         base = os.path.basename(binary)
-        cos = glob.glob(os.path.join(tmpdir, f"{base}*.hipv4*"))
+        cos = glob.glob(os.path.join(tmpdir, f"{base}*.hip*-amdgcn-amd-amdhsa--*"))
     if not cos:
         # Try in the binary's directory
         bdir = os.path.dirname(binary)
-        cos = glob.glob(os.path.join(bdir, f"{os.path.basename(binary)}*.hipv4*"))
+        cos = glob.glob(os.path.join(bdir, f"{os.path.basename(binary)}*.hip*-amdgcn-amd-amdhsa--*"))
     if not cos:
         return ""
 
@@ -368,8 +368,8 @@ TESTS = [
         "reject_funcmap": [],
     },
     {
-        "name": "gfx9_addr_trace_nop_hazard",
-        "desc": "gfx9: s_nop 0 between s_ttracedata and s_mov_b32 m0 in addr trace",
+        "name": "gfx9_exec_m0_trace_spacing",
+        "desc": "gfx9: address EXEC traces use the explicit mov/nop/trace sequence",
         "env": {"SQTT_TRACE_ADDRESSES": "memory"},
         "mode": "asm",
         "flags": ["--offload-arch=gfx90a"],
@@ -379,7 +379,35 @@ TESTS = [
         "reject_ir": [],
         "expect_funcmap": [],
         "reject_funcmap": [],
-        "custom_asm_check": "nop_between_ttracedata_and_mov_m0",
+        "custom_asm_check": "gfx9_m0_trace_spacing",
+    },
+    {
+        "name": "gfx10_full_m0_trace_nop",
+        "desc": "gfx10: every full M0 trace has s_nop 0 before s_ttracedata",
+        "env": {"SQTT_TRACE_ADDRESSES": "memory"},
+        "mode": "asm",
+        "flags": ["--offload-arch=gfx1030"],
+        "expect_ir": [
+            r"s_ttracedata\b",
+        ],
+        "reject_ir": [],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+        "custom_asm_check": "m0_nop_before_ttracedata",
+    },
+    {
+        "name": "gfx12_full_m0_trace_nop",
+        "desc": "gfx12: every full M0 trace has s_nop 0 before s_ttracedata",
+        "env": {"SQTT_TRACE_ADDRESSES": "memory"},
+        "mode": "asm",
+        "flags": ["--offload-arch=gfx1200"],
+        "expect_ir": [
+            r"s_ttracedata\b",
+        ],
+        "reject_ir": [],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+        "custom_asm_check": "m0_nop_before_ttracedata",
     },
     {
         "name": "addr_trace_unique_ids",
@@ -505,6 +533,35 @@ TESTS = [
         "reject_funcmap": [],
     },
     {
+        "name": "gfx12_shader_clock_disabled_asm",
+        "desc": "gfx12: disabled clock packing keeps immediate headers and dynamic payload traces",
+        "env": {"SQTT_SHADER_CLOCK_BITS": "0"},
+        "mode": "asm",
+        "source": "marker",
+        "flags": ["--offload-arch=gfx1200"],
+        "expect_ir": [
+            r"s_ttracedata_imm\b",
+            r"v_readfirstlane_b32\b",
+        ],
+        "reject_ir": [r"HW_REG_SHADER_CYCLES_LO"],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+        "custom_asm_check": "m0_nop_before_ttracedata",
+    },
+    {
+        "name": "gfx12_shader_clock_disabled_funcmap",
+        "desc": "gfx12: disabled clock packing emits no funcmap layout row",
+        "env": {"SQTT_SHADER_CLOCK_BITS": "0"},
+        "mode": "obj",
+        "source": "marker",
+        "flags": ["--offload-arch=gfx1200"],
+        "expect_ir": [],
+        "reject_ir": [],
+        "expect_funcmap": ["payload_value"],
+        "reject_funcmap": ["M:shader_clock_bits"],
+        "custom_funcmap_check": "data_marker_payload",
+    },
+    {
         "name": "gfx12_markers_no_global_inv",
         "desc": "gfx12 marker fences do not generate global cache invalidates",
         "env": {},
@@ -592,7 +649,7 @@ def run_test(test: dict, hipcc: str, verbose: bool) -> TestResult:
         try:
             if mode == "ir" or mode == "ir+obj":
                 ir_path = os.path.join(tmpdir, f"{test['name']}.ll")
-                r = compile_test(env_vars, ["-S", "-emit-llvm"] + extra_flags,
+                r = compile_test(env_vars, ["-S", "-emit-llvm", "--offload-device-only"] + extra_flags,
                                  ir_path, hipcc, source=source)
                 if r.returncode != 0:
                     result.fail(f"Compilation failed (exit {r.returncode})")
@@ -674,7 +731,7 @@ def run_test(test: dict, hipcc: str, verbose: bool) -> TestResult:
                 ir_path = os.path.join(tmpdir, f"{test['name']}.ll")
                 # Compile without pass plugin or SQTT_ENABLED
                 env = os.environ.copy()
-                cmd = [hipcc, f"-I{INCLUDE_DIR}", "-S", "-emit-llvm",
+                cmd = [hipcc, f"-I{INCLUDE_DIR}", "-S", "-emit-llvm", "--offload-device-only",
                        TEST_SOURCE, "-o", ir_path]
                 r = subprocess.run(cmd, capture_output=True, text=True,
                                    env=env, timeout=120, cwd=PROJECT_ROOT)
@@ -722,45 +779,52 @@ def check_funcmap(result: TestResult, funcmap: str,
 
 def check_custom_asm(result: TestResult, asm: str, check: str):
     """Run custom assembly validation checks."""
-    if check == "nop_between_ttracedata_and_mov_m0":
-        # gfx9 hazard: s_mov_b32 m0 immediately followed by s_ttracedata
-        # requires an s_nop 0 in between.  Extract instruction lines only.
-        insn_lines = []
-        for line in asm.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith(";") or stripped.startswith("."):
-                continue
-            if stripped.endswith(":"):
-                continue
-            insn_lines.append(stripped)
+    if check not in {"m0_nop_before_ttracedata", "gfx9_m0_trace_spacing"}:
+        return
 
-        violations = 0
-        for i in range(len(insn_lines) - 1):
-            if re.match(r"s_mov_b32\s+m0\b", insn_lines[i]):
-                nxt = insn_lines[i + 1]
-                if re.match(r"s_ttracedata\b", nxt):
-                    violations += 1
-                    result.fail(
-                        f"s_mov_b32 m0 immediately followed by s_ttracedata "
-                        f"(no s_nop): {insn_lines[i]!r} -> {nxt!r}")
-        if violations == 0:
-            # Verify we actually saw the pattern with the nop
-            saw_mov_m0 = False
-            saw_nop = False
-            for line in insn_lines:
-                if re.match(r"s_mov_b32\s+m0\b", line):
-                    saw_mov_m0 = True
-                    saw_nop = False
-                elif saw_mov_m0 and re.match(r"s_nop\b", line):
-                    saw_nop = True
-                elif saw_mov_m0 and saw_nop and re.match(r"s_ttracedata\b", line):
-                    break
-                else:
-                    saw_mov_m0 = False
-                    saw_nop = False
-            else:
-                result.fail("No s_mov_b32 m0 -> s_nop -> s_ttracedata sequence "
-                            "found (expected at least one for exec mask hazard)")
+    # The pass emits direct M0 traces as mov/nop/trace. On gfx9, the backend
+    # may instead schedule an unrelated scalar instruction in that hazard
+    # slot, which is safe but means the final sequence is not contiguous.
+    strict_nop = check == "m0_nop_before_ttracedata"
+    insn_lines = []
+    for line in asm.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";") or stripped.startswith("."):
+            continue
+        if stripped.endswith(":"):
+            continue
+        insn_lines.append(stripped)
+
+    if strict_nop:
+        trace_count = 0
+        for i, line in enumerate(insn_lines):
+            if not re.match(r"s_ttracedata\b", line):
+                continue
+            trace_count += 1
+            if (i < 2 or not re.match(r"s_nop\s+0\b", insn_lines[i - 1]) or
+                    not re.match(r"s_mov_b32\s+m0\b", insn_lines[i - 2])):
+                before = insn_lines[max(0, i - 2):i + 1]
+                result.fail(f"full M0 trace does not use mov/nop 0/trace: {before!r}")
+        if trace_count == 0:
+            result.fail("No full M0 trace found")
+        return
+
+    valid_sequences = 0
+    for i in range(len(insn_lines) - 1):
+        if not re.match(r"s_mov_b32\s+m0\b", insn_lines[i]):
+            continue
+        nxt = insn_lines[i + 1]
+        if re.match(r"s_ttracedata\b", nxt):
+            result.fail(
+                f"s_mov_b32 m0 immediately followed by s_ttracedata "
+                f"(no spacing): {insn_lines[i]!r} -> {nxt!r}")
+            continue
+        if i + 2 < len(insn_lines) and re.match(r"s_nop\s+0\b", nxt) and re.match(
+                r"s_ttracedata\b", insn_lines[i + 2]):
+            valid_sequences += 1
+
+    if valid_sequences == 0:
+        result.fail("No s_mov_b32 m0 -> s_nop 0 -> s_ttracedata sequence found")
 
 
 def check_custom_funcmap(result: TestResult, funcmap: str, check: str):

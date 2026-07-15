@@ -28,6 +28,28 @@
 
 using namespace llvm;
 
+namespace
+{
+
+// Keep the explicit EXEC trace sequence together on every target.
+void emitExecMaskTrace(IRBuilder<>& B, LLVMContext& Ctx, bool high)
+{
+    const char* Asm = high ? "s_mov_b32 m0, exec_hi\n"
+                             "s_nop 0\n"
+                             "s_ttracedata"
+                           : "s_mov_b32 m0, exec_lo\n"
+                             "s_nop 0\n"
+                             "s_ttracedata";
+    // Model the M0 definition as a fixed output. `m0` is reserved on AMDGPU,
+    // so a `~{m0}` clobber is diagnosed as undefined behavior by LLVM.
+    InlineAsm* trace = InlineAsm::get(
+        FunctionType::get(Type::getInt32Ty(Ctx), false), Asm, "={m0}", /*hasSideEffects=*/true
+    );
+    B.CreateCall(trace);
+}
+
+} // namespace
+
 SQTTInstrumentPass::AddrTraceKind SQTTInstrumentPass::classifyAddrTraceOp(
     Instruction* I, bool traceMemory, bool traceLDS
 )
@@ -168,42 +190,8 @@ void SQTTInstrumentPass::emitAddressTrace(
     // 3. EXEC mask
     unsigned waveSize = getWaveSize(gen);
 
-    // gfx9: the ISA spec requires s_nop 0 between s_mov_b32 m0 and
-    // s_ttracedata.  We can't insert a nop between the backend-generated
-    // s_mov_b32 m0 and s_ttracedata pair, so for exec reads we emit the
-    // entire sequence as a single inline asm block.
-    if (gen == GfxGen::GFX9)
-    {
-        InlineAsm* traceExecLo = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_lo\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecLo);
-
-        InlineAsm* traceExecHi = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_hi\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecHi);
-    }
-    else
-    {
-        InlineAsm* readExecLo =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_lo", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecLo), M, gen);
-
-        InlineAsm* readExecHi =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_hi", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecHi), M, gen);
-    }
+    emitExecMaskTrace(B, Ctx, /*high=*/false);
+    emitExecMaskTrace(B, Ctx, /*high=*/true);
 
     // 4. Readlane loop
     Function* ReadLane = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readlane, {I32});
@@ -424,38 +412,8 @@ void SQTTInstrumentPass::emitBufferTrace(IRBuilder<>& B, CallInst* bufOp, uint32
 
     // 2. EXEC mask (same as memory/LDS traces)
     unsigned waveSize = getWaveSize(gen);
-    if (gen == GfxGen::GFX9)
-    {
-        InlineAsm* traceExecLo = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_lo\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecLo);
-
-        InlineAsm* traceExecHi = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_hi\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecHi);
-    }
-    else
-    {
-        InlineAsm* readExecLo =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_lo", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecLo), M, gen);
-
-        InlineAsm* readExecHi =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_hi", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecHi), M, gen);
-    }
+    emitExecMaskTrace(B, Ctx, /*high=*/false);
+    emitExecMaskTrace(B, Ctx, /*high=*/true);
 
     // 3. rsrc base (lo/hi words)
     Value* rsrc = ops.Rsrc;
@@ -556,38 +514,8 @@ void SQTTInstrumentPass::emitPermuteTrace(
 
     // 2. EXEC mask
     unsigned waveSize = getWaveSize(gen);
-    if (gen == GfxGen::GFX9)
-    {
-        InlineAsm* traceExecLo = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_lo\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecLo);
-
-        InlineAsm* traceExecHi = InlineAsm::get(
-            FunctionType::get(Type::getVoidTy(Ctx), false),
-            "s_mov_b32 m0, exec_hi\n"
-            "s_nop 0\n"
-            "s_ttracedata",
-            "",
-            /*hasSideEffects=*/true
-        );
-        B.CreateCall(traceExecHi);
-    }
-    else
-    {
-        InlineAsm* readExecLo =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_lo", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecLo), M, gen);
-
-        InlineAsm* readExecHi =
-            InlineAsm::get(FunctionType::get(I32, false), "s_mov_b32 $0, exec_hi", "=s", /*hasSideEffects=*/true);
-        emitBareTraceValue(B, B.CreateCall(readExecHi), M, gen);
-    }
+    emitExecMaskTrace(B, Ctx, /*high=*/false);
+    emitExecMaskTrace(B, Ctx, /*high=*/true);
 
     // 3. Per-lane readlane loop over index operand (arg 0)
     Value* index = permuteOp->getArgOperand(0);

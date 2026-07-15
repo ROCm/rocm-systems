@@ -29,6 +29,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace rocprof_trace_decoder::codeobj;
@@ -108,13 +109,111 @@ TEST(DecodeMarkerValue, ShaderClockEncoding)
     uint32_t raw = (0xABCu << 20) | (42u << 2) | 0b10u;
     auto m = decode_marker_value(raw, enc);
     EXPECT_EQ(m.id, 42u);
-    EXPECT_EQ(m.shader_clock, 0xABCu);
+    EXPECT_EQ(enc.decode_shader_clock(raw), 0xABCu);
     EXPECT_TRUE(m.is_enter);
     EXPECT_FALSE(m.exit_prev);
 
     Funcmap fm;
     fm.marker_encoding = enc;
-    EXPECT_EQ(decode_marker_value(raw, fm).id, 42u);
+    EXPECT_EQ(decode_marker_value(raw, fm).id, raw >> 2);
+}
+
+TEST(MarkerEncoding, ExposesRawAndSourceClockMasks)
+{
+    MarkerEncoding enc{12, 4};
+
+    // The raw shaderdata word reserves bits [31:20] for the packed clock,
+    // bits [19:2] for the ID, and preserves the two low flags.
+    EXPECT_TRUE(enc.is_valid());
+    EXPECT_TRUE(enc.has_shader_clock());
+    EXPECT_EQ(enc.marker_id_mask(), 0x000FFFFCu);
+    EXPECT_EQ(enc.packed_shader_clock_mask(), 0xFFF00000u);
+
+    // The sampled clock was HW_REG_SHADER_CYCLES_LO bits [15:4].
+    EXPECT_EQ(enc.shader_clock_source_mask(), 0x0000FFF0u);
+
+    uint32_t raw = (0xABCu << 20) | (42u << 2) | 0b10u;
+    EXPECT_EQ((raw & enc.marker_id_mask()) >> 2, 42u);
+    EXPECT_EQ(raw & enc.packed_shader_clock_mask(), 0xABC00000u);
+}
+
+TEST(MarkerEncoding, LegacyEncodingRemainsFullWidthIdOnly)
+{
+    MarkerEncoding enc{};
+
+    EXPECT_TRUE(enc.is_valid());
+    EXPECT_FALSE(enc.has_shader_clock());
+    EXPECT_EQ(enc.marker_id_mask(), 0xFFFFFFFCu);
+    EXPECT_EQ(enc.packed_shader_clock_mask(), 0u);
+    EXPECT_EQ(enc.shader_clock_source_mask(), 0u);
+
+    uint32_t raw = (0x3FFFFFFFu << 2) | 0b01u;
+    EXPECT_EQ(decode_marker_value(raw, enc).id, 0x3FFFFFFFu);
+    EXPECT_EQ(enc.decode_shader_clock(raw), 0u);
+
+    MarkerEncoding invalid{30, 0};
+    EXPECT_FALSE(invalid.is_valid());
+    EXPECT_EQ(decode_marker_value(raw, invalid).id, 0x3FFFFFFFu);
+}
+
+TEST(MarkerEncoding, SupportsBoundaryClockWindows)
+{
+    MarkerEncoding high_bit{1, 31};
+    EXPECT_TRUE(high_bit.is_valid());
+    EXPECT_EQ(high_bit.marker_id_mask(), 0x7FFFFFFCu);
+    EXPECT_EQ(high_bit.packed_shader_clock_mask(), 0x80000000u);
+    EXPECT_EQ(high_bit.shader_clock_source_mask(), 0x80000000u);
+
+    MarkerEncoding wide{29, 3};
+    EXPECT_TRUE(wide.is_valid());
+    EXPECT_EQ(wide.marker_id_mask(), 0x00000004u);
+    EXPECT_EQ(wide.packed_shader_clock_mask(), 0xFFFFFFF8u);
+    EXPECT_EQ(wide.shader_clock_source_mask(), 0xFFFFFFF8u);
+}
+
+TEST(DecodeMarkerValue, FuncmapLeavesUnregisteredValuesLegacy)
+{
+    Funcmap fm;
+    fm.marker_encoding = {12, 4};
+    auto entry = std::make_shared<FuncmapEntry>();
+    entry->kind = FuncmapEntryKind::Point;
+    entry->id = 42;
+    fm.entries.push_back(entry);
+    fm.by_id.emplace(entry->id, entry);
+
+    uint32_t known = (0xABCu << 20) | (42u << 2);
+    EXPECT_EQ(decode_marker_value(known, fm).id, 42u);
+    EXPECT_EQ(fm.marker_encoding.decode_shader_clock(known), 0xABCu);
+
+    uint32_t numeric = (0xABCu << 20) | (123u << 2);
+    EXPECT_EQ(decode_marker_value(numeric, fm).id, numeric >> 2);
+
+    uint32_t exit = (0xABCu << 20) | 1u;
+    EXPECT_EQ(decode_marker_value(exit, fm).id, 0u);
+    EXPECT_EQ(fm.marker_encoding.decode_shader_clock(exit), 0xABCu);
+}
+
+TEST(FuncmapCompatibility, ExistingAggregateInitializersStillWork)
+{
+    // Keep source compatibility for consumers that aggregate-initialize the
+    // public structs from the pre-packed-marker layout.
+    std::vector<FuncmapDiagnostic> diagnostics;
+    Funcmap map{
+        std::vector<Funcmap::EntryPtr>{},
+        std::unordered_map<uint32_t, Funcmap::EntryPtr>{},
+        0,
+        diagnostics,
+    };
+    FuncmapEntry entry{FuncmapEntryKind::Point, 7, "point", "source.cpp:1", 0x100000000ull};
+    MarkerValue marker{7, true, false};
+
+    EXPECT_TRUE(map.diagnostics.empty());
+    EXPECT_FALSE(map.marker_encoding.has_shader_clock());
+    EXPECT_EQ(entry.vaddr, 0x100000000ull);
+    EXPECT_EQ(entry.extra_payload_count, 0u);
+    EXPECT_EQ(marker.id, 7u);
+    EXPECT_TRUE(marker.is_enter);
+    EXPECT_FALSE(marker.exit_prev);
 }
 
 // ─── parse_funcmap_section ──────────────────────────────────────────────────
@@ -169,6 +268,17 @@ TEST(ParseFuncmap, ParsesExtraPayloadAndMarkerEncoding)
     EXPECT_EQ(p->extra_payload_count, 1u);
     EXPECT_EQ(m.marker_encoding.shader_clock_bits, 12u);
     EXPECT_EQ(m.marker_encoding.shader_clock_shift, 4u);
+    EXPECT_EQ(m.marker_encoding.marker_id_mask(), 0x000FFFFCu);
+    EXPECT_EQ(m.marker_encoding.packed_shader_clock_mask(), 0xFFF00000u);
+    EXPECT_EQ(m.marker_encoding.shader_clock_source_mask(), 0x0000FFF0u);
+}
+
+TEST(ParseFuncmap, PackedMarkerEncodingRequiresClockShift)
+{
+    Funcmap m = parse_funcmap_section("M:shader_clock_bits=12\n", /*silent=*/true);
+
+    EXPECT_FALSE(m.marker_encoding.has_shader_clock());
+    EXPECT_TRUE(has_warning(m.diagnostics, "malformed M:"));
 }
 
 TEST(ParseFuncmap, ToleratesBlankLinesCRLFAndTrailingNUL)

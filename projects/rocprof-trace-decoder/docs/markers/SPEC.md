@@ -85,7 +85,9 @@ Where `flags` is the OR of applicable bits: `EXIT_PREV=1`, `ENTER=2`.
 
 - If `encoded <= 0xFF`, the target supports it, and shader-clock packing is
   inactive: emit `s_ttracedata_imm` (8-bit immediate, no m0 setup, ~1 cycle faster)
-- Otherwise: emit `s_ttracedata` (32-bit value loaded into m0)
+- Otherwise: emit `s_ttracedata` through M0. On gfx10+, the pass explicitly
+  emits `s_mov_b32 m0, <value>` + `s_nop 0` + `s_ttracedata`; gfx9's backend
+  already provides the required hazard spacing for ordinary traces.
 
 With the 2-bit encoding, IDs 1-63 fit in `s_ttracedata_imm` (previously
 limited to IDs 1-15 with 4-bit flags).
@@ -108,10 +110,43 @@ id         = (val >> 2) & ((1 << (30 - clock_bits)) - 1)
 clock      = val >> (32 - clock_bits)
 ```
 
+Only headers created by the pass use this packed form. Numeric point and enter
+markers retain their legacy values so arbitrary user shaderdata is not
+reinterpreted as a packed header. Bare exits use the packed form too: their
+value is intrinsically indistinguishable from a pass-generated exit.
+`att_tool.py` restores packed headers to the legacy form by default;
+`--no-decode-markers` preserves the raw value.
+
 The clock field is the shader clock sampled with `s_getreg`, not the realtime
 clock associated with `s_sendmsg`. The funcmap records the active layout with
 `M:shader_clock_bits=N;shader_clock_shift=S`. When `SQTT_SHADER_CLOCK_BITS=0`,
-gfx12 uses the legacy marker layout and may use `s_ttracedata_imm`.
+gfx12 uses the no-clock full-ID layout and may use `s_ttracedata_imm`.
+A nonzero `shader_clock_bits` value requires `shader_clock_shift`; a malformed
+packed row uses the no-clock full-ID layout.
+
+The sampled window lets a decoder compensate for the variable delay between
+the trace instruction issuing and its shaderdata record appearing in SQTT.
+For each **marker header** (never an `R:`-declared raw payload), restore the
+sampled field to its source positions and calculate the delay modulo the
+source-clock window:
+
+```text
+arrival_window = uint32_t(record_time) & shader_clock_source_mask
+sampled_window = packed_clock_field << shader_clock_shift
+delay = (arrival_window - sampled_window) & shader_clock_source_mask
+```
+
+Only a relative delay is knowable from this truncated clock. Keep the smallest
+observed delay for each shader-engine clock domain and compatible layout as the
+reference, then shift every header earlier by `delay - minimum_delay`. This
+preserves that stream's unknown common time origin while removing the extra
+delivery latency. The actual delivery delay must be shorter than the sampled
+clock window (the default 12-bit field at shift 4 has a 65,536-cycle window),
+otherwise the modulo value is ambiguous.
+
+`att_tool.py` applies this correction while writing JSON by default;
+`--no-decode-markers` preserves the packed values and arrival timestamps. It
+rewrites each corrected header to the legacy `(id << 2) | flags` form.
 
 ### Semantic rules
 
@@ -145,6 +180,44 @@ id        = val >> 2  # or masked to 30 - shader_clock_bits when M: is present
 
 The marker type (function, user scope, point event) is resolved from the
 funcmap, not from encoding bits.
+
+### C++ decoder marker encoding
+
+`<rocprof_trace_decoder/cxx/code_printing.hpp>` exposes the parsed funcmap and
+its `MarkerEncoding`:
+
+```cpp
+const auto& encoding = codeobjs.getFuncmap(codeobj_id).marker_encoding;
+const auto marker = codeobjs.decodeMarkerValue(codeobj_id, raw_shaderdata_value);
+
+uint32_t id = marker.id;
+uint32_t marker_id_mask = encoding.marker_id_mask();
+uint32_t packed_clock_mask = encoding.packed_shader_clock_mask();
+uint32_t source_clock_mask = encoding.shader_clock_source_mask();
+
+// The sampled field is right-aligned.
+uint32_t sampled_lo = 0;
+if (encoding.has_shader_clock() && encoding.is_valid())
+    sampled_lo = encoding.decode_shader_clock(raw_shaderdata_value) << encoding.shader_clock_shift;
+```
+
+`marker_id_mask()` and `packed_shader_clock_mask()` apply to the raw 32-bit
+shaderdata value. `shader_clock_source_mask()` describes the matching low-word
+window in `HW_REG_SHADER_CYCLES_LO` for timestamp comparison.
+`decode_shader_clock()` is meaningful only after the record has been identified
+as a packed header.
+
+`decode_marker_value(raw, funcmap)` (and the `CodeobjMap::decodeMarkerValue()`
+wrapper) uses the packed layout for IDs known to the funcmap and for bare
+exits; unregistered numeric point/enter values otherwise remain legacy. A
+numeric value whose low packed ID collides with a registered ID is inherently
+ambiguous from the 32-bit record alone. Call
+`decode_marker_value(raw, encoding)` directly when the record is known to be a
+packed header.
+
+With no `M:` row, `MarkerEncoding` uses the no-clock full-ID layout:
+`marker_id_mask()` is `0xFFFFFFFC` and the two shader-clock masks and decoded
+sampled field are zero.
 
 ---
 
@@ -492,6 +565,23 @@ M:shader_clock_bits=12;shader_clock_shift=4    -- gfx12 marker header clock pack
 ```
 
 The section is added to `llvm.used` to prevent linker stripping.
+
+### `code.json` marker metadata
+
+For a packed code object, `att_tool.py` adds `sqtt_funcmap` data to
+`code.json` using the established six-column row shape. Two additive top-level
+tables carry metadata that cannot be represented in those rows:
+
+```json
+"sqtt_funcmap_layout": [[codeobj_id, shader_clock_bits, shader_clock_shift]],
+"sqtt_funcmap_payloads": [[codeobj_id, marker_id, extra_payload_count]]
+```
+
+`sqtt_funcmap_layout` contains rows only for code objects with shader-clock
+packing; `sqtt_funcmap_payloads` contains their nonzero payload counts. Readers
+that do not know these optional tables can continue using the unchanged
+`sqtt_funcmap` rows. For a packed row, an absent payload count means zero;
+legacy `code.json` output is unchanged.
 
 ### Extracting the funcmap
 
@@ -870,9 +960,8 @@ For each qualifying memory operation, the pass emits (before the op):
 1. Allocate a unique ID from `NextEventID++`
 2. Record the ID, kind name, and source location in `AddrTraceEntries`
 3. Header point marker via `emitBareTrace()` with the unique ID
-4. EXEC mask via inline asm: `s_mov_b32 $0, exec_lo` / `exec_hi`
-   (on gfx9, the exec read and `s_ttracedata` are fused into a single
-   inline asm block to satisfy the s_nop hazard requirement)
+4. EXEC mask via inline asm: `s_mov_b32 m0, exec_lo` / `exec_hi`, then
+   `s_nop 0` and `s_ttracedata`.
 5. For memory/LDS/atomics: `ptrtoint` of the pointer operand (i64 for memory, i32 for LDS)
    For buffers: extract rsrc_lo/hi, soffset as scalar values
    For permutes: extract the index operand (arg 0 of the intrinsic)

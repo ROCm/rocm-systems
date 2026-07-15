@@ -233,6 +233,7 @@ uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
                 auto IID = Callee->getIntrinsicID();
                 if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
                 if (isRawPayloadTrace(CI)) continue;
+                if (!isMarkerHeaderTrace(CI)) continue;
                 auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
                 if (!Arg) continue;
                 uint32_t val = Arg->getZExtValue();
@@ -319,6 +320,7 @@ void SQTTInstrumentPass::rewriteMarkerIDs(Function& F, const std::map<uint32_t, 
             auto IID = Callee->getIntrinsicID();
             if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
             if (isRawPayloadTrace(CI)) continue;
+            if (!isMarkerHeaderTrace(CI)) continue;
 
             auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
             if (!Arg) continue;
@@ -353,16 +355,18 @@ void SQTTInstrumentPass::rewriteMarkerIDs(Function& F, const std::map<uint32_t, 
     for (auto& [CI, newVal] : Rewrites)
     {
         IRBuilder<> B(CI);
+        CallInst* replacement;
         if (canUseImm(newVal) && supportsImmTrace(gen))
         {
             Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-            B.CreateCall(TTDImm, {ConstantInt::get(I16, newVal)});
+            replacement = B.CreateCall(TTDImm, {ConstantInt::get(I16, newVal)});
         }
         else
         {
             Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-            B.CreateCall(TTD, {ConstantInt::get(I32, newVal)});
+            replacement = B.CreateCall(TTD, {ConstantInt::get(I32, newVal)});
         }
+        replacement->copyMetadata(*CI);
         CI->eraseFromParent();
     }
 }
@@ -387,6 +391,7 @@ void SQTTInstrumentPass::removeFuncMarkersFromModule(Module& M, uint32_t id)
                 auto IID = Callee->getIntrinsicID();
                 if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
                 if (isRawPayloadTrace(CI)) continue;
+                if (!isMarkerHeaderTrace(CI)) continue;
 
                 auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
                 if (!Arg) continue;

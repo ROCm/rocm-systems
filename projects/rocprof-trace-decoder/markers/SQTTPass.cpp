@@ -179,6 +179,9 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
         if (!hadEarlyPass && Config.FunctionThreshold > 0 && !IsKernel) Changed |= instrumentFunctionDirect(F, Gen);
 
         Changed |= applyShaderClockPacking(F, Gen);
+        // gfx9's backend already provides the required M0 hazard spacing.
+        // RDNA/gfx12 need the explicit asm form.
+        if (Gen != GfxGen::GFX9) Changed |= lowerFullTracesWithM0Nop(F);
     }
 
     // Clean up sentinel declarations
