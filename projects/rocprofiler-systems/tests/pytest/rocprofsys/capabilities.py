@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+import functools
 import os
 import shutil
 import subprocess
@@ -383,19 +384,19 @@ class SystemCapabilities:
             return False
 
     # ---------------------------------------------------------------------------
-    # Do not make these persistent_cached_property: the result depends on the
-    # per-process --python-versions / --python-root-dirs hints
-    @property
+    # Do NOT make this a persistent_cached_property: the result depends on the
+    # per-process --python-versions / --python-root-dirs hints, so it must not be
+    # shared across processes
+    @functools.cached_property
     def _supported_python_versions_and_executables(
         self,
     ) -> tuple[Optional[list[str]], Optional[list[Path]]]:
         """Return the list of supported python versions and executables"""
-        versions, executables = _get_supported_python_versions_and_executables(
+        return _get_supported_python_versions_and_executables(
             self.rocprofsys_site_packages,
             self._python_versions_hint,
             self._python_root_dirs_hint,
         )
-        return versions, executables
 
     @property
     def supported_python_versions(self) -> Optional[list[str]]:

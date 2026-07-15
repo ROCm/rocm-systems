@@ -1724,7 +1724,12 @@ def _cleanup_temp_patterns() -> list[str]:
     try:
         user = getpass.getuser()
     except Exception:
-        user = None
+        # Match cache.py's fallback: it names the per-user dir with the numeric
+        # uid when getuser() fails, so cleanup must look there too or leak files
+        try:
+            user = str(os.getuid())
+        except Exception:
+            user = None
 
     patterns = []
     for d in dirs:

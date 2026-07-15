@@ -26,7 +26,7 @@ from typing import Any, Callable, Optional
 
 _DISABLE_ENV = "ROCPROFSYS_DISABLE_TEST_CACHE"
 
-# Set only by disable_for_process() to turn of cache for remainder of this process
+# Set only by disable_for_process() to turn off cache for remainder of this process
 _proc_cache_disabled = False
 
 # Debug aid, prints HIT/MISS lines for cache lookup attempts.
@@ -212,7 +212,9 @@ class PersistentCache:
         file: ``_atomic_write`` swaps the data file's inode via ``os.replace``, so
         a lock on the data file would not serialize concurrent writers.
         """
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # 0o700: the cache files are 0o600, so keep the per-user dir owner-only
+        # too (defense-in-depth on shared /tmp; no effect if it already exists).
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock_fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
