@@ -163,9 +163,10 @@ class TestThreadLimitLoadTest(RocprofsysTest):
         thread_limit = get_thread_limit()
         pass_value = get_expected_pass_value(thread_count, thread_limit)
         fail_value = get_expected_fail_value(thread_count, thread_limit)
+        warning_re = get_thread_limit_warning_regex(thread_limit)
         self.assert_regex(
             result,
             mode,
-            pass_regex=[f"\\|{pass_value}>>>"],
+            pass_regex=[f"\\|{pass_value}>>>", warning_re],
             fail_regex=[f"\\|{fail_value}>>>"],
         )
