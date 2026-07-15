@@ -61,6 +61,8 @@ unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
 std::string g_ConcurrentNodes = "";
 std::vector<int> g_SelectedNodes;
+unsigned int g_AisThreads = 8;
+unsigned int g_AisSizeMB = 1024;
 class KFDBaseComponentTest *g_baseTest;
 
 GTEST_API_ int main(int argc, char **argv) {
@@ -93,6 +95,8 @@ GTEST_API_ int main(int argc, char **argv) {
         }
 
         g_TestDstNodeId = args.DstNodeId;
+        g_AisThreads = args.AisThreads;
+        g_AisSizeMB = args.AisSizeMB;
 
         // If --node is not specified, then args.NodeId == -1
         if (!args.ConcurrentNodes.empty()) {
