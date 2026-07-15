@@ -6,6 +6,7 @@
 
 #include "ipc_init.h"
 
+#include "alloc.h"
 #include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
@@ -156,12 +157,25 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  if (ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
+    CUDACHECKIGNORE(cudaFree(peerDev));
+    delete handler;
+    CUDACHECKIGNORE(cudaFree(scratch));
+    WARN("ncclDdaIpcCommInit: OOM allocating host peer table");
+    return ncclSuccess;
+  }
+
   cudaError_t ddaCe = cudaMemcpy(
     comm->ddaPeerPtrsHost,
     h_ptrs,
     kDdaNranks * sizeof(void*),
     cudaMemcpyHostToHost);
   if (ddaCe != cudaSuccess) {
+    free(comm->ddaPeerPtrsHost);
+    comm->ddaPeerPtrsHost = nullptr;
+    CUDACHECKIGNORE(cudaFree(peerDev));
+    delete handler;
+    CUDACHECKIGNORE(cudaFree(scratch));
     WARN(
         "ncclDdaIpcCommInit: cudaMemcpy(host peer table) failed (%s)",
         cudaGetErrorString(ddaCe));
@@ -173,6 +187,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
       kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
+    free(comm->ddaPeerPtrsHost);
+    comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
@@ -183,6 +199,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   auto* barrierState = new (std::nothrow) DdaIpcBarrierState();
   if (barrierState == nullptr) {
     barrierPair.first.reset();
+    free(comm->ddaPeerPtrsHost);
+    comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
@@ -215,6 +233,8 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
+  free(comm->ddaPeerPtrsHost);
+  comm->ddaPeerPtrsHost = nullptr;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
