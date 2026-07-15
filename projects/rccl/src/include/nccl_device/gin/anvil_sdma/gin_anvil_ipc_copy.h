@@ -113,9 +113,32 @@ NCCL_DEVICE_INLINE void ipcPutRemainder(uint8_t* dst, uint8_t* src, int remainde
 }
 
 NCCL_DEVICE_INLINE void ipcFlatAtomicAddSys64(uint64_t* dst, uint64_t val) {
+#if defined(__gfx942__) || defined(__gfx950__)
+  unsigned long long vdst = 0;
+  unsigned long long vsrc = static_cast<unsigned long long>(val);
+  asm volatile("flat_atomic_add_x2 %0, %1, %2 sc0 sc1"
+               : "=v"(vdst)
+               : "v"(dst), "v"(vsrc)
+               : "memory");
+#elif defined(__gfx90a__) || defined(__gfx1100__)
+  unsigned long long vdst = 0;
+  unsigned long long vsrc = static_cast<unsigned long long>(val);
+  asm volatile("flat_atomic_add_x2 %0, %1, %2 glc slc"
+               : "=v"(vdst)
+               : "v"(dst), "v"(vsrc)
+               : "memory");
+#elif defined(__gfx1201__) || defined(__gfx1250__)
+  unsigned long long vdst = 0;
+  unsigned long long vsrc = static_cast<unsigned long long>(val);
+  asm volatile("flat_atomic_add_b64 %0, %1, %2 scope:SCOPE_SYS"
+               : "=v"(vdst)
+               : "v"(dst), "v"(vsrc)
+               : "memory");
+#else
   __hip_atomic_fetch_add(reinterpret_cast<unsigned long long*>(dst),
                          static_cast<unsigned long long>(val), __ATOMIC_RELAXED,
                          __HIP_MEMORY_SCOPE_SYSTEM);
+#endif
 }
 
 }  // namespace detail
