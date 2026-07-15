@@ -349,7 +349,7 @@ __device__ void IPCContext::internal_broadcastmem_wave(void *dst, const void *sr
 }
 
 __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
-                              void *dest, const void *source, int nelement, int PE_root) {
+                              void *dest, const void *source, int nelems, int PE_root) {
 
   if (dest == nullptr || source == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
@@ -364,7 +364,7 @@ __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
 
-  internal_broadcastmem_wave(dest, source, nelement, pe_root_world, 
+  internal_broadcastmem_wave(dest, source, nelems, pe_root_world,
                               pe_start, stride, pe_size, p_sync);
   return ROCSHMEM_SUCCESS;
 }
@@ -400,7 +400,7 @@ __device__ void IPCContext::internal_broadcastmem_wg(void *dst, const void *src,
 }
 
 __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
-                              void *dest, const void *source, int nelement, int PE_root) {
+                              void *dest, const void *source, int nelems, int PE_root) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -411,7 +411,7 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
 
-  internal_broadcastmem_wg(dest, source, nelement, pe_root_world, 
+  internal_broadcastmem_wg(dest, source, nelems, pe_root_world,
                               pe_start, stride, pe_size, p_sync);
 }
 __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 

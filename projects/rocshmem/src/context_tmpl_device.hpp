@@ -901,8 +901,8 @@ __device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* ds
 
 template <typename T>
 __device__ int Context::broadcast_wave(rocshmem_team_t team, 
-                              T *dest, const T *source, int nelement, int PE_root){
-  DISPATCH_RET(broadcast_wave<T>(team, dest, source, nelement, PE_root));
+                              T *dest, const T *source, int nelems, int PE_root){
+  DISPATCH_RET(broadcast_wave<T>(team, dest, source, nelems, PE_root));
 }
 
 }  // namespace rocshmem

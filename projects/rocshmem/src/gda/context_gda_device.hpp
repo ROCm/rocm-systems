@@ -157,15 +157,15 @@ class GDAContext : public Context {
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
-  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source, 
-                                  int nelement, int PE_root);
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source,
+                                  int nelems, int PE_root);
 
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
-                                T *dest, const T* source, int nelement, int PE_root);
+                                T *dest, const T* source, int nelems, int PE_root);
 
   __device__ int broadcastmem_wave(rocshmem_team_t team,
-                                void *dest, const void* source, int nelement, int PE_root);
+                                void *dest, const void* source, int nelems, int PE_root);
 
   template <typename T>
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,

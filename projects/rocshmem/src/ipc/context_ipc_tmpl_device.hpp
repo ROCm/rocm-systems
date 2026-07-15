@@ -680,7 +680,7 @@ __device__ void IPCContext::internal_get_broadcast_wave(
 
 template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
-                              T *dest, const T *source, int nelement, int PE_root) {
+                              T *dest, const T *source, int nelems, int PE_root) {
   if (dest == nullptr || 
     source == nullptr || 
     team == ROCSHMEM_TEAM_INVALID)
@@ -695,7 +695,7 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
+  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
                               pe_start, stride, pe_size, p_sync);
 
   return ROCSHMEM_SUCCESS;

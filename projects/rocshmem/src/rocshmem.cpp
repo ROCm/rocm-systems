@@ -1373,24 +1373,24 @@ __host__ void rocshmem_team_sync(rocshmem_team_t team) {
 
 template <typename T>
 __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, T *dest,
-                                  const T *source, int nelem, int pe_root,
+                                  const T *source, int nelems, int pe_root,
                                   int pe_start, int log_pe_stride, int pe_size,
                                   long *p_sync) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelem=%d, pe_root=%d)", dest, source, nelem, pe_root);
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->broadcast<T>(dest, source, nelem, pe_root, pe_start, log_pe_stride,
+      ->broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
                      pe_size, p_sync);
 }
 
 template <typename T>
 __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx,
                                   rocshmem_team_t team, T *dest,
-                                  const T *source, int nelem, int pe_root) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelem=%d, pe_root=%d)", dest, source, nelem, pe_root);
+                                  const T *source, int nelems, int pe_root) {
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->broadcast<T>(team, dest, source, nelem, pe_root);
+      ->broadcast<T>(team, dest, source, nelems, pe_root);
 }
 
 template <typename T, ROCSHMEM_OP Op>
@@ -1554,11 +1554,11 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
                                               size_t nelems, int pe);         \
   template __host__ T rocshmem_g<T>(const T *source, int pe);                 \
   template __host__ void rocshmem_broadcast<T>(                               \
-      rocshmem_ctx_t ctx, T * dest, const T *source, int nelem, int pe_root,  \
+      rocshmem_ctx_t ctx, T * dest, const T *source, int nelems, int pe_root,  \
       int pe_start, int log_pe_stride, int pe_size, long *p_sync);            \
   template __host__ void rocshmem_broadcast<T>(                               \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelem, int pe_root);
+      int nelems, int pe_root);
 
 /**
  * Declare templates for the standard amo types
@@ -1738,15 +1738,15 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
     return rocshmem_g<T>(source, pe);                                         \
   }                                                                           \
   __host__ void rocshmem_ctx_##TNAME##_broadcast(                             \
-      rocshmem_ctx_t ctx, T *dest, const T *source, int nelem, int pe_root,   \
+      rocshmem_ctx_t ctx, T *dest, const T *source, int nelems, int pe_root,  \
       int pe_start, int log_pe_stride, int pe_size, long *p_sync) {           \
-    rocshmem_broadcast<T>(ctx, dest, source, nelem, pe_root, pe_start,        \
+    rocshmem_broadcast<T>(ctx, dest, source, nelems, pe_root, pe_start,       \
                            log_pe_stride, pe_size, p_sync);                   \
   }                                                                           \
   __host__ void rocshmem_ctx_##TNAME##_broadcast(                             \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
-      int nelem, int pe_root) {                                               \
-    rocshmem_broadcast<T>(ctx, team, dest, source, nelem, pe_root);           \
+      int nelems, int pe_root) {                                              \
+    rocshmem_broadcast<T>(ctx, team, dest, source, nelems, pe_root);          \
   }
 
 #define AMO_STANDARD_DEF_GEN(T, TNAME)                                        \
