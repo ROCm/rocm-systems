@@ -405,6 +405,8 @@ if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
     rocprofsys_configure_rocpd_schema_files()
 endif()
 
+include(ProfilerHub)
+
 # ----------------------------------------------------------------------------------------#
 #
 # MPI

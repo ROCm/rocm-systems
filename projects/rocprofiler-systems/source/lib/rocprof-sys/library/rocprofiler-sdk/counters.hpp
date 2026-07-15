@@ -62,6 +62,7 @@ struct counter_storage
 {
     const client_data*                    tool_data          = nullptr;
     std::uint64_t                         device_id          = 0;
+    std::uint32_t                         device_type_index  = 0;
     std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
     std::string                           metric_description = {};
@@ -71,7 +72,8 @@ struct counter_storage
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
-    counter_storage(const client_data* _tool_data, std::uint64_t _devid, size_t _idx,
+    counter_storage(const client_data* _tool_data, std::uint64_t _devid,
+                    std::uint32_t _device_type_index, size_t _idx,
                     std::string_view _name);
 
     ~counter_storage()                                 = default;
