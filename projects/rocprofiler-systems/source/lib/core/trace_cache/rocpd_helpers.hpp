@@ -5,6 +5,7 @@
 
 #include "core/agent.hpp"
 
+#include <cstddef>
 #include <profiler-hub/writer_types.hpp>
 
 #include <optional>
@@ -13,15 +14,11 @@
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
-{
-namespace rocpd_helpers
+namespace rocprofsys::trace_cache::rocpd_helpers
 {
 
 inline profiler_hub::writer_types::agent_unique_id_t
-make_agent_uid(const agent& a)
+make_agent_uid(const agent& agnt)
 {
     const auto type_to_string = [](agent_type type) -> std::optional<std::string_view> {
         switch(type)
@@ -34,13 +31,13 @@ make_agent_uid(const agent& a)
     };
 
     profiler_hub::writer_types::agent_unique_id_t uid;
-    uid.agent_type = type_to_string(a.type);
-    uid.type_index = a.device_type_index;
+    uid.agent_type = type_to_string(agnt.type);
+    uid.type_index = agnt.device_type_index;
     return uid;
 }
 
 inline profiler_hub::writer_types::trace_environment_t
-make_trace_env(size_t node_id, size_t process_id, size_t thread_id)
+make_trace_env(std::size_t node_id, std::size_t process_id, std::size_t thread_id)
 {
     profiler_hub::writer_types::trace_environment_t env;
     env.node_id    = node_id;
@@ -50,20 +47,20 @@ make_trace_env(size_t node_id, size_t process_id, size_t thread_id)
 }
 
 inline profiler_hub::writer_types::trace_environment_t
-make_trace_env_with_agent(size_t node_id, size_t process_id, size_t thread_id,
-                          const agent& a)
+make_trace_env_with_agent(std::size_t node_id, std::size_t process_id,
+                          std::size_t thread_id, const agent& agnt)
 {
     auto env     = make_trace_env(node_id, process_id, thread_id);
-    env.agent_id = make_agent_uid(a);
+    env.agent_id = make_agent_uid(agnt);
     return env;
 }
 
 inline profiler_hub::writer_types::trace_environment_t
-make_trace_env_with_agent_queue_stream(size_t node_id, size_t process_id,
-                                       size_t thread_id, const agent& a, size_t queue_id,
-                                       size_t stream_id)
+make_trace_env_with_agent_queue_stream(std::size_t node_id, std::size_t process_id,
+                                       std::size_t thread_id, const agent& agnt,
+                                       std::size_t queue_id, std::size_t stream_id)
 {
-    auto env      = make_trace_env_with_agent(node_id, process_id, thread_id, a);
+    auto env      = make_trace_env_with_agent(node_id, process_id, thread_id, agnt);
     env.queue_id  = queue_id;
     env.stream_id = stream_id;
     return env;
@@ -73,12 +70,12 @@ inline profiler_hub::writer_types::event_data_t
 make_event(size_t stack_id, size_t parent_stack_id, size_t correlation_id,
            const char* category)
 {
-    profiler_hub::writer_types::event_data_t ev;
-    ev.stack_id        = stack_id;
-    ev.parent_stack_id = parent_stack_id;
-    ev.correlation_id  = correlation_id;
-    ev.event_category  = category;
-    return ev;
+    profiler_hub::writer_types::event_data_t event;
+    event.stack_id        = stack_id;
+    event.parent_stack_id = parent_stack_id;
+    event.correlation_id  = correlation_id;
+    event.event_category  = category;
+    return event;
 }
 
 using memory_operation = std::string;
@@ -110,6 +107,4 @@ parse_memory_operation_name(std::string_view memory_operation_name)
     return item->second;
 }
 
-}  // namespace rocpd_helpers
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache::rocpd_helpers
