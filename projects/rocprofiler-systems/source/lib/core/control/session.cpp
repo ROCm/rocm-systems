@@ -35,7 +35,7 @@ session::subscribe(subscriber sub)
 }
 
 void
-session::attach(const trigger& trig)
+session::register_trigger(const trigger& trig)
 {
     const std::scoped_lock lk{ m_votes_mutex };
     find_or_insert_locked(trig.name(), trig.initial_vote());
@@ -43,12 +43,12 @@ session::attach(const trigger& trig)
 }
 
 void
-session::detach(const trigger& trig)
+session::unregister_trigger(const trigger& trig)
 {
     const std::scoped_lock lk{ m_votes_mutex };
-    const auto              name = trig.name();
+    const auto             name = trig.name();
     m_votes.erase(std::remove_if(m_votes.begin(), m_votes.end(),
-                                  [name](const vote_entry& e) { return e.name == name; }),
+                                 [name](const vote_entry& e) { return e.name == name; }),
                   m_votes.end());
     m_active.store(resolve_locked(), std::memory_order_relaxed);
 }
@@ -61,13 +61,14 @@ session::force_initial_pause()
 }
 
 void
-session::publish(const trigger& trig, vote new_vote)
+session::publish_vote(const trigger& trig, vote new_vote)
 {
-    // Serializes compute-then-notify across concurrent publish() callers so
-    // subscribers observe transitions in the same order they were computed.
-    // Deliberately a separate mutex from m_votes_mutex (released below,
-    // before notify_pause()/notify_resume() run) so a subscriber callback
-    // that re-enters is_active()/is_active_excluding() cannot deadlock.
+    // Serializes compute-then-notify across concurrent publish_vote() callers
+    // so subscribers observe transitions in the same order they were
+    // computed. Deliberately a separate mutex from m_votes_mutex (released
+    // below, before notify_pause()/notify_resume() run) so a subscriber
+    // callback that re-enters is_active()/is_active_excluding_trigger()
+    // cannot deadlock.
     const std::scoped_lock notify_lk{ m_notify_mutex };
 
     bool was_active = false;
@@ -91,7 +92,7 @@ vote_entry&
 session::find_or_insert_locked(std::string_view name, vote v)
 {
     auto it = std::find_if(m_votes.begin(), m_votes.end(),
-                            [name](const vote_entry& e) { return e.name == name; });
+                           [name](const vote_entry& e) { return e.name == name; });
     if(it == m_votes.end())
     {
         m_votes.push_back({ std::string{ name }, v });
@@ -106,16 +107,14 @@ session::find_or_insert_locked(std::string_view name, vote v)
 bool
 session::resolve_locked() const noexcept
 {
-    return std::none_of(m_votes.begin(), m_votes.end(),
-                         [](const vote_entry& e) { return e.current_vote == vote::paused; });
+    return std::none_of(m_votes.begin(), m_votes.end(), [](const vote_entry& e) {
+        return e.current_vote == vote::paused;
+    });
 }
 
 bool
-session::is_active_excluding(std::string_view name) const noexcept
+session::is_active_excluding_trigger(std::string_view name) const noexcept
 {
-    // Cold path: not yet called in this PR (see header doc); when a caller
-    // arrives it will hit this after its own fast atomic check, with only
-    // 1-2 votes attached, so a locked linear scan remains appropriate.
     const std::scoped_lock lk{ m_votes_mutex };
     return std::none_of(m_votes.begin(), m_votes.end(), [name](const vote_entry& e) {
         return e.name != name && e.current_vote == vote::paused;
