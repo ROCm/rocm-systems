@@ -130,28 +130,24 @@ exactly one payload (`R:...=1`) and remains eligible for clock packing.
 
 The sampled window lets a decoder compensate for the variable delay between
 the trace instruction issuing and its shaderdata record appearing in SQTT.
-For each **marker header** (never an `R:`-declared raw payload), restore the
-sampled field to its source positions and calculate a safe lower bound for the
-delay modulo the source-clock window:
+Shaderdata and shader-clock timestamps have the same rate but an unknown fixed
+phase per physical SIMD. For each **marker header** (never an `R:`-declared raw
+payload), calculate its circular residue:
 
 ```text
 window_mask = (1ULL << (clock_bits + shader_clock_shift)) - 1
 bucket_size = 1ULL << shader_clock_shift
-arrival_window = uint32_t(record_time) & window_mask
 sampled_window = packed_clock_field << shader_clock_shift
-delta = (arrival_window - sampled_window) & window_mask
-delay_lower_bound = max(0, delta - (bucket_size - 1))
+residue = (uint32_t(record_time) - sampled_window) & window_mask
 ```
 
-Only a relative delay is knowable from this truncated clock. The low
-`shader_clock_shift` bits were not sampled, so the lower bound avoids moving a
-record before any possible issue time; it leaves at most
-`(1 << shader_clock_shift) - 1` cycles of residual jitter. Keep the smallest
-observed lower bound for each shader-engine clock domain and compatible layout
-as the reference, then shift every header earlier by
-`delay_lower_bound - minimum_delay`. The actual delivery delay must be shorter
-than the sampled clock window (the default 12-bit field at shift 4 has a
-65,536-cycle window), otherwise the modulo value is ambiguous.
+Within each `(shader engine, CU, SIMD, clock_bits, shader_clock_shift)` domain,
+sort residues, find the largest circular gap, and unwrap after it. If the
+unwrapped span exceeds half the window, emit one warning for that domain but
+still use the deterministic first largest-gap reference. With
+`relative = (residue - unwrap_start) & window_mask`, shift a header earlier by
+`max(0, relative - (bucket_size - 1))`. This cancels the unknown phase while
+never assuming the omitted low clock bits.
 
 `att_tool.py` applies this correction while writing JSON by default;
 `--no-decode-markers` preserves the packed values and arrival timestamps. It

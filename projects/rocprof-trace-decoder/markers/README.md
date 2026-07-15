@@ -482,10 +482,11 @@ leaving 18 marker ID bits plus the two low flags. Configure this with
 Numeric point and enter markers keep their legacy values; bare exits use the
 packed form because their value is indistinguishable from a generated exit.
 
-The packed clock is a truncated sample at instruction issue. Compare it with
-the record timestamp modulo its source-clock window and subtract only the
-excess over the smallest delay for that shader engine. Apply this only to
-headers, never `R:` payloads. `Funcmap::marker_encoding` exposes
+The packed clock is a truncated sample at instruction issue. Shaderdata and
+shader clocks have an unknown fixed phase per physical SIMD, so `att_tool.py`
+circularly unwraps recognized header residues per SIMD/layout before applying a
+conservative relative correction. Apply this only to headers, never `R:`
+payloads. `Funcmap::marker_encoding` exposes
 `marker_id_mask()`, `packed_shader_clock_mask()`, and
 `shader_clock_source_mask()`; without `M:` metadata those describe the legacy
 full-width ID layout.

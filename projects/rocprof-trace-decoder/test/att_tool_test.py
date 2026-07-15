@@ -71,7 +71,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
 
         _correct_marker_timestamps([(0, records)], document)
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x1010, 0x1020])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x101F, 0x102F])
         self.assertIs(records.shaderdata[0], first)
         self.assertIs(records.shaderdata[1], second)
         self.assertIs(records.shaderdata[2], payload)
@@ -162,7 +162,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
                     formats="json",
                 )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x1010])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x101F])
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
     def test_correction_does_not_share_the_reference_between_simds(self):
@@ -186,23 +186,42 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual(fast_simd.time, 0x1010)
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
-    def test_correction_does_not_precede_the_sampled_clock_at_wrap(self):
+    def test_correction_unwraps_unknown_clock_phase(self):
         marker_id = 3 << 2
-        reference = _shaderdata(0x43FF, (0x10 << 20) | marker_id)
-        wrapped = _shaderdata(0x400010, (0xFFF << 20) | marker_id)
+        reference = _shaderdata(0x21F64, (0x200 << 20) | marker_id)
+        delayed = _shaderdata(0x22384, (0x210 << 20) | marker_id)
         records = TraceRecords(
-            occupancy=[_occupancy(1, 0)], shaderdata=[reference, wrapped])
+            occupancy=[_occupancy(1, 0)], shaderdata=[reference, delayed])
 
         _correct_marker_timestamps(
             [(0, records)],
             {
                 "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
-                "sqtt_funcmap_layout": [[7, 12, 10]],
+                "sqtt_funcmap_layout": [[7, 12, 4]],
             },
         )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x43FF, 0x3FFFFF])
+        self.assertEqual([record.time for record in records.shaderdata], [0x21F64, 0x22073])
         self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
+
+    def test_wide_clock_phase_warns_and_is_corrected(self):
+        marker_id = 3 << 2
+        value = (0x200 << 20) | marker_id
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0)],
+            shaderdata=[_shaderdata(time, value) for time in (0x12000, 0x16000, 0x1B000)],
+        )
+
+        with self.assertWarnsRegex(RuntimeWarning, "span exceeds half"):
+            _correct_marker_timestamps(
+                [(0, records)],
+                {
+                    "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
+                    "sqtt_funcmap_layout": [[7, 12, 4]],
+                },
+            )
+
+        self.assertEqual([record.time for record in records.shaderdata], [0x12000, 0x1200F, 0x1200F])
 
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
         value = (0x100 << 20) | (3 << 2)
@@ -222,7 +241,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         )
 
         self.assertEqual(before_retirement.time, 0x1010)
-        self.assertEqual(after_retirement.time, 0x1010)
+        self.assertEqual(after_retirement.time, 0x101F)
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
     def test_later_launch_supersedes_a_retired_wave_slot(self):
@@ -246,7 +265,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x1020])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x103F])
         self.assertEqual([record.value for record in records.shaderdata], [16, 16])
 
     def test_multi_payload_headers_are_normalized_without_clock_correction(self):
