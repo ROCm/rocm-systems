@@ -987,12 +987,22 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
   auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    if (allocation_map_.find(ptr) == allocation_map_.end())
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   hsa_status_t err = driver.MakeMemoryUnresident(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   err = driver.DeregisterMemory(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    allocation_map_.erase(ptr);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1828,6 +1838,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& new_async_events_ = eventsInfo->new_events;
   auto& hsa_events = eventsInfo->events.hsa_events_;
   auto& event_age = eventsInfo->events.age_;
+  auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
 
@@ -1837,6 +1848,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
     if (!keep) {
+      // Drop the removed event's cached age so a future event reusing the same
+      // HsaEvent* address does not inherit a stale baseline.
+      HsaEvent* removed_event = hsa_signal_handle(async_events_.signal_[index])->EopEvent();
+      if (removed_event != nullptr) event_age_map.erase(removed_event);
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -1845,7 +1860,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   // Prepares a list of events for a wait inside KFD
-  auto PrepareInterrupt = [&](size_t idx, bool init_age) {
+  auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
     // If any signal doesn't have an interrupt, then switch to polling
     if (hsa_event == nullptr) {
@@ -1853,12 +1868,19 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
-          hsa_events.resize(unique_evts + 10);
-          event_age.resize(unique_evts + 10);
+        hsa_events.resize(unique_evts + 10);
+        event_age.resize(unique_evts + 10);
       }
-      if (init_age || hsa_events[unique_evts] != hsa_event ) {
-        event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
-      }
+      // Restore this event's last-known KFD age, keyed by the event itself
+      // rather than by the compacted slot index. The async list is reordered in
+      // place on handler removal (CopyIndex/PopBack) and grows on registration,
+      // so the event occupying a given slot changes frequently. Re-priming a
+      // live event's baseline to 1 on such a slot change makes KFD report it
+      // satisfied immediately (event_age != 1) and busy-spins this loop.
+      const uint64_t default_age =
+          runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
+      auto age_it = event_age_map.find(hsa_event);
+      event_age[unique_evts] = (age_it != event_age_map.end()) ? age_it->second : default_age;
       hsa_events[unique_evts] = hsa_event;
       unique_evts++;
       return true;
@@ -1869,9 +1891,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // if ROCR can wake it up with hsaKmtSetEvent()
   auto WaitForInterrupt = [&]() {
     constexpr uint32_t wait_ms = 0xFFFFFFFEu;
-    HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
-    unique_evts = uint32_t(end - &hsa_events[0]);
+    uint32_t out = 0;
+    for (uint32_t in = 0; in < unique_evts; ++in) {
+      if (in == 0 || hsa_events[in] != hsa_events[out - 1]) {
+        hsa_events[out] = hsa_events[in];
+        event_age[out] = event_age[in];
+        ++out;
+      }
+    }
+    unique_evts = out;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
+    // Persist the round-tripped ages keyed by event so a later reordering of
+    // the async list restores the correct baseline instead of re-priming to 1.
+    for (uint32_t k = 0; k < unique_evts; k++)
+      event_age_map[hsa_events[k]] = event_age[k];
   };
 
   while (!async_events_control_.exit.load(std::memory_order_acquire)) {
@@ -1912,7 +1945,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
-      bool init_age = true;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -1936,13 +1968,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             if (!wait_any) {
               finish = true;
-              init_age = true;
             }
           }
 
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i, init_age);
+            interrupt_wait = PrepareInterrupt(i);
             // If the interrupt was disabled, then force polling
             if (!interrupt_wait) {
               polling = true;
@@ -2006,7 +2037,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-          init_age = false;
         }
       }
     }
@@ -2566,8 +2596,14 @@ hsa_status_t Runtime::Load() {
   // Initialize IPC support mode
   InitIPCDmaBufSupport();
 
-  // Load svm profiler
+  // Load svm profiler (Linux-only: relies on KFD SMI events via poll/eventfd)
+#if defined(__linux__)
   svm_profile_.reset(new AMD::SvmProfileControl);
+#else
+  if (!flag_.svm_profile().empty()) {
+    debug_warning("HSA_SVM_PROFILE=%s is only supported on Linux; ignoring.", flag_.svm_profile().c_str());
+  }
+#endif
 
   return HSA_STATUS_SUCCESS;
 }
@@ -3019,6 +3055,7 @@ void Runtime::AsyncEvents::Clear() {
   value_.clear();
   handler_.clear();
   arg_.clear();
+  age_by_event_.clear();
 }
 
 hsa_status_t Runtime::SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback,

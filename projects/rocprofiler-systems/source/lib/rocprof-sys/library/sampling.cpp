@@ -1696,7 +1696,7 @@ post_process_timemory(std::int64_t                               _tid,
 
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1734,7 +1734,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1798,7 +1798,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1825,7 +1825,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
