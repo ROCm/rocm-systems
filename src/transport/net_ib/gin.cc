@@ -174,6 +174,7 @@ ncclResult_t ncclGinIbP2PBarrier(struct ncclGinIbCollComm* cComm) {
 ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   struct ncclIbListenComm* lComm = (struct ncclIbListenComm*)listenComm;
   struct ncclGinIbCollComm* cCommArray = nullptr;
+  ncclResult_t ret = ncclSuccess;
   int next;
 
   *collComm = NULL;
@@ -187,10 +188,13 @@ ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, 
   next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(ncclIbConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL, /*nQpsPerDev*/ 1,
-                                  ncclParamGinIbTc() != -1 ? ncclParamGinIbTc() : ncclParamIbTc()));
+      NCCLCHECKGOTO(ncclIbConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL, /*nQpsPerDev*/ 1,
+                                      ncclParamGinIbTc() != -1 ? ncclParamGinIbTc() : ncclParamIbTc()),
+                    ret, fail);
     }
-    if (cComm->recvComm == NULL) NCCLCHECK(ncclIbAcceptImpl(lComm, &cComm->recvComm, NULL, /*nQpsPerDev*/ 1));
+    if (cComm->recvComm == NULL) {
+      NCCLCHECKGOTO(ncclIbAcceptImpl(lComm, &cComm->recvComm, NULL, /*nQpsPerDev*/ 1), ret, fail);
+    }
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   cComm->getProperties = (ncclResult_t (*)(int dev, void* props))ncclIbGetProperties;
@@ -204,6 +208,12 @@ ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, 
 
   *collComm = cCommArray;
   return ncclSuccess;
+
+fail:
+  if (cComm->recvComm) ncclNetIb.closeRecv(cComm->recvComm);
+  if (cComm->sendComm) ncclNetIb.closeSend(cComm->sendComm);
+  free(cCommArray);
+  return ret;
 }
 
 ncclResult_t ncclGinIbCloseColl(void* collComm) {
