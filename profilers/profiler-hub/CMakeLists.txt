@@ -257,29 +257,33 @@ foreach(_target profiler-hub profiler-hub-static)
     endif()
 endforeach()
 
-# CMake automatically copies a STATIC library's PRIVATE link dependencies
-# into its own INTERFACE_LINK_LIBRARIES, because a static archive does not
-# resolve its own undefined symbols - consumers must supply them at their
-# final link step. None of the dependencies above are part of this package's
-# export set (they are either vendored in-build-tree targets or otherwise
-# not installed/exported), so leaving them in the exported interface breaks
-# `install(EXPORT ...)`: wrapping the reference in `$<BUILD_INTERFACE:>`
-# genexps does not help, because CMake's export validation still resolves
-# and flags the underlying target even when the genexp only ever evaluates
-# to empty for the installed configuration. fmt is the sole exception
-# real consumers may need to resolve themselves, and only when it is a
-# genuine `find_package()`-imported target that they too can find.
-if(fmt_FOUND)
-    set_target_properties(
-        profiler-hub-static
-        PROPERTIES INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:fmt::fmt>"
-    )
-else()
-    set_target_properties(
-        profiler-hub-static
-        PROPERTIES INTERFACE_LINK_LIBRARIES ""
+# STATIC libraries copy PRIVATE link deps into INTERFACE_LINK_LIBRARIES so
+# consumers can resolve undefined symbols, but install(EXPORT) then
+# validates every target referenced there, even inside $<BUILD_INTERFACE:>.
+# Rebuild the property with only the deps that are genuinely
+# find_package()-imported and thus resolvable by real consumers; queries
+# and sqlite3 are always in-tree-only and never belong in it.
+# profiler-hub (SHARED) needs no such fix: PRIVATE deps of a shared library
+# are never copied into INTERFACE_LINK_LIBRARIES.
+set(profiler_hub_static_iface_libs "")
+foreach(_dep fmt spdlog nlohmann_json)
+    if(${_dep}_FOUND)
+        list(
+            APPEND profiler_hub_static_iface_libs
+            "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
+        )
+    endif()
+endforeach()
+if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+    list(
+        APPEND profiler_hub_static_iface_libs
+        "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
     )
 endif()
+set_target_properties(
+    profiler-hub-static
+    PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"
+)
 
 # ------------------------------------------------------------ #
 # Install package support
