@@ -7,6 +7,7 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <cxxabi.h>
 #include <string_view>
 
@@ -76,21 +77,28 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
       auto *hash = reinterpret_cast<const uint32_t *>(elf_base + hash_off);
       nsyms = hash[1];
     }
+    if (syment < sizeof(Elf64_Sym))
+      break;
     if (nsyms == 0 ||
         !in_range(elf_base + symtab_off, uint64_t{nsyms} * syment, elf_base, elf_accessible))
       break;
     if (!in_range(elf_base + strtab_off, strsz, elf_base, elf_accessible))
       break;
 
-    auto *syms = reinterpret_cast<const Elf64_Sym *>(elf_base + symtab_off);
     auto *strtab = reinterpret_cast<const char *>(elf_base + strtab_off);
 
     for (uint32_t s = 0; s < nsyms; ++s) {
-      if (syms[s].st_value != kd_offset)
+      auto *sym = reinterpret_cast<const Elf64_Sym *>(elf_base + symtab_off + uint64_t{s} * syment);
+      if (sym->st_value != kd_offset)
         continue;
-      if (syms[s].st_name >= strsz)
+      if (sym->st_name >= strsz)
         continue;
-      std::string_view name(strtab + syms[s].st_name);
+      const char *symbol_name = strtab + sym->st_name;
+      size_t max_name_size = strsz - sym->st_name;
+      size_t name_size = strnlen(symbol_name, max_name_size);
+      if (name_size == max_name_size)
+        continue;
+      std::string_view name(symbol_name, name_size);
       if (name.size() > 3 && name.substr(name.size() - 3) == ".kd")
         name = name.substr(0, name.size() - 3);
       if (!name.empty())
@@ -145,8 +153,10 @@ std::string demangle_kernel_symbol(std::string_view symbol) {
   std::string symbol_string(symbol);
   int status = 0;
   char *demangled = abi::__cxa_demangle(symbol_string.c_str(), nullptr, nullptr, &status);
-  if (status != 0 || demangled == nullptr)
+  if (status != 0 || demangled == nullptr) {
+    std::free(demangled);
     return symbol_string;
+  }
 
   std::string result(demangled);
   std::free(demangled);
