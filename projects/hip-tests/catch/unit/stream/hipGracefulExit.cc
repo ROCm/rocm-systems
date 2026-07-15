@@ -41,7 +41,7 @@ THE SOFTWARE.
 
 static constexpr DWORD kTimeoutMs = 10000;
 
-TEST_CASE("Unit_hipStream_GracefulExitWithPendingWork") {
+HIP_TEST_CASE(Unit_hipStream_GracefulExitWithPendingWork) {
   auto exePath = fs::path(TestContext::get().currentPath()) / "hipGracefulExit_exe";
   std::string exeStr = exePath.string();
   if (exePath.extension().empty()) exeStr += ".exe";
