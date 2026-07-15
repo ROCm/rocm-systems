@@ -26,6 +26,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/output/output_key.hpp"
 
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
@@ -53,5 +54,11 @@ get_mpi_rank();
 
 std::string
 format_path(std::string _fpath, const std::string& _tag = {});
+
+// Overload that expands using a caller-provided key table (instead of deriving
+// one from a tag). Lets callers substitute custom values -- e.g. map the pid
+// tokens to a sentinel to detect whether a format resolves to the pid.
+std::string
+format_path(std::string&& _fpath, const std::vector<output_key>& _keys);
 }  // namespace tool
 }  // namespace rocprofiler
