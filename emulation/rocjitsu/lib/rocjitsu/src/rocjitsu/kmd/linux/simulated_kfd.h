@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -81,8 +82,10 @@ public:
   /// @details Used by the interposer when an existing KFD fd is duplicated
   /// (dup/dup2/dup3/fcntl F_DUPFD). Each live fd holds one reference so the
   /// process is torn down only when the last fd is closed, not the first.
-  /// No-op when there is no local process (e.g. daemon/remote mode).
-  void retain_local_open() override;
+  /// @retval true A reference was added.
+  /// @retval false No local process to retain (e.g. it was already torn down, or
+  ///         daemon/remote mode); the caller must NOT treat the fd as retained.
+  [[nodiscard]] bool retain_local_open() override;
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
@@ -117,8 +120,25 @@ public:
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }
   std::string drm_path() const override { return topology_.drm_path(); }
-  [[nodiscard]] int fd() const override { return fd_; }
+  [[nodiscard]] int fd() const override { return fd_.load(std::memory_order_acquire); }
   [[nodiscard]] uint32_t local_process_id() const { return local_process_id_; }
+
+  /// @brief Forget the primary KFD fd number without touching the process.
+  /// @details Used by the interposer when dup2/dup3 atomically overwrites the
+  /// primary KFD fd number: the number no longer refers to this driver, so stop
+  /// classifying it as the local primary (fd() must no longer match it). Only
+  /// clears if @p fd matches the current primary, so a stale call is a no-op.
+  /// @returns kClearedDropRef if @p fd matched and was cleared (the local primary
+  ///          holds one counted open reference, so the caller drops it via
+  ///          close()); kNotPrimary if it did not match (a concurrent overwrite
+  ///          won the race), so the caller must not release a reference.
+  /// @details Runs under process_mutex_ so the CAS on fd_ is serialized with
+  /// open()'s fd creation/selection/return: a racing dup2 can no longer clear
+  /// fd_ in the window between open() publishing it and open() returning it, so
+  /// open() never hands back -1 or an already-overwritten descriptor. Lock-free
+  /// readers (driver_fd()/kfd_backend_of()/is_kfd_primary()) still observe fd_
+  /// atomically.
+  [[nodiscard]] PrimaryInvalidation invalidate_primary_fd(int fd) override;
 
   /// @brief Open-reference count of the local process, or 0 if none is alive.
   /// @details Introspection for tests/diagnostics. Each live KFD fd (the primary
@@ -146,6 +166,13 @@ private:
 
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
+
+  /// @brief Look up a KfdProcess by its client (Linux) pid. Used by
+  /// AMDKFD_IOC_DBG_TRAP to resolve the debug target, mirroring the kernel's
+  /// kfd_lookup_process_by_pid().
+  /// @param pid Client (Linux) pid of the target process.
+  /// @return The matching KfdProcess, or nullptr if none matches.
+  std::shared_ptr<KfdProcess> find_process_by_client_pid(pid_t pid) const;
 
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
   GpuDevice *find_gpu(uint32_t gpu_id);
@@ -198,13 +225,20 @@ private:
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
+  int debug_trap_ioctl(KfdProcess &caller, void *arg);
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
+  /// @brief Lazily create the backing memfd exactly once across racing opens.
+  /// @details CAS-publishes fd_ so concurrent open()/open_process() callers agree
+  /// on a single memfd; losers close their own and adopt the winner's.
+  /// @retval true fd_ holds a valid descriptor. @retval false memfd_create failed.
+  [[nodiscard]] bool ensure_fd_created();
+
   std::vector<GpuDevice> gpus_;
   bool daemon_mode_ = false;
-  int fd_ = -1;
+  std::atomic<int> fd_{-1};
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.

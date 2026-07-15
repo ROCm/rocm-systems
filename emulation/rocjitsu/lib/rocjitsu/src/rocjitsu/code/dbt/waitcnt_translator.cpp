@@ -7,22 +7,16 @@
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 
 #include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 
 #include <algorithm>
-#include <bit>
 
 namespace rocjitsu {
 namespace {
 
 [[nodiscard]] uint32_t make_gfx12_sopp(uint8_t op, uint16_t simm16) {
-  rdna4::SoppMachineInst s{};
-  s.encoding = rdna4::encoding::kSopp;
-  s.op = op;
-  s.simm16 = simm16;
-  return std::bit_cast<uint32_t>(s);
+  return rdna4::build_sopp(op, {.simm16 = simm16})[0];
 }
 
 } // namespace

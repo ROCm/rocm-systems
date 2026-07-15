@@ -1866,6 +1866,12 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadI8Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -1889,6 +1895,12 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU8Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1915,6 +1927,12 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadI16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -1938,6 +1956,12 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3909,6 +3933,12 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -3935,6 +3965,12 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -3959,6 +3995,12 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+}
+
+void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3988,6 +4030,12 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4015,6 +4063,12 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsReadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4039,6 +4093,12 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
