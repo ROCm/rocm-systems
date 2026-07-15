@@ -191,12 +191,6 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
     parameters = aqlArgBuf;
   }
 
-  amd::NDRange local(sizes.local());
-  const amd::NDRange& global = sizes.global();
-
-  // Check if runtime has to find local workgroup size
-  FindLocalWorkSize(sizes.dimensions(), sizes.global(), local);
-
   address hidden_arguments = const_cast<address>(parameters);
 
   // Check if runtime has to setup hidden arguments
@@ -206,16 +200,16 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
       case amd::KernelParameterDescriptor::HiddenNone:
         break;
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetX:
-        WriteAqlArgAt(hidden_arguments, sizes.offset()[0], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_offset(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetY:
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, sizes.offset()[1], it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_offset(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetZ:
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, sizes.offset()[2], it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_offset(2), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenPrintfBuffer:
@@ -263,60 +257,54 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[0] / local[0]), it.size_,
-                      it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_count(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountY:
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[1] / local[1]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_count(1), it.size_, it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountZ:
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[2] / local[2]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_count(2), it.size_, it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(local[0]), it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_local(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeY:
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(local[1]), it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_local(1), it.size_, it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeZ:
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(local[2]), it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_local(2), it.size_, it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[0] % local[0]), it.size_,
-                      it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderY:
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[1] % local[1]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderZ:
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[2] % local[2]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(2), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGridDims:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(sizes.dimensions()), it.size_,
+        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(sizes.get_dimensions()), it.size_,
                       it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenPrivateBase:
@@ -357,15 +345,15 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
       (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
   hsaDisp->header = kDispatchPacketHeader;
-  hsaDisp->setup = sizes.dimensions();
+  hsaDisp->setup = sizes.get_dimensions();
 
-  hsaDisp->workgroup_size_x = local[0];
-  hsaDisp->workgroup_size_y = (sizes.dimensions() > 1) ? local[1] : 1;
-  hsaDisp->workgroup_size_z = (sizes.dimensions() > 2) ? local[2] : 1;
+  hsaDisp->workgroup_size_x = sizes.get_local(0);
+  hsaDisp->workgroup_size_y = (sizes.get_dimensions() > 1) ? sizes.get_local(1) : 1;
+  hsaDisp->workgroup_size_z = (sizes.get_dimensions() > 2) ? sizes.get_local(2) : 1;
 
-  hsaDisp->grid_size_x = global[0];
-  hsaDisp->grid_size_y = (sizes.dimensions() > 1) ? global[1] : 1;
-  hsaDisp->grid_size_z = (sizes.dimensions() > 2) ? global[2] : 1;
+  hsaDisp->grid_size_x = sizes.get_global(0);
+  hsaDisp->grid_size_y = (sizes.get_dimensions() > 1) ? sizes.get_global(1) : 1;
+  hsaDisp->grid_size_z = (sizes.get_dimensions() > 2) ? sizes.get_global(2) : 1;
   hsaDisp->reserved0 = 0;
 
   // Initialize kernel ISA and execution buffer requirements

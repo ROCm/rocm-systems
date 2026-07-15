@@ -8,7 +8,7 @@
 #include "platform/commandqueue.hpp"
 #include "platform/runtime.hpp"
 #include "platform/program.hpp"
-#include "platform/ndrange.hpp"
+#include "platform/NDrange_container.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
 #include "hotswap.hpp"

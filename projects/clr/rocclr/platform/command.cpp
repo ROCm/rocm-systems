@@ -445,8 +445,13 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
       allGridSum_(allGridSum),
       firstDevice_(firstDevice),
       parameters_(nullptr) {
+  initExecuteKernel(queue, forceProfiling);
+}
+
+void NDRangeKernelCommand::initExecuteKernel(HostQueue& queue, bool forceProfiling) {
   auto& device = queue.device();
-  auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
+  auto devKernel = const_cast<device::Kernel*>(kernel_.getDeviceKernel(device));
+  (void)devKernel;  // getDeviceKernel is called for its device-side build effect
   if (cooperativeGroups()) {
     setNumWorkgroups();
   }

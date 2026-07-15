@@ -54,19 +54,6 @@ class PrintfDbg {
   //! Creates the PrintfDbg object
   bool create();
 
-  //! Initializes the debug buffer before kernel's execution
-  bool init(VirtualGPU& gpu,          //!< Virtual GPU object
-            bool printfEnabled,       //!< checks for printf
-            const amd::NDRange& size  //!< Kernel's workload
-  );
-
-  //! Prints the kernel's debug informaiton from the buffer
-  bool output(VirtualGPU& gpu,                                   //!< Virtual GPU object
-              bool printfEnabled,                                //!< checks for printf
-              const amd::NDRange& size,                          //!< Kernel's workload
-              const std::vector<device::PrintfInfo>& printfInfo  //!< printf info
-  );
-
   //! Debug buffer size per workitem
   size_t wiDbgSize() const { return wiDbgSize_; }
 

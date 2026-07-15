@@ -7,7 +7,7 @@
 #include "cl_common.hpp"
 #include "cl_kernel_info_amd.h"
 #include "platform/kernel.hpp"
-#include "platform/ndrange.hpp"
+#include "platform/NDrange_container.hpp"
 #include "platform/command.hpp"
 
 /*! \addtogroup API

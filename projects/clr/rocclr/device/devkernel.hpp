@@ -13,7 +13,7 @@
 namespace amd {
 class Device;
 class KernelSignature;
-class NDRange;
+class NDRangeContainer;
 
 struct KernelParameterDescriptor {
   enum Desc {
@@ -309,11 +309,12 @@ class Kernel {
   //! Return printf info array
   const std::vector<PrintfInfo>& printfInfo() const { return printf_; }
 
-  //! Finds local workgroup size
-  void FindLocalWorkSize(size_t workDim,                   //!< Work dimension
-                         const amd::NDRange& gblWorkSize,  //!< Global work size
-                         amd::NDRange& lclWorkSize         //!< Calculated local work size
-  ) const;
+  //! Compute a default local work size when the kernel has no compiled
+  //! reqd_work_group_size and the caller supplied none. No-op otherwise.
+  void UpdateNullLocalWorkSize(amd::NDRangeContainer& sizes) const;
+
+  //! Force the local work size to the compiled reqd_work_group_size, if any.
+  void SetLocalWorkSizeIfKernelRequired(amd::NDRangeContainer& sizes) const;
 
   const uint64_t KernelCodeHandle() const { return kernelCodeHandle_; }
 

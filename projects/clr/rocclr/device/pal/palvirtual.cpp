@@ -2693,11 +2693,19 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
 
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
+  // Finalize the local work size in the command's container before dispatch.
+  // Mirrors the ROCm backend; safe to mutate in place (single-device command,
+  // idempotent calls).
+  const device::Kernel* palDevKernel = vcmd.kernel().getDeviceKernel(dev());
+  amd::NDRangeContainer& ndSizes = vcmd.sizes();
+  palDevKernel->UpdateNullLocalWorkSize(ndSizes);
+  palDevKernel->SetLocalWorkSizeIfKernelRequired(ndSizes);
+
   if (vcmd.cooperativeGroups()) {
     uint32_t workgroups = 1;
-    for (uint i = 0; i < vcmd.sizes().dimensions(); i++) {
-      if (vcmd.sizes().local()[i] != 0) {
-        workgroups *= (vcmd.sizes().global()[i] / vcmd.sizes().local()[i]);
+    for (uint i = 0; i < vcmd.sizes().get_dimensions(); i++) {
+      if (vcmd.sizes().get_local(i) != 0) {
+        workgroups *= (vcmd.sizes().get_global(i) / vcmd.sizes().get_local(i));
       }
     }
 
@@ -2753,10 +2761,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (rgpCaptureEna()) {
     size_t newLocalSize[3] = {1, 1, 1};
     size_t newGlobalSize[3] = {0, 0, 0};
-    for (uint i = 0; i < sizes.dimensions(); i++) {
-      newGlobalSize[i] = sizes.global()[i];
-      if (sizes.local()[i] != 0) {
-        newLocalSize[i] = sizes.local()[i];
+    for (uint i = 0; i < sizes.get_dimensions(); i++) {
+      newGlobalSize[i] = sizes.get_global(i);
+      if (sizes.get_local(i) != 0) {
+        newLocalSize[i] = sizes.get_local(i);
       }
     }
     dev().captureMgr()->PreDispatch(

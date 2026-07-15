@@ -1717,21 +1717,21 @@ class GraphKernelNode : public GraphNode {
       }
     }
 
-    const amd::Device* device = g_devices[dev_id_]->devices()[0];
-    amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
-                                       kernelParams_.gridDim.z, kernelParams_.blockDim.x,
-                                       kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                       kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
+    bool valid;
+    amd::NDRangeContainer sizes = amd::MakeLaunchFromGrid(
+        kernelParams_.gridDim.x, kernelParams_.gridDim.y, kernelParams_.gridDim.z,
+        kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+        globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+        clusterDim_.x, clusterDim_.y, clusterDim_.z, valid);
 
-    if (!launch_params.IsValidConfig()) {
+    if (!valid) {
       return hipErrorInvalidConfiguration;
     }
 
-    status = ihipLaunchKernelCommand(
-        command, func, launch_params, stream, kernelParams_.kernelParams, kernelParams_.extra,
-        kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
+    status = ihipLaunchKernelCommand(command, func, sizes, kernelParams_.sharedMemBytes, stream,
+                                     kernelParams_.kernelParams, kernelParams_.extra,
+                                     kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags,
+                                     coopKernel_, 0, 0, 0, 0, 0);
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
       command->SetProfiling();
@@ -1815,15 +1815,13 @@ class GraphKernelNode : public GraphNode {
       if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
         return hipErrorInvalidConfiguration;
       }
-      const amd::Device* device = g_devices[dev_id_]->devices()[0];
-      amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
-                                         kernelParams_.gridDim.z, kernelParams_.blockDim.x,
-                                         kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                         kernelParams_.sharedMemBytes, *device,
-                                         globalWorkSizeX_remainder_, globalWorkSizeY_remainder_,
-                                         globalWorkSizeZ_remainder_, clusterDim.x, clusterDim.y,
-                                         clusterDim.z);
-      if (!launch_params.IsValidConfig()) {
+      bool valid;
+      amd::NDRangeContainer sizes = amd::MakeLaunchFromGrid(
+          kernelParams_.gridDim.x, kernelParams_.gridDim.y, kernelParams_.gridDim.z,
+          kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+          globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+          clusterDim.x, clusterDim.y, clusterDim.z, valid);
+      if (!valid) {
         return hipErrorInvalidConfiguration;
       }
       clusterDim_ = clusterDim;
@@ -1900,21 +1898,20 @@ class GraphKernelNode : public GraphNode {
 
   hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
                                   hipFunction_t func, int devId) {
+    bool valid;
+    amd::NDRangeContainer sizes = amd::MakeLaunchFromGrid(
+        pNodeParams->gridDim.x, pNodeParams->gridDim.y, pNodeParams->gridDim.z,
+        pNodeParams->blockDim.x, pNodeParams->blockDim.y, pNodeParams->blockDim.z,
+        globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+        clusterDim_.x, clusterDim_.y, clusterDim_.z, valid);
 
-    const amd::Device* device = g_devices[devId]->devices()[0];
-    amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
-                                       pNodeParams->gridDim.z, pNodeParams->blockDim.x,
-                                       pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                       pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
-
-    if (!launch_params.IsValidConfig()) {
+    if (!valid) {
       HIP_RETURN(hipErrorInvalidConfiguration);
     }
 
-    hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
-                                                  pNodeParams->extra, devId, coopKernel_);
+    hipError_t status = ihipLaunchKernel_validate(func, sizes, pNodeParams->sharedMemBytes,
+                                                  pNodeParams->kernelParams, pNodeParams->extra,
+                                                  devId, coopKernel_);
     if (status != hipSuccess) {
       return status;
     }

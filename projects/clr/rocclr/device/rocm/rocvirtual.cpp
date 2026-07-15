@@ -4464,17 +4464,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           std::min(gpuKernel.KernargSegmentByteSize(), signature.paramsSize()),
           gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
 
-  amd::NDRange local_size(sizes.local());
   address hidden_arguments = const_cast<address>(parameters);
-  // Calculate local size if it wasn't provided
-  devKernel->FindLocalWorkSize(sizes.dimensions(), sizes.global(), local_size);
 
-  uint16_t local[3] = {1, 1, 1};
-  uint32_t global[3] = {1, 1, 1};
-  for (uint i = 0; i < sizes.dimensions(); i++) {
-    global[i] = static_cast<uint32_t>(sizes.global()[i]);
-    local[i] = static_cast<uint16_t>(local_size[i]);
-  }
   uint64_t spVA = 0;
   // Check if runtime has to setup hidden arguments
   for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
@@ -4483,18 +4474,18 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       case amd::KernelParameterDescriptor::HiddenNone:
         break;
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetX: {
-        WriteAqlArgAt(hidden_arguments, sizes.offset()[0], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_offset(0), it.size_, it.offset_);
         break;
       }
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetY: {
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, sizes.offset()[1], it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_offset(1), it.size_, it.offset_);
         }
         break;
       }
       case amd::KernelParameterDescriptor::HiddenGlobalOffsetZ: {
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, sizes.offset()[2], it.size_, it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_offset(2), it.size_, it.offset_);
         }
         break;
       }
@@ -4595,42 +4586,38 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountX:
-        WriteAqlArgAt(hidden_arguments, global[0] / local[0], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_count(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountY:
-        WriteAqlArgAt(hidden_arguments, global[1] / local[1], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_count(1), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountZ:
-        WriteAqlArgAt(hidden_arguments, global[2] / local[2], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_count(2), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeX:
-        WriteAqlArgAt(hidden_arguments, local[0], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_local(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeY:
-        WriteAqlArgAt(hidden_arguments, local[1], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_local(1), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeZ:
-        WriteAqlArgAt(hidden_arguments, local[2], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_local(2), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[0] % local[0]), it.size_,
-                      it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(0), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderY:
-        if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[1] % local[1]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 2) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderZ:
-        if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[2] % local[2]), it.size_,
-                        it.offset_);
+        if (sizes.get_dimensions() >= 3) {
+          WriteAqlArgAt(hidden_arguments, sizes.get_block_remainder(2), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGridDims:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(sizes.dimensions()), it.size_,
-                      it.offset_);
+        WriteAqlArgAt(hidden_arguments, sizes.get_dimensions(), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenPrivateBase:
         WriteAqlArgAt(hidden_arguments,
@@ -4707,40 +4694,42 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     auto& dispatchPacket = dispatchPacketUnion.kernelDispatch;
     memset(&dispatchPacket, 0, sizeof(dispatchPacket));
 
-    uint32_t newGlobalSize[3] = {global[0], global[1], global[2]};
-
     dispatchPacket.header = kInvalidAql;
     dispatchPacket.kernel_object = gpuKernel.KernelCodeHandle();
 
     // dispatchPacket.header = aqlHeader_;
-    // dispatchPacket.setup |= sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+    // dispatchPacket.setup |= sizes.get_dimensions() <<
+    // HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
 
-    bool extDispatchPacket =
-        (sizes.dimensions() > 0 && sizes.cluster()[0] > 1) ||
-        (sizes.dimensions() > 1 && sizes.cluster()[1] > 1) ||
-        (sizes.dimensions() > 2 && sizes.cluster()[2] > 1) ||
-        dev().settings().ext_dispatch_packet_;
+    bool extDispatchPacket = (sizes.get_dimensions() > 0 && sizes.get_cluster(0) > 1) ||
+                             (sizes.get_dimensions() > 1 && sizes.get_cluster(1) > 1) ||
+                             (sizes.get_dimensions() > 2 && sizes.get_cluster(2) > 1) ||
+                             dev().settings().ext_dispatch_packet_;
 
     if (extDispatchPacket) {
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
 
-      dispatchPacketExt.cluster_size_x = sizes.dimensions() > 0 ? sizes.cluster()[0] : 1;
-      dispatchPacketExt.cluster_size_y = sizes.dimensions() > 1 ? sizes.cluster()[1] : 1;
-      dispatchPacketExt.cluster_size_z = sizes.dimensions() > 2 ? sizes.cluster()[2] : 1;
+      dispatchPacketExt.cluster_size_x = sizes.get_dimensions() > 0 ? sizes.get_cluster(0) : 1;
+      dispatchPacketExt.cluster_size_y = sizes.get_dimensions() > 1 ? sizes.get_cluster(1) : 1;
+      dispatchPacketExt.cluster_size_z = sizes.get_dimensions() > 2 ? sizes.get_cluster(2) : 1;
 
       // Already validated in HIP Launch Params that newGlobalSize is perfectly divisible by local
       // and it is divisible by cluster size.
-      dispatchPacketExt.cluster_count_x = sizes.dimensions() > 0
-                                          ? (newGlobalSize[0] / local[0] / sizes.cluster()[0]) : 1;
-      dispatchPacketExt.cluster_count_y = sizes.dimensions() > 1
-                                          ? (newGlobalSize[1] / local[1] / sizes.cluster()[1]) : 1;
-      dispatchPacketExt.cluster_count_z = sizes.dimensions() > 2
-                                          ? (newGlobalSize[2] / local[2] / sizes.cluster()[2]) : 1;
+      assert((sizes.get_block_count(0) % sizes.get_cluster(0) == 0) &&
+             "Assumed global size invariant failed, must be cleanly divisible by cluster size");
+      assert(sizes.get_dimensions() < 2 || (sizes.get_block_count(1) % sizes.get_cluster(1) == 0));
+      assert(sizes.get_dimensions() < 3 || (sizes.get_block_count(2) % sizes.get_cluster(2) == 0));
+      dispatchPacketExt.cluster_count_x =
+          sizes.get_dimensions() > 0 ? (sizes.get_block_count(0) / sizes.get_cluster(0)) : 1;
+      dispatchPacketExt.cluster_count_y =
+          sizes.get_dimensions() > 1 ? (sizes.get_block_count(1) / sizes.get_cluster(1)) : 1;
+      dispatchPacketExt.cluster_count_z =
+          sizes.get_dimensions() > 2 ? (sizes.get_block_count(2) / sizes.get_cluster(2)) : 1;
 
     } else {
-      dispatchPacket.grid_size_x = sizes.dimensions() > 0 ? newGlobalSize[0] : 1;
-      dispatchPacket.grid_size_y = sizes.dimensions() > 1 ? newGlobalSize[1] : 1;
-      dispatchPacket.grid_size_z = sizes.dimensions() > 2 ? newGlobalSize[2] : 1;
+      dispatchPacket.grid_size_x = sizes.get_dimensions() > 0 ? sizes.get_global(0) : 1;
+      dispatchPacket.grid_size_y = sizes.get_dimensions() > 1 ? sizes.get_global(1) : 1;
+      dispatchPacket.grid_size_z = sizes.get_dimensions() > 2 ? sizes.get_global(2) : 1;
     }
 
     if (dev().settings().groupMemCarveout_) {
@@ -4757,9 +4746,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       }
     }
 
-    dispatchPacket.workgroup_size_x = sizes.dimensions() > 0 ? local[0] : 1;
-    dispatchPacket.workgroup_size_y = sizes.dimensions() > 1 ? local[1] : 1;
-    dispatchPacket.workgroup_size_z = sizes.dimensions() > 2 ? local[2] : 1;
+    dispatchPacket.workgroup_size_x = sizes.get_dimensions() > 0 ? sizes.get_local(0) : 1;
+    dispatchPacket.workgroup_size_y = sizes.get_dimensions() > 1 ? sizes.get_local(1) : 1;
+    dispatchPacket.workgroup_size_z = sizes.get_dimensions() > 2 ? sizes.get_local(2) : 1;
 
     dispatchPacket.kernarg_address = argBuffer;
     dispatchPacket.group_segment_size = ldsUsage + sharedMemBytes;
@@ -4801,16 +4790,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
         // For an ext-dispatch vendor packet byte+2 is amd_format, not setup; set
         // amd_format=EXT_KERNEL_DISPATCH and shift setup (dimensions) into byte+3.
-        aql_packet->setup = static_cast<uint16_t>(HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
-                              | ((sizes.dimensions()
-                                  << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
+        aql_packet->setup = static_cast<uint16_t>(
+            HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH |
+            ((sizes.get_dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
       } else {
         aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
                               (1 << HSA_PACKET_HEADER_BARRIER) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-        aql_packet->setup = static_cast<uint16_t>(sizes.dimensions()
-                              << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
+        aql_packet->setup = static_cast<uint16_t>(sizes.get_dimensions()
+                                                  << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
       }
     }
 
@@ -4821,10 +4810,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       // on normal dispatch packet, first 32 bits are header & setup. In ext dispatch packet,
       // the first 32 bits are header, amd_format, setup. Update the "rest" of the 32 bits, so we
       // can commit it atomically in packet_store_release.
-      rest = (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
-              | ((sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
+      rest = (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH |
+              ((sizes.get_dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
     } else {
-      rest = (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
+      rest = (sizes.get_dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
     }
 
     metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
@@ -4883,6 +4872,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
  */
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
+  // Finalize the local work size in the command's container before dispatch.
+  // Safe to mutate in place: each NDRangeKernelCommand targets a single device
+  // and both calls are idempotent (UpdateNullLocalWorkSize self-guards on an
+  // already-set local size), so graph replay re-submitting the same command is
+  // fine.
+  const device::Kernel* devKernel = vcmd.kernel().getDeviceKernel(dev());
+  amd::NDRangeContainer& ndSizes = vcmd.sizes();
+  devKernel->UpdateNullLocalWorkSize(ndSizes);
+  devKernel->SetLocalWorkSizeIfKernelRequired(ndSizes);
+
   if (vcmd.cooperativeGroups()) {
     // Wait for the execution on the current queue, since the coop groups will use the device queue
     releaseGpuMemoryFence(kSkipCpuWait);

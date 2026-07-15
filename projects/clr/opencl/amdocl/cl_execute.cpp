@@ -8,7 +8,7 @@
 #include "vdi_common.hpp"
 
 #include "platform/kernel.hpp"
-#include "platform/ndrange.hpp"
+#include "platform/NDrange_container.hpp"
 #include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "os/os.hpp"
@@ -217,9 +217,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
           (local_work_size[dim] != devKernel->workGroupInfo()->compileSize_[dim])) {
         return CL_INVALID_WORK_GROUP_SIZE;
       }
-      // >32bits global work size is not supported.
-      if ((global_work_size[dim] == 0) ||
-          (global_work_size[dim] > static_cast<size_t>(0xffffffff))) {
+      if (global_work_size[dim] == 0) {
         return CL_INVALID_GLOBAL_WORK_SIZE;
       }
       numWorkItems *= local_work_size[dim];
@@ -235,6 +233,13 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
           return CL_INVALID_WORK_GROUP_SIZE;
         }
       }
+    }
+  }
+
+  // global work size larger than 32 bits is not supported
+  for (cl_uint dim = 0; dim < work_dim; ++dim) {
+    if (global_work_size[dim] > static_cast<size_t>(0xffffffff)) {
+      return CL_INVALID_GLOBAL_WORK_SIZE;
     }
   }
 

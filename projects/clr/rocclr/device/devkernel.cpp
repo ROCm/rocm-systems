@@ -6,7 +6,7 @@
 
 #include "platform/runtime.hpp"
 #include "platform/program.hpp"
-#include "platform/ndrange.hpp"
+#include "platform/NDrange_container.hpp"
 #include "platform/kernel_init.hpp"
 #include "devkernel.hpp"
 #include "utils/macros.hpp"
@@ -684,90 +684,102 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
 Kernel::~Kernel() { delete signature_; }
 
 // ================================================================================================
-void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
-                               amd::NDRange& lclWorkSize) const {
-  // Initialize the default workgoup info
-  // Check if the kernel has the compiled sizes
-  if (workGroupInfo()->compileSize_[0] == 0) {
-    // Find the default local workgroup size, if it wasn't specified
-    if (lclWorkSize[0] == 0) {
-      // Find threads per group
-      size_t thrPerGrp = workGroupInfo()->size_;
+void Kernel::UpdateNullLocalWorkSize(amd::NDRangeContainer& sizes) const {
+  // Only compute a default local size when the kernel has no compiled
+  // (reqd_work_group_size) size AND the caller didn't provide one. Self-guarded
+  // so ordering with SetLocalWorkSizeIfKernelRequired is irrelevant, and so
+  // repeated submission (e.g. graph replay) is idempotent.
+  if (workGroupInfo()->compileSize_[0] != 0 || sizes.get_local(0) != 0) {
+    return;
+  }
+  const uint16_t workDim = sizes.get_dimensions();
+  size_t thrPerGrp = workGroupInfo()->size_;
 
-      // Check if kernel uses images
-      if (flags_.imageEna_ &&
-          // and thread group is a multiple value of wavefronts
-          ((thrPerGrp % workGroupInfo()->wavefrontSize_) == 0) &&
-          // and it's 2 or 3-dimensional workload
-          (workDim > 1) && (((gblWorkSize[0] % 16) == 0) && ((gblWorkSize[1] % 16) == 0))) {
-        // Use 8x8 workgroup size if kernel has image writes
-        if (flags_.imageWriteEna_ || (thrPerGrp != device().info().preferredWorkGroupSize_)) {
-          lclWorkSize[0] = 8;
-          lclWorkSize[1] = 8;
-        } else {
-          lclWorkSize[0] = 16;
-          lclWorkSize[1] = 16;
-        }
-        if (workDim == 3) {
-          lclWorkSize[2] = 1;
-        }
-      } else {
-        size_t tmp = thrPerGrp;
-        // Split the local workgroup into the most efficient way
-        for (uint d = 0; d < workDim; ++d) {
-          size_t div = tmp;
-          for (; (gblWorkSize[d] % div) != 0; div--);
-          lclWorkSize[d] = div;
-          tmp /= div;
-        }
+  // Check if kernel uses images
+  if (flags_.imageEna_ &&
+      // and thread group is a multiple value of wavefronts
+      ((thrPerGrp % workGroupInfo()->wavefrontSize_) == 0) &&
+      // and it's 2 or 3-dimensional workload
+      (workDim > 1) && (((sizes.get_global(0) % 16) == 0) && ((sizes.get_global(1) % 16) == 0))) {
+    // Use 8x8 workgroup size if kernel has image writes
+    if (flags_.imageWriteEna_ || (thrPerGrp != device().info().preferredWorkGroupSize_)) {
+      sizes.set_local(0, 8);
+      sizes.set_local(1, 8);
+    } else {
+      sizes.set_local(0, 16);
+      sizes.set_local(1, 16);
+    }
+    if (workDim == 3) {
+      sizes.set_local(2, 1);
+    }
+  } else {
+    size_t tmp = thrPerGrp;
+    // Split the local workgroup into the most efficient way
+    for (uint d = 0; d < workDim; ++d) {
+      size_t div = tmp;
+      for (; (sizes.get_global(d) % div) != 0; div--);
+      sizes.set_local(d, static_cast<uint16_t>(div));
+      tmp /= div;
+    }
 
-        if (!workGroupInfo()->uniformWorkGroupSize_) {
-          // Assuming DWORD access
-          const uint cacheLineMatch = device().info().globalMemCacheLineSize_ >> 2;
+    if (!workGroupInfo()->uniformWorkGroupSize_) {
+      // Assuming DWORD access
+      const uint cacheLineMatch = device().info().globalMemCacheLineSize_ >> 2;
 
-          // Check if we couldn't find optimal workload
-          if (((lclWorkSize.product() % workGroupInfo()->wavefrontSize_) != 0) ||
-              // or size is too small for the cache line
-              (lclWorkSize[0] < cacheLineMatch)) {
-            size_t maxSize = 0;
-            size_t maxDim = 0;
-            for (uint d = 0; d < workDim; ++d) {
-              if (maxSize < gblWorkSize[d]) {
-                maxSize = gblWorkSize[d];
-                maxDim = d;
-              }
+      // Inline product over the resolved local sizes (size_t accumulator so the
+      // intermediate multiply can't wrap the uint16_t element type).
+      size_t lclProduct = sizes.get_local(0);
+      for (uint d = 1; d < workDim; ++d) {
+        lclProduct *= sizes.get_local(d);
+      }
+
+      // Check if we couldn't find optimal workload
+      if (((lclProduct % workGroupInfo()->wavefrontSize_) != 0) ||
+          // or size is too small for the cache line
+          (sizes.get_local(0) < cacheLineMatch)) {
+        size_t maxSize = 0;
+        uint16_t maxDim = 0;
+        for (uint16_t d = 0; d < workDim; ++d) {
+          if (maxSize < sizes.get_global(d)) {
+            maxSize = sizes.get_global(d);
+            maxDim = d;
+          }
+        }
+        // Use X dimension as high priority. Runtime will assume that
+        // X dimension is more important for the address calculation
+        if ((maxDim != 0) && (sizes.get_global(0) >= (cacheLineMatch / 2))) {
+          sizes.set_local(0, static_cast<uint16_t>(cacheLineMatch));
+          thrPerGrp /= cacheLineMatch;
+          sizes.set_local(maxDim, static_cast<uint16_t>(thrPerGrp));
+          for (uint16_t d = 1; d < workDim; ++d) {
+            if (d != maxDim) {
+              sizes.set_local(d, 1);
             }
-            // Use X dimension as high priority. Runtime will assume that
-            // X dimension is more important for the address calculation
-            if ((maxDim != 0) && (gblWorkSize[0] >= (cacheLineMatch / 2))) {
-              lclWorkSize[0] = cacheLineMatch;
-              thrPerGrp /= cacheLineMatch;
-              lclWorkSize[maxDim] = thrPerGrp;
-              for (uint d = 1; d < workDim; ++d) {
-                if (d != maxDim) {
-                  lclWorkSize[d] = 1;
-                }
-              }
-            } else {
-              // Check if a local workgroup has the most optimal size
-              if (thrPerGrp > maxSize) {
-                thrPerGrp = maxSize;
-              }
-              lclWorkSize[maxDim] = thrPerGrp;
-              for (uint d = 0; d < workDim; ++d) {
-                if (d != maxDim) {
-                  lclWorkSize[d] = 1;
-                }
-              }
+          }
+        } else {
+          // Check if a local workgroup has the most optimal size
+          if (thrPerGrp > maxSize) {
+            thrPerGrp = maxSize;
+          }
+          sizes.set_local(maxDim, static_cast<uint16_t>(thrPerGrp));
+          for (uint16_t d = 0; d < workDim; ++d) {
+            if (d != maxDim) {
+              sizes.set_local(d, 1);
             }
           }
         }
       }
     }
-  } else {
-    for (uint d = 0; d < workDim; ++d) {
-      lclWorkSize[d] = workGroupInfo()->compileSize_[d];
-    }
+  }
+}
+
+// ================================================================================================
+void Kernel::SetLocalWorkSizeIfKernelRequired(amd::NDRangeContainer& sizes) const {
+  if (workGroupInfo()->compileSize_[0] == 0) {
+    return;
+  }
+  for (uint16_t d = 0; d < sizes.get_dimensions(); ++d) {
+    sizes.set_local(d, static_cast<uint16_t>(workGroupInfo()->compileSize_[d]));
   }
 }
 

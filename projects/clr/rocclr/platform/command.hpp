@@ -13,7 +13,7 @@
 #include "platform/agent.hpp"
 #include "platform/object.hpp"
 #include "platform/context.hpp"
-#include "platform/ndrange.hpp"
+#include "platform/NDrange_container.hpp"
 #include "platform/kernel.hpp"
 #include "device/device.hpp"
 #include "utils/concurrent.hpp"
@@ -1488,6 +1488,10 @@ class NDRangeKernelCommand : public Command {
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
   DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
+  //! Shared constructor tail: forces device-kernel creation, sets workgroup
+  //! count for cooperative launches, enables forced profiling, retains kernel.
+  void initExecuteKernel(HostQueue& queue, bool forceProfiling);
+
  public:
   enum {
     CooperativeGroups = 0x01,
@@ -1513,14 +1517,11 @@ class NDRangeKernelCommand : public Command {
   //! Return the parameters given to this kernel.
   const_address parameters() const { return parameters_; }
 
-  //! Return the kernel NDRange.
+  //! Return the kernel sizes.
   const NDRangeContainer& sizes() const { return sizes_; }
 
-  //! updates kernel NDRange.
-  void setSizes(const size_t* globalWorkOffset, const size_t* globalWorkSize,
-                const size_t* localWorkSize) {
-    sizes_.update(3, globalWorkOffset, globalWorkSize, localWorkSize);
-  }
+  //! Return the kernel sizes (mutable). Submission finalizes local_ in place.
+  NDRangeContainer& sizes() { return sizes_; }
 
   //! Return the shared memory size
   uint32_t sharedMemBytes() const { return sharedMemBytes_; }
@@ -1559,15 +1560,12 @@ class NDRangeKernelCommand : public Command {
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
 
-  //! Set the local work size.
-  void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
-
   //! Set the number of workgroups
   void setNumWorkgroups() {
     uint32_t numWorkgroups = 1;
-    for (uint i = 0; i < sizes().dimensions(); i++) {
-      if (sizes().local()[i] != 0) {
-        numWorkgroups *= (sizes().global()[i] / sizes().local()[i]);
+    for (uint16_t i = 0; i < sizes().get_dimensions(); i++) {
+      if (sizes().get_local(i) != 0) {
+        numWorkgroups *= (sizes().get_global(i) / sizes().get_local(i));
       }
     }
     numWorkgroups_ = numWorkgroups;
