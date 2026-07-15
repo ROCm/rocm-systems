@@ -124,6 +124,7 @@ class TestRCCLRocprof:
     def test_rocprofv3_help_shows_rccl_trace(self):
         skip_if_missing(PATHS["rocprofv3"], "rocprofv3")
         result = run_cmd([PATHS["rocprofv3"], "--help"])
+        assert result.returncode == 0, f"rocprofv3 --help failed: {result.stderr}"
         combined = result.stdout + result.stderr
         assert "--rccl-trace" in combined, (
             "rocprofv3 --help does not mention --rccl-trace"
@@ -165,8 +166,9 @@ class TestRCCLRocprof:
                 with open(csv_file) as f:
                     reader = csv.reader(f)
                     rows = list(reader)
-                    total_rows += len(rows) - 1
-                    log.info(f"  {csv_file.name}: {len(rows)-1} data rows")
+                    data_rows = max(0, len(rows) - 1)
+                    total_rows += data_rows
+                    log.info(f"  {csv_file.name}: {data_rows} data rows")
 
             assert total_rows > 0, "CSV output files are empty (no trace data)"
 
@@ -212,11 +214,12 @@ class TestRCCLRocprof:
             found_any = any(
                 ind.lower() in all_content.lower() for ind in rccl_indicators
             )
-            if not found_any:
-                log.warning(
-                    "No RCCL-specific entries found in trace output. "
-                    "rocprofiler-register may not be exposing RCCL callbacks."
-                )
+            assert found_any, (
+                "No RCCL-specific entries found in trace output. "
+                "rocprofiler-register may not be exposing RCCL callbacks. "
+                f"Searched for {rccl_indicators} in {len(csv_files)} CSV files "
+                f"({len(all_content)} bytes total)."
+            )
 
     def test_rocprofv3_sys_trace_rccl(self):
         skip_if_missing(PATHS["rocprofv3"], "rocprofv3")
