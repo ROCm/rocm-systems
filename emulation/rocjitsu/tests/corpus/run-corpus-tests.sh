@@ -4,6 +4,7 @@ set -euo pipefail
 : "${ROCM_PATH:?ROCM_PATH must be set}"
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
+WORKER_COUNT="${WORKER_COUNT:-8}"
 SOFT_TIMEOUT_SECONDS="${SOFT_TIMEOUT_SECONDS:-30}"
 HARD_TIMEOUT_SECONDS="${HARD_TIMEOUT_SECONDS:-60}"
 
@@ -40,7 +41,7 @@ for target in "${targets[@]}"; do
     --tb=no
   )
 
-  if "${pytest_cmd[@]}" -n 8 -o "timeout_func_only=true" --timeout "${SOFT_TIMEOUT_SECONDS}"; then
+  if "${pytest_cmd[@]}" -n "${WORKER_COUNT}" -o "timeout_func_only=true" --timeout "${SOFT_TIMEOUT_SECONDS}"; then
     status_message="All (${name}) tests passed."
   elif "${pytest_cmd[@]}" --last-failed --timeout "${HARD_TIMEOUT_SECONDS}"; then
     status_message="Retried (${name}) tests passed."

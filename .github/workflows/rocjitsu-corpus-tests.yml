@@ -182,11 +182,13 @@ jobs:
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
 
-          cmake --build "${ROCJITSU_BUILD_DIR}"
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -E "${EXCLUDED_TESTS}" \
-            --output-on-failure
+            --output-on-failure \
+            -j "${WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
