@@ -7,6 +7,8 @@
 #include "core/demangler.hpp"
 #include "defines.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <timemory/components/types.hpp>
 #include <timemory/enum.h>
 #include <timemory/utility/types.hpp>
@@ -32,8 +34,8 @@ struct component_categories
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
-            "::", "component", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
+        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(fmt::format(
+            "component::{}", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
     }
 
     void operator()(std::set<std::string>& _v) const

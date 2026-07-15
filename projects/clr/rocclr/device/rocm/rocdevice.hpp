@@ -730,6 +730,7 @@ class Device : public NullDevice {
   size_t alloc_granularity_;
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
+  mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access

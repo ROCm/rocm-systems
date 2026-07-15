@@ -87,7 +87,21 @@ public:
   bool prepare_for_discovery();
 
   /// @brief Add one open reference for a duplicated KFD fd.
-  void retain_local_open() override;
+  /// @retval true A reference was added.
+  /// @retval false No live guest process to retain.
+  [[nodiscard]] bool retain_local_open() override;
+
+  /// @brief Stop classifying the hidden real /dev/kfd fd number as KFD after a
+  /// dup2/dup3 overwrote it.
+  /// @details GuestKfd hands applications ordinary dup fds and keeps the real
+  /// /dev/kfd fd internal (real_kfd_fd_). If a dup2/dup3 target reuses that hidden
+  /// fd number, fd()/owns_fd() must stop reporting it as KFD so later ioctl/mmap/
+  /// close are not routed to whatever now occupies the number. The real fd is NOT
+  /// counted in open_refs_ (only app-facing dups are), so a match returns
+  /// kClearedKeepRefs — the interposer must clear the classification WITHOUT
+  /// dropping an open reference. Returns kNotPrimary if @p fd is not the current
+  /// hidden real fd.
+  [[nodiscard]] PrimaryInvalidation invalidate_primary_fd(int fd) override;
 
 private:
   class TopologyOverlay;
