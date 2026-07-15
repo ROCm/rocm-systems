@@ -62,7 +62,7 @@ class GDAContext : public Context {
   __device__ void fence(int pe);
 
   /**
-   * @brief Targeted-ordering fence: uses fence_targeted() (s_waitcnt vmcnt(0))
+   * @brief Targeted-ordering fence: uses wait_on_vmem(0)
    * in place of the expensive per-QP quiet + system-scope L2 writeback.
    * Correct when prior puts used cache-bypassing stores (sc0 sc1).
    */
@@ -235,7 +235,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
-  /** _av variant: uses mlx5_post_wqe_rma_av (cache-bypassing WQE + fence_targeted doorbell). */
+  /** _av variant: uses mlx5_post_wqe_rma_av (cache-bypassing WQE + wait_on_vmem(0) doorbell). */
   __device__ void putmem_nbi_wave_av(void *dest, const void *source,
                                      size_t nelems, int pe);
 

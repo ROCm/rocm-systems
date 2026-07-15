@@ -237,7 +237,8 @@ __device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
                                                     T val) {
   while (!test(ivars, cmp, val)) {
   }
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");
+  detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                               detail::atomic::memory_order_acquire>();
 }
 
 template <typename T>
@@ -245,7 +246,7 @@ __device__ __forceinline__ void Context::wait_until_av(T *ivars, int cmp,
                                                        T val) {
   while (!test(ivars, cmp, val)) {
   }
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ __forceinline__ size_t status_entry(size_t nelems,

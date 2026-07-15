@@ -171,7 +171,7 @@ class QueuePair {
   __device__ void put_nbi(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 
-  /** Targeted-ordering variant: cache-bypassing WQE stores + fence_targeted doorbell. */
+  /** Targeted-ordering variant: cache-bypassing WQE stores + wait_on_vmem(0) doorbell. */
   __device__ void put_nbi_av(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 

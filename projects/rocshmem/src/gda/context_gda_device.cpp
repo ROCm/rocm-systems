@@ -170,43 +170,84 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
 
 __device__ void GDAContext::fence() {
   /**
-   * Matches the sc26 targeted_order reference implementation.
+   * Operations issued by this context may use two backends: RDMA QPs
+   * for remote PEs and the IPC fast path, when enabled, for shm-local
+   * peers. The fence must order writes across both paths.
    *
-   * rocSHMEM uses one QP per PE per context by default
-   * (ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX=1).  With a single QP all
-   * puts to a given PE travel in order through the same NIC queue, so
-   * NIC in-order delivery guarantees payload visibility before the count
-   * signal without any explicit CQ drain.  A GPU-side system release
-   * fence (buffer_wbl2) is sufficient to order WQE postings and IPC
-   * writes for all paths.
+   * RDMA: A single QP already orders its own traffic through in-order
+   * delivery; only the multi-QP case requires an explicit per-QP quiet.
    *
    * For the targeted-ordering path see fence_av() which uses
-   * fence_targeted() (s_waitcnt vmcnt(0)) instead.
+   * wait_on_vmem(0) instead.
    */
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for (uint32_t i = 0; i < num_qps; i++) {
+      qps[i].quiet(wf_info);
+    }
+  }
+
+  /**
+   * IPC: Skip when there are no shm-local peers. Otherwise, issue a
+   * system-scope release fence to ensure prior IPC writes are visible
+   * to peer ranks.
+   */
+  if (constmem.ipc_shm_size != 0) {
+    ipcImpl_.ipcFence();
+  }
 }
 
 __device__ void GDAContext::fence_av() {
   /**
    * Targeted-ordering fence for the GDA context.
    *
-   * Replaces the standard fence's expensive per-QP quiet + system-scope
-   * ipcFence() with fence_targeted() (s_waitcnt vmcnt(0)):
+   * Uses wait_on_vmem(0) — a portable drain of all in-flight vector memory
+   * operations — in place of the standard ipcFence<system, release>() which
+   * emits a system-scope L2 writeback (buffer_wbl2):
    *  - RDMA path: a single QP delivers writes in order; no CQ drain needed
    *    to establish ordering, only a GPU-side VMEM completion wait.
-   *  - IPC path: fence_targeted() replaces ipcImpl_.ipcFence() (which emits
-   *    buffer_wbl2) when prior stores already used sc0 sc1 cache bypass.
+   *  - IPC path: prior stores used sc0 sc1 cache bypass, so no L2 writeback
+   *    is required; wait_on_vmem(0) is sufficient.
+   *
+   * wait_on_vmem(0) lowers to s_waitcnt vmcnt(0) on GFX9/GFX9.5 and to the
+   * equivalent split load/store waits on GFX12, avoiding arch-specific asm.
    */
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ void GDAContext::fence_av(int pe) {
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ void GDAContext::fence(int pe) {
-  // With a single QP per PE, NIC in-order delivery handles per-PE ordering.
-  fence();
+  /**
+   * Operations targeting `pe` may use two backends: RDMA QPs for remote
+   * PEs and the IPC fast path, when enabled, for shm-local peers. The
+   * fence must order writes to `pe` across both paths.
+   *
+   * RDMA: A single QP per PE already orders its own traffic through
+   * in-order delivery; only the multi-QP-per-PE case requires an explicit
+   * quiet on each QP associated with `pe`.
+   */
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for (uint32_t i = 0; i < num_qps_per_pe; i++) {
+      int qp_index = i * constmem.num_pes + pe;
+      qps[qp_index].quiet(wf_info);
+    }
+  }
+
+  /**
+   * IPC: Skip when `pe` is not shm-local. Otherwise, issue a
+   * system-scope release fence so prior IPC writes to `pe` are visible
+   * to that peer rank. Passing `local_pe` lets the SDMA-enabled policy
+   * quiet only the channels associated with `pe` instead of falling
+   * back to sdmaQuietAll().
+   */
+  int local_pe;
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    ipcImpl_.ipcFence(local_pe);
+  }
 }
 
 __device__ void GDAContext::quiet() {

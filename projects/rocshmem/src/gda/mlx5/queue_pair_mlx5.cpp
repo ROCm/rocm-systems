@@ -101,14 +101,15 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
 /**
  * @brief Targeted-ordering variant of mlx5_ring_doorbell.
  *
- * Replaces system-scope release stores with fence_targeted() +
+ * Replaces system-scope release stores with wait_on_vmem(0) +
  * relaxed system-scope stores:
- *   - fence_targeted() (s_waitcnt vmcnt(0)) before dbrec: ensures all
- *     preceding cache-bypassing WQE stores have reached HBM before the
- *     NIC reads the doorbell record.
- *   - Relaxed system-scope store for dbrec (sc0 sc1, no preceding buffer_wbl2).
- *   - fence_targeted() between dbrec and doorbell register: ensures dbrec
- *     is visible before the NIC is notified via the BlueFlame write.
+ *   - wait_on_vmem(0) before dbrec: drains all in-flight VMEM ops (including
+ *     cache-bypassing WQE stores) so they are committed to HBM before the
+ *     NIC reads the doorbell record.  Portable across GFX9/GFX10/GFX12.
+ *   - Relaxed system-scope store for dbrec (sc0 sc1, no L2 writeback needed
+ *     because preceding WQE stores used cache bypass).
+ *   - wait_on_vmem(0) between dbrec and doorbell register: ensures the dbrec
+ *     store is complete before the NIC is notified via the BlueFlame write.
  *   - Relaxed system-scope store for the doorbell register (MMIO, uncacheable).
  */
 __device__ void QueuePair::mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
@@ -120,10 +121,10 @@ __device__ void QueuePair::mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx
 
   // Drain all outstanding VMEM ops (including WQE cache-bypassing stores)
   // before making the doorbell record visible to the NIC.
-  fence_targeted();
+  wait_on_vmem(0);
   __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   // Order dbrec store before the doorbell register write.
-  fence_targeted();
+  wait_on_vmem(0);
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
@@ -329,7 +330,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
  *
  * Uses cache-bypassing stores (sc0 sc1) for the WQE copy so data is
  * written directly to HBM without populating the GPU's L1/L2 cache.
- * This is required so that fence_targeted() (s_waitcnt vmcnt(0)) is
+ * This is required so that wait_on_vmem(0) is
  * sufficient to guarantee NIC visibility before the doorbell is rung.
  *
  * Variables used only for GPU thread synchronisation (lock, sq.post,
@@ -356,7 +357,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
 
   // Copy WQE to SQ using cache-bypassing (SystemScope) stores so HBM
   // receives the data directly.  The NIC will DMA-read from HBM, and
-  // fence_targeted() in mlx5_ring_doorbell_av() ensures these stores are
+  // wait_on_vmem(0) in mlx5_ring_doorbell_av() ensures these stores are
   // complete before the doorbell is visible to the NIC.
   //
   // The WQE is a stack-local value; load each 16-byte chunk with standard

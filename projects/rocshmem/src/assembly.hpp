@@ -1498,18 +1498,6 @@ __device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits)
 #endif
 }
 
-/**
- * @brief Targeted fence: waits only for outstanding vector memory operations
- * to complete (s_waitcnt vmcnt(0)) without issuing a system-scope cache flush.
- *
- * Used by the _av variants of fence/wait_until to provide ordered visibility
- * to a specific remote PE without the cost of a full system-scope fence.
- */
-__device__ __forceinline__ void fence_targeted() {
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
-  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-#endif
-}
 
 }  // namespace rocshmem
 

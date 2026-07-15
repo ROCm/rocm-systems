@@ -338,7 +338,7 @@ class IpcOnImpl {
    *
    * Uses __ATOMIC_RELAXED instead of __ATOMIC_SEQ_CST, omitting the
    * implicit buffer_wbl2 + buffer_inv that SEQ_CST implies on gfx942.
-   * Safe to use after a preceding fence_av() / fence_targeted() that
+   * Safe to use after a preceding fence_av() / wait_on_vmem(0) that
    * has already ensured all prior writes are visible to system scope.
    */
   template <typename T>

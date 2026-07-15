@@ -75,11 +75,12 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
 }
 
 __device__ void IPCContext::fence() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+  ipcImpl_.ipcFence();
 }
 
 __device__ void IPCContext::fence(int pe) {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+                    detail::atomic::memory_order_release>(pe);
 }
 
 __device__ void IPCContext::putmem_nbi_wave_av(void *dest, const void *source,
@@ -90,11 +91,11 @@ __device__ void IPCContext::putmem_nbi_wave_av(void *dest, const void *source,
 }
 
 __device__ void IPCContext::fence_av() {
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ void IPCContext::fence_av(int pe) {
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ void IPCContext::quiet() {
@@ -123,8 +124,8 @@ __device__ void IPCContext::putmem_wg_av(void *dest, const void *source,
    * Targeted-ordering blocking WG put.
    *
    * Uses ipcCopy_wg<Put> (non-blocking, sc0 sc1 stores) + s_barrier +
-   * fence_targeted() in place of ipcCopy_wg<PutBlocking> which internally
-   * issues a full system-scope release fence.  fence_targeted() =
+   * wait_on_vmem(0) in place of ipcCopy_wg<PutBlocking> which internally
+   * issues a full system-scope release fence.  wait_on_vmem(0) =
    * s_waitcnt vmcnt(0) is sufficient because the sc0 sc1 stores write
    * directly to HBM without populating the L2 cache.
    */
@@ -132,7 +133,7 @@ __device__ void IPCContext::putmem_wg_av(void *dest, const void *source,
   ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(
       ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
   __builtin_amdgcn_s_barrier();
-  fence_targeted();
+  wait_on_vmem(0);
 }
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,
