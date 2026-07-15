@@ -28,7 +28,7 @@ namespace amd::smi {
 
 // Internal helper under test. It decides whether the KFD topology total should
 // be preferred over the sysfs mem_info_vram_total value for VRAM (see
-// rsmi_dev_memory_total_get in rocm_smi.cc / SWDEV-536184).
+// rsmi_dev_memory_total_get in rocm_smi.cc).
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total);
 
@@ -39,11 +39,14 @@ namespace {
 constexpr uint64_t kSampleVramTotal = 128ULL * 1024 * 1024 * 1024;  // 128 GiB
 constexpr uint64_t kApuCarveout = 512ULL * 1024 * 1024;             // 512 MiB BIOS carveout
 constexpr uint64_t kApuUnified = 110ULL * 1024 * 1024 * 1024;       // 110 GiB unified pool
+// Real MI300X SPX values observed on hardware: sysfs and KFD agree byte-for-byte.
+constexpr uint64_t kMi300xSpxTotal = 206141652992ULL;  // ~192 GiB
 
 }  // namespace
 
 // When the sysfs read failed, the KFD total is always preferred, regardless of
-// the reported partition mode.
+// the reported partition mode. This is the MI300A path, where the sysfs
+// mem_info_vram_total node is absent.
 TEST(AmdSmiVramTotalPreferKfdTest, UnusableSysfsAlwaysPrefersKfd) {
   for (const char* mode : {"", "SPX", "CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(false, kSampleVramTotal, mode, kSampleVramTotal))
@@ -77,10 +80,16 @@ TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsPartitionedPrefersKfd) {
 }
 
 // APU (e.g. gfx1151 / Strix Halo): sysfs reports only the small BIOS VRAM
-// carveout while KFD reports the true unified pool, which must win.
+// carveout while KFD reports the true, larger unified pool, which must win.
 TEST(AmdSmiVramTotalPreferKfdTest, ApuCarveoutPrefersKfd) {
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "", kApuUnified));
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "SPX", kApuUnified));
+}
+
+// Regression guard for MI300X SPX: sysfs and KFD report the same value, so the
+// final clause is false and the sysfs value is kept. Confirmed on hardware.
+TEST(AmdSmiVramTotalPreferKfdTest, Mi300xSpxAgreeingSourcesKeepsSysfs) {
+  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
 }
 
 // Discrete GPU: sysfs and KFD agree, so the sysfs value is kept.
