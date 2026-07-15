@@ -511,36 +511,37 @@ kernel3(const float c, const int iter_num)
 // ======================================================
 
 void
-run_kernel()
+run_kernel(size_t iter_num)
 {
     int wave_size = 0;
     HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
 
     // Get device properties to retrieve GFXIP version
     size_t num_blocks = BLOCK_SIZE;
-    size_t num_iters  = ITER_NUM;
 
     for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
-            kernel1<<<num_blocks, i>>>(i, num_iters);
+            kernel1<<<num_blocks, i>>>(i, iter_num);
         else
-            kernel2<<<num_blocks, i>>>(i, num_iters);
+            kernel2<<<num_blocks, i>>>(i, iter_num);
 
         check_hip_error();
         HIP_API_CALL(hipDeviceSynchronize());
     }
 
     float arg = 0;
-    kernel3<<<num_blocks, 4 * wave_size>>>(arg, num_iters);
+    kernel3<<<num_blocks, 4 * wave_size>>>(arg, iter_num);
     check_hip_error();
     HIP_API_CALL(hipDeviceSynchronize());
 }
 
 int
-main()
+main(int argc, char* argv[])
 {
-    run_kernel();
+    size_t iter_num = ITER_NUM;
+    if(argc > 1) iter_num = std::stoull(argv[1]);
+    run_kernel(iter_num);
     return 0;
 }
 

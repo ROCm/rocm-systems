@@ -149,7 +149,9 @@ def validate_exec_mask_based_on_correlation_id(df):
     ).all(), "Exec_Mask does not match expected mask derived from Correlation_Id for all samples"
 
 
-def exec_mask_manipulation_validate_csv(df, all_sampled=False):
+def exec_mask_manipulation_validate_csv(
+    df, all_sampled=False, wave_size=None, num_kernels=None
+):
     assert not df.empty
 
     validate_instruction_comment(df)
@@ -158,40 +160,55 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
     # Validate samples with non-zero correlation IDs (and with decoded instructions)
     samples_cid_non_zero_df = df[df["Correlation_Id"] != 0]
 
-    # We have exactly wave_size + 1 kernels and matching correaltion IDs.
-    # Depending on the underlying architecture, that's either 33 (32 + 1)
-    # or 65
-    unique_kernels_num = samples_cid_non_zero_df["Correlation_Id"].max()
-    assert unique_kernels_num in [
-        33,
-        65,
-    ], f"Expected 33 or 65 unique kernels, got {unique_kernels_num}"
+    # Number of captured kernels (== max correlation id). In wrap mode this is the
+    # full run (wave_size + 1 kernels); in attach mode the window may capture fewer.
+    max_correlation_id = int(samples_cid_non_zero_df["Correlation_Id"].max())
+
+    if wave_size is None:
+        # Backward-compatible path: infer from the data. A full wrap-mode run always
+        # has exactly wave_size + 1 kernels, i.e. 33 (wave32) or 65 (wave64).
+        assert max_correlation_id in [
+            33,
+            65,
+        ], f"Expected 33 or 65 unique kernels, got {max_correlation_id}"
+        wave_size = max_correlation_id - 1
+
+    if num_kernels is None:
+        num_kernels = max_correlation_id
+    # Never expect more kernels than a full run would produce.
+    num_kernels = min(num_kernels, wave_size + 1)
 
     assert (samples_cid_non_zero_df["Correlation_Id"].astype(int) >= 1).all()
-    assert (
-        samples_cid_non_zero_df["Correlation_Id"].astype(int) <= unique_kernels_num
-    ).all()
+    assert (samples_cid_non_zero_df["Correlation_Id"].astype(int) <= num_kernels).all()
     if all_sampled:
         # all correlation IDs must be sampled
         assert (
             len(samples_cid_non_zero_df["Correlation_Id"].astype(int).unique())
-            == unique_kernels_num
+            == num_kernels
         )
+
+    is_full_capture = num_kernels == wave_size + 1
+
+    # The last kernel (kernel3, the v_rcp kernel) is only present on a full capture.
+    # On a partial attach capture, validate the exec masks on the captured kernels.
+    if not is_full_capture:
+        validate_exec_mask_based_on_correlation_id(samples_cid_non_zero_df.copy())
+        return
 
     # all kernels except the last one
     first_kernels_df = samples_cid_non_zero_df[
-        samples_cid_non_zero_df["Correlation_Id"] <= unique_kernels_num - 1
+        samples_cid_non_zero_df["Correlation_Id"] <= num_kernels - 1
     ]
 
     # Make a copy, so that we don't work (modify) a view.
     validate_exec_mask_based_on_correlation_id(first_kernels_df.copy())
 
     # validate the last kernel
-    last_kernel = df[df["Correlation_Id"] == unique_kernels_num]
+    last_kernel = df[df["Correlation_Id"] == num_kernels]
 
     # For 32 wave size, the exec mask is 32 bits or 8 hex digits.
     # For 64 wave size, the exec mask is 64 bits or 16 hex digits.
-    exec_mask_size_hex_digits = unique_kernels_num // 4
+    exec_mask_size_hex_digits = num_kernels // 4
     even_simd_threads_active_exec_mask = int("5" * exec_mask_size_hex_digits, 16)
     odd_simd_threads_active_exec_mask = int("A" * exec_mask_size_hex_digits, 16)
 
