@@ -34,4 +34,4 @@ jobs:
 
       - name: Run tests
         working-directory: .github/actions/rocprofiler-sdk-util/resolve-ci-config
-        run: python -m pytest test_resolve_ci_config.py -v
+        run: python -m unittest test_resolve_ci_config -v
