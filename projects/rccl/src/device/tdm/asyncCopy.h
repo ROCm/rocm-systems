@@ -286,7 +286,9 @@ __device__ void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t
 // Warp-level async copy from LDS into global memory.  The entire warp calls this with the same arguments.
 template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes){
-  async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp>(globalDst, ldsSrc, sizeInBytes);
+  // warpAsyncCopy shares one non-const `lds` parameter across load and store; the store path only reads from
+  // it, so dropping const here is safe.
+  async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp>(globalDst, const_cast<uint8_t*>(ldsSrc), sizeInBytes);
   if constexpr (sp == SyncPolicy::Sync) {
     asyncWait<0>();
   }
@@ -302,17 +304,28 @@ __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElemen
   group1.tileDim0(numElements);
 }
 
-template<CachePolicy cp = DEFAULT_CACHE_POLICY>
+// Warp-level tile copier built on top of the async-to/from-LDS builtins.  Exposes the same interface as
+// TileMover so the two can be used interchangeably as the TileMoverType of a copy kernel.  An entire warp
+// makes each call, and the shmem/global pointers must be uniform across the warp (no per-lane offsets).
+template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
 struct AsyncDataCopier{
-  size_t size_{0};
+  size_t sizeInBytes_{0};
+  T* shmemPtr_{nullptr};
 
-  __device__ void loadTile(const uint8_t* src, uint8_t* dst, size_t size){
-    size_ = size;
-    asyncLoadToLDS<cp>(src, dst, size);
+  // An entire warp makes this call.  The shmemPtr and srcPtr should be the same across all lanes in the warp.
+  __device__ void loadTile(T* shmemPtr, const T* srcPtr, int numElementsToProcess){
+    sizeInBytes_ = static_cast<size_t>(numElementsToProcess) * sizeof(T);
+    shmemPtr_ = shmemPtr;
+    asyncLoadToLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(srcPtr),
+                                          reinterpret_cast<uint8_t*>(shmemPtr),
+                                          sizeInBytes_);
   }
 
-  __device__ void storeTile(uint8_t* dst){
-    asyncStoreFromLDS<cp>(dst, src);
+  // An entire warp makes this call.  The dstPtr should be the same across all lanes in the warp.
+  __device__ void storeTile(T* dstPtr){
+    asyncStoreFromLDS<SyncPolicy::Async, cp>(reinterpret_cast<const uint8_t*>(shmemPtr_),
+                                             reinterpret_cast<uint8_t*>(dstPtr),
+                                             sizeInBytes_);
   }
 
   template<int WAIT_CNT = 0>
