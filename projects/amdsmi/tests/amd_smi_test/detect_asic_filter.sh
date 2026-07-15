@@ -73,6 +73,35 @@ if [ -z "$ASIC_NAME" ] && command -v amd-smi >/dev/null 2>&1; then
     fi
 fi
 
+# ---------- Privilege tier detection ----------
+# amdsmitst gates state-modifying tests on AMDSMI_NON_PRIVILEGED (skip) and
+# is_sudo_user() (uid == 0). Inside an unprivileged container the process is
+# uid 0 yet lacks CAP_SYS_ADMIN, so uid alone cannot tell it apart from
+# baremetal root. Detect that case and export AMDSMI_NON_PRIVILEGED so a plain
+# `source detect_asic_filter.sh && ./amdsmitst` skips the write tests instead of
+# hanging. A caller that already set AMDSMI_NON_PRIVILEGED is left untouched.
+if [ -z "${AMDSMI_NON_PRIVILEGED+x}" ]; then
+    in_container=""
+    if [ -f /.dockerenv ] || grep -qE 'docker|kubepods|containerd' /proc/1/cgroup 2>/dev/null; then
+        in_container="1"
+    fi
+    if [ -n "$in_container" ]; then
+        # CAP_SYS_ADMIN is bit 21; CapEff is a hex mask in /proc/self/status.
+        cap_eff=$(awk '/^CapEff:/{print $2}' /proc/self/status 2>/dev/null)
+        if [ -n "$cap_eff" ] && [ $(( 0x$cap_eff & (1 << 21) )) -ne 0 ]; then
+            echo "Privilege tier: privileged container" >&2
+        else
+            export AMDSMI_NON_PRIVILEGED=1
+            echo "Privilege tier: unprivileged container — exporting AMDSMI_NON_PRIVILEGED=1" >&2
+        fi
+    elif [ "$(id -u)" -ne 0 ]; then
+        export AMDSMI_NON_PRIVILEGED=1
+        echo "Privilege tier: non-root baremetal — exporting AMDSMI_NON_PRIVILEGED=1" >&2
+    else
+        echo "Privilege tier: baremetal root" >&2
+    fi
+fi
+
 # ---------- Virtualization detection ----------
 VIRT_MODE=""
 virt_file=$(find /sys/class/drm/card*/device/ -name 'current_virtualization_mode' 2>/dev/null | head -1)
