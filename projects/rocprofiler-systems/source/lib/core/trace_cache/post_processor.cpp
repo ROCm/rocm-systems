@@ -36,7 +36,8 @@ namespace
 std::uint64_t
 file_size_or_zero(const std::string& path) noexcept
 {
-    struct stat st{};
+    struct stat st
+    {};
     if(::stat(path.c_str(), &st) != 0) return 0;
     return static_cast<std::uint64_t>(st.st_size);
 }
