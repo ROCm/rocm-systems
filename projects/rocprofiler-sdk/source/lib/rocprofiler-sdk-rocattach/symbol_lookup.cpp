@@ -22,6 +22,7 @@
 
 #include "symbol_lookup.hpp"
 
+#include "lib/common/hasher.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 
@@ -84,6 +85,23 @@ struct mapped_object
     uint64_t                    inode        = 0;
     std::string                 path         = {};
     std::vector<memory_mapping> mappings     = {};
+};
+
+struct mapped_object_key
+{
+    uint32_t device_major = 0;
+    uint32_t device_minor = 0;
+    uint64_t inode        = 0;
+
+    bool operator==(const mapped_object_key&) const = default;
+};
+
+struct mapped_object_key_hash
+{
+    size_t operator()(const mapped_object_key& key) const
+    {
+        return common::fnv1a_hasher::combine(key.device_major, key.device_minor, key.inode);
+    }
 };
 
 struct target_elf
@@ -277,7 +295,7 @@ parse_maps(pid_t pid)
 std::vector<mapped_object>
 find_mapped_objects(pid_t pid, const std::string& library)
 {
-    auto objects = std::unordered_map<std::string, mapped_object>{};
+    auto objects = std::unordered_map<mapped_object_key, mapped_object, mapped_object_key_hash>{};
 
     for(const auto& mapping : parse_maps(pid))
     {
@@ -286,9 +304,8 @@ find_mapped_objects(pid_t pid, const std::string& library)
         // Multiple maps entries usually belong to the same ELF: readonly headers,
         // executable text, writable data, and so on. Device/inode is the stable key
         // for grouping those segments even when paths differ through namespaces.
-        auto key =
-            fmt::format("{}:{}:{}", mapping.device_major, mapping.device_minor, mapping.inode);
-        auto& object        = objects[key];
+        auto  key    = mapped_object_key{mapping.device_major, mapping.device_minor, mapping.inode};
+        auto& object = objects[key];
         object.device_major = mapping.device_major;
         object.device_minor = mapping.device_minor;
         object.inode        = mapping.inode;
@@ -444,19 +461,17 @@ std::optional<target_elf>
 open_target_elf(pid_t pid, const mapped_object& object)
 {
     // Prefer map_files because it is a kernel-provided handle to the exact file
-    // backing a VMA. If permissions block that path, fall back to the same path
-    // as seen through the target process root and still validate device/inode.
-    for(const auto& mapping : object.mappings)
+    // backing the mapped object. If permissions block that path, fall back to
+    // the same path as seen through the target root and still validate device/inode.
+    const auto& mapping        = object.mappings.front();
+    auto        map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
+                                      pid,
+                                      static_cast<uint64_t>(mapping.start),
+                                      static_cast<uint64_t>(mapping.end));
+    if(auto elf = read_file_if_matches_mapping(map_files_path, object))
     {
-        auto map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
-                                          pid,
-                                          static_cast<uint64_t>(mapping.start),
-                                          static_cast<uint64_t>(mapping.end));
-        if(auto elf = read_file_if_matches_mapping(map_files_path, object))
-        {
-            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << map_files_path;
-            return elf;
-        }
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << map_files_path;
+        return elf;
     }
 
     auto target_path = strip_deleted_suffix(object.path);
