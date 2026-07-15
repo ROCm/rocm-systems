@@ -23,6 +23,7 @@
     "cts.gfx1201.fpsan.fpsan_swmmac_gfx12_w64_fp8_bf8bf8_test"
   ],
   "kernels": [
+    "hip_matmul_matvec::m256_n1_k1024",
     "llama_mul_mat_vec_q::default",
     "llama_rms_norm::default"
   ]
