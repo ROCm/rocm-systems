@@ -35,6 +35,11 @@ roctx::roctx(session& sess, std::string_view trace_regions)
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
 }
 
+roctx::~roctx()
+{
+    m_session.detach(*this);
+}
+
 vote
 roctx::initial_vote() const noexcept
 {
@@ -63,6 +68,8 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
 void
 roctx::on_range_stop(std::uint64_t range_id)
 {
+    if(!filter_active()) return;
+
     bool now_empty = false;
     {
         std::scoped_lock const lk{ m_mutex };
@@ -137,11 +144,7 @@ roctx::on_resume()
 vote
 roctx::compute_vote() const noexcept
 {
-    const bool filter    = filter_active();
-    const bool in_region = m_in_region.load(std::memory_order_relaxed);
-    const bool paused    = m_user_paused.load(std::memory_order_relaxed);
-    const bool active    = !paused && (!filter || in_region);
-    return active ? vote::active : vote::paused;
+    return compute_should_write() ? vote::active : vote::paused;
 }
 
 bool
