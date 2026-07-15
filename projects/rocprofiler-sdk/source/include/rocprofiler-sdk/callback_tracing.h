@@ -403,6 +403,56 @@ typedef struct rocprofiler_callback_tracing_hip_graph_data_t
 } rocprofiler_callback_tracing_hip_graph_data_t;
 
 /**
+ * @brief ROCProfiler Kernel Replay Callback Tracer Record.
+ *
+ * Payload for @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY callbacks.
+ * All members are present in the struct (no unions). Which members are meaningful
+ * depends on the current operation:
+ *
+ * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG: @c dispatch_info is populated by the SDK.
+ *   The tool writes @c pass_count and optionally @c should_continue during
+ *   @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields are zero.
+ * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
+ *   @c total_passes are populated by the SDK. Config fields are zero/null and must not be
+ *   modified.
+ *
+ * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
+ * (CONFIG + all PASS operations). A tool can write per-dispatch state into
+ * @c user_data during CONFIG PHASE_ENTER; the same value is delivered to every
+ * subsequent PASS callback and to @c should_continue for the same dispatch.
+ */
+typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
+{
+    uint64_t                           size;           ///< sizeof this struct (versioning)
+    rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Kernel dispatch info (always set)
+
+    /// @brief [CONFIG] Number of replay passes. Tool sets during CONFIG PHASE_ENTER.
+    /// N > 0: fixed loop of N passes. 0: indefinite (requires @c should_continue).
+    uint64_t pass_count;
+
+    /// @brief [CONFIG] Optional callback invoked after each pass completes.
+    /// Return non-zero to continue the replay loop, zero to break out.
+    /// Required when @c pass_count == 0; if @c pass_count > 0, allows early exit.
+    /// The @c user_data argument is the per-dispatch user data set during CONFIG
+    /// PHASE_ENTER (same value threaded through all callbacks for this dispatch).
+    int (*should_continue)(uint64_t                current_pass,
+                           uint64_t                total_passes,
+                           rocprofiler_user_data_t user_data);
+
+    /// @brief [PASS] 0-indexed current pass number. Read-only, populated by SDK.
+    uint64_t current_pass;
+
+    /// @brief [PASS] Total passes if known (from @c pass_count), else 0. Read-only.
+    uint64_t total_passes;
+
+    // --- Future (TODO) ---------------------------------
+    // Localized context control: override context active state for this replay pass
+    // without changing the global context state.
+    // rocprofiler_status_t (*start_context)(rocprofiler_context_id_t ctx_id);
+    // rocprofiler_status_t (*stop_context)(rocprofiler_context_id_t ctx_id);
+} rocprofiler_callback_tracing_kernel_replay_data_t;
+
+/**
  * @brief API Tracing callback function. This function is invoked twice per API function: once
  * before the function is invoked and once after the function is invoked.  The external correlation
  * id value within the record is assigned the value at the top of the external correlation id stack.
