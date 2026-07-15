@@ -38,7 +38,7 @@ constexpr auto k_max_poll_interval = 100ms;
 #define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     clock_identifier { #VAL, VAL }
 
-auto accepted_clock_ids =
+const auto accepted_clock_ids =
     std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
                                 ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
                                 ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),

@@ -21,17 +21,6 @@ class session;
 
 namespace rocprofsys::control::triggers
 {
-/// ROCtx region-filter and user-pause trigger.
-///
-/// Lifetime contract: @p sess (a bare reference, not owned) must outlive
-/// this object; the destructor calls session::detach() on it, so the
-/// session itself must not have been destroyed first.
-///
-/// Thread-safety: on_range_start()/on_range_stop()/on_pause()/on_resume()
-/// are called from arbitrary rocprofiler-sdk callback threads (not
-/// necessarily the same thread across calls) and are safe to call
-/// concurrently with each other - state is guarded by m_mutex plus a set
-/// of atomics for the hot-path read side (should_write_markers()).
 class roctx : public trigger
 {
 public:

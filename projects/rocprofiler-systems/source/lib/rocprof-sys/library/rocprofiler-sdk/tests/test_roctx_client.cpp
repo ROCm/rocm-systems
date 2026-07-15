@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -102,7 +103,11 @@ TEST_F(roctx_client_test, constructor_creates_controller)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "TestRegion" };
+    const roctx_client_config config{ .pause_resume_enabled = true,
+                                       .use_perfetto = true,
+                                       .use_timemory = true,
+                                       .perfetto_annotations = false,
+                                       .selected_trace_regions = "TestRegion" };
     roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_session(), nullptr);
 }
@@ -111,7 +116,11 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "" };
+    const roctx_client_config config{ .pause_resume_enabled = true,
+                                       .use_perfetto = true,
+                                       .use_timemory = true,
+                                       .perfetto_annotations = false,
+                                       .selected_trace_regions = "" };
     roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_session(), nullptr);
     EXPECT_FALSE(client.get_trigger().filter_active());
@@ -121,7 +130,11 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "Region 1" };
+    const roctx_client_config config{ .pause_resume_enabled = true,
+                                       .use_perfetto = true,
+                                       .use_timemory = true,
+                                       .perfetto_annotations = false,
+                                       .selected_trace_regions = "Region 1" };
     roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_trigger().filter_active());
 }
@@ -130,7 +143,11 @@ TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "" };
+    const roctx_client_config config{ .pause_resume_enabled = true,
+                                       .use_perfetto = true,
+                                       .use_timemory = true,
+                                       .perfetto_annotations = false,
+                                       .selected_trace_regions = "" };
     roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_trigger().should_write_markers());
 }
@@ -139,7 +156,11 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "Region 1" };
+    const roctx_client_config config{ .pause_resume_enabled = true,
+                                       .use_perfetto = true,
+                                       .use_timemory = true,
+                                       .perfetto_annotations = false,
+                                       .selected_trace_regions = "Region 1" };
     roctx_client<mock_marker_policy> client(config);
     EXPECT_FALSE(client.get_trigger().should_write_markers());
 }
@@ -168,7 +189,11 @@ protected:
     /// so trigger.should_write_markers() purely reflects the trigger state.
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
-        const roctx_config_t config{ true, false, false, false, regions };
+        const roctx_config_t config{ .pause_resume_enabled = true,
+                                  .use_perfetto = false,
+                                  .use_timemory = false,
+                                  .perfetto_annotations = false,
+                                  .selected_trace_regions = regions };
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_session();
@@ -196,7 +221,6 @@ protected:
 TEST_F(roctx_client_control_test, pause_resume_no_filter)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_session();
 
     EXPECT_FALSE(client->get_trigger().filter_active());
     EXPECT_TRUE(client->get_trigger().should_write_markers());
@@ -237,7 +261,6 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
 TEST_F(roctx_client_control_test, selective_region_normal)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     EXPECT_TRUE(client->get_trigger().filter_active());
 
@@ -302,7 +325,6 @@ TEST_F(roctx_client_control_test, selective_region_normal)
 TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     // CodeZ: outside region
     EXPECT_FALSE(client->get_trigger().should_write_markers());
@@ -347,7 +369,6 @@ TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
 TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     // roctx_pause outside region: ignored (region filter active, no active ranges)
     client->get_trigger().on_pause();
@@ -396,7 +417,6 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
 TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     // Push Region1
     client->get_trigger().on_range_start(1, "Region 1");
@@ -429,7 +449,6 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
 TEST_F(roctx_client_control_test, double_pause_is_ignored)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_session();
 
     client->get_trigger().on_pause();
     EXPECT_EQ(stop_count, 1);
@@ -445,7 +464,6 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
 TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_session();
 
     // Resume without prior pause
     client->get_trigger().on_resume();
@@ -456,7 +474,6 @@ TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
 TEST_F(roctx_client_control_test, nested_target_regions)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     EXPECT_FALSE(client->get_trigger().should_write_markers());
 
@@ -484,7 +501,6 @@ TEST_F(roctx_client_control_test, nested_target_regions)
 TEST_F(roctx_client_control_test, multiple_target_regions)
 {
     auto client = make_client("Region 1,Region 2");
-    auto ctrl   = client->get_session();
 
     EXPECT_TRUE(client->get_trigger().filter_active());
     EXPECT_FALSE(client->get_trigger().should_write_markers());
@@ -526,7 +542,6 @@ TEST_F(roctx_client_control_test, shutdown_clears_state)
 TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     client->get_trigger().on_range_stop(999);
     EXPECT_EQ(stop_count, 0);
@@ -536,7 +551,6 @@ TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_session();
 
     client->get_trigger().on_range_start(1, nullptr);
     EXPECT_EQ(start_count, 0);
@@ -696,4 +710,142 @@ TEST_F(marker_write_test, write_end_with_empty_args)
 
     const mock_marker_writer writer(false, false, false);
     writer.write_end("R", 100, 200, "", record);
+}
+
+// ============================================================================
+// roctxRangePush / roctxRangePop region-filter and pause/resume tests
+//
+// These tests verify the behavioral contract that roctxRangePush/roctxRangePop
+// must deliver: the roctx trigger's region-filter and pause/resume logic must
+// engage for push/pop the same way it does for roctxRangeStartA/roctxRangeStop.
+//
+// They drive the trigger directly — the same pattern used by the existing
+// roctx_client_control_test fixture — using synthetic range IDs from the
+// UINT64_MAX-downward space that roctx_client reserves for push/pop via the
+// s_push_range_id counter in roctx_client.cpp.
+// ============================================================================
+
+class roctx_push_pop_region_test : public mock_cleanup_base
+{
+protected:
+    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
+    using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
+
+    int start_count = 0;
+    int stop_count  = 0;
+
+    std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
+    {
+        const roctx_config_t config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = false,
+                                      .use_timemory           = false,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = regions };
+        auto                 client = std::make_unique<roctx_client_t>(config);
+
+        auto ctrl = client->get_session();
+        ctrl->subscribe(
+            { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
+
+        return client;
+    }
+
+    // Synthetic IDs mirror the s_push_range_id counter: starts at UINT64_MAX,
+    // decrements on each roctxRangePush to avoid colliding with SDK-allocated
+    // roctxRangeStart IDs (which count upward from small values).
+    static constexpr std::uint64_t k_push_id = std::numeric_limits<std::uint64_t>::max();
+};
+
+TEST_F(roctx_push_pop_region_test, push_matching_region_activates_controller)
+{
+    auto client = make_client("Region1");
+
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_start(k_push_id, "Region1");
+
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, pop_matching_region_deactivates_controller)
+{
+    auto client = make_client("Region1");
+
+    client->get_trigger().on_range_start(k_push_id, "Region1");
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_stop(k_push_id);
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, push_non_matching_region_does_not_activate)
+{
+    auto client = make_client("Region1");
+
+    client->get_trigger().on_range_start(k_push_id, "OtherRegion");
+
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+    EXPECT_EQ(start_count, 0);
+}
+
+TEST_F(roctx_push_pop_region_test, resume_callback_fires_on_first_push)
+{
+    auto client = make_client("Region1");
+
+    EXPECT_EQ(start_count, 0);
+    client->get_trigger().on_range_start(k_push_id, "Region1");
+    EXPECT_EQ(start_count, 1);
+}
+
+TEST_F(roctx_push_pop_region_test, pause_callback_fires_on_last_pop)
+{
+    auto client = make_client("Region1");
+
+    client->get_trigger().on_range_start(k_push_id, "Region1");
+    EXPECT_EQ(stop_count, 0);
+
+    client->get_trigger().on_range_stop(k_push_id);
+    EXPECT_EQ(stop_count, 1);
+}
+
+// Nested pushes of the same region use distinct synthetic IDs (UINT64_MAX,
+// UINT64_MAX-1, ...). The trigger resumes on the first push and pauses
+// only when the last pop removes the final active ID.
+TEST_F(roctx_push_pop_region_test, nested_push_pop_same_region)
+{
+    auto client = make_client("Region1");
+
+    // First push: activates
+    client->get_trigger().on_range_start(k_push_id, "Region1");
+    EXPECT_EQ(start_count, 1);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    // Second push: already active — no extra resume callback
+    client->get_trigger().on_range_start(k_push_id - 1, "Region1");
+    EXPECT_EQ(start_count, 1);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    // First pop: removes second ID — first is still active
+    client->get_trigger().on_range_stop(k_push_id - 1);
+    EXPECT_EQ(stop_count, 0);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    // Second pop: removes last ID — pause fires
+    client->get_trigger().on_range_stop(k_push_id);
+    EXPECT_EQ(stop_count, 1);
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, push_pop_no_filter_always_active)
+{
+    auto client = make_client("");
+
+    EXPECT_FALSE(client->get_trigger().filter_active());
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_start(k_push_id, "AnyRegion");
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_stop(k_push_id);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
 }

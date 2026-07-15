@@ -15,24 +15,6 @@
 
 namespace rocprofsys::control::triggers
 {
-/// Time-windowed pause/resume trigger driven by an injected clock.
-///
-/// Lifecycle votes:
-///   delay > 0  -> initial vote paused; publishes active when delay elapses
-///   duration>0 -> publishes paused (terminal) when duration elapses
-///   delay=0, duration=0 -> abstain (degenerate config; thread does nothing)
-///
-/// Templated on Clock so production wires `clocks::steady` and tests wire
-/// `clocks::manual`. Methods on the Clock parameter are duck-typed against
-/// the concept in core/control/clock.hpp.
-///
-/// Lifetime contract: @p sess (a bare reference, not owned) must outlive
-/// this object, including the time span between start() and the worker
-/// thread's join() inside stop()/~time_window() - the worker calls
-/// m_session.publish() directly with no synchronization back to the owner.
-/// start()/stop() are not safe to call concurrently with each other (guarded
-/// internally against that), but neither is safe to call concurrently with
-/// destruction from a different thread than the one driving the trigger.
 template <typename Clock>
 class time_window : public trigger
 {
@@ -52,7 +34,7 @@ public:
     ~time_window() override
     {
         stop();
-        m_session.detach(*this);
+        m_session.unregister_trigger(*this);
     }
 
     time_window(const time_window&)            = delete;
@@ -98,11 +80,11 @@ public:
     }
 
 private:
-    session&    m_session;
-    Clock&      m_clock;
+    session&     m_session;
+    Clock&       m_clock;
     const config m_config;
-    std::thread m_thread;
-    std::mutex  m_lifecycle_mutex;
+    std::thread  m_thread;
+    std::mutex   m_lifecycle_mutex;
 
     [[nodiscard]] bool has_window() const noexcept
     {
@@ -119,14 +101,14 @@ private:
         if(has_delay)
         {
             if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
-            m_session.publish(*this, vote::active);
+            m_session.publish_vote(*this, vote::active);
         }
 
         if(has_duration)
         {
             const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;    // interrupted
-            m_session.publish(*this, vote::paused);  // terminal
+            if(!m_clock.sleep_until(end)) return;         // interrupted
+            m_session.publish_vote(*this, vote::paused);  // terminal
         }
     }
 };
