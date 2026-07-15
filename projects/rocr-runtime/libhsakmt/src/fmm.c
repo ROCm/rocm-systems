@@ -712,13 +712,19 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		/* Reset NUMA policy */
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
-		/* Unmap first to drop shmem refcount for MAP_SHARED allocations */
+		/*
+		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
+		 * allocations, then re-reserve the VA range as PROT_NONE.
+		 * Callers hold fmm_mutex (see contract above), which serializes
+		 * this against aperture allocations, so no allocation can claim
+		 * the VA in the window between munmap() and mmap().
+		 */
 		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
 		if (mmap_ret == MAP_FAILED)
-			pr_warn("Failed to reserve VA range %p: %s\n", address, strerror(errno));
+			pr_err("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
