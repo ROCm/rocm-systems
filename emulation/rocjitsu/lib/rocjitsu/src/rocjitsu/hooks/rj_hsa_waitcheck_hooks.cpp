@@ -19,9 +19,12 @@
 #include <cstdlib>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,15 +35,27 @@ namespace {
 
 using CreateFromFileWithOffsetSizeFn = hsa_status_t (*)(hsa_file_t, size_t, size_t,
                                                         hsa_code_object_reader_t *);
+using LoadedCodeObjectGetInfoFn = hsa_status_t (*)(hsa_loaded_code_object_t, uint32_t, void *);
+
+inline constexpr uint32_t kLoadedCodeObjectInfoLoadDelta = 8;
 
 struct AmdLoaderTablePrefix {
   void *query_host_address = nullptr;
   void *query_segment_descriptors = nullptr;
   void *query_executable = nullptr;
   void *executable_iterate_loaded_code_objects = nullptr;
-  void *loaded_code_object_get_info = nullptr;
+  LoadedCodeObjectGetInfoFn loaded_code_object_get_info = nullptr;
   CreateFromFileWithOffsetSizeFn create_from_file_with_offset_size = nullptr;
 };
+
+enum class RuntimeMode { Dispatch, Eager };
+
+[[nodiscard]] RuntimeMode runtime_mode() {
+  const char *value = std::getenv("ROCJITSU_WAITCHECK_MODE");
+  if (value != nullptr && std::string_view(value) == "eager")
+    return RuntimeMode::Eager;
+  return RuntimeMode::Dispatch;
+}
 
 struct AnalysisResult {
   bool checked = false;
@@ -90,7 +105,9 @@ struct ReaderEntry {
 
 struct HookStats {
   std::atomic<uint64_t> loads{0};
+  std::atomic<uint64_t> dispatches{0};
   std::atomic<uint64_t> checked{0};
+  std::atomic<uint64_t> cache_hits{0};
   std::atomic<uint64_t> passed{0};
   std::atomic<uint64_t> hazards{0};
   std::atomic<uint64_t> analysis_errors{0};
@@ -98,7 +115,9 @@ struct HookStats {
 
   void reset() {
     loads.store(0, std::memory_order_relaxed);
+    dispatches.store(0, std::memory_order_relaxed);
     checked.store(0, std::memory_order_relaxed);
+    cache_hits.store(0, std::memory_order_relaxed);
     passed.store(0, std::memory_order_relaxed);
     hazards.store(0, std::memory_order_relaxed);
     analysis_errors.store(0, std::memory_order_relaxed);
@@ -126,10 +145,12 @@ void print_summary_once() {
   }
   std::fprintf(
       stderr,
-      "rocjitsu-waitcheck: summary loads=%llu checked=%llu passed=%llu hazards=%llu "
-      "analysis_errors=%llu unavailable=%llu\n",
+      "rocjitsu-waitcheck: summary loads=%llu dispatches=%llu checked=%llu cache_hits=%llu "
+      "passed=%llu hazards=%llu analysis_errors=%llu unavailable=%llu\n",
       static_cast<unsigned long long>(g_stats.loads.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(g_stats.dispatches.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(g_stats.checked.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(g_stats.cache_hits.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(g_stats.passed.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(g_stats.hazards.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(g_stats.analysis_errors.load(std::memory_order_relaxed)),
@@ -156,16 +177,21 @@ void print_summary_once() {
 }
 
 void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
-                  const rocjitsu::WaitcheckReport &report) {
+                  const rocjitsu::WaitcheckReport &report, std::string_view kernel_name = {}) {
   if (report.passed())
     return;
 
   if (report.diagnostics_truncated) {
-    std::fprintf(stderr, "rocjitsu-waitcheck: at least %zu waitcnt hazard(s) in %s code object\n",
-                 report.diagnostics_observed, target_name(code_object.target_id()));
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: at least %zu waitcnt hazard(s) in %s code object%s%.*s\n",
+                 report.diagnostics_observed, target_name(code_object.target_id()),
+                 kernel_name.empty() ? "" : " kernel ", static_cast<int>(kernel_name.size()),
+                 kernel_name.empty() ? "" : kernel_name.data());
   } else {
-    std::fprintf(stderr, "rocjitsu-waitcheck: %zu waitcnt hazard(s) in %s code object\n",
-                 report.diagnostics_observed, target_name(code_object.target_id()));
+    std::fprintf(stderr, "rocjitsu-waitcheck: %zu waitcnt hazard(s) in %s code object%s%.*s\n",
+                 report.diagnostics_observed, target_name(code_object.target_id()),
+                 kernel_name.empty() ? "" : " kernel ", static_cast<int>(kernel_name.size()),
+                 kernel_name.empty() ? "" : kernel_name.data());
   }
 
   constexpr size_t kMaxDiagnostics = 32;
@@ -189,9 +215,11 @@ void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
 }
 
 void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
-                            const rocjitsu::WaitcheckReport &report) {
-  std::fprintf(stderr, "rocjitsu-waitcheck: analysis failed for %s code object",
-               target_name(code_object.target_id()));
+                            const rocjitsu::WaitcheckReport &report,
+                            std::string_view kernel_name = {}) {
+  std::fprintf(stderr, "rocjitsu-waitcheck: analysis failed for %s code object%s%.*s",
+               target_name(code_object.target_id()), kernel_name.empty() ? "" : " kernel ",
+               static_cast<int>(kernel_name.size()), kernel_name.empty() ? "" : kernel_name.data());
   if (!report.analysis_error.empty())
     std::fprintf(stderr, ": %s", report.analysis_error.c_str());
   std::fprintf(stderr, "\n");
@@ -244,11 +272,62 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
   return result;
 }
 
+[[nodiscard]] AnalysisResult check_kernel(const rocjitsu::AmdGpuCodeObject &code_object,
+                                          const rocjitsu::WaitcheckKernelInfo &kernel) {
+  if (!env_enabled("ROCJITSU_WAITCHECK", true) || g_in_waitcheck)
+    return {};
+
+  g_in_waitcheck = true;
+  AnalysisResult result;
+  try {
+    const rj_code_arch_t arch = rocjitsu::waitcheck_arch_for_target(code_object.target_id());
+    if (code_object.is_valid() && arch != ROCJITSU_CODE_ARCH_INVALID) {
+      result.checked = true;
+      rocjitsu::WaitcheckOptions options;
+      options.max_diagnostics = 32;
+      auto report =
+          rocjitsu::analyze_waitcnts_for_kernel(code_object, arch, kernel.entry_offset, options);
+      if (!report.supported) {
+        print_analysis_failure(code_object, report, kernel.name);
+        result.passed = false;
+        result.analysis_failed = true;
+        g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        print_report(code_object, report, kernel.name);
+        result.passed = report.passed();
+      }
+    }
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: analysis failed for kernel %s: %s\n",
+                 kernel.name.c_str(), error.what());
+    result.analysis_failed = true;
+    g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+  } catch (...) {
+    std::fprintf(stderr, "rocjitsu-waitcheck: analysis failed for kernel %s\n",
+                 kernel.name.c_str());
+    result.analysis_failed = true;
+    g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+  }
+  g_in_waitcheck = false;
+
+  if (result.checked) {
+    g_stats.checked.fetch_add(1, std::memory_order_relaxed);
+    if (result.passed)
+      g_stats.passed.fetch_add(1, std::memory_order_relaxed);
+    else if (!result.analysis_failed)
+      g_stats.hazards.fetch_add(1, std::memory_order_relaxed);
+  }
+  return result;
+}
+
 class ReaderRegistry {
 public:
   static ReaderRegistry &instance() {
-    static ReaderRegistry registry;
-    return registry;
+    // HSA API wrappers can be called by HIP module destructors after ordinary
+    // C++ function-local statics have begun destruction. Keep hook state alive
+    // until the process address space is torn down; OnUnload still clears it.
+    static ReaderRegistry *registry = new ReaderRegistry();
+    return *registry;
   }
 
   void store_memory(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size) {
@@ -316,6 +395,163 @@ private:
   static constexpr size_t kMaxReaders = 1024;
   std::mutex mutex_;
   std::array<ReaderEntry, kMaxReaders> entries_;
+};
+
+struct KernelCheck {
+  [[nodiscard]] AnalysisResult run() {
+    std::lock_guard lock(mutex);
+    if (analyzed) {
+      g_stats.cache_hits.fetch_add(1, std::memory_order_relaxed);
+      return result;
+    }
+    result = check_kernel(*code_object, info);
+    analyzed = true;
+    return result;
+  }
+
+  std::mutex mutex;
+  std::shared_ptr<rocjitsu::AmdGpuCodeObject> code_object;
+  rocjitsu::WaitcheckKernelInfo info;
+  bool analyzed = false;
+  AnalysisResult result;
+};
+
+struct LoadedCodeObjectEntry {
+  uint64_t executable_handle = 0;
+  hsa_loaded_code_object_t loaded{};
+  std::vector<std::shared_ptr<KernelCheck>> kernels;
+  bool activated = false;
+};
+
+class DispatchRegistry {
+public:
+  static DispatchRegistry &instance() {
+    static DispatchRegistry *registry = new DispatchRegistry();
+    return *registry;
+  }
+
+  void store(hsa_executable_t executable, hsa_loaded_code_object_t loaded, const uint8_t *bytes,
+             size_t size) {
+    if (bytes == nullptr || size == 0)
+      return;
+    try {
+      auto code_object = std::make_shared<rocjitsu::AmdGpuCodeObject>(bytes, size);
+      if (!code_object->is_valid() || rocjitsu::waitcheck_arch_for_target(
+                                          code_object->target_id()) == ROCJITSU_CODE_ARCH_INVALID) {
+        return;
+      }
+
+      auto entry = std::make_shared<LoadedCodeObjectEntry>();
+      entry->executable_handle = executable.handle;
+      entry->loaded = loaded;
+      for (rocjitsu::WaitcheckKernelInfo &info : rocjitsu::waitcheck_kernels(*code_object)) {
+        auto kernel = std::make_shared<KernelCheck>();
+        kernel->code_object = code_object;
+        kernel->info = std::move(info);
+        entry->kernels.push_back(std::move(kernel));
+      }
+      if (entry->kernels.empty())
+        return;
+
+      std::lock_guard lock(mutex_);
+      loaded_.push_back(std::move(entry));
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "rocjitsu-waitcheck: failed to index loaded code object: %s\n",
+                   error.what());
+      g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+    } catch (...) {
+      std::fprintf(stderr, "rocjitsu-waitcheck: failed to index loaded code object\n");
+      g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  void activate(hsa_executable_t executable, LoadedCodeObjectGetInfoFn get_info) {
+    if (get_info == nullptr) {
+      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+
+    std::vector<std::shared_ptr<LoadedCodeObjectEntry>> entries;
+    {
+      std::lock_guard lock(mutex_);
+      for (const auto &entry : loaded_) {
+        if (entry->executable_handle == executable.handle && !entry->activated)
+          entries.push_back(entry);
+      }
+    }
+
+    for (const auto &entry : entries) {
+      int64_t load_delta = 0;
+      if (get_info(entry->loaded, kLoadedCodeObjectInfoLoadDelta, &load_delta) !=
+          HSA_STATUS_SUCCESS) {
+        g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+        continue;
+      }
+
+      std::lock_guard lock(mutex_);
+      for (const auto &kernel : entry->kernels) {
+        const uint64_t descriptor = kernel->info.descriptor_vaddr;
+        uint64_t runtime_address = 0;
+        if (load_delta >= 0) {
+          const uint64_t positive_delta = static_cast<uint64_t>(load_delta);
+          if (descriptor > std::numeric_limits<uint64_t>::max() - positive_delta) {
+            g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+            continue;
+          }
+          runtime_address = descriptor + positive_delta;
+        } else {
+          const uint64_t magnitude = static_cast<uint64_t>(-(load_delta + 1)) + 1;
+          if (descriptor < magnitude) {
+            g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+            continue;
+          }
+          runtime_address = descriptor - magnitude;
+        }
+        if (runtime_address == 0) {
+          g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+          continue;
+        }
+        kernels_.insert_or_assign(runtime_address, kernel);
+      }
+      entry->activated = true;
+    }
+  }
+
+  [[nodiscard]] std::shared_ptr<KernelCheck> lookup(uint64_t kernel_object) {
+    std::lock_guard lock(mutex_);
+    auto it = kernels_.find(kernel_object);
+    return it == kernels_.end() ? nullptr : it->second;
+  }
+
+  void remove(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    for (auto it = loaded_.begin(); it != loaded_.end();) {
+      if ((*it)->executable_handle != executable.handle) {
+        ++it;
+        continue;
+      }
+      for (const auto &kernel : (*it)->kernels) {
+        for (auto map_it = kernels_.begin(); map_it != kernels_.end();) {
+          if (map_it->second == kernel)
+            map_it = kernels_.erase(map_it);
+          else
+            ++map_it;
+        }
+      }
+      it = loaded_.erase(it);
+    }
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    kernels_.clear();
+    loaded_.clear();
+  }
+
+private:
+  std::mutex mutex_;
+  std::vector<std::shared_ptr<LoadedCodeObjectEntry>> loaded_;
+  std::unordered_map<uint64_t, std::shared_ptr<KernelCheck>> kernels_;
 };
 
 [[nodiscard]] std::optional<std::vector<uint8_t>>
@@ -388,6 +624,13 @@ hsa_status_t HSA_API waitcheck_reader_destroy(hsa_code_object_reader_t reader);
 hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object);
+hsa_status_t HSA_API waitcheck_executable_freeze(hsa_executable_t executable, const char *options);
+hsa_status_t HSA_API waitcheck_executable_destroy(hsa_executable_t executable);
+hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
+                                            hsa_queue_type32_t type,
+                                            void (*callback)(hsa_status_t, hsa_queue_t *, void *),
+                                            void *data, uint32_t private_segment_size,
+                                            uint32_t group_segment_size, hsa_queue_t **queue);
 hsa_status_t HSA_API waitcheck_reader_create_from_file_with_offset_size(
     hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t *reader);
 
@@ -409,11 +652,35 @@ public:
     original_create_from_memory_ = core_->hsa_code_object_reader_create_from_memory_fn;
     original_destroy_ = core_->hsa_code_object_reader_destroy_fn;
     original_load_ = core_->hsa_executable_load_agent_code_object_fn;
+    original_freeze_ = core_->hsa_executable_freeze_fn;
+    original_executable_destroy_ = core_->hsa_executable_destroy_fn;
+    original_queue_create_ = core_->hsa_queue_create_fn;
+    original_queue_destroy_ = core_->hsa_queue_destroy_fn;
+    mode_ = runtime_mode();
+
+    if (mode_ == RuntimeMode::Dispatch) {
+      constexpr size_t intercept_table_size =
+          offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn) +
+          sizeof(AmdExtTable::hsa_amd_queue_intercept_register_fn);
+      if (table->amd_ext_ == nullptr || table->amd_ext_->version.minor_id < intercept_table_size ||
+          table->amd_ext_->hsa_amd_queue_intercept_create_fn == nullptr ||
+          table->amd_ext_->hsa_amd_queue_intercept_register_fn == nullptr) {
+        std::fprintf(stderr,
+                     "rocjitsu-waitcheck: queue interception unavailable; using eager mode\n");
+        mode_ = RuntimeMode::Eager;
+      } else {
+        original_intercept_create_ = table->amd_ext_->hsa_amd_queue_intercept_create_fn;
+        original_intercept_register_ = table->amd_ext_->hsa_amd_queue_intercept_register_fn;
+      }
+    }
 
     if (original_get_extension_table_ == nullptr ||
         original_get_major_extension_table_ == nullptr || original_create_from_file_ == nullptr ||
         original_create_from_memory_ == nullptr || original_destroy_ == nullptr ||
-        original_load_ == nullptr) {
+        original_load_ == nullptr ||
+        (mode_ == RuntimeMode::Dispatch &&
+         (original_freeze_ == nullptr || original_executable_destroy_ == nullptr ||
+          original_queue_create_ == nullptr || original_queue_destroy_ == nullptr))) {
       std::fprintf(stderr, "rocjitsu-waitcheck: HSA core table contains null required entries\n");
       clear_unlocked();
       return false;
@@ -425,6 +692,11 @@ public:
     core_->hsa_code_object_reader_create_from_memory_fn = waitcheck_reader_create_from_memory;
     core_->hsa_code_object_reader_destroy_fn = waitcheck_reader_destroy;
     core_->hsa_executable_load_agent_code_object_fn = waitcheck_executable_load_agent_code_object;
+    if (mode_ == RuntimeMode::Dispatch) {
+      core_->hsa_executable_freeze_fn = waitcheck_executable_freeze;
+      core_->hsa_executable_destroy_fn = waitcheck_executable_destroy;
+      core_->hsa_queue_create_fn = waitcheck_queue_create;
+    }
     active_ = true;
     g_stats.reset();
     g_summary_printed.store(false, std::memory_order_relaxed);
@@ -457,11 +729,18 @@ public:
             waitcheck_executable_load_agent_code_object) {
           core_->hsa_executable_load_agent_code_object_fn = original_load_;
         }
+        if (core_->hsa_executable_freeze_fn == waitcheck_executable_freeze)
+          core_->hsa_executable_freeze_fn = original_freeze_;
+        if (core_->hsa_executable_destroy_fn == waitcheck_executable_destroy)
+          core_->hsa_executable_destroy_fn = original_executable_destroy_;
+        if (core_->hsa_queue_create_fn == waitcheck_queue_create)
+          core_->hsa_queue_create_fn = original_queue_create_;
       }
       active_ = false;
     }
 
     ReaderRegistry::instance().clear();
+    DispatchRegistry::instance().clear();
     print_summary_once();
 
     std::lock_guard lock(mutex_);
@@ -492,6 +771,34 @@ public:
     std::lock_guard lock(mutex_);
     return original_load_;
   }
+  [[nodiscard]] decltype(hsa_executable_freeze) *freeze() const {
+    std::lock_guard lock(mutex_);
+    return original_freeze_;
+  }
+  [[nodiscard]] decltype(hsa_executable_destroy) *executable_destroy() const {
+    std::lock_guard lock(mutex_);
+    return original_executable_destroy_;
+  }
+  [[nodiscard]] decltype(hsa_queue_destroy) *queue_destroy() const {
+    std::lock_guard lock(mutex_);
+    return original_queue_destroy_;
+  }
+  [[nodiscard]] hsa_amd_queue_intercept_create_fn_t intercept_create() const {
+    std::lock_guard lock(mutex_);
+    return original_intercept_create_;
+  }
+  [[nodiscard]] hsa_amd_queue_intercept_register_fn_t intercept_register() const {
+    std::lock_guard lock(mutex_);
+    return original_intercept_register_;
+  }
+  [[nodiscard]] LoadedCodeObjectGetInfoFn loaded_code_object_get_info() const {
+    std::lock_guard lock(mutex_);
+    return original_loaded_code_object_get_info_;
+  }
+  [[nodiscard]] RuntimeMode mode() const {
+    std::lock_guard lock(mutex_);
+    return mode_;
+  }
   [[nodiscard]] CreateFromFileWithOffsetSizeFn file_range_create() const {
     std::lock_guard lock(mutex_);
     return original_file_range_create_;
@@ -500,6 +807,11 @@ public:
     std::lock_guard lock(mutex_);
     if (original != nullptr && original != waitcheck_reader_create_from_file_with_offset_size)
       original_file_range_create_ = original;
+  }
+  void save_loaded_code_object_get_info(LoadedCodeObjectGetInfoFn original) {
+    std::lock_guard lock(mutex_);
+    if (original != nullptr)
+      original_loaded_code_object_get_info_ = original;
   }
 
 private:
@@ -529,7 +841,15 @@ private:
     original_create_from_memory_ = nullptr;
     original_destroy_ = nullptr;
     original_load_ = nullptr;
+    original_freeze_ = nullptr;
+    original_executable_destroy_ = nullptr;
+    original_queue_create_ = nullptr;
+    original_queue_destroy_ = nullptr;
+    original_intercept_create_ = nullptr;
+    original_intercept_register_ = nullptr;
+    original_loaded_code_object_get_info_ = nullptr;
     original_file_range_create_ = nullptr;
+    mode_ = RuntimeMode::Eager;
   }
 
   mutable std::mutex mutex_;
@@ -541,12 +861,20 @@ private:
   decltype(hsa_code_object_reader_create_from_memory) *original_create_from_memory_ = nullptr;
   decltype(hsa_code_object_reader_destroy) *original_destroy_ = nullptr;
   decltype(hsa_executable_load_agent_code_object) *original_load_ = nullptr;
+  decltype(hsa_executable_freeze) *original_freeze_ = nullptr;
+  decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
+  decltype(hsa_queue_create) *original_queue_create_ = nullptr;
+  decltype(hsa_queue_destroy) *original_queue_destroy_ = nullptr;
+  hsa_amd_queue_intercept_create_fn_t original_intercept_create_ = nullptr;
+  hsa_amd_queue_intercept_register_fn_t original_intercept_register_ = nullptr;
+  LoadedCodeObjectGetInfoFn original_loaded_code_object_get_info_ = nullptr;
   CreateFromFileWithOffsetSizeFn original_file_range_create_ = nullptr;
+  RuntimeMode mode_ = RuntimeMode::Eager;
 };
 
 WaitcheckHsaLayer &layer() {
-  static WaitcheckHsaLayer state;
-  return state;
+  static WaitcheckHsaLayer *state = new WaitcheckHsaLayer();
+  return *state;
 }
 
 [[nodiscard]] bool amd_loader_table_has_file_range_reader(size_t table_length) {
@@ -555,16 +883,26 @@ WaitcheckHsaLayer &layer() {
   return table_length >= reader_offset + sizeof(CreateFromFileWithOffsetSizeFn);
 }
 
+[[nodiscard]] bool amd_loader_table_has_loaded_code_object_info(size_t table_length) {
+  constexpr size_t info_offset = offsetof(AmdLoaderTablePrefix, loaded_code_object_get_info);
+  return table_length >= info_offset + sizeof(LoadedCodeObjectGetInfoFn);
+}
+
 void patch_amd_loader_extension_table(uint16_t extension, uint16_t version_major,
                                       size_t table_length, void *table) {
-  if (extension != HSA_EXTENSION_AMD_LOADER || version_major != 1 || table == nullptr ||
-      !amd_loader_table_has_file_range_reader(table_length)) {
+  if (extension != HSA_EXTENSION_AMD_LOADER || version_major != 1 || table == nullptr) {
     return;
   }
   auto *loader = static_cast<AmdLoaderTablePrefix *>(table);
-  layer().save_file_range_create(loader->create_from_file_with_offset_size);
-  if (loader->create_from_file_with_offset_size != nullptr)
-    loader->create_from_file_with_offset_size = waitcheck_reader_create_from_file_with_offset_size;
+  if (amd_loader_table_has_loaded_code_object_info(table_length))
+    layer().save_loaded_code_object_get_info(loader->loaded_code_object_get_info);
+  if (amd_loader_table_has_file_range_reader(table_length)) {
+    layer().save_file_range_create(loader->create_from_file_with_offset_size);
+    if (loader->create_from_file_with_offset_size != nullptr) {
+      loader->create_from_file_with_offset_size =
+          waitcheck_reader_create_from_file_with_offset_size;
+    }
+  }
 }
 
 [[nodiscard]] size_t deprecated_amd_loader_table_length(uint16_t version_minor) {
@@ -654,6 +992,32 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
 
   g_stats.loads.fetch_add(1, std::memory_order_relaxed);
   ReaderEntry *entry = ReaderRegistry::instance().lookup(reader);
+  if (layer().mode() == RuntimeMode::Dispatch) {
+    hsa_loaded_code_object_t captured_loaded{};
+    hsa_loaded_code_object_t *runtime_output =
+        loaded_code_object == nullptr ? &captured_loaded : loaded_code_object;
+    const hsa_status_t status = original(executable, agent, reader, options, runtime_output);
+    if (status != HSA_STATUS_SUCCESS || !env_enabled("ROCJITSU_WAITCHECK", true))
+      return status;
+
+    if (entry == nullptr) {
+      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      return status;
+    }
+
+    // The HSA contract keeps the reader and its backing memory alive through
+    // executable destruction. Index directly from it after a successful load;
+    // AmdGpuCodeObject takes the one persistent copy needed for lazy dispatch.
+    std::lock_guard entry_lock(entry->mutex);
+    if (!entry->active || entry->handle != reader.handle || entry->bytes == nullptr ||
+        entry->size == 0) {
+      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      return status;
+    }
+    DispatchRegistry::instance().store(executable, *runtime_output, entry->bytes, entry->size);
+    return status;
+  }
+
   if (entry != nullptr) {
     std::lock_guard entry_lock(entry->mutex);
     if (!entry->active || entry->handle != reader.handle) {
@@ -672,6 +1036,100 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
     g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
   }
   return original(executable, agent, reader, options, loaded_code_object);
+}
+
+hsa_status_t HSA_API waitcheck_executable_freeze(hsa_executable_t executable, const char *options) {
+  auto *original = layer().freeze();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  const hsa_status_t status = original(executable, options);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+
+  LoadedCodeObjectGetInfoFn get_info = layer().loaded_code_object_get_info();
+  if (get_info == nullptr) {
+    AmdLoaderTablePrefix loader{};
+    auto *get_table = layer().get_major_extension_table();
+    if (get_table != nullptr &&
+        get_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader), &loader) == HSA_STATUS_SUCCESS) {
+      layer().save_loaded_code_object_get_info(loader.loaded_code_object_get_info);
+      get_info = loader.loaded_code_object_get_info;
+    }
+  }
+  DispatchRegistry::instance().activate(executable, get_info);
+  return status;
+}
+
+hsa_status_t HSA_API waitcheck_executable_destroy(hsa_executable_t executable) {
+  auto *original = layer().executable_destroy();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  const hsa_status_t status = original(executable);
+  if (status == HSA_STATUS_SUCCESS)
+    DispatchRegistry::instance().remove(executable);
+  return status;
+}
+
+void waitcheck_queue_intercept(const void *packets, uint64_t packet_count, uint64_t, void *,
+                               hsa_amd_queue_intercept_packet_writer_t writer) {
+  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == 64);
+  if (packets == nullptr || writer == nullptr)
+    return;
+
+  const auto *packet_bytes = static_cast<const uint8_t *>(packets);
+  constexpr uint16_t type_mask = static_cast<uint16_t>((1U << HSA_PACKET_HEADER_WIDTH_TYPE) - 1U);
+  for (uint64_t i = 0; i < packet_count; ++i) {
+    const auto *packet = reinterpret_cast<const hsa_kernel_dispatch_packet_t *>(
+        packet_bytes + i * sizeof(hsa_kernel_dispatch_packet_t));
+    const uint16_t type =
+        static_cast<uint16_t>((packet->header >> HSA_PACKET_HEADER_TYPE) & type_mask);
+    if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+      continue;
+
+    g_stats.dispatches.fetch_add(1, std::memory_order_relaxed);
+    std::shared_ptr<KernelCheck> kernel =
+        DispatchRegistry::instance().lookup(packet->kernel_object);
+    if (kernel == nullptr) {
+      if (env_enabled("ROCJITSU_WAITCHECK", true))
+        g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      continue;
+    }
+
+    const AnalysisResult result = kernel->run();
+    if (result.checked && !result.passed && env_enabled("ROCJITSU_WAITCHECK_FAIL", false)) {
+      std::fprintf(stderr, "rocjitsu-waitcheck: refusing to dispatch kernel %s; aborting process\n",
+                   kernel->info.name.c_str());
+      std::fflush(stderr);
+      std::abort();
+    }
+  }
+  writer(packets, packet_count);
+}
+
+hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
+                                            hsa_queue_type32_t type,
+                                            void (*callback)(hsa_status_t, hsa_queue_t *, void *),
+                                            void *data, uint32_t private_segment_size,
+                                            uint32_t group_segment_size, hsa_queue_t **queue) {
+  auto create = layer().intercept_create();
+  auto register_intercept = layer().intercept_register();
+  if (create == nullptr || register_intercept == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+
+  const hsa_status_t status =
+      create(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  if (status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
+    return status;
+
+  const hsa_status_t register_status =
+      register_intercept(*queue, waitcheck_queue_intercept, nullptr);
+  if (register_status == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  if (auto *destroy = layer().queue_destroy(); destroy != nullptr)
+    (void)destroy(*queue);
+  *queue = nullptr;
+  return register_status;
 }
 
 } // namespace

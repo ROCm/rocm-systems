@@ -1100,7 +1100,7 @@ TEST(Rdna4DecodeTest, GlobalCacheMaintenanceConsumesThreeDwords) {
   }
 }
 
-TEST(Rdna4DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
+TEST(Rdna4DecodeTest, Vop3CompareRetainsWave64ScalarMaskPair) {
   const uint32_t words[] = {
       0xD44C0002u, // v_cmp_gt_u32 s2, s5, v12
       0x02021805u,
@@ -1114,12 +1114,11 @@ TEST(Rdna4DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
   EXPECT_EQ(inst->size(), sizeof(words));
 
   const std::string disasm = inst->disassemble();
-  EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
-  EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
+  EXPECT_NE(disasm.find("s[2:3]"), std::string::npos) << disasm;
 
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
-  EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
+  EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
 }
 
 TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesFourDwords) {

@@ -46,6 +46,7 @@ struct CliOptions {
   std::optional<rj_code_target_id_t> target;
   uint32_t code_object_index = 0;
   bool code_object_index_set = false;
+  std::optional<uint64_t> kernel_entry;
   size_t max_diagnostics = 32;
   bool all_code_objects = false;
   bool list_code_objects = false;
@@ -86,6 +87,7 @@ void print_help() {
             << "Options:\n"
             << "  --target TARGET          Select target from executable inputs\n"
             << "  --code-object-index N    Code-object index for the selected target (default: 0)\n"
+            << "  --kernel-entry OFFSET    Analyze only the kernel at this .text byte offset\n"
             << "  --all-code-objects       Analyze all supported code objects\n"
             << "  --list-code-objects      List supported code objects and exit\n"
             << "  --recursive              Expand directory inputs into recursive file sweeps\n"
@@ -118,6 +120,18 @@ void print_help() {
 }
 
 [[nodiscard]] bool parse_u32(std::string_view text, uint32_t &value) {
+  int base = 10;
+  if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+    text.remove_prefix(2);
+    base = 16;
+  }
+  auto *begin = text.data();
+  auto *end = text.data() + text.size();
+  auto [ptr, ec] = std::from_chars(begin, end, value, base);
+  return ec == std::errc{} && ptr == end;
+}
+
+[[nodiscard]] bool parse_u64(std::string_view text, uint64_t &value) {
   int base = 10;
   if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
     text.remove_prefix(2);
@@ -198,6 +212,17 @@ void print_help() {
       options.code_object_index_set = true;
       continue;
     }
+    if (arg == "--kernel-entry") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      uint64_t kernel_entry = 0;
+      if (!parse_u64(value, kernel_entry)) {
+        std::cerr << "invalid kernel entry: " << value << "\n";
+        return false;
+      }
+      options.kernel_entry = kernel_entry;
+      continue;
+    }
     if (arg == "--max-diagnostics") {
       if (!require_value(argc, argv, i, arg, value))
         return false;
@@ -221,6 +246,10 @@ void print_help() {
 
   if (options.all_code_objects && options.code_object_index_set) {
     std::cerr << "--code-object-index cannot be used with --all-code-objects\n";
+    return false;
+  }
+  if (options.all_code_objects && options.kernel_entry) {
+    std::cerr << "--kernel-entry cannot be used with --all-code-objects\n";
     return false;
   }
 
@@ -385,10 +414,13 @@ void print_diagnostics(const std::string &input_path, rj_code_target_id_t target
 }
 
 void print_summary(const std::string &input_path, rj_code_target_id_t target,
-                   uint32_t code_object_index, const WaitcheckReport &report) {
+                   uint32_t code_object_index, std::optional<uint64_t> kernel_entry,
+                   const WaitcheckReport &report) {
   std::cout << "rj_waitcheck: " << input_path << ":" << target_name(target) << "["
-            << code_object_index
-            << "]: instructions=" << count_label(report.instructions_analyzed, report.stopped_early)
+            << code_object_index << "]";
+  if (kernel_entry)
+    std::cout << ":kernel=.text+" << hex_offset(*kernel_entry);
+  std::cout << ": instructions=" << count_label(report.instructions_analyzed, report.stopped_early)
             << " memory-events=" << count_label(report.memory_events_tracked, report.stopped_early)
             << " diagnostics="
             << count_label(report.diagnostics_observed, report.diagnostics_truncated) << "\n";
@@ -415,7 +447,10 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
   WaitcheckOptions analysis_options;
   analysis_options.max_diagnostics = options.max_diagnostics;
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
-  WaitcheckReport report = analyze_waitcnts(code_object, arch, analysis_options);
+  WaitcheckReport report =
+      options.kernel_entry
+          ? analyze_waitcnts_for_kernel(code_object, arch, *options.kernel_entry, analysis_options)
+          : analyze_waitcnts(code_object, arch, analysis_options);
   if (!report.supported) {
     error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
             std::to_string(code_object_index) + "]";
@@ -430,7 +465,7 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
   totals.hazards = totals.hazards || !report.passed();
 
   if (!options.summary_only) {
-    print_summary(input_path, target, code_object_index, report);
+    print_summary(input_path, target, code_object_index, options.kernel_entry, report);
     print_diagnostics(input_path, target, code_object_index, report, options.max_diagnostics);
   }
   return true;

@@ -129,9 +129,11 @@ public:
   /// @brief Build only basic blocks reachable from externally-known entries.
   ///
   /// @details Unlike build(), this avoids decoding padding and data embedded in
-  /// executable sections of library code objects.
+  /// executable sections of library code objects. Statically recoverable call
+  /// targets are decoded on demand so callers can model helper waits without
+  /// scanning the rest of a large library code object.
   static std::vector<std::unique_ptr<BasicBlock>>
-  build_reachable(const CodeObject &co, Decoder &decoder,
+  build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                   std::span<const uint64_t> entry_offsets);
 
 private:

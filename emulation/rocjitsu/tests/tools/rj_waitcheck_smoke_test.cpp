@@ -7,6 +7,7 @@
 #include "waitcheck_fixture.h"
 
 #include <gtest/gtest.h>
+#include <zstd.h>
 
 #include <array>
 #include <cstdint>
@@ -70,6 +71,111 @@ bool write_binary_file(const std::filesystem::path &path, const std::vector<uint
   return out.good();
 }
 
+template <typename T> void append_value(std::vector<uint8_t> &bytes, T value) {
+  const auto *raw = reinterpret_cast<const uint8_t *>(&value);
+  bytes.insert(bytes.end(), raw, raw + sizeof(value));
+}
+
+std::vector<uint8_t> make_clang_offload_bundle(const std::vector<uint8_t> &code_object) {
+  constexpr std::string_view magic = "__CLANG_OFFLOAD_BUNDLE__";
+  constexpr std::string_view host_id = "host-x86_64-unknown-linux-gnu-";
+  constexpr std::string_view gpu_id = "hipv4-amdgcn-amd-amdhsa--gfx950";
+  constexpr uint64_t bundle_count = 2;
+  const uint64_t header_size = magic.size() + sizeof(bundle_count) + 2 * 3 * sizeof(uint64_t) +
+                               host_id.size() + gpu_id.size();
+  const uint64_t payload_offset = rocjitsu::waitcheck_test::align_up(header_size, 4096);
+
+  std::vector<uint8_t> bundle;
+  bundle.insert(bundle.end(), magic.begin(), magic.end());
+  append_value(bundle, bundle_count);
+  append_value(bundle, payload_offset);
+  append_value(bundle, uint64_t{0});
+  append_value(bundle, static_cast<uint64_t>(host_id.size()));
+  bundle.insert(bundle.end(), host_id.begin(), host_id.end());
+  append_value(bundle, payload_offset);
+  append_value(bundle, static_cast<uint64_t>(code_object.size()));
+  append_value(bundle, static_cast<uint64_t>(gpu_id.size()));
+  bundle.insert(bundle.end(), gpu_id.begin(), gpu_id.end());
+  bundle.resize(static_cast<size_t>(payload_offset), 0);
+  bundle.insert(bundle.end(), code_object.begin(), code_object.end());
+  return bundle;
+}
+
+std::vector<uint8_t> make_compressed_offload_bundle(const std::vector<uint8_t> &bundle) {
+  constexpr std::string_view magic = "CCOB";
+  constexpr uint16_t version = 3;
+  constexpr uint16_t zstd_method = 1;
+  constexpr uint64_t hash = 0;
+  constexpr size_t header_size = 32;
+
+  std::vector<uint8_t> compressed(ZSTD_compressBound(bundle.size()));
+  const size_t compressed_size = ZSTD_compress(compressed.data(), compressed.size(), bundle.data(),
+                                               bundle.size(), ZSTD_CLEVEL_DEFAULT);
+  if (ZSTD_isError(compressed_size))
+    return {};
+  compressed.resize(compressed_size);
+
+  std::vector<uint8_t> result;
+  result.insert(result.end(), magic.begin(), magic.end());
+  append_value(result, version);
+  append_value(result, zstd_method);
+  append_value(result, static_cast<uint64_t>(header_size + compressed.size()));
+  append_value(result, static_cast<uint64_t>(bundle.size()));
+  append_value(result, hash);
+  result.insert(result.end(), compressed.begin(), compressed.end());
+  return result;
+}
+
+std::vector<uint8_t>
+make_gnu_host_fat_binary(const std::vector<std::vector<uint8_t>> &compressed_bundles) {
+  std::vector<uint8_t> fatbin;
+  for (const auto &bundle : compressed_bundles) {
+    fatbin.resize(static_cast<size_t>(rocjitsu::waitcheck_test::align_up(fatbin.size(), 4096)), 0);
+    fatbin.insert(fatbin.end(), bundle.begin(), bundle.end());
+  }
+
+  constexpr uint64_t fatbin_offset = 0x100;
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t fatbin_name = rocjitsu::waitcheck_test::add_elf_name(shstrtab, ".hip_fatbin");
+  const uint32_t shstrtab_name = rocjitsu::waitcheck_test::add_elf_name(shstrtab, ".shstrtab");
+  const uint64_t shstrtab_offset = fatbin_offset + fatbin.size();
+  const uint64_t shoff = rocjitsu::waitcheck_test::align_up(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 3;
+  std::vector<uint8_t> image(shoff + section_count * sizeof(rocjitsu::Elf64_Shdr), 0);
+
+  rocjitsu::Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE);
+  ehdr.e_ident[rocjitsu::EI_CLASS] = rocjitsu::ELFCLASS64;
+  ehdr.e_ident[rocjitsu::EI_DATA] = 1;
+  ehdr.e_ident[rocjitsu::EI_VERSION] = 1;
+  ehdr.e_ident[rocjitsu::EI_OSABI] = rocjitsu::ELFOSABI_GNU;
+  ehdr.e_type = rocjitsu::ET_DYN;
+  ehdr.e_machine = rocjitsu::EM_X86_64;
+  ehdr.e_version = 1;
+  ehdr.e_ehsize = sizeof(rocjitsu::Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_shentsize = sizeof(rocjitsu::Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 2;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  std::memcpy(image.data() + fatbin_offset, fatbin.data(), fatbin.size());
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<rocjitsu::Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = fatbin_name;
+  shdrs[1].sh_type = rocjitsu::SHT_PROGBITS;
+  shdrs[1].sh_offset = fatbin_offset;
+  shdrs[1].sh_size = fatbin.size();
+  shdrs[1].sh_addralign = 4096;
+  shdrs[2].sh_name = shstrtab_name;
+  shdrs[2].sh_type = rocjitsu::SHT_STRTAB;
+  shdrs[2].sh_offset = shstrtab_offset;
+  shdrs[2].sh_size = shstrtab.size();
+  shdrs[2].sh_addralign = 1;
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(rocjitsu::Elf64_Shdr));
+  return image;
+}
+
 } // namespace
 
 TEST(RjWaitcheck, ReportsMissingWait) {
@@ -104,6 +210,84 @@ TEST(RjWaitcheck, ReportsMissingWait) {
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjWaitcheck, ListsAndScansConcatenatedCompressedGfx950Bundles) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "pytorch_style_gfx950.so";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto missing = rocjitsu::waitcheck_test::make_gfx_code_object(
+      {0xE0501000u, 0x80000008u, 0x7E020300u}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const auto correct = rocjitsu::waitcheck_test::make_gfx_code_object(
+      {0xE0501000u, 0x80000008u, 0xBF8C0F70u, 0x7E020300u}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const auto executable = make_gnu_host_fat_binary(
+      {make_compressed_offload_bundle(make_clang_offload_bundle(missing)),
+       make_compressed_offload_bundle(make_clang_offload_bundle(correct))});
+  ASSERT_TRUE(write_binary_file(input, executable));
+
+  std::string command = shell_quote(g_waitcheck_tool.string()) + " --list-code-objects " +
+                        shell_quote(input.string()) + " > " + shell_quote(output.string()) +
+                        " 2> " + shell_quote(error.string());
+  int status = std::system(command.c_str());
+  std::string stdout_text = read_text_file(output);
+  std::string stderr_text = read_text_file(error);
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "gfx950: 2")) << stdout_text;
+
+  command = shell_quote(g_waitcheck_tool.string()) + " --all-code-objects --no-fail " +
+            shell_quote(input.string()) + " > " + shell_quote(output.string()) + " 2> " +
+            shell_quote(error.string());
+  status = std::system(command.c_str());
+  stdout_text = read_text_file(output);
+  stderr_text = read_text_file(error);
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "missing s_waitcnt vmcnt(0)")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text,
+                       "rj_waitcheck: scanned inputs=1 skipped=0 code-objects=2 diagnostics=1"))
+      << stdout_text;
+}
+
+TEST(RjWaitcheck, KernelEntryChecksOnlySelectedDescriptor) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "multi_kernel_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"hazard", {0xE0501000u, 0x80000008u, 0x7E020300u}},
+       {"clean", {0xE0501000u, 0x80000008u, 0xBF8C0F70u, 0x7E020300u}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  // The second descriptor starts after the first kernel's three encoded
+  // words. A whole-object check reports the first kernel's hazard; selecting
+  // entry 0xc must decode and analyze only the clean second kernel.
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --target gfx950 --kernel-entry 0xc > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "gfx950[0]:kernel=.text+0xc")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "instructions=3 memory-events=1 diagnostics=0")) << stdout_text;
 }
 
 TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {

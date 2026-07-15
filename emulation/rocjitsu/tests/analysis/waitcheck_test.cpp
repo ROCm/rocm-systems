@@ -5,6 +5,8 @@
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -511,6 +513,34 @@ void append_gfx950_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &progr
   program.push_back(0x80000008u);
 }
 
+void append_gfx950_global_atomic_add_x2(std::vector<uint32_t> &program, uint32_t vdst,
+                                        uint32_t vaddr, uint32_t data, bool return_old) {
+  cdna4::FlatMachineInst inst{};
+  inst.encoding = 0x37;
+  inst.seg = 2;
+  inst.op = 98;
+  inst.sc0 = return_old;
+  inst.addr = vaddr;
+  inst.data = data;
+  inst.saddr = 0x7f;
+  inst.vdst = vdst;
+  append_inst(program, inst);
+}
+
+void append_gfx950_buffer_atomic_add(std::vector<uint32_t> &program, uint32_t vdata,
+                                     bool return_old) {
+  cdna4::MubufMachineInst inst{};
+  inst.encoding = 0x38;
+  inst.op = 66;
+  inst.offen = 1;
+  inst.sc0 = return_old;
+  inst.vaddr = 8;
+  inst.vdata = vdata;
+  inst.srsrc = 0;
+  inst.soffset = 0;
+  append_inst(program, inst);
+}
+
 void append_gfx950_buffer_load_dword_v1_v8_s0_offen(std::vector<uint32_t> &program) {
   program.push_back(0xE0501000u);
   program.push_back(0x80000108u);
@@ -1001,6 +1031,45 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950NonReturningFlatAtomicDoesNotDefineVdst) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_global_atomic_add_x2(program, 0, 40, 36, false);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ReturningFlatAtomicDefinesVdst) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_global_atomic_add_x2(program, 0, 40, 36, true);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950BufferAtomicAlwaysReadsPayload) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_atomic_add(program, 0, false);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
 }
 
 TEST(WaitcheckTest, Gfx950DoesNotTreatDirectToLdsBufferLoadAsVgprProducer) {
@@ -3360,6 +3429,105 @@ TEST(WaitcheckTest, DescriptorEntryAnalysisIgnoresPaddingAfterEndpgm) {
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty());
   EXPECT_EQ(report.instructions_analyzed, 2u);
+}
+
+TEST(WaitcheckTest, SharedKernelEntryDiagnosticsAreReportedOnce) {
+  std::vector<uint32_t> words;
+  rocjitsu::waitcheck_test::append_inst(words, rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(words, rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  words.push_back(0xBFB00000U); // s_endpgm
+
+  auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"first", words}, {"alias", words}}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  constexpr uint64_t kTextOffset = 0x100;
+  constexpr uint64_t kTextVaddr = 0x1100;
+  constexpr uint64_t kDescriptorSize = 64;
+  constexpr uint64_t kEntryOffsetField = 16;
+  const uint64_t text_size = 2 * words.size() * sizeof(uint32_t);
+  const uint64_t rodata_offset = kTextOffset + text_size;
+  const uint64_t rodata_vaddr = kTextVaddr + text_size + 0x1000;
+  const uint64_t alias_descriptor_vaddr = rodata_vaddr + kDescriptorSize;
+  const int64_t alias_entry_offset =
+      static_cast<int64_t>(kTextVaddr) - static_cast<int64_t>(alias_descriptor_vaddr);
+  std::memcpy(image.data() + rodata_offset + kDescriptorSize + kEntryOffsetField,
+              &alias_entry_offset, sizeof(alias_entry_offset));
+
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_EQ(report.diagnostics_observed, 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ResolvedSwappcHelperWaitAppliesBeforeContinuation) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+
+  // The kernel leaves a VMEM result pending, builds the helper address relative
+  // to s_getpc, and uses s_swappc to call it. The helper's entry wait is the only
+  // wait before the continuation consumes v0. Runtime waitcheck must decode the
+  // proven helper target without walking unrelated .text bytes and propagate
+  // the helper state back through its matching s[30:31] return.
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);                     // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4)); // 0x08.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_CDNA4)); // 0x0c.
+  program.push_back(24);                                        // 0x10 -> 0x24.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_CDNA4)); // 0x14.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4)); // 0x18.
+  append_gfx950_v_mov_b32_v1_v0(program);                                      // 0x1c.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));                 // 0x20.
+  append_gfx950_s_waitcnt_vmcnt_0(program);                                    // 0x24 helper.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
+                                        kReturnSreg)); // 0x28 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ResolvedSwappcPropagatesHelperLoadToContinuation) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4)); // 0x00.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_CDNA4)); // 0x04.
+  program.push_back(24);                                        // 0x08 -> 0x1c.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_CDNA4)); // 0x0c.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4)); // 0x10.
+  append_gfx950_v_mov_b32_v1_v0(program);                                      // 0x14.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));                 // 0x18.
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);                     // 0x1c helper.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
+                                        kReturnSreg)); // 0x24 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
 }
 
 } // namespace

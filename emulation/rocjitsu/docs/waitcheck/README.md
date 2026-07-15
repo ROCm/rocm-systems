@@ -65,6 +65,7 @@ Useful options:
 | --- | --- |
 | `--target gfx942|gfx950|gfx1100|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
+| `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. Use this to mirror dispatch-lazy runtime checking on a massive code object. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
@@ -186,6 +187,14 @@ configuration), so waitcheck analyzes it rather than treating it as a container.
 Waitcheck analyzes each kernel entry point independently so large generated
 libraries do not retain whole-library CFG state in memory at once.
 
+For a library with many descriptors, use `rj_co --list-kernels` to obtain one
+entry offset and reproduce the runtime-sized analysis directly:
+
+```sh
+rj_waitcheck libtorch_hip.so --target gfx950 --code-object-index 76 \
+  --kernel-entry 0x25d400
+```
+
 ## Runtime HSA Tool
 
 Load the checker through ROCR's HSA tools interface:
@@ -226,11 +235,18 @@ Environment variables:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to reject supported code objects with missing waits by returning `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
-| `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/check/pass/hazard counters at shutdown or process exit. |
+| `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode rejects the load with `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
+| `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/dispatch/check/cache/pass/hazard counters at shutdown or process exit. |
 
 The tool prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
-reports each reader's hazards once and chains to the next runtime layer.
+reports each selected kernel's hazards once and submits the packet. Dispatch
+mode indexes descriptors at load, maps them to runtime `kernel_object` values
+after executable freeze, and does not decode or build a CFG until the kernel is
+actually submitted. This keeps large PyTorch and Tensile code objects from
+paying whole-library analysis costs. Use `ROCJITSU_WAITCHECK_MODE=eager` for
+load-only validation or when the application never creates an interceptable
+HSA queue.
 
 ## How It Works
 

@@ -10,7 +10,9 @@
 #include "util/except.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <optional>
@@ -378,21 +380,18 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 }
 
 std::vector<std::unique_ptr<BasicBlock>>
-BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder,
+BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                             std::span<const uint64_t> entry_offsets) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   if (entry_offsets.empty())
     return blocks;
 
   for (const auto *sec : co.text_sections()) {
-    const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
-    const std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    const uint64_t section_end = inst_data_size * sizeof(uint32_t);
+    const auto text =
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+    const uint64_t section_end = text.size();
     if (section_end == 0)
       continue;
-
-    std::vector<uint32_t> padded(inst_data, inst_data + inst_data_size);
-    padded.resize(padded.size() + 2);
 
     std::map<uint64_t, std::unique_ptr<Instruction>> decoded;
     std::set<uint64_t> leaders;
@@ -412,51 +411,98 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder,
     for (uint64_t entry : entry_offsets)
       enqueue(entry);
 
-    for (size_t work_index = 0; work_index < worklist.size(); ++work_index) {
-      uint64_t offset = worklist[work_index];
-      while (offset < section_end) {
-        if (offset % sizeof(uint32_t) != 0)
-          throw util::InvalidInst("unaligned instruction offset", "Invalid CFG: ");
+    std::vector<IndirectCallFixup> recovered_indirect_targets;
+    size_t work_index = 0;
+    while (true) {
+      while (work_index < worklist.size()) {
+        uint64_t offset = worklist[work_index++];
+        while (offset < section_end) {
+          if (offset % sizeof(uint32_t) != 0)
+            throw util::InvalidInst("unaligned instruction offset", "Invalid CFG: ");
 
-        auto decoded_it = decoded.find(offset);
-        if (decoded_it == decoded.end()) {
-          auto *raw_inst =
-              decoder.decode(&padded[offset / sizeof(uint32_t)], offset);
-          std::unique_ptr<Instruction> inst(raw_inst);
-          if (!inst || inst->size() <= 0)
-            throw util::InvalidInst("zero-sized instruction", "Invalid CFG: ");
-          if (offset + static_cast<uint64_t>(inst->size()) > section_end)
-            throw util::InvalidInst("truncated instruction", "Invalid CFG: ");
-          decoded_it = decoded.emplace(offset, std::move(inst)).first;
-        }
+          auto decoded_it = decoded.find(offset);
+          if (decoded_it == decoded.end()) {
+            // Decode from a small local window instead of copying the complete
+            // .text section. AMDGPU instructions occupy at most three words;
+            // zero padding preserves the decoder's established lookahead
+            // contract at the end of a section.
+            std::array<uint32_t, 3> window{};
+            const size_t available =
+                static_cast<size_t>(std::min<uint64_t>(sizeof(window), section_end - offset));
+            std::memcpy(window.data(), text.data() + offset, available);
+            std::unique_ptr<Instruction> inst(decoder.decode(window.data(), offset));
+            if (!inst || inst->size() <= 0)
+              throw util::InvalidInst("zero-sized instruction", "Invalid CFG: ");
+            if (offset + static_cast<uint64_t>(inst->size()) > section_end)
+              throw util::InvalidInst("truncated instruction", "Invalid CFG: ");
+            decoded_it = decoded.emplace(offset, std::move(inst)).first;
+          }
 
-        const Instruction &inst = *decoded_it->second;
-        const uint64_t next_offset = offset + static_cast<uint64_t>(inst.size());
-        const auto branch_delta = inst.branch_offset_bytes();
-        assert((!(inst.flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
-               "direct branch is missing branch_offset_bytes()");
+          const Instruction &inst = *decoded_it->second;
+          const uint64_t next_offset = offset + static_cast<uint64_t>(inst.size());
+          const auto branch_delta = inst.branch_offset_bytes();
+          assert((!(inst.flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
+                 "direct branch is missing branch_offset_bytes()");
 
-        if (branch_delta) {
-          const int64_t target =
-              static_cast<int64_t>(next_offset) + static_cast<int64_t>(*branch_delta);
-          if (target >= 0 && static_cast<uint64_t>(target) < section_end)
-            enqueue(static_cast<uint64_t>(target));
-        }
+          if (branch_delta) {
+            const int64_t target =
+                static_cast<int64_t>(next_offset) + static_cast<int64_t>(*branch_delta);
+            if (target >= 0 && static_cast<uint64_t>(target) < section_end)
+              enqueue(static_cast<uint64_t>(target));
+          }
 
-        if (is_block_terminator(inst)) {
-          if (!has_no_static_successor(inst) && !is_unconditional_branch(inst) &&
-              next_offset < section_end)
+          if (is_block_terminator(inst)) {
+            if (!has_no_static_successor(inst) && !is_unconditional_branch(inst) &&
+                next_offset < section_end)
+              enqueue(next_offset);
+            break;
+          }
+          if (next_offset >= section_end)
+            break;
+          if (leaders.contains(next_offset)) {
             enqueue(next_offset);
-          break;
+            break;
+          }
+          offset = next_offset;
         }
-        if (next_offset >= section_end)
-          break;
-        if (leaders.contains(next_offset)) {
-          enqueue(next_offset);
-          break;
-        }
-        offset = next_offset;
       }
+
+      std::vector<const Instruction *> decoded_insts;
+      decoded_insts.reserve(decoded.size());
+      std::vector<uint64_t> discovery_leaders(entry_offsets.begin(), entry_offsets.end());
+      uint64_t previous_end = 0;
+      bool first = true;
+      for (const auto &[offset, inst] : decoded) {
+        decoded_insts.push_back(inst.get());
+        if (first || offset != previous_end)
+          discovery_leaders.push_back(offset);
+        previous_end = offset + static_cast<uint64_t>(inst->size());
+        first = false;
+      }
+      discovery_leaders.insert(discovery_leaders.end(), leaders.begin(), leaders.end());
+      std::ranges::sort(discovery_leaders);
+      discovery_leaders.erase(std::ranges::unique(discovery_leaders).begin(),
+                              discovery_leaders.end());
+
+      const auto newly_recovered = discover_indirect_branch_edges(
+          std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
+          arch, discovery_leaders);
+      for (const IndirectCallFixup &fixup : newly_recovered) {
+        const auto duplicate = std::ranges::find_if(
+            recovered_indirect_targets, [&](const IndirectCallFixup &existing) {
+              return existing.source_call_offset == fixup.source_call_offset &&
+                     existing.source_target_offset == fixup.source_target_offset &&
+                     existing.source_call_sreg == fixup.source_call_sreg &&
+                     existing.source_return_sreg == fixup.source_return_sreg;
+            });
+        if (duplicate == recovered_indirect_targets.end())
+          recovered_indirect_targets.push_back(fixup);
+        leaders.insert(fixup.source_call_offset);
+        enqueue(fixup.source_target_offset);
+      }
+
+      if (work_index == worklist.size())
+        break;
     }
 
     std::vector<std::unique_ptr<BasicBlock>> section_blocks;
@@ -464,8 +510,7 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder,
       auto current = std::make_unique<BasicBlock>(it->first);
       while (it != decoded.end()) {
         const uint64_t inst_offset = it->first;
-        const uint64_t next_offset =
-            inst_offset + static_cast<uint64_t>(it->second->size());
+        const uint64_t next_offset = inst_offset + static_cast<uint64_t>(it->second->size());
         const bool terminates = is_block_terminator(*it->second);
         current->add_instruction(std::move(it->second));
         ++it;
@@ -479,24 +524,113 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder,
     std::unordered_map<uint64_t, BasicBlock *> block_by_offset;
     for (auto &block : section_blocks)
       block_by_offset.emplace(block->start_offset(), block.get());
+
+    std::unordered_set<uint64_t> kernel_entry_offsets(entry_offsets.begin(), entry_offsets.end());
+    auto function_returns_to_sreg = [&](BasicBlock &callee, uint16_t return_sreg) {
+      std::vector<BasicBlock *> stack{&callee};
+      std::unordered_set<BasicBlock *> visited;
+      while (!stack.empty()) {
+        BasicBlock *block = stack.back();
+        stack.pop_back();
+        if (block == nullptr || !visited.insert(block).second)
+          continue;
+        const Instruction *term = block->terminator();
+        if (term == nullptr)
+          continue;
+        if (s_setpc_from_sreg(*term, first_word(*term), return_sreg))
+          return true;
+        for (BasicBlock *succ : block->successors()) {
+          if (succ == nullptr)
+            continue;
+          if (kernel_entry_offsets.contains(succ->start_offset()) && succ != &callee)
+            continue;
+          stack.push_back(succ);
+        }
+      }
+      return false;
+    };
+
+    std::vector<DeferredIndirectCall> deferred_indirect_calls;
+    for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
+      auto source_it = block_by_offset.find(fixup.source_call_offset);
+      if (source_it == block_by_offset.end())
+        continue;
+      BasicBlock *source = source_it->second;
+      source->add_static_indirect_call_fixup(fixup);
+      auto target_it = block_by_offset.find(fixup.source_target_offset);
+      if (target_it == block_by_offset.end())
+        continue;
+      BasicBlock *target = target_it->second;
+      BasicBlock *continuation = nullptr;
+      if (auto it = block_by_offset.find(source->end_offset()); it != block_by_offset.end())
+        continuation = it->second;
+      if (fixup.source_is_call && continuation != nullptr) {
+        deferred_indirect_calls.push_back({.source = source,
+                                           .target = target,
+                                           .continuation = continuation,
+                                           .source_call_offset = fixup.source_call_offset,
+                                           .return_sreg = fixup.source_return_sreg});
+      } else {
+        source->add_successor(*target);
+      }
+    }
+
+    std::vector<DeferredDirectCall> deferred_direct_calls;
     for (auto &block_ptr : section_blocks) {
       BasicBlock &block = *block_ptr;
       const Instruction *term = block.terminator();
       if (term == nullptr || has_no_static_successor(*term))
         continue;
       if (const auto branch_delta = term->branch_offset_bytes()) {
-        const int64_t target = static_cast<int64_t>(block.end_offset()) +
-                               static_cast<int64_t>(*branch_delta);
+        const int64_t target =
+            static_cast<int64_t>(block.end_offset()) + static_cast<int64_t>(*branch_delta);
         if (target >= 0) {
-          if (auto target_it = block_by_offset.find(static_cast<uint64_t>(target));
-              target_it != block_by_offset.end())
+          auto target_it = block_by_offset.find(static_cast<uint64_t>(target));
+          const auto fallthrough_it = block_by_offset.find(block.end_offset());
+          const auto call_sdst = s_call_sdst(*term, first_word(*term));
+          if (call_sdst && target_it != block_by_offset.end() &&
+              fallthrough_it != block_by_offset.end()) {
+            deferred_direct_calls.push_back({.source = &block,
+                                             .target = target_it->second,
+                                             .continuation = fallthrough_it->second,
+                                             .source_call_offset = term->src_loc(),
+                                             .return_sreg = *call_sdst});
+          } else if (target_it != block_by_offset.end()) {
             block.add_successor(*target_it->second);
+          }
         }
       }
       if (!is_unconditional_branch(*term)) {
         if (auto fallthrough_it = block_by_offset.find(block.end_offset());
             fallthrough_it != block_by_offset.end())
           block.add_successor(*fallthrough_it->second);
+      }
+    }
+
+    for (const DeferredIndirectCall &call : deferred_indirect_calls) {
+      if (call.source == nullptr || call.target == nullptr || call.continuation == nullptr)
+        continue;
+      if (function_returns_to_sreg(*call.target, call.return_sreg)) {
+        call.source->add_call_edge(CallEdge{.kind = CallEdgeKind::IndirectSwapPc,
+                                            .callee = call.target,
+                                            .continuation = call.continuation,
+                                            .source_call_offset = call.source_call_offset,
+                                            .return_sreg = call.return_sreg});
+      } else {
+        call.source->add_successor(*call.target);
+      }
+    }
+    for (const DeferredDirectCall &call : deferred_direct_calls) {
+      if (call.source == nullptr || call.target == nullptr || call.continuation == nullptr)
+        continue;
+      if (function_returns_to_sreg(*call.target, call.return_sreg)) {
+        call.source->add_call_edge(CallEdge{.kind = CallEdgeKind::DirectCall,
+                                            .callee = call.target,
+                                            .continuation = call.continuation,
+                                            .source_call_offset = call.source_call_offset,
+                                            .return_sreg = call.return_sreg});
+      } else {
+        call.source->add_successor(*call.target);
       }
     }
 

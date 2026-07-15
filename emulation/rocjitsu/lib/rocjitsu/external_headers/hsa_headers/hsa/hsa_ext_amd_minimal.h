@@ -27,6 +27,15 @@ using hsa_amd_sdma_engine_id_t = uint32_t;
 using hsa_amd_pointer_type_t = uint32_t;
 using hsa_amd_copy_direction_t = uint32_t;
 
+using hsa_amd_queue_intercept_packet_writer_t = void (*)(const void *, uint64_t);
+using hsa_amd_queue_intercept_handler_t = void (*)(const void *, uint64_t, uint64_t, void *,
+                                                   hsa_amd_queue_intercept_packet_writer_t);
+using hsa_amd_queue_intercept_create_fn_t = hsa_status_t(HSA_API *)(
+    hsa_agent_t, uint32_t, hsa_queue_type32_t, void (*)(hsa_status_t, hsa_queue_t *, void *),
+    void *, uint32_t, uint32_t, hsa_queue_t **);
+using hsa_amd_queue_intercept_register_fn_t =
+    hsa_status_t(HSA_API *)(hsa_queue_t *, hsa_amd_queue_intercept_handler_t, void *);
+
 /// @brief Minimal profiling dispatch-time result mirror.
 struct hsa_amd_profiling_dispatch_time_t {
   uint64_t start;

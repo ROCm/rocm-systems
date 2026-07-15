@@ -75,6 +75,15 @@ struct WaitcheckOptions {
   bool stop_after_first_diagnostic = false;
 };
 
+/// @brief One AMDHSA kernel discovered in a final code object.
+struct WaitcheckKernelInfo {
+  std::string name;
+  /// @brief ELF virtual address of the kernel descriptor (`.kd`) symbol.
+  uint64_t descriptor_vaddr = 0;
+  /// @brief Byte offset of the kernel entry point within the `.text` section.
+  uint64_t entry_offset = 0;
+};
+
 /// @brief Result of one waitcheck analysis run.
 struct WaitcheckReport {
   bool supported = true;
@@ -98,6 +107,12 @@ struct WaitcheckReport {
 /// @details Unsupported targets return ROCJITSU_CODE_ARCH_INVALID.
 [[nodiscard]] rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target);
 
+/// @brief Discover independently analyzable AMDHSA kernels in a code object.
+///
+/// @details The descriptor virtual address can be combined with the loader's
+/// load delta to identify the `kernel_object` field in an AQL dispatch packet.
+[[nodiscard]] std::vector<WaitcheckKernelInfo> waitcheck_kernels(const CodeObject &code_object);
+
 /// @brief Analyze one stream of 32-bit instruction words.
 ///
 /// @details Unsupported architectures return a report with supported=false.
@@ -110,5 +125,15 @@ struct WaitcheckReport {
 /// file offset when the section exposes one.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
+
+/// @brief Analyze only the kernel whose entry point is at @p kernel_entry_offset.
+///
+/// @details Reachable functions are included, while sibling kernels and
+/// unrelated executable sections are skipped. This is the runtime-oriented
+/// counterpart to the exhaustive code-object overload above.
+[[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,
+                                                          rj_code_arch_t arch,
+                                                          uint64_t kernel_entry_offset,
+                                                          WaitcheckOptions options = {});
 
 } // namespace rocjitsu

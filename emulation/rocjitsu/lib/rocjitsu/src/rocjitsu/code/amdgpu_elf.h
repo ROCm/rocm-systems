@@ -31,6 +31,7 @@ inline constexpr uint8_t ELFCLASS32 = 1;
 inline constexpr uint8_t ELFCLASS64 = 2;
 
 inline constexpr uint8_t ELFOSABI_NONE = 0;
+inline constexpr uint8_t ELFOSABI_GNU = 3;
 inline constexpr uint8_t ELFOSABI_AMDGPU_HSA = 64;
 
 inline constexpr int ELFABIVERSION_AMDGPU_HSA_V2 = 0;
