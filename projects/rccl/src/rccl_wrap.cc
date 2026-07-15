@@ -644,7 +644,10 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
     return;
   }
-  const int ranksThreshold = (archGfx942) ? 64 : 32;
+  // On gfx950 the default PXN-on threshold is 32 ranks, but on the AINIC RoCE path
+  // enabling PXN at 32 ranks collapses AllToAll BW at >=256MB (net proxy contention).
+  // Match the gfx942 threshold (64) for AINIC/gfx950 so PXN stays off at 32 ranks.
+  const int ranksThreshold = (archGfx942 || (archGfx950 && rcclUseAinic())) ? 64 : 32;
   int pxnDisable = (comm->nRanks >= ranksThreshold) ? 0 : 1;
   INFO(NCCL_INIT, "RCCL PXN set as %s (nRanks=%d threshold=%d)", !pxnDisable ? "enabled" : "disabled", comm->nRanks,
        ranksThreshold);
