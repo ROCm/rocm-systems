@@ -98,8 +98,6 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (amdgpu not found in modules)"
                     )
                 else:
-                    # Fatal init error: exit with the real status (folded to a byte),
-                    # not an uncaught traceback -> exit 1 (== AMDSMI_STATUS_INVAL).
                     logging.exception("Unexpected library error during GPU device init")
                     sys.exit(library_code_to_exit_code(e.err_code))
 
@@ -130,8 +128,6 @@ class AMDSMICommands(
                         "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
                     )
                 else:
-                    # Fatal init error: exit with the real status (folded to a byte),
-                    # not an uncaught traceback -> exit 1 (== AMDSMI_STATUS_INVAL).
                     logging.exception("Unexpected library error during NIC device init")
                     sys.exit(library_code_to_exit_code(e.err_code))
 
@@ -160,8 +156,6 @@ class AMDSMICommands(
                         "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
                     )
                 else:
-                    # Fatal init error: exit with the real status (folded to a byte),
-                    # not an uncaught traceback -> exit 1 (== AMDSMI_STATUS_INVAL).
                     logging.exception("Unexpected library error during CPU device init")
                     sys.exit(library_code_to_exit_code(e.err_code))
 
@@ -177,8 +171,6 @@ class AMDSMICommands(
                         "Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)"
                     )
                 else:
-                    # Fatal init error: exit with the real status (folded to a byte),
-                    # not an uncaught traceback -> exit 1 (== AMDSMI_STATUS_INVAL).
                     logging.exception("Unexpected library error during CORE device init")
                     sys.exit(library_code_to_exit_code(e.err_code))
 

@@ -235,11 +235,6 @@ if __name__ == "__main__":
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
 
-        # record-then-finalize: every device has now been attempted. Decide the
-        # single process exit code from the failures recorded during the run
-        # (none -> 0, all-same -> that code, mixed -> MIXED_DEVICE_ERRORS). FATAL
-        # errors never reach here; they are raised and handled by the except
-        # blocks below.
         sys.exit(amd_smi_helpers.error_collector.resolve_exit_code())
     except amdsmi_cli_exceptions.AmdSmiException as e:
         _print_error(

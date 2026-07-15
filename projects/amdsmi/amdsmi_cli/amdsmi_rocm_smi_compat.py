@@ -26,12 +26,11 @@ SMI_HASH = "amdsmi"
 __version__ = "%s.%s.%s+%s" % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
 
-# rocm-smi uses a BINARY exit convention (0 = success, 1 = any error), unlike
-# amd-smi's rich AmdSmiExitCode band (192-255). This shim intentionally mirrors
-# rocm-smi so `amd-smi --rocm-smi ...` stays a drop-in replacement for scripts
-# that check $? against rocm-smi's contract. These are deliberately NOT
-# AmdSmiExitCode values (those live in 192-255 and must never collide with a
-# library AMDSMI_STATUS_* code); the compat path speaks rocm-smi's dialect.
+# `amd-smi --rocm-smi` mirrors legacy rocm-smi's default output, so it keeps
+# rocm-smi's binary exit convention (0 = success, 1 = error) instead of amd-smi's
+# exit-code redesign (the 192-255 AmdSmiExitCode band + library status codes).
+# Adopting the new codes here could break scripts that rely on rocm-smi's existing
+# $? contract.
 class RocmSmiCompatExitCode(enum.IntEnum):
     SUCCESS = 0
     ERROR = 1
