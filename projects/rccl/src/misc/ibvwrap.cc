@@ -175,7 +175,8 @@ ncclResult_t wrap_ibv_open_device(struct ibv_context** ret,
     }
     return ncclSuccess;
   } else {
-    IBV_PTR_CHECK(ibvSymbols, ibv_internal_open_device, ibv_internal_open_device(device), *ret, NULL, "ibv_open_device");
+    IBV_PTR_CHECK(ibvSymbols, ibv_internal_open_device, ibv_internal_open_device(device), *ret, NULL,
+                  "ibv_open_device");
   }
 #else
   IBV_PTR_CHECK(ibvSymbols, ibv_internal_open_device, ibv_internal_open_device(device), *ret, NULL, "ibv_open_device");

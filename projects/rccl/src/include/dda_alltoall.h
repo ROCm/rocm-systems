@@ -28,22 +28,13 @@ ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t cou
  * Check if DDA alltoall is eligible for the fabric/VMM path (runtime nRanks
  * up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).
  */
-bool ncclAllToAllDdaFabricEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype);
+bool ncclAllToAllDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype);
 
 /**
  * Execute DDA alltoall operation using the fabric/VMM path
  */
-ncclResult_t ncclAllToAllDdaFabric(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                   ncclComm* comm, cudaStream_t stream);
 
 #endif
