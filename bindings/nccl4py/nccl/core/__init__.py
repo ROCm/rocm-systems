@@ -29,6 +29,9 @@ from nccl.core.utils import *
 # Memory management
 from nccl.core.buffer import *
 
+# Parameter access
+from nccl.core.params import *
+
 # The following __all__ exports define the stable, public API surface of NCCL4Py.
 # Semantic versioning guarantees apply only to the symbols explicitly listed below.
 # All other modules, functions, and symbols are internal implementation details and are subject to change without notice.
@@ -101,6 +104,9 @@ __all__ = [
     # Memory
     "mem_alloc",
     "mem_free",
+    # Parameters
+    "params",
+    "dump_params",
     # Interop modules (lazy-loaded)
     "cupy",
     "torch",

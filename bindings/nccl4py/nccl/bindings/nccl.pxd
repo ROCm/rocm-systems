@@ -103,3 +103,8 @@ cpdef object team_world(intptr_t comm)
 cpdef object team_lsa(intptr_t comm)
 cpdef object team_rail(intptr_t comm)
 cpdef object get_library_path()
+
+# Hand-written: Param API (SKIP_LOWPP in nccl.cybind.yaml).
+cpdef str param_get_parameter(str key)
+cpdef list param_get_all_keys()
+cpdef param_dump_all()

@@ -3760,21 +3760,7 @@ cpdef intptr_t get_peer_device_pointer(intptr_t window, size_t offset, int peer)
 
 
 
-# Hand-written: SKIP_LOWPP in nccl.cybind.yaml suppresses cybind's lowpp
-# emission for ncclTeamWorld/Lsa/Rail (which would otherwise treat the
-# struct-by-value return as a status code). Each wrapper allocates a Team
-# POD and populates it directly via _get_ptr() to avoid a struct copy.
-#
-# SKIP_LOWPP also removes the cynccl/_internal cdef declarations cybind
-# would normally emit, so the C symbols are declared inline here. The
-# linker resolves them against libnccl at build time (no dlsym fallback,
-# which is fine since these are core host APIs always present alongside
-# the other ncclXxx symbols this module already links against).
-cdef extern from *:
-    ncclTeam_t ncclTeamWorld(ncclComm_t comm) nogil
-    ncclTeam_t ncclTeamLsa(ncclComm_t comm) nogil
-    ncclTeam_t ncclTeamRail(ncclComm_t comm) nogil
-
+# Hand-written: cybind cannot emit by-value struct returns (ncclTeam_t).
 
 cpdef object team_world(intptr_t comm):
     cdef Team team_py = Team()
@@ -3802,3 +3788,34 @@ cpdef object team_rail(intptr_t comm):
 cpdef object get_library_path():
     from ._internal.nccl import _inspect_loaded_library_path
     return _inspect_loaded_library_path()
+
+
+# Hand-written: Param API (SKIP_LOWPP in nccl.cybind.yaml).
+# param_get_parameter raises KeyError on unknown key (not NCCLError).
+# ncclParamDumpAll returns void — auto-gen wraps only ncclResult_t.
+
+cpdef str param_get_parameter(str key):
+    cdef const char* value
+    cdef int value_len
+    cdef bytes _key = key.encode()
+    cdef const char* _key_ptr = _key
+    cdef int status
+    with nogil:
+        status = <int>ncclParamGetParameter(_key_ptr, &value, &value_len)
+    if status != 0:
+        raise KeyError(key)
+    return value.decode()
+
+
+cpdef list param_get_all_keys():
+    cdef const char** table
+    cdef int table_len
+    with nogil:
+        __status__ = ncclParamGetAllParameterKeys(&table, &table_len)
+    check_status(__status__)
+    return [table[i].decode() for i in range(table_len)]
+
+
+cpdef param_dump_all():
+    with nogil:
+        ncclParamDumpAll()

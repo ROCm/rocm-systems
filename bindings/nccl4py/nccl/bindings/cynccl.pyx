@@ -207,6 +207,62 @@ cdef ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESUL
     return _nccl._ncclGroupSimulateEnd(simInfo)
 
 
+cdef ncclResult_t ncclParamBind(ncclParamHandle_t* out, const char* key) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamBind(out, key)
+
+
+cdef ncclResult_t ncclParamGetI8(ncclParamHandle_t h, int8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetI8(h, out)
+
+
+cdef ncclResult_t ncclParamGetI16(ncclParamHandle_t h, int16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetI16(h, out)
+
+
+cdef ncclResult_t ncclParamGetI32(ncclParamHandle_t h, int32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetI32(h, out)
+
+
+cdef ncclResult_t ncclParamGetI64(ncclParamHandle_t h, int64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetI64(h, out)
+
+
+cdef ncclResult_t ncclParamGetU8(ncclParamHandle_t h, uint8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetU8(h, out)
+
+
+cdef ncclResult_t ncclParamGetU16(ncclParamHandle_t h, uint16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetU16(h, out)
+
+
+cdef ncclResult_t ncclParamGetU32(ncclParamHandle_t h, uint32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetU32(h, out)
+
+
+cdef ncclResult_t ncclParamGetU64(ncclParamHandle_t h, uint64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetU64(h, out)
+
+
+cdef ncclResult_t ncclParamGetStr(ncclParamHandle_t h, const char** out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetStr(h, out)
+
+
+cdef ncclResult_t ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGet(h, out, maxLen, len)
+
+
+cdef ncclResult_t ncclParamGetParameter(const char* key, const char** value, int* valueLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetParameter(key, value, valueLen)
+
+
+cdef ncclResult_t ncclParamGetAllParameterKeys(const char*** table, int* tableLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclParamGetAllParameterKeys(table, tableLen)
+
+
+cdef void ncclParamDumpAll() except* nogil:
+    _nccl._ncclParamDumpAll()
+
+
 cdef ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclCommQueryProperties(comm, props)
 

@@ -118,6 +118,20 @@ cdef void* __ncclWaitSignal = NULL
 cdef void* __ncclGroupStart = NULL
 cdef void* __ncclGroupEnd = NULL
 cdef void* __ncclGroupSimulateEnd = NULL
+cdef void* __ncclParamBind = NULL
+cdef void* __ncclParamGetI8 = NULL
+cdef void* __ncclParamGetI16 = NULL
+cdef void* __ncclParamGetI32 = NULL
+cdef void* __ncclParamGetI64 = NULL
+cdef void* __ncclParamGetU8 = NULL
+cdef void* __ncclParamGetU16 = NULL
+cdef void* __ncclParamGetU32 = NULL
+cdef void* __ncclParamGetU64 = NULL
+cdef void* __ncclParamGetStr = NULL
+cdef void* __ncclParamGet = NULL
+cdef void* __ncclParamGetParameter = NULL
+cdef void* __ncclParamGetAllParameterKeys = NULL
+cdef void* __ncclParamDumpAll = NULL
 cdef void* __ncclCommQueryProperties = NULL
 cdef void* __ncclDevCommCreate = NULL
 cdef void* __ncclDevCommDestroy = NULL
@@ -490,6 +504,104 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclGroupSimulateEnd = dlsym(handle, 'ncclGroupSimulateEnd')
 
+        global __ncclParamBind
+        __ncclParamBind = dlsym(RTLD_DEFAULT, 'ncclParamBind')
+        if __ncclParamBind == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamBind = dlsym(handle, 'ncclParamBind')
+
+        global __ncclParamGetI8
+        __ncclParamGetI8 = dlsym(RTLD_DEFAULT, 'ncclParamGetI8')
+        if __ncclParamGetI8 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI8 = dlsym(handle, 'ncclParamGetI8')
+
+        global __ncclParamGetI16
+        __ncclParamGetI16 = dlsym(RTLD_DEFAULT, 'ncclParamGetI16')
+        if __ncclParamGetI16 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI16 = dlsym(handle, 'ncclParamGetI16')
+
+        global __ncclParamGetI32
+        __ncclParamGetI32 = dlsym(RTLD_DEFAULT, 'ncclParamGetI32')
+        if __ncclParamGetI32 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI32 = dlsym(handle, 'ncclParamGetI32')
+
+        global __ncclParamGetI64
+        __ncclParamGetI64 = dlsym(RTLD_DEFAULT, 'ncclParamGetI64')
+        if __ncclParamGetI64 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetI64 = dlsym(handle, 'ncclParamGetI64')
+
+        global __ncclParamGetU8
+        __ncclParamGetU8 = dlsym(RTLD_DEFAULT, 'ncclParamGetU8')
+        if __ncclParamGetU8 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU8 = dlsym(handle, 'ncclParamGetU8')
+
+        global __ncclParamGetU16
+        __ncclParamGetU16 = dlsym(RTLD_DEFAULT, 'ncclParamGetU16')
+        if __ncclParamGetU16 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU16 = dlsym(handle, 'ncclParamGetU16')
+
+        global __ncclParamGetU32
+        __ncclParamGetU32 = dlsym(RTLD_DEFAULT, 'ncclParamGetU32')
+        if __ncclParamGetU32 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU32 = dlsym(handle, 'ncclParamGetU32')
+
+        global __ncclParamGetU64
+        __ncclParamGetU64 = dlsym(RTLD_DEFAULT, 'ncclParamGetU64')
+        if __ncclParamGetU64 == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetU64 = dlsym(handle, 'ncclParamGetU64')
+
+        global __ncclParamGetStr
+        __ncclParamGetStr = dlsym(RTLD_DEFAULT, 'ncclParamGetStr')
+        if __ncclParamGetStr == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetStr = dlsym(handle, 'ncclParamGetStr')
+
+        global __ncclParamGet
+        __ncclParamGet = dlsym(RTLD_DEFAULT, 'ncclParamGet')
+        if __ncclParamGet == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGet = dlsym(handle, 'ncclParamGet')
+
+        global __ncclParamGetParameter
+        __ncclParamGetParameter = dlsym(RTLD_DEFAULT, 'ncclParamGetParameter')
+        if __ncclParamGetParameter == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetParameter = dlsym(handle, 'ncclParamGetParameter')
+
+        global __ncclParamGetAllParameterKeys
+        __ncclParamGetAllParameterKeys = dlsym(RTLD_DEFAULT, 'ncclParamGetAllParameterKeys')
+        if __ncclParamGetAllParameterKeys == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamGetAllParameterKeys = dlsym(handle, 'ncclParamGetAllParameterKeys')
+
+        global __ncclParamDumpAll
+        __ncclParamDumpAll = dlsym(RTLD_DEFAULT, 'ncclParamDumpAll')
+        if __ncclParamDumpAll == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclParamDumpAll = dlsym(handle, 'ncclParamDumpAll')
+
         global __ncclCommQueryProperties
         __ncclCommQueryProperties = dlsym(RTLD_DEFAULT, 'ncclCommQueryProperties')
         if __ncclCommQueryProperties == NULL:
@@ -713,6 +825,48 @@ cpdef dict _inspect_function_pointers():
 
     global __ncclGroupSimulateEnd
     data["__ncclGroupSimulateEnd"] = <intptr_t>__ncclGroupSimulateEnd
+
+    global __ncclParamBind
+    data["__ncclParamBind"] = <intptr_t>__ncclParamBind
+
+    global __ncclParamGetI8
+    data["__ncclParamGetI8"] = <intptr_t>__ncclParamGetI8
+
+    global __ncclParamGetI16
+    data["__ncclParamGetI16"] = <intptr_t>__ncclParamGetI16
+
+    global __ncclParamGetI32
+    data["__ncclParamGetI32"] = <intptr_t>__ncclParamGetI32
+
+    global __ncclParamGetI64
+    data["__ncclParamGetI64"] = <intptr_t>__ncclParamGetI64
+
+    global __ncclParamGetU8
+    data["__ncclParamGetU8"] = <intptr_t>__ncclParamGetU8
+
+    global __ncclParamGetU16
+    data["__ncclParamGetU16"] = <intptr_t>__ncclParamGetU16
+
+    global __ncclParamGetU32
+    data["__ncclParamGetU32"] = <intptr_t>__ncclParamGetU32
+
+    global __ncclParamGetU64
+    data["__ncclParamGetU64"] = <intptr_t>__ncclParamGetU64
+
+    global __ncclParamGetStr
+    data["__ncclParamGetStr"] = <intptr_t>__ncclParamGetStr
+
+    global __ncclParamGet
+    data["__ncclParamGet"] = <intptr_t>__ncclParamGet
+
+    global __ncclParamGetParameter
+    data["__ncclParamGetParameter"] = <intptr_t>__ncclParamGetParameter
+
+    global __ncclParamGetAllParameterKeys
+    data["__ncclParamGetAllParameterKeys"] = <intptr_t>__ncclParamGetAllParameterKeys
+
+    global __ncclParamDumpAll
+    data["__ncclParamDumpAll"] = <intptr_t>__ncclParamDumpAll
 
     global __ncclCommQueryProperties
     data["__ncclCommQueryProperties"] = <intptr_t>__ncclCommQueryProperties
@@ -1271,6 +1425,146 @@ cdef ncclResult_t _ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESU
             raise FunctionNotFoundError("function ncclGroupSimulateEnd is not found")
     return (<ncclResult_t (*)(ncclSimInfo_t*) noexcept nogil>__ncclGroupSimulateEnd)(
         simInfo)
+
+
+cdef ncclResult_t _ncclParamBind(ncclParamHandle_t* out, const char* key) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamBind
+    _check_or_init_nccl()
+    if __ncclParamBind == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamBind is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t*, const char*) noexcept nogil>__ncclParamBind)(
+        out, key)
+
+
+cdef ncclResult_t _ncclParamGetI8(ncclParamHandle_t h, int8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI8
+    _check_or_init_nccl()
+    if __ncclParamGetI8 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI8 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int8_t*) noexcept nogil>__ncclParamGetI8)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI16(ncclParamHandle_t h, int16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI16
+    _check_or_init_nccl()
+    if __ncclParamGetI16 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI16 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int16_t*) noexcept nogil>__ncclParamGetI16)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI32(ncclParamHandle_t h, int32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI32
+    _check_or_init_nccl()
+    if __ncclParamGetI32 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI32 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int32_t*) noexcept nogil>__ncclParamGetI32)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetI64(ncclParamHandle_t h, int64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetI64
+    _check_or_init_nccl()
+    if __ncclParamGetI64 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetI64 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, int64_t*) noexcept nogil>__ncclParamGetI64)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU8(ncclParamHandle_t h, uint8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU8
+    _check_or_init_nccl()
+    if __ncclParamGetU8 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU8 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint8_t*) noexcept nogil>__ncclParamGetU8)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU16(ncclParamHandle_t h, uint16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU16
+    _check_or_init_nccl()
+    if __ncclParamGetU16 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU16 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint16_t*) noexcept nogil>__ncclParamGetU16)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU32(ncclParamHandle_t h, uint32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU32
+    _check_or_init_nccl()
+    if __ncclParamGetU32 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU32 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint32_t*) noexcept nogil>__ncclParamGetU32)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetU64(ncclParamHandle_t h, uint64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetU64
+    _check_or_init_nccl()
+    if __ncclParamGetU64 == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetU64 is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, uint64_t*) noexcept nogil>__ncclParamGetU64)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGetStr(ncclParamHandle_t h, const char** out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetStr
+    _check_or_init_nccl()
+    if __ncclParamGetStr == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetStr is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, const char**) noexcept nogil>__ncclParamGetStr)(
+        h, out)
+
+
+cdef ncclResult_t _ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGet
+    _check_or_init_nccl()
+    if __ncclParamGet == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGet is not found")
+    return (<ncclResult_t (*)(ncclParamHandle_t, void*, int, int*) noexcept nogil>__ncclParamGet)(
+        h, out, maxLen, len)
+
+
+cdef ncclResult_t _ncclParamGetParameter(const char* key, const char** value, int* valueLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetParameter
+    _check_or_init_nccl()
+    if __ncclParamGetParameter == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetParameter is not found")
+    return (<ncclResult_t (*)(const char*, const char**, int*) noexcept nogil>__ncclParamGetParameter)(
+        key, value, valueLen)
+
+
+cdef ncclResult_t _ncclParamGetAllParameterKeys(const char*** table, int* tableLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclParamGetAllParameterKeys
+    _check_or_init_nccl()
+    if __ncclParamGetAllParameterKeys == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamGetAllParameterKeys is not found")
+    return (<ncclResult_t (*)(const char***, int*) noexcept nogil>__ncclParamGetAllParameterKeys)(
+        table, tableLen)
+
+
+cdef void _ncclParamDumpAll() except* nogil:
+    global __ncclParamDumpAll
+    _check_or_init_nccl()
+    if __ncclParamDumpAll == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclParamDumpAll is not found")
+    (<void (*)() noexcept nogil>__ncclParamDumpAll)(
+        )
 
 
 cdef ncclResult_t _ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
