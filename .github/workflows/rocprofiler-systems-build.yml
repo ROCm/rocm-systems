@@ -54,6 +54,8 @@ jobs:
   matrix-setup:
     name: Matrix setup
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       ubuntu_2204_primary_matrix: ${{ steps.ubuntu_2204.outputs.primary_matrix }}
       ubuntu_2204_system_deps_matrix: ${{ steps.ubuntu_2204.outputs.system_deps_matrix }}
