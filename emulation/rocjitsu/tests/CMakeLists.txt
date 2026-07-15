@@ -916,106 +916,16 @@ if(RJ_INSTALL_TESTS)
 endif()
 
 set(RJ_EARLY_MMAP_ASAN_PRELOAD "")
-if(RJ_ENABLE_ASAN AND UNIX AND NOT APPLE)
-    find_program(_rj_ldd_executable NAMES ldd)
-    if(_rj_ldd_executable)
-        set(_rj_asan_probe_src
-            "${CMAKE_CURRENT_BINARY_DIR}/asan_link_probe.cpp"
-        )
-        set(_rj_asan_probe_bin "${CMAKE_CURRENT_BINARY_DIR}/asan_link_probe")
-        file(
-            WRITE "${_rj_asan_probe_src}"
-            "int main() { volatile int value = 0; return value; }\n"
-        )
-
-        set(_rj_asan_probe_compile_command "${CMAKE_CXX_COMPILER}")
-        if(CMAKE_CXX_COMPILER_ARG1)
-            list(
-                APPEND _rj_asan_probe_compile_command
-                ${CMAKE_CXX_COMPILER_ARG1}
-            )
-        endif()
-        separate_arguments(
-            _rj_asan_probe_cxx_flags
-            NATIVE_COMMAND
-            "${CMAKE_CXX_FLAGS}"
-        )
-        separate_arguments(
-            _rj_asan_probe_link_flags
-            NATIVE_COMMAND
-            "${CMAKE_EXE_LINKER_FLAGS}"
-        )
-        if(CMAKE_BUILD_TYPE)
-            string(TOUPPER "${CMAKE_BUILD_TYPE}" _rj_asan_probe_config)
-            separate_arguments(
-                _rj_asan_probe_config_cxx_flags
-                NATIVE_COMMAND
-                "${CMAKE_CXX_FLAGS_${_rj_asan_probe_config}}"
-            )
-            separate_arguments(
-                _rj_asan_probe_config_link_flags
-                NATIVE_COMMAND
-                "${CMAKE_EXE_LINKER_FLAGS_${_rj_asan_probe_config}}"
-            )
-        endif()
-        list(
-            APPEND _rj_asan_probe_compile_command
-            ${_rj_asan_probe_cxx_flags}
-            ${_rj_asan_probe_config_cxx_flags}
-            ${RJ_SANITIZER_COMPILE_OPTIONS}
-            "${_rj_asan_probe_src}"
-            -o
-            "${_rj_asan_probe_bin}"
-            ${_rj_asan_probe_link_flags}
-            ${_rj_asan_probe_config_link_flags}
-            ${RJ_SANITIZER_LINK_OPTIONS}
-        )
-        execute_process(
-            COMMAND ${_rj_asan_probe_compile_command}
-            RESULT_VARIABLE _rj_asan_probe_compile_result
-            ERROR_VARIABLE _rj_asan_probe_compile_error
-            OUTPUT_QUIET
-        )
-        if(_rj_asan_probe_compile_result EQUAL 0)
-            execute_process(
-                COMMAND "${_rj_ldd_executable}" "${_rj_asan_probe_bin}"
-                RESULT_VARIABLE _rj_asan_probe_ldd_result
-                OUTPUT_VARIABLE _rj_asan_probe_ldd_output
-                ERROR_VARIABLE _rj_asan_probe_ldd_error
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-            )
-            if(_rj_asan_probe_ldd_result EQUAL 0)
-                string(
-                    REGEX MATCH
-                    "(^|\n)[^\n]*asan[^\n]*=>[ \t]*([^ \t\n]+)"
-                    _rj_asan_probe_ldd_match
-                    "${_rj_asan_probe_ldd_output}"
-                )
-                if(CMAKE_MATCH_2 AND IS_ABSOLUTE "${CMAKE_MATCH_2}")
-                    set(RJ_EARLY_MMAP_ASAN_PRELOAD "${CMAKE_MATCH_2}:")
-                endif()
-            else()
-                message(
-                    WARNING
-                    "Unable to inspect ASan probe dependencies with ldd: "
-                    "${_rj_asan_probe_ldd_error}"
-                )
-            endif()
-        else()
-            message(
-                WARNING
-                "Unable to compile ASan link probe: "
-                "${_rj_asan_probe_compile_error}"
-            )
-        endif()
-    endif()
+if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
+    set(RJ_EARLY_MMAP_ASAN_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
 endif()
 
-# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after the optional ASan
-# runtime). The loader maps rocjitsu first, but runs early_mmap_preload's
-# constructor before init_interposer(). That constructor calls mmap/munmap early
-# enough to exercise the pre-init fallback; verifying the exact path directly
-# would require adding observable test state to the interposer.
+# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after the shared ASan
+# runtime, when enabled). The loader maps rocjitsu first, but runs
+# early_mmap_preload's constructor before init_interposer(). That constructor
+# calls mmap/munmap early enough to exercise the pre-init fallback; verifying the
+# exact path directly would require adding observable test state to the
+# interposer.
 rj_add_test(
     NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     COMMAND $<TARGET_FILE:early_mmap_driver>
