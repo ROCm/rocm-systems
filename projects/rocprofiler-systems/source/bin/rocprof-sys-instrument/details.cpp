@@ -558,12 +558,12 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
     {
         if(!obj) continue;
 
-        std::string binary_path = obj->name();
+        std::string binary_path = obj->pathName();
         // Open Symtab directly for comprehensive symbol access
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))
         {
-            verbprintf(3, "Failed to open Symtab for: %s\n", binary_path.c_str());
+            verbprintf(1, "Failed to open Symtab for: %s\n", binary_path.c_str());
             continue;
         }
 

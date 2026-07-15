@@ -36,7 +36,7 @@ __launch_bounds__(512)
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, idxStart, idxEnd, idxStride, false);
+  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();

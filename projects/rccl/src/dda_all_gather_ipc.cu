@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include "dda_all_gather_ipc.h"
+#include "dda_all_gather.h"
 
 #include "algorithms/CollCommon.h"
 #include "algorithms/all_gather/all_gather_dda.h"
@@ -12,7 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "ipc_gpu_barrier.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 #include <cuda_runtime.h>
 
@@ -23,22 +23,22 @@
 
 namespace {
 
-using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_ipc_detail::kDdaNranks;
+using nccl_dda_detail::DdaIpcBarrierState;
+using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
 static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
                                              cudaStream_t stream) {
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr || comm->ddaIpcPeerPtrsDev == nullptr ||
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
 
   const size_t totalCount = sendcount * comm->nRanks;
-  if (totalCount * sizeof(T) > comm->ddaIpcScratchBytes) {
+  if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
     WARN("DDA IPC allgather: send element count %zu needs %zu bytes; comm scratch is %zu bytes", sendcount,
-         totalCount * sizeof(T), comm->ddaIpcScratchBytes);
+         totalCount * sizeof(T), comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -51,7 +51,7 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   meta::comms::IpcGpuBarrier barrierHost = barrierState->barrierHost;
 
-  void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
+  void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   meta::comms::ddaAllGatherIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
@@ -69,7 +69,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr || comm->ddaIpcPeerPtrsDev == nullptr ||
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
@@ -79,7 +79,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_ipc_detail::kDdaNranks) {
+  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
     return false;
   }
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
@@ -87,7 +87,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   }
 
   size_t need = sendcount * ncclTypeSize(datatype);
-  if (need > comm->ddaIpcScratchBytes) {
+  if (need > comm->ddaScratchBytes) {
     return false;
   }
 

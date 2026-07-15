@@ -270,6 +270,21 @@ intended for debugging and development purposes.
       - | ``0``: Memory manager enabled (default).
         | ``1``: Memory manager disabled.
 
+    * - | ``NCCL_NO_CACHE``
+        | Disables caching for selected RCCL environment parameters so their
+          values are re-read from the environment on each access. By default,
+          RCCL caches parameter values after the first read for performance.
+          This variable is intended for testing and debugging when parameters
+          need to be changed without restarting the process. The value is
+          parsed once on first use, so it must be set before RCCL reads any
+          parameters. ``NCCL_NO_CACHE`` itself is always cached and cannot
+          be listed.
+      - | Unset (default): all parameters are cached after first read.
+        | Comma-separated list of parameter names (for example,
+          ``NCCL_DEBUG,NCCL_ALGO``): disable caching for those keys only.
+        | ``ALL``: disable caching for every parameter except
+          ``NCCL_NO_CACHE``.
+
 Multi-communicator ordering
 ===========================
 
