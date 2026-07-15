@@ -38,7 +38,9 @@
 #else
 #if defined(__GNUC__)
 #include <sys/time.h>
+#if defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
+#endif
 #endif  // __GNUC__
 #endif  // _MSC_VER
 
