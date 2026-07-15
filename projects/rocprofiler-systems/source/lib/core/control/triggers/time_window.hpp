@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <string_view>
 #include <thread>
 
@@ -24,6 +25,14 @@ namespace rocprofsys::control::triggers
 /// Templated on Clock so production wires `clocks::steady` and tests wire
 /// `clocks::manual`. Methods on the Clock parameter are duck-typed against
 /// the concept in core/control/clock.hpp.
+///
+/// Lifetime contract: @p sess (a bare reference, not owned) must outlive
+/// this object, including the time span between start() and the worker
+/// thread's join() inside stop()/~time_window() - the worker calls
+/// m_session.publish() directly with no synchronization back to the owner.
+/// start()/stop() are not safe to call concurrently with each other (guarded
+/// internally against that), but neither is safe to call concurrently with
+/// destruction from a different thread than the one driving the trigger.
 template <typename Clock>
 class time_window : public trigger
 {
@@ -40,7 +49,11 @@ public:
     , m_config{ cfg }
     {}
 
-    ~time_window() override { stop(); }
+    ~time_window() override
+    {
+        stop();
+        m_session.detach(*this);
+    }
 
     time_window(const time_window&)            = delete;
     time_window& operator=(const time_window&) = delete;
@@ -60,17 +73,25 @@ public:
     }
 
     /// Spawn the worker thread that advances the window through delay and
-    /// duration phases. Idempotent: a second call is a no-op.
+    /// duration phases. Idempotent: a second call is a no-op. Not safe to
+    /// call concurrently with stop() from a different thread than the one
+    /// serializing start()/stop() calls (guarded via m_lifecycle_mutex).
     void start()
     {
+        std::scoped_lock const lk{ m_lifecycle_mutex };
         if(!has_window()) return;
         if(m_thread.joinable()) return;
         m_thread = std::thread{ [this]() { worker(); } };
     }
 
     /// Interrupt the clock and join the worker thread. Idempotent.
+    /// m_thread.join() can only throw if joinable() is false (guarded above)
+    /// or if called from the worker thread itself, which never happens -
+    /// stop() is only ever invoked from the owning thread (including via
+    /// the destructor), never from worker().
     void stop() noexcept
     {
+        std::scoped_lock const lk{ m_lifecycle_mutex };
         if(!m_thread.joinable()) return;
         m_clock.interrupt();
         m_thread.join();
@@ -79,8 +100,9 @@ public:
 private:
     session&    m_session;
     Clock&      m_clock;
-    config      m_config;
+    const config m_config;
     std::thread m_thread;
+    std::mutex  m_lifecycle_mutex;
 
     [[nodiscard]] bool has_window() const noexcept
     {
