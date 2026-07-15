@@ -154,6 +154,7 @@ TEST(InstructionCacheTest, FetchIsCorrectWhenTheWorkingSetExceedsTheCache) {
 constexpr uint32_t kSNop = 0xBF800000u;
 constexpr uint32_t kSEndpgm = 0xBF810000u;
 constexpr uint32_t kSIcacheInv = 0xBF930000u;
+constexpr uint32_t kSSetvskip = 0xBF100000u;
 constexpr uint32_t s_mov_b32_s0_imm(uint32_t imm) { return 0xBE800000u | (128u + imm); }
 
 /// @brief One CDNA4 CU running a wave from a program at @ref kCodeBase.
@@ -294,6 +295,49 @@ TEST(InstructionCacheCuTest, LaunchInvalidationIsOncePerDispatch) {
   const auto next_dispatch = fixture.peek();
   EXPECT_TRUE(std::equal(next_dispatch.begin(), next_dispatch.end(), rewritten.begin()))
       << "a new dispatch reused code bytes cached by the previous one";
+}
+
+// A failed instruction remains at the same PC. Dropping its decoded bytes on
+// the exception path lets a debugger or caller repair the instruction and
+// retry instead of repeatedly executing the stale cached instruction.
+TEST(InstructionCacheCuTest, ExecuteExceptionInvalidatesBeforeRetry) {
+  CuFixture fixture("icache_exception_cu");
+  fixture.write_program(std::array<uint32_t, 2>{kSSetvskip, kSEndpgm});
+
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  EXPECT_ANY_THROW(fixture.cu()->step());
+  ASSERT_EQ(wf->pc, kCodeBase);
+
+  fixture.memory().write32(kCodeBase, s_mov_b32_s0_imm(2));
+  EXPECT_NO_THROW(fixture.cu()->step());
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+// Scalar launch coherency follows the same once-per-dispatch rule as the I$:
+// sibling workgroups retain shared cache contents, while a later dispatch sees
+// the authoritative L2 value.
+TEST(InstructionCacheCuTest, ScalarCacheInvalidatesOncePerDispatch) {
+  CuFixture fixture("scalar_dispatch_cu");
+  constexpr uint64_t kDataAddr = 0x300000;
+  constexpr uint32_t kFirst = 0x11112222;
+  constexpr uint32_t kSecond = 0x33334444;
+
+  fixture.memory().write32(kDataAddr, kFirst);
+  fixture.cu()->begin_workgroup(7, 0, 1);
+  uint32_t value = 0;
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  ASSERT_EQ(value, kFirst);
+
+  fixture.cu()->l2()->write(kDataAddr, reinterpret_cast<const uint8_t *>(&kSecond), sizeof(kSecond),
+                            amdgpu::Mtype::RW, 0);
+  fixture.cu()->begin_workgroup(7, 1, 1);
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  EXPECT_EQ(value, kFirst) << "a sibling workgroup invalidated the scalar cache";
+
+  fixture.cu()->begin_workgroup(8, 0, 1);
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  EXPECT_EQ(value, kSecond) << "a new dispatch reused stale scalar cache data";
 }
 
 } // namespace
