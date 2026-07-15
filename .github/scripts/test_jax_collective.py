@@ -70,20 +70,22 @@ def find_rccl_library(artifact_dir: Path) -> Path:
     return lib_path
 
 
-def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
-    """Find the dist/rocm/lib directory in artifacts."""
-    for d in artifact_dir.rglob("dist/rocm/lib"):
-        if d.is_dir():
-            log.info("Found ROCm lib dir: %s", d)
-            return d
-    return None
+def find_lib_dirs(artifact_dir: Path) -> list[Path]:
+    """Find all directories containing .so files in the artifact tree."""
+    lib_dirs: set[Path] = set()
+    for so_file in artifact_dir.rglob("*.so"):
+        lib_dirs.add(so_file.parent.resolve())
+    for so_file in artifact_dir.rglob("*.so.*"):
+        lib_dirs.add(so_file.parent.resolve())
+    sorted_dirs = sorted(lib_dirs)
+    for d in sorted_dirs:
+        log.info("Found lib dir: %s", d)
+    return sorted_dirs
 
 
-def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
-    """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
-    parts = [str(rccl_lib_dir.resolve())]
-    if rocm_lib_dir:
-        parts.append(str(rocm_lib_dir.resolve()))
+def setup_ld_library_path(lib_dirs: list[Path]) -> str:
+    """Prepend all artifact lib dirs to LD_LIBRARY_PATH."""
+    parts = [str(d) for d in lib_dirs]
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -156,9 +158,15 @@ def print_environment_info() -> None:
     try:
         import jax
         log.info("JAX version: %s", jax.__version__)
-        log.info("Devices: %s", jax.devices())
+        devices = jax.devices()
+        log.info("Devices: %s", devices)
         log.info("Device count: %d", jax.device_count())
         log.info("Local device count: %d", jax.local_device_count())
+        gpu_devices = [d for d in devices if d.platform != "cpu"]
+        if not gpu_devices:
+            log.error("No GPU devices found — JAX fell back to CPU only")
+            log.error("Check that ROCm libraries are on LD_LIBRARY_PATH")
+            sys.exit(1)
     except Exception as e:
         log.error("Failed to query JAX devices: %s", e)
         sys.exit(1)
@@ -342,20 +350,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Step 1: Discover RCCL library path
+    # Step 1: Discover RCCL library and all lib dirs in artifacts
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
-    rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
+    lib_dirs = find_lib_dirs(args.artifact_dir)
 
     set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
-    if rocm_lib_dir:
-        set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
 
     if args.discover_only:
         return
 
     # Step 2: Set up LD_LIBRARY_PATH and verify override
-    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Set XLA environment variables
