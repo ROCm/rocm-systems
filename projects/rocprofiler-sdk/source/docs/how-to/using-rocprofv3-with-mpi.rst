@@ -31,7 +31,7 @@ The preceding command runs the application with ``rocprofiler-core`` and generat
     2293215_agent_info.csv
     2293215_hip_api_trace.csv
 
-Since the data collection is performed in-process, it's ideal to collect data from within the processes launched by MPI. When ``rocprofiler-core`` is run outside of ``mpirun``, the tool library is loaded into the `mpirun` executable..
+Since the data collection is performed in-process, it's ideal to collect data from within the processes launched by MPI. When ``rocprofiler-core`` is run outside of ``mpirun``, the tool library is loaded into the `mpirun` executable.
 Collecting data outside of ``mpirun`` works but fetches agent info for the ``mpirun`` process too. For example:
 
 .. code-block:: bash

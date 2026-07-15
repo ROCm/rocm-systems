@@ -145,7 +145,7 @@ pushd /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/tes
 gdb --args /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/bin/hip-graph
 ```
 
-If the test command uses [rocprofiler-core](./source/bin/rocprofiler-core.py) (formerly `rocprofv3`, retained as a deprecated alias), using debuggers such as `gdb` will require replacing prefixing with `gdb --args python3 /path/to/rocprofiler-core ...`.
+If the test command uses [rocprofiler-core](./source/bin/rocprofiler-core.py) (formerly `rocprofv3`, retained as a deprecated alias), using debuggers such as `gdb` will require prefixing the command with `gdb --args python3 /path/to/rocprofiler-core ...`.
 If rocprofiler-core requires application replay, execute `set follow-fork-mode child` within the GDB command line prompt.
 
 ### Test Locations ###

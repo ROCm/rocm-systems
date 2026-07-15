@@ -4,9 +4,9 @@
 
 .. _cli-options:
 
-==============================
-roprofv3 command-line options
-==============================
+=====================================
+rocprofiler-core command-line options
+=====================================
 
 The following table lists the commonly used ``rocprofiler-core`` command-line options categorized according to their purpose.
 
@@ -29,7 +29,7 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 <tr>
                     <th rowspan="7">I/O options</th>
                     <td>-i INPUT | --input INPUT</td>
-                    <td>Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. See <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#collecting-traces-using-input-file">collecting traces using input file</a> and <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#counter-collection-using-input-file">counter collection using input file.</a></td>
+                    <td>Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. See <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#collecting-traces-using-input-file">collecting traces using input file</a> and <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-input-file">counter collection using input file.</a></td>
                 </tr>
                 <tr>
                     <td>-o OUTPUT_FILE | --output-file OUTPUT_FILE</td>
@@ -41,11 +41,11 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 </tr>
                 <tr>
                     <td>-f {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...] | --output-format {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]</td>
-                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#output-formats">Read more...</a></td>
+                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#output-formats">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--output-config [BOOL]</td>
-                    <td>Generates a configuration output file containing the resolved rocprofiler-core settings and options used for the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#configuration-output">Read more...</a></td>
+                    <td>Generates a configuration output file containing the resolved rocprofiler-core settings and options used for the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#configuration-output">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--log-level {fatal,error,warning,info,trace,env}</td>
@@ -53,7 +53,7 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 </tr>
                 <tr>
                     <td>-E EXTRA_COUNTERS | --extra-counters EXTRA_COUNTERS</td>
-                    <td>Specifies the path to a YAML file consisting of extra counter definitions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#extra-counters">Read more...</a></td>
+                    <td>Specifies the path to a YAML file consisting of extra counter definitions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#extra-counters">Read more...</a></td>
                 </tr>
                 <tr>
                     <th>Dynamic process attachment</th>
@@ -63,11 +63,11 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 <tr>
                     <th rowspan="2">Aggregate tracing</th>
                     <td>-r [BOOL] | --runtime-trace [BOOL]</td>
-                    <td>Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), and kernel dispatches. Similar to --sys-trace without HIP compiler API and the underlying HSA API tracing. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#runtime-trace">Read more...</a></td>
+                    <td>Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), and kernel dispatches. Similar to --sys-trace without HIP compiler API and the underlying HSA API tracing. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#runtime-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>-s [BOOL] | --sys-trace [BOOL]</td>
-                    <td>Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), and kernel dispatches. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#system-trace">Read more...</a></td>
+                    <td>Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), and kernel dispatches. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#system-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">PC sampling</th>
@@ -89,7 +89,7 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 <tr>
                     <th rowspan="12">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
-                    <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofiler-core, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hip-trace">Read more...</a></td>
+                    <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofiler-core, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--marker-trace [BOOL]</td>
@@ -97,14 +97,14 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 </tr>
                 <tr>
                     <td>--kernel-trace [BOOL]</td>
-                    <td>Collects kernel dispatch traces. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#kernel-trace">Read more...</a></td>
+                    <td>Collects kernel dispatch traces. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#kernel-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--memory-copy-trace [BOOL]</td>
-                    <td>Collects memory copy traces. This was a part of the HIP and HSA traces in previous rocprof versions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#memory-copy-trace">Read more...</a></td>
+                    <td>Collects memory copy traces. This was a part of the HIP and HSA traces in previous rocprof versions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#memory-copy-trace">Read more...</a></td>
                 <tr>
                     <td>--memory-allocation-trace [BOOL]</td>
-                    <td>Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#memory-allocation-trace">Read more...</a></td>
+                    <td>Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#memory-allocation-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--kfd-trace</td>
@@ -112,27 +112,27 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 </tr>
                 <tr>
                     <td>--scratch-memory-trace [BOOL]</td>
-                    <td>Collects scratch memory operations traces. Helps in determining scratch allocations and manage them efficiently. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#scratch-memory-trace">Read more...</a></td>
+                    <td>Collects scratch memory operations traces. Helps in determining scratch allocations and manage them efficiently. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#scratch-memory-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--hsa-trace [BOOL]</td>
-                    <td>Collects --hsa-core-trace, --hsa-amd-trace, --hsa-image-trace, and --hsa-finalizer-trace. This option only enables the HSA API tracing. Unlike previous iterations of rocprof, this doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hsa-trace">Read more...</a></td>
+                    <td>Collects --hsa-core-trace, --hsa-amd-trace, --hsa-image-trace, and --hsa-finalizer-trace. This option only enables the HSA API tracing. Unlike previous iterations of rocprof, this doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--rccl-trace [BOOL]</td>
-                    <td>Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as ‘Rickle’. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#rccl-trace">Read more...</a></td>
+                    <td>Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as ‘Rickle’. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rccl-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--kokkos-trace [BOOL]</td>
-                    <td>Enables builtin Kokkos tools support, which implies enabling --marker-trace collection and --kernel-rename. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#kokkos-trace">Read more...</a></td>
+                    <td>Enables builtin Kokkos tools support, which implies enabling --marker-trace collection and --kernel-rename. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#kokkos-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--rocdecode-trace [BOOL]</td>
-                    <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#rocdecode-trace">Read more...</a></td>
+                    <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--ompt-trace [CATEGORY ...]</td>
-                    <td>Collects OMPT (OpenMP Tools) traces from applications linked against an OMPT-capable OpenMP runtime (e.g. LLVM-based <code>libomp</code> from AOMP / ROCm). Captures host parallel regions, tasks, sync, mutex, and target-offload events. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#ompt-trace">Read more...</a></td>
+                    <td>Collects OMPT (OpenMP Tools) traces from applications linked against an OMPT-capable OpenMP runtime (e.g. LLVM-based <code>libomp</code> from AOMP / ROCm). Captures host parallel regions, tasks, sync, mutex, and target-offload events. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#ompt-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="10">Granular tracing</th>
@@ -145,19 +145,19 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 </tr>
                 <tr>
                     <td>--hsa-core-trace [BOOL]</td>
-                    <td>Collects HSA API traces (core API). For example, HSA functions prefixed with only hsa_ such as hsa_init. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hsa-trace">HSA trace</a></td>
+                    <td>Collects HSA API traces (core API). For example, HSA functions prefixed with only hsa_ such as hsa_init. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">HSA trace</a></td>
                 </tr>
                 <tr>
                     <td>--hsa-amd-trace [BOOL]</td>
-                    <td>Collects HSA API traces (AMD-extension API). For example, HSA functions prefixed with hsa_amd_ such as hsa_amd_coherency_get_type. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hsa-trace">HSA trace</a></td>
+                    <td>Collects HSA API traces (AMD-extension API). For example, HSA functions prefixed with hsa_amd_ such as hsa_amd_coherency_get_type. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">HSA trace</a></td>
                 </tr>
                 <tr>
                     <td>--hsa-image-trace [BOOL]</td>
-                    <td>Collects HSA API traces (image-extenson API). For example, HSA functions prefixed with only hsa_ext_image_ such as hsa_ext_image_get_capability. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hsa-trace">HSA trace</a></td>
+                    <td>Collects HSA API traces (image-extenson API). For example, HSA functions prefixed with only hsa_ext_image_ such as hsa_ext_image_get_capability. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">HSA trace</a></td>
                 </tr>
                 <tr>
                     <td>--hsa-finalizer-trace [BOOL]</td>
-                    <td>Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only hsa_ext_program_ such as hsa_ext_program_create. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#hsa-trace">HSA trace</a></td>
+                    <td>Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only hsa_ext_program_ such as hsa_ext_program_create. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">HSA trace</a></td>
                 </tr>
                 <tr>
                     <td>--kfd-page-migration-trace</td>
@@ -178,29 +178,29 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 <tr>
                     <th>Counter collection</th>
                     <td>--pmc [PMC …]</td>
-                    <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#counter-collection-using-command-line">Read more...</a></td>
+                    <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>
                     <td>--stats [BOOL]</td>
-                    <td>Collects statistics of enabled tracing types. Must be combined with one or more tracing options. Doesn’t include default kernel stats unlike previous rocprof versions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#stats">Read more...</a></td>
+                    <td>Collects statistics of enabled tracing types. Must be combined with one or more tracing options. Doesn’t include default kernel stats unlike previous rocprof versions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#stats">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>-S [BOOL] | --summary [BOOL]</td>
-                    <td>Displays single summary of tracing data for the enabled tracing type, after conclusion of the profiling session. Displays a summary of tracing data for the enabled tracing type, after conclusion of the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#summary">Read more...</a></td>
+                    <td>Displays single summary of tracing data for the enabled tracing type, after conclusion of the profiling session. Displays a summary of tracing data for the enabled tracing type, after conclusion of the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#summary">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>-D [BOOL] | --summary-per-domain [BOOL]</td>
-                    <td>Displays a summary of each tracing domain for the enabled tracing type, after conclusion of the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#summary-per-domain">Read more...</a></td>
+                    <td>Displays a summary of each tracing domain for the enabled tracing type, after conclusion of the profiling session. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#summary-per-domain">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--summary-groups REGULAR_EXPRESSION [REGULAR_EXPRESSION …]</td>
-                    <td>Displays a summary for each set of domains matching the specified regular expression. For example, ‘KERNEL_DISPATCH|MEMORY_COPY’ generates a summary of all the tracing data in the KERNEL_DISPATCH and MEMORY_COPY domains. Similarly ‘*._API’ generates a summary of all the tracing data in the HIP_API, HSA_API, and MARKER_API domains. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#summary-groups">Read more...</a></td>
+                    <td>Displays a summary for each set of domains matching the specified regular expression. For example, ‘KERNEL_DISPATCH|MEMORY_COPY’ generates a summary of all the tracing data in the KERNEL_DISPATCH and MEMORY_COPY domains. Similarly ‘*._API’ generates a summary of all the tracing data in the HIP_API, HSA_API, and MARKER_API domains. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#summary-groups">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="2">Summary</th>
                     <td>--summary-output-file SUMMARY_OUTPUT_FILE</td>
-                    <td>Outputs summary to a file, stdout, or stderr. By default, outputs to stderr. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#summary-output-file">Read more...</a></td>
+                    <td>Outputs summary to a file, stdout, or stderr. By default, outputs to stderr. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#summary-output-file">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>-u {sec,msec,usec,nsec} | --summary-units {sec,msec,usec,nsec}</td>
@@ -263,7 +263,7 @@ The following table lists the commonly used ``rocprofiler-core`` command-line op
                 <tr>
                     <th rowspan="2">Display</th>
                     <td>-L [BOOL] | --list-avail [BOOL]</td>
-                    <td>Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier rocprof versions, this was known as --list-basic, --list-derived, and --list-counters. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-core.html#kernel-counter-collection">Read more...</a></td>
+                    <td>Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier rocprof versions, this was known as --list-basic, --list-derived, and --list-counters. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#kernel-counter-collection">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--group-by-queue [BOOL]</td>

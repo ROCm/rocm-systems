@@ -328,7 +328,7 @@ Memory copy traces track ``hipMemcpy`` and ``hipMemcpyAsync`` functions, which u
 
 .. code-block:: shell
 
-    rocprofiler-core –-memory-copy-trace --output-format csv -- <application_path>
+    rocprofiler-core --memory-copy-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_copy_trace.csv`` file prefixed with the process ID.
 
@@ -366,7 +366,7 @@ To trace memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofiler-core –-memory-allocation-trace --output-format csv -- <application_path>
+    rocprofiler-core --memory-allocation-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
 
@@ -397,7 +397,7 @@ memory operations (copies, allocations, and scratch).
 
 .. code-block:: shell
 
-    rocprofiler-core –-runtime-trace --output-format csv -- <application_path>
+    rocprofiler-core --runtime-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
@@ -408,7 +408,7 @@ This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory
 
 .. code-block:: shell
 
-    rocprofiler-core –-sys-trace --output-format csv -- <application_path>
+    rocprofiler-core --sys-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
@@ -421,7 +421,7 @@ To trace scratch memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofiler-core –-scratch-memory-trace --output-format csv -- <application_path>
+    rocprofiler-core --scratch-memory-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``scratch_memory_trace.csv`` file prefixed with the process ID.
 
