@@ -32,6 +32,13 @@ test_categories:
       - "rocrtstFunc.AgentPropertiesTests"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "RetargetCacheLru.TracksBytesAndSize"
+      - "RetargetCacheLru.EvictsLeastRecentlyUsedWhenOverBudget"
+      - "RetargetCacheLru.AccessRefreshesRecency"
+      - "RetargetCacheLru.OversizedEntryIsRetainedAlone"
+      - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
+      - "RetargetCacheLru.ZeroBudgetIsUnbounded"
+      - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     exclude_windows: []
@@ -112,6 +119,13 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "RetargetCacheLru.TracksBytesAndSize"
+      - "RetargetCacheLru.EvictsLeastRecentlyUsedWhenOverBudget"
+      - "RetargetCacheLru.AccessRefreshesRecency"
+      - "RetargetCacheLru.OversizedEntryIsRetainedAlone"
+      - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
+      - "RetargetCacheLru.ZeroBudgetIsUnbounded"
+      - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -202,6 +216,13 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "RetargetCacheLru.TracksBytesAndSize"
+      - "RetargetCacheLru.EvictsLeastRecentlyUsedWhenOverBudget"
+      - "RetargetCacheLru.AccessRefreshesRecency"
+      - "RetargetCacheLru.OversizedEntryIsRetainedAlone"
+      - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
+      - "RetargetCacheLru.ZeroBudgetIsUnbounded"
+      - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -294,6 +315,13 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
       - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
       - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
+      - "RetargetCacheLru.TracksBytesAndSize"
+      - "RetargetCacheLru.EvictsLeastRecentlyUsedWhenOverBudget"
+      - "RetargetCacheLru.AccessRefreshesRecency"
+      - "RetargetCacheLru.OversizedEntryIsRetainedAlone"
+      - "RetargetCacheLru.ReplacingKeyUpdatesBytesNotCount"
+      - "RetargetCacheLru.ZeroBudgetIsUnbounded"
+      - "RetargetCacheLru.FailureSentinelConsumesNoBytesButParticipatesInLru"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

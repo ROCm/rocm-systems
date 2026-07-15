@@ -48,6 +48,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/inc/amd_hsa_loader.hpp"
 #include "inc/hsa.h"
@@ -143,6 +144,20 @@ bool HotswapRewriteWithOptionsAvailableForTesting();
 void ForceRetargetCodeObjectFailureForTesting(bool force);
 size_t RetargetCacheSizeForTesting();
 void ClearRetargetCacheForTesting();
+// Bytes currently held by the in-memory retarget cache.
+size_t RetargetCacheBytesForTesting();
+// Sets the in-memory cache byte budget and re-evicts to honor it immediately.
+void SetRetargetCacheByteBudgetForTesting(size_t budget);
+// Inserts a synthetic success entry of `size` zero-filled bytes under `key`.
+void PutSyntheticRetargetCacheEntryForTesting(uint64_t key, size_t size);
+// Inserts a failure sentinel (no buffer, consumes no budget) under `key`.
+void PutFailureRetargetCacheEntryForTesting(uint64_t key);
+// Returns true if `key` is currently resident in the in-memory cache.
+bool RetargetCacheContainsForTesting(uint64_t key);
+// Performs a real cache Get (refreshes LRU recency) for `key`; returns true on
+// a success hit and, if `out_bytes` is non-null, the shared buffer handle.
+bool RetargetCacheGetForTesting(uint64_t key,
+                                std::shared_ptr<std::vector<uint8_t>>* out_bytes);
 #endif
 
 }  // namespace hotswap

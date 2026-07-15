@@ -45,9 +45,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -115,10 +118,216 @@ struct CachedRetargetResult {
   std::shared_ptr<std::vector<uint8_t>> elf_bytes;
 };
 
-constexpr size_t kMaxRetargetCacheEntries = 256;
+// Default in-memory cache byte budget (4 GiB). Bounds resident RAM held by
+// cached retarget results. Overridable at runtime via HSA_HOTSWAP_MEM_BUDGET
+// (parsed as a byte count; see ParseMemBudgetEnv). A value of 0 disables the
+// budget (unbounded), matching prior behavior for callers that opt out.
+constexpr size_t kDefaultRetargetCacheMemBudget = 4ULL * 1024 * 1024 * 1024;
 
-std::mutex g_retarget_cache_mutex;
-std::unordered_map<uint64_t, CachedRetargetResult> g_retarget_cache;
+// LRU-by-bytes cache of retarget results, keyed by ComputeRetargetCacheKey.
+//
+// - Successful entries hold a ref-counted ELF buffer and consume `bytes()`
+//   worth of budget; failure sentinels hold no buffer and consume nothing.
+// - On insert, least-recently-used entries are evicted until the total held
+//   bytes fit within the budget. A single entry larger than the whole budget
+//   is still stored (evicting everything else); refusing it would force an
+//   unbounded COMGR re-run on every load of that object.
+// - Access (hit) and insert both move the entry to the most-recently-used
+//   position. Failure sentinels participate in LRU ordering too, so a stale
+//   failure can be evicted like any other entry.
+//
+// All public methods are internally synchronized; the returned shared_ptr
+// lets callers perform the large copy after releasing the lock.
+class RetargetCache {
+ public:
+  explicit RetargetCache(size_t byte_budget) : byte_budget_(byte_budget) {}
+
+  enum class Lookup { kMiss, kHitSuccess, kHitFailure };
+
+  // Looks up `key`. On a success hit, `out_bytes` receives a shared handle to
+  // the cached buffer (copy it outside the lock). Touches LRU order on hit.
+  Lookup Get(uint64_t key, std::shared_ptr<std::vector<uint8_t>>* out_bytes) {
+    if (out_bytes != nullptr) {
+      out_bytes->reset();  // clear on all paths so callers never see stale data
+    }
+    std::scoped_lock lock(mutex_);
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return Lookup::kMiss;
+    }
+    TouchLocked(it);
+    if (it->second.result.succeeded) {
+      if (out_bytes != nullptr) {
+        *out_bytes = it->second.result.elf_bytes;
+      }
+      return Lookup::kHitSuccess;
+    }
+    return Lookup::kHitFailure;
+  }
+
+  // Inserts (or replaces) `key` with a success entry owning `bytes`, evicting
+  // LRU entries as needed to respect the budget. `bytes` must be non-null.
+  void PutSuccess(uint64_t key, std::shared_ptr<std::vector<uint8_t>> bytes) {
+    const size_t entry_bytes = bytes ? bytes->size() : 0;
+    CachedRetargetResult result;
+    result.succeeded = true;
+    result.elf_bytes = std::move(bytes);
+    std::scoped_lock lock(mutex_);
+    InsertLocked(key, std::move(result), entry_bytes);
+  }
+
+  // Inserts (or replaces) `key` with a failure sentinel (consumes no budget).
+  void PutFailure(uint64_t key) {
+    CachedRetargetResult result;
+    result.succeeded = false;
+    std::scoped_lock lock(mutex_);
+    InsertLocked(key, std::move(result), 0);
+  }
+
+  size_t Size() {
+    std::scoped_lock lock(mutex_);
+    return map_.size();
+  }
+
+  size_t Bytes() {
+    std::scoped_lock lock(mutex_);
+    return held_bytes_;
+  }
+
+  void Clear() {
+    std::scoped_lock lock(mutex_);
+    map_.clear();
+    lru_.clear();
+    held_bytes_ = 0;
+  }
+
+#ifdef ROCR_HOTSWAP_TESTING
+  // Testing hook: reports residency without perturbing LRU order.
+  bool ContainsForTesting(uint64_t key) {
+    std::scoped_lock lock(mutex_);
+    return map_.find(key) != map_.end();
+  }
+
+  // Testing hook: change the byte budget and immediately re-evict so the new
+  // limit takes effect. Used to exercise eviction without allocating gigabytes.
+  void SetByteBudgetForTesting(size_t budget) {
+    std::scoped_lock lock(mutex_);
+    byte_budget_ = budget;
+    // Evict from the tail until within the new budget. Pass a sentinel that
+    // matches no key so nothing is protected.
+    EvictToBudgetLocked(/*protect=*/0, /*protect_valid=*/false);
+  }
+
+  // Testing hook: insert a synthetic success entry of `size` zero-filled bytes
+  // under `key`, so eviction ordering/accounting can be tested with controlled
+  // sizes and without real code objects.
+  void PutSyntheticForTesting(uint64_t key, size_t size) {
+    auto bytes = std::make_shared<std::vector<uint8_t>>(size, 0);
+    PutSuccess(key, std::move(bytes));
+  }
+#endif
+
+ private:
+  struct Entry {
+    CachedRetargetResult result;
+    size_t bytes = 0;                     // budget contribution of this entry
+    std::list<uint64_t>::iterator lru_it; // position in lru_ (front = MRU)
+  };
+
+  // Moves the entry to the front (most-recently-used). Caller holds mutex_.
+  void TouchLocked(std::unordered_map<uint64_t, Entry>::iterator it) {
+    lru_.splice(lru_.begin(), lru_, it->second.lru_it);
+  }
+
+  // Inserts/replaces key, then evicts from the LRU tail until within budget.
+  // Caller holds mutex_.
+  void InsertLocked(uint64_t key, CachedRetargetResult result,
+                    size_t entry_bytes) {
+    auto existing = map_.find(key);
+    if (existing != map_.end()) {
+      // Replace in place, adjusting the byte total and refreshing LRU order.
+      held_bytes_ -= existing->second.bytes;
+      existing->second.result = std::move(result);
+      existing->second.bytes = entry_bytes;
+      held_bytes_ += entry_bytes;
+      TouchLocked(existing);
+    } else {
+      lru_.push_front(key);
+      Entry entry;
+      entry.result = std::move(result);
+      entry.bytes = entry_bytes;
+      entry.lru_it = lru_.begin();
+      map_.emplace(key, std::move(entry));
+      held_bytes_ += entry_bytes;
+    }
+    EvictToBudgetLocked(key, /*protect_valid=*/true);
+  }
+
+  // Evicts least-recently-used entries until held_bytes_ <= byte_budget_.
+  // When `protect_valid` is true, never evicts `protect` (the just-inserted
+  // key), so a lone oversized entry is retained rather than dropped and forced
+  // to re-run COMGR on every load. A budget of 0 means unbounded (no
+  // eviction). Caller holds mutex_.
+  void EvictToBudgetLocked(uint64_t protect, bool protect_valid) {
+    if (byte_budget_ == 0) {
+      return;
+    }
+    while (held_bytes_ > byte_budget_ && !lru_.empty()) {
+      uint64_t victim = lru_.back();
+      if (protect_valid && victim == protect) {
+        // The protected (just-inserted, MRU) entry sits at the tail only when
+        // it is the sole remaining entry. Stop rather than evict it: keeping a
+        // lone oversized entry is preferable to discarding what we just added.
+        break;
+      }
+      auto it = map_.find(victim);
+      if (it != map_.end()) {
+        held_bytes_ -= it->second.bytes;
+        map_.erase(it);
+      }
+      lru_.pop_back();
+    }
+  }
+
+  std::mutex mutex_;
+  std::unordered_map<uint64_t, Entry> map_;
+  std::list<uint64_t> lru_;  // front = most-recently-used, back = least
+  size_t held_bytes_ = 0;
+  size_t byte_budget_;  // mutable only under mutex_ (see SetByteBudgetForTesting)
+};
+
+size_t ParseMemBudgetEnv() {
+  if (!os::IsEnvVarSet("HSA_HOTSWAP_MEM_BUDGET")) {
+    return kDefaultRetargetCacheMemBudget;
+  }
+  std::string value = os::GetEnvVar("HSA_HOTSWAP_MEM_BUDGET");
+  // Trim leading whitespace so a leading '-' is detectable below.
+  size_t first = value.find_first_not_of(" \t");
+  if (first == std::string::npos) {
+    return kDefaultRetargetCacheMemBudget;  // empty / all-whitespace
+  }
+  value = value.substr(first);
+  // Reject negatives explicitly: strtoull would wrap "-1" to ULLONG_MAX, which
+  // would read as an effectively-unbounded budget rather than a parse error.
+  if (value[0] == '-') {
+    return kDefaultRetargetCacheMemBudget;
+  }
+  // Accept a plain byte count. errno/strtoull guard against garbage; on any
+  // parse failure fall back to the default rather than an accidental 0
+  // (unbounded) or overflow. An explicit "0" is honored as unbounded.
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+  if (end == value.c_str() || errno != 0) {
+    return kDefaultRetargetCacheMemBudget;
+  }
+  return static_cast<size_t>(parsed);
+}
+
+RetargetCache& GetRetargetCache() {
+  static RetargetCache cache(ParseMemBudgetEnv());
+  return cache;
+}
 
 constexpr char kGfx1250[] = "gfx1250";
 constexpr char kGfx1250B0Feature[] = ":gfx1250-b0-specific+";
@@ -554,21 +763,10 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   // Cache lookup: grab a shared_ptr under the lock, then copy outside it.
   {
     std::shared_ptr<std::vector<uint8_t>> cached_bytes;
-    bool cached_failed = false;
+    const RetargetCache::Lookup lookup =
+        GetRetargetCache().Get(cache_key, &cached_bytes);
 
-    {
-      std::scoped_lock lock(g_retarget_cache_mutex);
-      auto it = g_retarget_cache.find(cache_key);
-      if (it != g_retarget_cache.end()) {
-        if (it->second.succeeded) {
-          cached_bytes = it->second.elf_bytes;
-        } else {
-          cached_failed = true;
-        }
-      }
-    }
-
-    if (cached_failed) {
+    if (lookup == RetargetCache::Lookup::kHitFailure) {
       HOTSWAP_LOG("hotswap: cache hit (failed) src=%s tgt=%s entry_trampolines=%d strict=%d "
                   "required=%d in=%zu\n",
                   decision->source_isa.c_str(), decision->target_isa.c_str(),
@@ -582,7 +780,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
       return {};
     }
 
-    if (cached_bytes) {
+    if (lookup == RetargetCache::Lookup::kHitSuccess && cached_bytes) {
       OwnedElfBuffer buf(std::malloc(cached_bytes->size()), &std::free);
       if (buf) {
         std::memcpy(buf.get(), cached_bytes->data(), cached_bytes->size());
@@ -595,6 +793,8 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
                     code_object.size, cached_bytes->size());
         return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required};
       }
+      // malloc failed: fall through to a fresh retarget rather than caching a
+      // spurious failure. The cached entry stays intact for a later attempt.
     }
   }
 
@@ -619,21 +819,19 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   // with the same code object can still succeed.
   if (retarget_attempted) {
     try {
-      std::scoped_lock lock(g_retarget_cache_mutex);
-      if (g_retarget_cache.size() < kMaxRetargetCacheEntries) {
-        CachedRetargetResult entry;
-        entry.succeeded = rewritten;
-        if (rewritten) {
-          const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
-          entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
-        }
-        g_retarget_cache.emplace(cache_key, std::move(entry));
-        HOTSWAP_LOG("hotswap: cached key=0x%llx src=%s tgt=%s entry_trampolines=%d strict=%d "
-                    "in=%zu succeeded=%d\n",
-                    (unsigned long long)cache_key, decision->source_isa.c_str(),
-                    decision->target_isa.c_str(), decision->request_entry_trampolines,
-                    decision->request_strict_mode, code_object.size, rewritten ? 1 : 0);
+      if (rewritten) {
+        const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
+        auto bytes =
+            std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
+        GetRetargetCache().PutSuccess(cache_key, std::move(bytes));
+      } else {
+        GetRetargetCache().PutFailure(cache_key);
       }
+      HOTSWAP_LOG("hotswap: cached key=0x%llx src=%s tgt=%s entry_trampolines=%d strict=%d "
+                  "in=%zu succeeded=%d\n",
+                  (unsigned long long)cache_key, decision->source_isa.c_str(),
+                  decision->target_isa.c_str(), decision->request_entry_trampolines,
+                  decision->request_strict_mode, code_object.size, rewritten ? 1 : 0);
     } catch (const std::bad_alloc&) {
       HOTSWAP_LOG("hotswap: cache store skipped (OOM) key=0x%llx src=%s tgt=%s in=%zu\n",
                   (unsigned long long)cache_key, decision->source_isa.c_str(),
@@ -748,14 +946,32 @@ void ForceRetargetCodeObjectFailureForTesting(bool force) {
   g_force_retarget_code_object_failure_for_testing.store(force, std::memory_order_relaxed);
 }
 
-size_t RetargetCacheSizeForTesting() {
-  std::scoped_lock lock(g_retarget_cache_mutex);
-  return g_retarget_cache.size();
+size_t RetargetCacheSizeForTesting() { return GetRetargetCache().Size(); }
+
+void ClearRetargetCacheForTesting() { GetRetargetCache().Clear(); }
+
+size_t RetargetCacheBytesForTesting() { return GetRetargetCache().Bytes(); }
+
+void SetRetargetCacheByteBudgetForTesting(size_t budget) {
+  GetRetargetCache().SetByteBudgetForTesting(budget);
 }
 
-void ClearRetargetCacheForTesting() {
-  std::scoped_lock lock(g_retarget_cache_mutex);
-  g_retarget_cache.clear();
+void PutSyntheticRetargetCacheEntryForTesting(uint64_t key, size_t size) {
+  GetRetargetCache().PutSyntheticForTesting(key, size);
+}
+
+void PutFailureRetargetCacheEntryForTesting(uint64_t key) {
+  GetRetargetCache().PutFailure(key);
+}
+
+bool RetargetCacheContainsForTesting(uint64_t key) {
+  return GetRetargetCache().ContainsForTesting(key);
+}
+
+bool RetargetCacheGetForTesting(
+    uint64_t key, std::shared_ptr<std::vector<uint8_t>>* out_bytes) {
+  return GetRetargetCache().Get(key, out_bytes) ==
+         RetargetCache::Lookup::kHitSuccess;
 }
 #endif
 

@@ -839,4 +839,132 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) 
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
+// --- In-memory LRU byte-budget cache unit tests -----------------------------
+//
+// These exercise the RetargetCache eviction/accounting logic directly through
+// synthetic-entry hooks; they need neither a real code object nor COMGR.
+
+namespace {
+// Restores an empty cache and a large budget so a test's synthetic budget
+// changes do not leak into unrelated tests.
+void ResetRetargetCacheForBudgetTest() {
+  rocr::hotswap::ClearRetargetCacheForTesting();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(
+      static_cast<size_t>(1) << 40);  // 1 TiB — effectively unbounded for tests
+}
+}  // namespace
+
+TEST(RetargetCacheLru, TracksBytesAndSize) {
+  ResetRetargetCacheForBudgetTest();
+  ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+  ASSERT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 0u);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 250);
+
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 2u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 350u);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, EvictsLeastRecentlyUsedWhenOverBudget) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);  // LRU
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);  // MRU, total=300
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 3u);
+
+  // Inserting a 4th 100-byte entry pushes total to 400 > 300; key 1 (LRU) goes.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 300u);
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(3));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(4));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, AccessRefreshesRecency) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);
+
+  // Touch key 1 so it is now most-recently-used; key 2 becomes the LRU.
+  std::shared_ptr<std::vector<uint8_t>> bytes;
+  ASSERT_TRUE(rocr::hotswap::RetargetCacheGetForTesting(1, &bytes));
+
+  // Insert a 4th entry: key 2 (now LRU) should be evicted, key 1 retained.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(3));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(4));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, OversizedEntryIsRetainedAlone) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+
+  // A single entry larger than the whole budget still gets stored (everything
+  // else is evicted); refusing it would force a COMGR re-run on every load.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 5000);
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 5000u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, ReplacingKeyUpdatesBytesNotCount) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 400);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 400u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, ZeroBudgetIsUnbounded) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(0);
+  for (uint64_t k = 1; k <= 50; ++k) {
+    rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(k, 1000);
+  }
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 50u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 50000u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, FailureSentinelConsumesNoBytesButParticipatesInLru) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  // A cached failure holds no buffer: it counts toward entry count/LRU order
+  // but not toward the byte budget.
+  rocr::hotswap::PutFailureRetargetCacheEntryForTesting(1);  // LRU, 0 bytes
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 0u);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+
+  // Fill the byte budget with success entries; the failure sentinel is the LRU
+  // tail and must be evicted first when we go over budget.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);  // total=300
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(5, 100);  // over -> evict LRU
+
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));  // sentinel gone
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 300u);
+  ResetRetargetCacheForBudgetTest();
+}
+
 }  // namespace
