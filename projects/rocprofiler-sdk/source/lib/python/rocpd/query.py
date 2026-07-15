@@ -25,6 +25,7 @@
 
 import os
 import sys
+import time
 
 from typing import Union, Tuple, List, Optional
 from datetime import datetime
@@ -37,10 +38,295 @@ __all__ = [
     "export_sqlite_query",
     "send_report_email",
     "zip_files",
+    "update_query_for_blob_views",
     "add_args",
     "execute",
     "main",
 ]
+
+
+_BLOB_DECODED_SUFFIX = "_decoded"
+
+
+def _sql_tokens(query: str):
+    """Yield ``(kind, text, start, end)`` without interpreting SQL expressions."""
+    index = 0
+    while index < len(query):
+        start = index
+        char = query[index]
+        if char.isspace():
+            index += 1
+            while index < len(query) and query[index].isspace():
+                index += 1
+            yield "space", query[start:index], start, index
+        elif query.startswith("--", index):
+            end = query.find("\n", index + 2)
+            index = len(query) if end < 0 else end
+            yield "comment", query[start:index], start, index
+        elif query.startswith("/*", index):
+            end = query.find("*/", index + 2)
+            index = len(query) if end < 0 else end + 2
+            yield "comment", query[start:index], start, index
+        elif char == "'":
+            index += 1
+            while index < len(query):
+                if query[index] == "'":
+                    index += 1
+                    if index < len(query) and query[index] == "'":
+                        index += 1
+                        continue
+                    break
+                index += 1
+            yield "string", query[start:index], start, index
+        elif char in ('"', "`", "["):
+            closing = "]" if char == "[" else char
+            index += 1
+            while index < len(query):
+                if query[index] == closing:
+                    index += 1
+                    if closing != "]" and index < len(query) and query[index] == closing:
+                        index += 1
+                        continue
+                    break
+                index += 1
+            yield "identifier", query[start:index], start, index
+        elif char.isalpha() or char == "_":
+            index += 1
+            while index < len(query) and (query[index].isalnum() or query[index] in "_$"):
+                index += 1
+            yield "identifier", query[start:index], start, index
+        else:
+            index += 1
+            yield "symbol", query[start:index], start, index
+
+
+def _identifier_value(text: str) -> str:
+    if text.startswith("[") and text.endswith("]"):
+        return text[1:-1]
+    if text[:1] in ('"', "`") and text.endswith(text[0]):
+        return text[1:-1].replace(text[0] * 2, text[0])
+    return text
+
+
+def _quote_like_identifier(original: str, value: str) -> str:
+    if original.startswith("["):
+        return "[" + value.replace("]", "]]") + "]"
+    if original[:1] in ('"', "`"):
+        quote = original[0]
+        return quote + value.replace(quote, quote * 2) + quote
+    return value
+
+
+def _significant_tokens(tokens):
+    return [token for token in tokens if token[0] not in ("space", "comment")]
+
+
+def _cte_names(tokens):
+    """Return top-level CTE names so they are never treated as physical tables."""
+    significant = _significant_tokens(tokens)
+    if not significant or significant[0][1].casefold() != "with":
+        return set()
+
+    names = set()
+    index = 1
+    if index < len(significant) and significant[index][1].casefold() == "recursive":
+        index += 1
+    while index < len(significant):
+        token = significant[index]
+        if token[0] != "identifier":
+            break
+        names.add(_identifier_value(token[1]).casefold())
+        index += 1
+        if index < len(significant) and significant[index][1] == "(":
+            depth = 1
+            index += 1
+            while index < len(significant) and depth:
+                depth += significant[index][1] == "("
+                depth -= significant[index][1] == ")"
+                index += 1
+        if index >= len(significant) or significant[index][1].casefold() != "as":
+            break
+        index += 1
+        if index >= len(significant) or significant[index][1] != "(":
+            break
+        depth = 1
+        index += 1
+        while index < len(significant) and depth:
+            depth += significant[index][1] == "("
+            depth -= significant[index][1] == ")"
+            index += 1
+        if index >= len(significant) or significant[index][1] != ",":
+            break
+        index += 1
+    return names
+
+
+def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
+    """Rewrite *query* replacing blob-source table references with their
+    ``_decoded`` TEMP VIEW counterparts.
+
+    The decoded TEMP VIEWs and the ``rocpd_blob_field`` scalar function are
+    created during ``RocpdImportData`` initialisation by
+    :func:`importer.setup_blob_views`.  This function only rewrites the
+    query string so callers do not need to manually use the ``_decoded`` suffix.
+
+    A source table is rewritten only when its ``<source>_decoded`` view actually
+    exists -- blob-view setup is skipped for malformed/unknown blob metadata, and
+    rewriting to a non-existent view would turn a still-queryable base table into
+    an error.  Only unqualified references, or references explicitly qualified
+    with ``temp``, are rewritten (the decoded views are TEMP views, so a
+    ``main.``/attached-database qualifier is left untouched), and every table
+    factor in a comma-separated ``FROM`` list is rewritten, not just the first.
+
+    When no rewritable blob source tables are registered, or *query* is ``None``,
+    returns *query* unchanged.
+    """
+    import sqlite3
+
+    _t0 = time.perf_counter() if profile else None
+
+    if not query:
+        return query
+
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT source_table FROM rocpd_info_blob_schema "
+            "WHERE source_table IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return query
+
+    if not rows:
+        return query
+
+    try:
+        existing_temp_views = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_temp_master WHERE type = 'view'"
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        return query
+
+    replacements = {}
+    for (source_table,) in rows:
+        if not source_table:
+            continue
+        decoded = f"{source_table}{_BLOB_DECODED_SUFFIX}"
+        if decoded in existing_temp_views:
+            replacements[str(source_table).casefold()] = decoded
+    if not replacements:
+        return query
+
+    tokens = list(_sql_tokens(query))
+    cte_names = _cte_names(tokens)
+    significant_indexes = [
+        index
+        for index, token in enumerate(tokens)
+        if token[0] not in ("space", "comment")
+    ]
+
+    # Clause keywords that close an open FROM list at its own parenthesis depth.
+    _from_list_enders = frozenset(
+        (
+            "where",
+            "group",
+            "having",
+            "window",
+            "order",
+            "limit",
+            "union",
+            "except",
+            "intersect",
+            "returning",
+        )
+    )
+
+    edits = []
+    expect_table = False
+    paren_depth = 0
+    from_list_depths = []  # stack of parenthesis depths with an active FROM list
+    for position, token_index in enumerate(significant_indexes):
+        kind, text, start, end = tokens[token_index]
+        keyword = text.casefold() if kind == "identifier" else text
+
+        if text == "(":
+            paren_depth += 1
+            expect_table = False
+            continue
+        if text == ")":
+            paren_depth -= 1
+            while from_list_depths and from_list_depths[-1] > paren_depth:
+                from_list_depths.pop()
+            expect_table = False
+            continue
+
+        if keyword in ("from", "join"):
+            expect_table = True
+            if keyword == "from":
+                from_list_depths.append(paren_depth)
+            continue
+
+        # A top-level comma inside an active FROM list starts another table factor.
+        if text == "," and from_list_depths and from_list_depths[-1] == paren_depth:
+            expect_table = True
+            continue
+
+        # A clause keyword at the FROM list's depth closes that FROM list.
+        if (
+            kind == "identifier"
+            and keyword in _from_list_enders
+            and from_list_depths
+            and from_list_depths[-1] == paren_depth
+        ):
+            from_list_depths.pop()
+            expect_table = False
+            continue
+
+        if not expect_table:
+            continue
+        expect_table = False
+        if kind != "identifier":
+            continue
+
+        # A qualified name such as main.table / temp.table.  Only rewrite when
+        # unqualified or explicitly qualified with temp (where decoded views live).
+        name_token = tokens[token_index]
+        qualifier = None
+        if position + 2 < len(significant_indexes):
+            dot = tokens[significant_indexes[position + 1]]
+            qualified = tokens[significant_indexes[position + 2]]
+            if dot[1] == "." and qualified[0] == "identifier":
+                qualifier = _identifier_value(name_token[1]).casefold()
+                name_token = qualified
+
+        if qualifier is not None and qualifier != "temp":
+            continue
+
+        name = _identifier_value(name_token[1])
+        replacement = replacements.get(name.casefold())
+        if not replacement:
+            continue
+        # An unqualified name matching a top-level CTE is the CTE, not a table.
+        if qualifier is None and name.casefold() in cte_names:
+            continue
+        edits.append(
+            (
+                name_token[2],
+                name_token[3],
+                _quote_like_identifier(name_token[1], replacement),
+            )
+        )
+
+    for start, end, replacement in reversed(edits):
+        query = query[:start] + replacement + query[end:]
+
+    if profile and _t0 is not None:
+        elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+        print(f"Blob view query rewrite: elapsed={elapsed_ms:.2f} ms")
+
+    return query
 
 
 def export_sqlite_query(
@@ -113,6 +399,22 @@ def export_sqlite_query(
         # 3) Export based on format
         if export_format == "csv":
             import csv
+
+            # Preserve integer-looking Exec_Mask values as numeric so
+            # QUOTE_NONNUMERIC does not wrap them in quotes. Keep non-numeric
+            # values unchanged for pandas versions that no longer support
+            # errors="ignore" in to_numeric.
+            if "Exec_Mask" in df.columns:
+
+                def _to_int_if_numeric(value):
+                    if pd.isna(value):
+                        return value
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError, OverflowError):
+                        return value
+
+                df["Exec_Mask"] = df["Exec_Mask"].map(_to_int_if_numeric)
 
             cols = [f"{itr}" for itr in df.columns.tolist()]
             col_names = (
@@ -187,7 +489,7 @@ def _export_df_to_pdf(df, path: str):
     from reportlab.lib.units import inch
 
     c = canvas.Canvas(path, pagesize=letter)
-    width, height = letter
+    _, height = letter
     x = 0.5 * inch
     y = height - 1 * inch
     row_height = 14
@@ -405,6 +707,12 @@ def add_args(parser):
         type=str.lower,
     )
 
+    query_options.add_argument(
+        "--blob-view-profile",
+        action="store_true",
+        help="Print timing for automatic blob-view query rewriting",
+    )
+
     email_options = parser.add_argument_group("Query Email Options")
 
     # Email options (optional)
@@ -470,11 +778,20 @@ def execute(input, args, config=None, **kwargs):
         # read script and execute statements
         with open(args.script, "r") as ifs:
             for itr in ifs.read().split(";"):
-                input.execute(f"{itr}")
+                stmt = itr.strip()
+                if stmt:
+                    input.execute(stmt)
 
     # Prepare parameters for export
     query = args.query
     db = input
+
+    query = update_query_for_blob_views(
+        db,
+        query=query,
+        profile=getattr(args, "blob_view_profile", False),
+    )
+
     export_format = args.format
     export_path = os.path.join(config.output_path, config.output_file)
 
