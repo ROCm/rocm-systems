@@ -5,8 +5,13 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
+#include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
+
+#include <algorithm>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 namespace rocjitsu {
@@ -47,6 +52,10 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 
 using detail::fits_in_bounds;
 
+/*
+ * \NPI new GPU: map its MACH value and its gfxNNNN triple to a target id in \
+ * both target_from_machine_flags() and target_from_triple() below.
+ */
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
@@ -273,6 +282,58 @@ void AmdGpuCodeObject::load_sections() {
 uint64_t AmdGpuCodeObject::kernel_descriptor_offset(const std::string &kernel_name) const {
   auto it = kd_offsets_.find(kernel_name);
   return it != kd_offsets_.end() ? it->second : 0;
+}
+
+namespace {
+
+// CDNA targets encode the wavefront SGPR count in the descriptor even when the
+// granulated field is 0; RDNA-style targets treat a granulated 0 as "use the
+// fixed per-wave SGPR pool". Mirrors the command processor's
+// sgpr_count_is_descriptor_encoded(); kept as the short, stable CDNA
+// list so a new non-CDNA family falls through to the RDNA-style branch by
+// default. (Canonical copy: code/dbt/kernel_descriptor_translator.cpp.)
+[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+// Decode one kernel descriptor's per-wave SGPR count from its granulated field.
+[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rj_code_arch_t arch) {
+  // Descriptor-encoded (granulated != 0, or a CDNA target): (granulated + 1) * 8.
+  // Otherwise the field is an RDNA-style sentinel and the wave owns the fixed
+  // per-wave SGPR pool.
+  if (granulated != 0 || is_cdna_arch(arch))
+    return (granulated + 1) * 8;
+  return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
+}
+
+} // namespace
+
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  std::optional<uint32_t> min_count;
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    // Locate the section whose address range covers the .kd symbol, then read the
+    // descriptor out of that section's own bytes (no ELF re-walk).
+    for (const auto &section : all_sections()) {
+      const uint64_t base = section->vaddr();
+      if (base == 0 || kd_vaddr < base)
+        continue;
+      const uint64_t off = kd_vaddr - base;
+      if (off + sizeof(KD) > section->size())
+        continue;
+      KD desc;
+      std::memcpy(&desc, section->data() + off, sizeof(desc));
+      const uint32_t granulated = AMDHSA_BITS_GET(
+          desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+      min_count = min_count ? std::min(*min_count, count) : count;
+      break;
+    }
+  }
+  return min_count;
 }
 
 } // namespace rocjitsu

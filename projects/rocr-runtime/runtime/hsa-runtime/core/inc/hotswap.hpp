@@ -46,6 +46,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "core/inc/amd_hsa_loader.hpp"
@@ -54,12 +55,41 @@
 namespace rocr {
 namespace hotswap {
 
+struct AgentGfxRevision;
+
 using OwnedElfBuffer = std::unique_ptr<void, decltype(&std::free)>;
 
 struct CodeObjectView {
   const void* data = nullptr;
   size_t size = 0;
   std::string uri;
+};
+
+// Entry-trampoline rewriting is opt-in while validation is ongoing.
+inline constexpr bool kDefaultEntryTrampolinesEnabled = false;
+
+struct RewriteOptions {
+  bool entry_trampolines_enabled = kDefaultEntryTrampolinesEnabled;
+  bool strict_mode_enabled = false;
+};
+
+struct RewriteDecision {
+  std::string source_isa;
+  std::string target_isa;
+  bool request_entry_trampolines = false;
+  bool request_strict_mode = false;
+  bool rewrite_required = false;
+};
+
+enum class RetargetCodeObjectStatus {
+  kSkipped,
+  kRewritten,
+  kRequiredRewriteFailed,
+};
+
+struct RetargetCodeObjectResult {
+  RetargetCodeObjectStatus status = RetargetCodeObjectStatus::kSkipped;
+  bool rewrite_required = false;
 };
 
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(
@@ -82,15 +112,17 @@ std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         const char* source_isa, const char* target_isa,
-                        OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+                        OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size,
+                        bool request_entry_trampolines = false,
+                        bool request_strict_mode = false);
 
-bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer,
-                           size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(
+    const CodeObjectView& code_object, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
-                           hsa_agent_t agent, OwnedElfBuffer* out_elf_buffer,
-                           size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(
+    amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,
@@ -103,7 +135,12 @@ void RetainRewrittenElfBuffer(hsa_executable_t executable,
 void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
 
 #ifdef ROCR_HOTSWAP_TESTING
+std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
+    const AgentGfxRevision& gfx, const std::string& source_isa,
+    const std::string& target_isa, const RewriteOptions& options);
 size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
+bool HotswapRewriteWithOptionsAvailableForTesting();
+void ForceRetargetCodeObjectFailureForTesting(bool force);
 #endif
 
 }  // namespace hotswap

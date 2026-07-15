@@ -371,7 +371,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   if (!comm->useCtsOffload) {
     slots = comm->ctsFifo[slot];
-    uint64_t idx = comm->base.fifoHead+1;
+    uint32_t idx = (uint32_t)(comm->base.fifoHead+1);
     if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
     nreqs = slots[0].nreqs;
     // Wait until all data has arrived
@@ -655,7 +655,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       localElem[i].nreqs = n;
       localElem[i].size = sizes[i]; // Sanity/Debugging
       localElem[i].tag = tags[i];
-      localElem[i].idx = comm->base.fifoHead+1;
+      localElem[i].idx = (uint32_t)(comm->base.fifoHead+1);
       localElem[i].rxReqIndex = rxReqIndex;
     }
   }

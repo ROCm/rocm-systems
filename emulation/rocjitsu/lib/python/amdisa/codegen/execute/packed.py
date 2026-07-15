@@ -871,7 +871,7 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_dst_mod('result'))
     L.append(f'    uint32_t result_bits = {narrow}(result);')
     L.append(
-        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits);'
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )
     L.append('  }')
     return '\n'.join(L)

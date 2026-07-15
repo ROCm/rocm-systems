@@ -11,6 +11,7 @@ from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import resolve_rocm_library_path
+from utils.utils_profile import pc_sampling_unit
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -54,10 +55,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
-        if getattr(args, "torch_trace", False):
+        if getattr(self, "_selected_frameworks", set()):
             options["ROCPROF_MARKER_API_TRACE"] = "1"
-        # Create folder pointed by ROCPROF_OUTPUT_PATH
-        Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
 
         if args.iteration_multiplexing:
             options.update({
@@ -103,6 +102,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
+                "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC": "1",
             })
 
             if args.attach_duration_msec:
@@ -137,6 +137,27 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
         if not args.attach_pid:
             options["APP_CMD"] = app_cmd
+        return options
+
+    def get_pc_sampling_profiler_options(
+        self, native_tool_path: Optional[str] = None
+    ) -> dict[str, Union[str, list[str]]]:
+        args = self.get_args()
+        method = args.pc_sampling_method
+
+        options = self.get_profiler_options(native_tool_path=native_tool_path)
+        options.update({
+            # no counter collection for pc sampling
+            "ROCPROF_COUNTER_COLLECTION": "0",
+            "ROCPROF_KERNEL_TRACE": "1",
+            "ROCPROF_OUTPUT_FORMAT": "json",
+            "ROCPROF_OUTPUT_PATH": args.output_directory,
+            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
+            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
+            "ROCPROF_PC_SAMPLING_UNIT": pc_sampling_unit(method),
+            "ROCPROF_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),
+            "ROCPROF_PC_SAMPLING_METHOD": method,
+        })
         return options
 
     # -----------------------
