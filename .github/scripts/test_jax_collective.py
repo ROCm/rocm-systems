@@ -83,8 +83,34 @@ def find_lib_dirs(artifact_dir: Path) -> list[Path]:
     return sorted_dirs
 
 
+def create_soname_symlinks(lib_dirs: list[Path]) -> None:
+    """Create missing SONAME symlinks (e.g. libfoo.so.1 -> libfoo.so.1.2.3).
+
+    Artifact flattening can strip versioned symlinks. JAX wheels link
+    against SONAME versions (librocprofiler-sdk.so.1) that may only
+    exist as librocprofiler-sdk.so.1.0.0 after flattening.
+    """
+    for d in lib_dirs:
+        for so_file in d.glob("*.so.*"):
+            name = so_file.name
+            # Match libfoo.so.X.Y.Z — create libfoo.so.X symlink
+            parts = name.split(".so.")
+            if len(parts) != 2:
+                continue
+            version_parts = parts[1].split(".")
+            if len(version_parts) <= 1:
+                continue
+            soname = f"{parts[0]}.so.{version_parts[0]}"
+            soname_path = d / soname
+            if not soname_path.exists():
+                soname_path.symlink_to(so_file.name)
+                log.info("Created symlink: %s -> %s", soname_path, so_file.name)
+
+
 def setup_ld_library_path(lib_dirs: list[Path]) -> str:
     """Prepend all artifact lib dirs to LD_LIBRARY_PATH."""
+    create_soname_symlinks(lib_dirs)
+
     parts = [str(d) for d in lib_dirs]
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
