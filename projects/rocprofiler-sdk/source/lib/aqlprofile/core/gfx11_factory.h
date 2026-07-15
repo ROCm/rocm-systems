@@ -36,9 +36,9 @@ public:
         Init(agent_info);
     }
     Gfx11Factory(const GpuBlockInfo** table,
-                 const uint32_t&     size,
-                 const AgentInfo*    agent_info,
-                 bool                double_buffer = false)
+                 const uint32_t&      size,
+                 const AgentInfo*     agent_info,
+                 bool                 double_buffer = false)
     : Pm4Factory(BlockInfoMap(table, size))
     {
         Init(agent_info, double_buffer);
