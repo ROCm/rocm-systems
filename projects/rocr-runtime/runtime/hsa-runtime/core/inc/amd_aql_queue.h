@@ -396,8 +396,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
     uint8_t minor_;
   };
 
-  struct metadata_prefetch_pkt_version dispatch_version_;
-  struct metadata_prefetch_pkt_version barrier_version_;
+  metadata_prefetch_pkt_version dispatch_version_;
+  metadata_prefetch_pkt_version barrier_version_;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {
