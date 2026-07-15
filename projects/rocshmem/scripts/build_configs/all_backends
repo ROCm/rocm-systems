@@ -31,12 +31,20 @@ if [[ "${ASAN}" == true ]]; then
     export HSA_XNACK=1
 fi
 
+# Set RESOURCE_USAGE=ON to have the compiler emit per-kernel VGPR/SGPR/AGPR/
+# scratch/LDS usage and occupancy remarks (via -Rpass-analysis=kernel-resource-usage)
+# for every device kernel built in this tree.
+if [[ "${RESOURCE_USAGE}" == "ON" ]]; then
+    export CXXFLAGS="${CXXFLAGS} -Rpass-analysis=kernel-resource-usage"
+fi
+
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-~/rocshmem} \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
     -DBUILD_FUNCTIONAL_TESTS=ON \
     -DBUILD_UNIT_TESTS=ON \
     -DBUILD_EXAMPLES=ON \
@@ -55,6 +63,12 @@ cmake \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DASAN=${ASAN:-OFF} \
     $* $src_path
-cmake --build . --parallel 8
+if [[ "${RESOURCE_USAGE}" == "ON" ]]; then
+    cmake --build . --parallel 8 2>&1 | tee resource_usage.log
+    grep -B1 -A9 "Function Name:" resource_usage.log > resource_usage_summary.log || true
+    echo "Per-kernel resource usage written to $(pwd)/resource_usage_summary.log"
+else
+    cmake --build . --parallel 8
+fi
 cmake --install .
 
