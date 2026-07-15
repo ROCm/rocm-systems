@@ -140,31 +140,37 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
 # ---------------------------------------------------------------------------
 
 
+def roctx_recordfn_module_sources():
+    """The module's C++ source and header files."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    return sorted(set(src_dir.glob("*.cpp")) | set(src_dir.glob("*.h")))
+
+
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
-    """The source must not include ``<torch/{extension,all,torch}.h>``."""
-    cpp_path = inject_roctx_loader._SO_SOURCE
-    assert cpp_path.is_file(), f"missing C++ source at {cpp_path}"
-    active_lines = [
-        line
-        for line in cpp_path.read_text().splitlines()
-        if not line.lstrip().startswith("//")
-    ]
-    active_src = "\n".join(active_lines)
+    """No module source may include ``<torch/{extension,all,torch}.h>``."""
+    sources = roctx_recordfn_module_sources()
+    assert sources, f"no C++ sources under {inject_roctx_loader._SO_SOURCE_DIR}"
 
     forbidden = (
         "<torch/extension.h>",
         "<torch/all.h>",
         "<torch/torch.h>",
     )
-    for header in forbidden:
-        directive = f"#include {header}"
-        assert directive not in active_src, f"must not include {header}"
+    for path in sources:
+        active_lines = [
+            line
+            for line in path.read_text().splitlines()
+            if not line.lstrip().startswith("//")
+        ]
+        active_src = "\n".join(active_lines)
+        for header in forbidden:
+            directive = f"#include {header}"
+            assert directive not in active_src, f"{path.name} must not include {header}"
 
 
 def test_roctx_recordfn_source_uses_narrow_includes():
-    """The source includes only the required narrow PyTorch headers."""
-    cpp_path = inject_roctx_loader._SO_SOURCE
-    src = cpp_path.read_text()
+    """The module includes the required narrow PyTorch headers."""
+    combined = "\n".join(path.read_text() for path in roctx_recordfn_module_sources())
 
     required = (
         "#include <ATen/record_function.h>",
@@ -173,7 +179,7 @@ def test_roctx_recordfn_source_uses_narrow_includes():
         "#include <pybind11/stl.h>",
     )
     for directive in required:
-        assert directive in src, f"must include {directive}"
+        assert directive in combined, f"module must include {directive}"
 
 
 def test_cmake_buildfile_does_not_override_output_name():
