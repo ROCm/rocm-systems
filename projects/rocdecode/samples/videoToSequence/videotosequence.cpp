@@ -483,6 +483,7 @@ int main(int argc, char **argv) {
             }
             if (!v_dec_info[thread_idx]->viddec->CodecSupported(v_dec_info[thread_idx]->dec_device_id, v_dec_info[thread_idx]->rocdec_codec_id, v_dec_info[thread_idx]->bit_depth)) {
                 std::cerr << "Error: Codec not supported on GPU for " << input_file_names[j] << "!" << std::endl;
+                v_dec_info[thread_idx]->decoding_complete = true;
                 b_unsupported_codec = true;
                 continue;
             }
