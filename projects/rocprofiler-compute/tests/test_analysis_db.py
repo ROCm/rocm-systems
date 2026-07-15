@@ -858,8 +858,18 @@ def make_pc_sampling_tool_data():
             "pc_sample_comments": ["/s/a.cpp:1", "/s/a.cpp:2"],
         },
         "kernel_symbols": [
-            {"kernel_id": 100, "code_object_id": 5, "formatted_kernel_name": "vecCopy"},
-            {"kernel_id": 101, "code_object_id": 5, "formatted_kernel_name": "vecAdd"},
+            {
+                "kernel_id": 100,
+                "code_object_id": 5,
+                "kernel_name": "_Z7vecCopyv.kd",
+                "formatted_kernel_name": "vecCopy",
+            },
+            {
+                "kernel_id": 101,
+                "code_object_id": 5,
+                "kernel_name": "vecAdd.kd",
+                "formatted_kernel_name": "vecAdd",
+            },
         ],
         "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
         "agents": [],
@@ -947,38 +957,57 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
 # =============================================================================
 
 
-def make_disasm_code_object(code_object_id, instructions):
+def make_disasm_code_object(code_object_id, instructions, symbol_name="sym"):
     """Build one code_obj_info code object with a single symbol."""
     return {
         "id": code_object_id,
-        "symbols": [{"name": "sym", "instructions": instructions}],
+        "symbols": [{"name": symbol_name, "instructions": instructions}],
     }
 
 
 def test_add_code_object_isa_adds_unsampled_lines(db_session):
-    """Un-sampled instructions are inserted with kernel NULL; a disassembly
-    offset that matches an already-sampled offset inserts no duplicate row."""
+    """Un-sampled instructions of a dispatched kernel are added and attributed
+    via the mangled-name join; a disassembly offset that matches an already-
+    sampled offset inserts no duplicate row; ISA of an un-dispatched symbol is
+    not stored at all."""
     workload_path = common.get_output_dir()
     Path(workload_path).mkdir(parents=True, exist_ok=True)
     load_base = 0x1000
     try:
-        # 0x1010 -> offset 0x10 is already sampled; 0x1030 -> offset 0x30 is new.
+        # 0x1010 -> offset 0x10 is already sampled; 0x1030 -> offset 0x30 is new
+        # and joins vecCopy through its mangled ELF name; 0x1040 -> offset 0x40
+        # belongs to a symbol never dispatched, so it is dropped entirely.
         code_objects = [
-            make_disasm_code_object(
-                5,
-                [
+            {
+                "id": 5,
+                "symbols": [
                     {
-                        "virtual_address": load_base + 0x10,
-                        "name": "v_mov",
-                        "comment": "",
+                        "name": "_Z7vecCopyv",
+                        "instructions": [
+                            {
+                                "virtual_address": load_base + 0x10,
+                                "name": "v_mov",
+                                "comment": "",
+                            },
+                            {
+                                "virtual_address": load_base + 0x30,
+                                "name": "s_nop",
+                                "comment": "c",
+                            },
+                        ],
                     },
                     {
-                        "virtual_address": load_base + 0x30,
-                        "name": "s_nop",
-                        "comment": "c",
+                        "name": "_Z7unknownv",
+                        "instructions": [
+                            {
+                                "virtual_address": load_base + 0x40,
+                                "name": "s_endpgm",
+                                "comment": "",
+                            }
+                        ],
                     },
                 ],
-            )
+            }
         ]
         (Path(workload_path) / "42_code_obj_info.json").write_text(
             json.dumps({"code_objects": code_objects}), encoding="utf-8"
@@ -998,16 +1027,17 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             workload_path: make_pc_sampling_tool_data()
         }
         analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
-        analyzer.add_code_object_isa(workload_path, workload)
+        analyzer.add_code_object_isa(workload_path, workload, kernel_objs)
         db_session.commit()
 
         lines = db_session.query(orm.InstructionLine).all()
         by_offset = {line.code_object_offset: line for line in lines}
-        # Two sampled offsets + one new un-sampled offset, no duplicate at 0x10.
+        # Two sampled offsets + one new un-sampled offset; the un-dispatched
+        # symbol's 0x40 line is dropped, and 0x10 is not duplicated.
         assert set(by_offset) == {0x10, 0x20, 0x30}
-        # The disassembly-only line is un-attributed and has no sample state.
+        # The disassembly-only line joins its kernel and carries no sample state.
         isa_line = by_offset[0x30]
-        assert isa_line.kernel is None
+        assert isa_line.kernel.kernel_name == "vecCopy"
         assert isa_line.pc_sample_state is None
         assert isa_line.instruction == "s_nop"
         # The sampled line at 0x10 kept its kernel attribution and sample state.
@@ -1020,18 +1050,26 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
 
 
 def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session):
-    """A code object present only in code_obj_info gets a new store, using the
-    load_base from the PC-sampling results' code_objects list."""
+    """A dispatched-but-never-sampled code object present only in code_obj_info
+    gets a new store, using the load_base from the results' code_objects list,
+    and its ISA is attributed to the dispatched kernel."""
     workload_path = common.get_output_dir()
     Path(workload_path).mkdir(parents=True, exist_ok=True)
     try:
         tool_data = make_pc_sampling_tool_data()
-        # code object 9 has a load_base in the results but was never sampled.
+        # code object 9 has a load_base and a dispatched kernel, but no samples.
         tool_data["code_objects"].append({"code_object_id": 9, "load_base": 0x2000})
+        tool_data["kernel_symbols"].append({
+            "kernel_id": 102,
+            "code_object_id": 9,
+            "kernel_name": "_Z6helperv.kd",
+            "formatted_kernel_name": "helper",
+        })
         code_objects = [
             make_disasm_code_object(
                 9,
                 [{"virtual_address": 0x2000 + 0x8, "name": "s_endpgm", "comment": ""}],
+                symbol_name="_Z6helperv",
             )
         ]
         (Path(workload_path) / "42_code_obj_info.json").write_text(
@@ -1040,11 +1078,13 @@ def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session)
 
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
+        helper = orm.Kernel(kernel_name="helper", workload=workload)
+        db_session.add(helper)
 
         analyzer = db_analysis(MagicMock(), {})
         analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
-        analyzer.add_pc_sampling_data(workload_path, workload, {})
-        analyzer.add_code_object_isa(workload_path, workload)
+        analyzer.add_pc_sampling_data(workload_path, workload, {"helper": helper})
+        analyzer.add_code_object_isa(workload_path, workload, {"helper": helper})
         db_session.commit()
 
         store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
@@ -1057,7 +1097,7 @@ def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session)
             .one()
         )
         assert line.code_object_store is store
-        assert line.kernel is None
+        assert line.kernel is helper
     finally:
         common.clean_output_dir(True, workload_path)
 
@@ -1070,10 +1110,17 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
     try:
         tool_data = make_pc_sampling_tool_data()
         tool_data["code_objects"].append({"code_object_id": 9, "load_base": None})
+        tool_data["kernel_symbols"].append({
+            "kernel_id": 102,
+            "code_object_id": 9,
+            "kernel_name": "_Z6helperv.kd",
+            "formatted_kernel_name": "helper",
+        })
         code_objects = [
             make_disasm_code_object(
                 9,
                 [{"virtual_address": 0x500, "name": "s_endpgm", "comment": ""}],
+                symbol_name="_Z6helperv",
             )
         ]
         (Path(workload_path) / "42_code_obj_info.json").write_text(
@@ -1082,14 +1129,16 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
 
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
+        helper = orm.Kernel(kernel_name="helper", workload=workload)
+        db_session.add(helper)
 
         analyzer = db_analysis(MagicMock(), {})
         analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
-        analyzer.add_pc_sampling_data(workload_path, workload, {})
-        analyzer.add_code_object_isa(workload_path, workload)
+        analyzer.add_pc_sampling_data(workload_path, workload, {"helper": helper})
+        analyzer.add_code_object_isa(workload_path, workload, {"helper": helper})
         db_session.commit()
 
-        # No instruction line was inserted for code object 9.
+        # The store exists (its kernel was dispatched) but no ISA line was added.
         store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
         assert store.instruction_lines == []
     finally:

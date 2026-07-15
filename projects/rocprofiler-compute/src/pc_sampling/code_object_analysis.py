@@ -23,6 +23,7 @@ class CodeObjectInstruction(NamedTuple):
     virtual_address: int
     instruction: str
     comment: str
+    kernel_name: str
 
 
 class CodeObjectDisassembly(NamedTuple):
@@ -42,7 +43,7 @@ def parse_code_object_info(data: dict[str, Any]) -> list[CodeObjectDisassembly]:
         CodeObjectDisassembly(
             code_object_id=code_object["id"],
             instructions=[
-                _to_instruction(instruction)
+                _to_instruction(instruction, symbol.get("name"))
                 for symbol in code_object.get("symbols", [])
                 for instruction in symbol.get("instructions", [])
             ],
@@ -82,10 +83,13 @@ def _parse_pid(json_path: Path) -> Optional[int]:
     return int(pid_text)
 
 
-def _to_instruction(instruction: dict[str, Any]) -> CodeObjectInstruction:
+def _to_instruction(
+    instruction: dict[str, Any], symbol_name: str
+) -> CodeObjectInstruction:
     """Convert one raw instruction dict into a CodeObjectInstruction."""
     return CodeObjectInstruction(
         virtual_address=instruction["virtual_address"],
         instruction=instruction.get("name"),
         comment=instruction.get("comment"),
+        kernel_name=symbol_name,
     )

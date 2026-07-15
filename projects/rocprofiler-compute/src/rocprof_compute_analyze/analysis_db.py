@@ -215,7 +215,7 @@ class db_analysis(OmniAnalyze_Base):
 
             # Add pc sampling data, then the full code-object ISA
             self.add_pc_sampling_data(workload_path, workload_obj, kernel_objs)
-            self.add_code_object_isa(workload_path, workload_obj)
+            self.add_code_object_isa(workload_path, workload_obj, kernel_objs)
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -454,8 +454,9 @@ class db_analysis(OmniAnalyze_Base):
         self,
         workload_path: str,
         workload_obj: orm.Workload,
+        kernel_objs: dict[str, orm.Kernel],
     ) -> None:
-        """Add the full code-object disassembly as instruction lines,
+        """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
         tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
         # load_base comes only from the clobbered single ps_file, keyed by
@@ -465,6 +466,20 @@ class db_analysis(OmniAnalyze_Base):
             code_object["code_object_id"]: code_object.get("load_base")
             for code_object in (tool_data or {}).get("code_objects", [])
         }
+        # The disassembly carries the mangled ELF symbol; kernel_objs is keyed by
+        # the demangled name. kernel_symbols bridges the two per code object.
+        kernel_by_symbol = {
+            (
+                symbol["code_object_id"],
+                symbol["kernel_name"].removesuffix(".kd"),
+            ): kernel
+            for symbol in (tool_data or {}).get("kernel_symbols", [])
+            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
+        }
+        # A code object is worth storing only if one of its symbols was dispatched.
+        invoked_code_object_ids = {
+            code_object_id for code_object_id, _ in kernel_by_symbol
+        }
         # Reuse an existing code object instead of creating a duplicate.
         existing_code_objects = {
             (store.pid, store.code_object_id): store
@@ -473,6 +488,9 @@ class db_analysis(OmniAnalyze_Base):
 
         for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
             for disassembly in disassemblies:
+                if disassembly.code_object_id not in invoked_code_object_ids:
+                    continue
+
                 code_object_store = existing_code_objects.get((
                     pid,
                     disassembly.code_object_id,
@@ -505,6 +523,12 @@ class db_analysis(OmniAnalyze_Base):
                     for line in code_object_store.instruction_lines
                 }
                 for instruction in disassembly.instructions:
+                    kernel = kernel_by_symbol.get((
+                        disassembly.code_object_id,
+                        instruction.kernel_name,
+                    ))
+                    if kernel is None:
+                        continue
                     code_object_offset = (
                         instruction.virtual_address - code_object_store.load_base
                     )
@@ -517,7 +541,7 @@ class db_analysis(OmniAnalyze_Base):
                             comment=instruction.comment,
                             instruction=instruction.instruction,
                             code_object_store=code_object_store,
-                            kernel=None,
+                            kernel=kernel,
                         )
                     )
 
