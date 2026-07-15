@@ -3658,7 +3658,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                  totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
-      }
+      }*/
 
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable = !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);

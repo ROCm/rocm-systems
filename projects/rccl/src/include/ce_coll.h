@@ -17,14 +17,18 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// CE AllReduce: maximum supported total AllReduce message size.
-// The ceARTmpBuf is sized to hold nRanks scatter slots (totalBytes) plus
-// one reduce-scratch slot (chunkBytes = totalBytes/nRanks), so the buffer
-// must satisfy: totalBytes * (nRanks+1)/nRanks <= ceARTmpBufSize.
-//
-// Default is <= 2 MiB (covers most deep-learning AllReduce sizes).  
+// Default is <= 2 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots), 
+// and the reduced output goes to the user recvbuff)
 #define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
 #define NCCL_CE_AR_MIN_MSG_BYTES  (4ull * 1024 * 1024)
+
+#ifndef NCCL_CE_REDUCE_MAX_BLOCKS
+#define NCCL_CE_REDUCE_MAX_BLOCKS 46
+#endif
+
+#ifndef NCCL_CE_NUM_SLOTS
+#define NCCL_CE_NUM_SLOTS 2
+#endif
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
@@ -48,6 +52,17 @@ struct ncclCeColl {
   //         [nRanks*chunkBytes .. (nRanks+1)*chunkBytes) reduce scratch.
   uint8_t*               ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  uint32_t* signalBuffer;
+  struct ncclDevrWindow* signalWin;
+  uint32_t* d_kernelReady;
+  // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
+  uint32_t* d_barrierSync;
+  // Monotonic anvil generation: host reserves a unique range per kernel launch;
+  // device kernel reads the start value and increments locally per barrier.
+  uint64_t* d_barrierGenBase;
+  uint64_t  barrierGenNext;
+  cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
+  cudaEvent_t  synceEvent;  // join scatterStream back onto the caller's stream
 
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE
