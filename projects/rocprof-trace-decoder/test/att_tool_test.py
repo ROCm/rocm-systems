@@ -187,11 +187,13 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
     def test_correction_cancels_unknown_clock_phase(self):
+        # The fixed inter-clock phase crosses the sampled window. The
+        # correction must use clock/time deltas, not absolute values.
         marker_id = 3 << 2
-        reference = _shaderdata(0x14080, marker_id)
-        delayed = _shaderdata(0x144A0, (0x10 << 20) | marker_id)
+        delayed = _shaderdata(0x101D0, marker_id)
+        reference = _shaderdata(0x10DFC, (0x100 << 20) | marker_id)
         records = TraceRecords(
-            occupancy=[_occupancy(1, 0)], shaderdata=[reference, delayed])
+            occupancy=[_occupancy(1, 0)], shaderdata=[delayed, reference])
 
         _correct_marker_timestamps(
             [(0, records)],
@@ -201,29 +203,8 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x14080, 0x1418F])
+        self.assertEqual([record.time for record in records.shaderdata], [0xFE0B, 0x10DFC])
         self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
-
-    def test_large_delay_warns_without_moving_the_minimum(self):
-        marker_id = 3 << 2
-        first = _shaderdata(0x1064, (0x100 << 20) | marker_id)
-        later = _shaderdata(0x20000, (0x63C << 20) | marker_id)
-        records = TraceRecords(
-            occupancy=[_occupancy(1, 0)],
-            shaderdata=[first, later],
-        )
-
-        with self.assertWarnsRegex(RuntimeWarning, "delay range exceeds half"):
-            _correct_marker_timestamps(
-                [(0, records)],
-                {
-                    "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
-                    "sqtt_funcmap_layout": [[7, 12, 4]],
-                },
-            )
-
-        self.assertEqual(first.time, 0x1064)
-        self.assertEqual(later.time, 0x16433)
 
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
         value = (0x100 << 20) | (3 << 2)

@@ -131,23 +131,26 @@ exactly one payload (`R:...=1`) and remains eligible for clock packing.
 The sampled window lets a decoder compensate for the variable delay between
 the trace instruction issuing and its shaderdata record appearing in SQTT.
 Shaderdata and shader-clock timestamps have the same rate but an unknown fixed
-phase per physical SIMD. For each **marker header** (never an `R:`-declared raw
-payload), calculate its circular residue:
+phase per physical SIMD. Do not compare them directly. For each **marker
+header** (never an `R:`-declared raw payload), choose any header `r` in the
+same physical SIMD/layout only as a coordinate origin and calculate:
 
 ```text
 window_mask = (1ULL << (clock_bits + shader_clock_shift)) - 1
+half_window = (window_mask + 1) / 2
 bucket_size = 1ULL << shader_clock_shift
 sampled_window = packed_clock_field << shader_clock_shift
-residue = (uint32_t(record_time) - sampled_window) & window_mask
+relative = (((record_time - r.record_time) -
+             (sampled_window - r.sampled_window) + half_window) & window_mask) - half_window
 ```
 
 Within each `(shader engine, CU, SIMD, clock_bits, shader_clock_shift)` domain,
-the implementation assumes the delivery delay does not wrap the sampled
-window. Keep the smallest residue as the reference. With
-`relative = residue - minimum_residue`, shift a header earlier by
-`max(0, relative - (bucket_size - 1))`; the fixed phase cancels in that
-difference. If the delay range exceeds half the window, emit one warning for
-that domain but still correct it.
+the implementation assumes the relative delta stays within the signed sampled
+window. Collect the complete domain before selecting `minimum_relative`, then
+shift every header earlier by
+`max(0, relative - minimum_relative - (bucket_size - 1))`. The coordinate
+origin is not a chronological anchor: a later lower value corrects earlier
+headers retroactively.
 
 `att_tool.py` applies this correction while writing JSON by default;
 `--no-decode-markers` preserves the packed values and arrival timestamps. It
