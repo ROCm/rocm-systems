@@ -1592,6 +1592,211 @@ ExpandResult expand_scaled_vglobal(const Instruction &inst, uint32_t, uint64_t,
   return ExpandResult::success(std::move(words));
 }
 
+struct AsyncVglobalLowering {
+  uint8_t access_bytes = 0;
+  uint8_t global_op = 0;
+  uint8_t ds_op = 0;
+  bool load_to_lds = false;
+  bool cluster = false;
+};
+
+[[nodiscard]] constexpr std::optional<AsyncVglobalLowering> async_vglobal_lowering(uint16_t op) {
+  switch (op) {
+  case 95: // global_load_async_to_lds_b8
+    return AsyncVglobalLowering{1, 16, 30, true, false};
+  case 96: // global_load_async_to_lds_b32
+    return AsyncVglobalLowering{4, 20, 13, true, false};
+  case 97: // global_load_async_to_lds_b64
+    return AsyncVglobalLowering{8, 21, 77, true, false};
+  case 98: // global_load_async_to_lds_b128
+    return AsyncVglobalLowering{16, 23, 223, true, false};
+  case 99: // global_store_async_from_lds_b8
+    return AsyncVglobalLowering{1, 24, 58, false, false};
+  case 100: // global_store_async_from_lds_b32
+    return AsyncVglobalLowering{4, 26, 54, false, false};
+  case 101: // global_store_async_from_lds_b64
+    return AsyncVglobalLowering{8, 27, 118, false, false};
+  case 102: // global_store_async_from_lds_b128
+    return AsyncVglobalLowering{16, 29, 255, false, false};
+  case 106: // cluster_load_async_to_lds_b8
+    return AsyncVglobalLowering{1, 16, 30, true, true};
+  case 107: // cluster_load_async_to_lds_b32
+    return AsyncVglobalLowering{4, 20, 13, true, true};
+  case 108: // cluster_load_async_to_lds_b64
+    return AsyncVglobalLowering{8, 21, 77, true, true};
+  case 109: // cluster_load_async_to_lds_b128
+    return AsyncVglobalLowering{16, 23, 223, true, true};
+  default:
+    return std::nullopt;
+  }
+}
+
+void append_scaled_vglobal_address(std::vector<uint32_t> &words, VglobalFields &fields, uint8_t tmp,
+                                   uint8_t access_bytes) {
+  constexpr uint8_t kOpLshlrevB32 = 24;
+  constexpr uint16_t kOpMulLoU32 = 812;
+  const uint8_t source_vaddr = static_cast<uint8_t>(fields.vaddr);
+  fields.vaddr = tmp;
+  fields.scale_offset = 0;
+  if (std::has_single_bit(access_bytes)) {
+    const auto shift = static_cast<uint8_t>(std::countr_zero(access_bytes));
+    words.push_back(
+        build_vop2(kOpLshlrevB32, tmp, scalar_positive_inline_u32(shift), source_vaddr));
+  } else {
+    append_vop3(words, kOpMulLoU32, tmp, vgpr_src(source_vaddr),
+                scalar_positive_inline_u32(access_bytes));
+  }
+  append_wait_valu_vgpr(words);
+}
+
+ExpandResult expand_cluster_load_vglobal(const Instruction &inst, uint32_t, uint64_t,
+                                         std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                         TranslationContext &context, const LaneLayout *,
+                                         const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VglobalMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VglobalMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  uint8_t access_bytes = 0;
+  uint8_t global_op = 0;
+  switch (src.op) {
+  case 103: // cluster_load_b32
+    access_bytes = 4;
+    global_op = 20;
+    break;
+  case 104: // cluster_load_b64
+    access_bytes = 8;
+    global_op = 21;
+    break;
+  case 105: // cluster_load_b128
+    access_bytes = 16;
+    global_op = 23;
+    break;
+  default:
+    return ExpandResult::not_handled();
+  }
+
+  auto fields = gfx1250_to_rdna4::decode_vglobal_gfx1250(raw[0], raw[1], raw[2]);
+  fields.op = global_op;
+  // A cluster load has ordinary per-wave destination semantics. The only
+  // target-visible difference is its forced cache bypass, for which RDNA4's
+  // no-allocate bit is the conservative replacement.
+  fields.nv = 1;
+
+  std::vector<uint32_t> words;
+  if (src.scale_offset && access_bytes != 1) {
+    std::vector<uint8_t> avoid;
+    add_avoid_vgpr_run(avoid, static_cast<uint8_t>(src.vaddr), 2);
+    add_avoid_vgpr_run(avoid, static_cast<uint8_t>(src.vdst), access_bytes / 4u);
+    const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
+    if (!tmp_opt)
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate a scaled-address VGPR");
+    append_scaled_vglobal_address(words, fields, static_cast<uint8_t>(*tmp_opt), access_bytes);
+    context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + 1u);
+  } else {
+    fields.scale_offset = 0;
+  }
+
+  if (!append_rdna4_vglobal_load(words, fields, global_op))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " could not encode its RDNA4 global-load replacement");
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_async_vglobal(const Instruction &inst, uint32_t, uint64_t,
+                                  std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                  TranslationContext &context, const LaneLayout *,
+                                  const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VglobalMachineInst))
+    return ExpandResult::not_handled();
+
+  gfx1250::VglobalMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const auto lowering = async_vglobal_lowering(src.op);
+  if (!lowering)
+    return ExpandResult::not_handled();
+
+  const uint8_t data_words = std::max<uint8_t>(1, lowering->access_bytes / 4u);
+  const bool needs_scaled_address = src.scale_offset && lowering->access_bytes != 1;
+  const uint8_t scratch_words = static_cast<uint8_t>(data_words + needs_scaled_address);
+  std::vector<uint8_t> avoid;
+  add_avoid_vgpr_run(avoid, static_cast<uint8_t>(src.vaddr), 2);
+  add_avoid_vgpr(avoid, lowering->load_to_lds ? static_cast<uint8_t>(src.vdst)
+                                              : static_cast<uint8_t>(src.vsrc));
+  const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, scratch_words, avoid);
+  if (!tmp_opt) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " cannot allocate " +
+                                std::to_string(scratch_words) + " temporary VGPRs");
+  }
+  const uint8_t data = static_cast<uint8_t>(*tmp_opt);
+
+  auto global = gfx1250_to_rdna4::decode_vglobal_gfx1250(raw[0], raw[1], raw[2]);
+  global.op = lowering->global_op;
+  if (lowering->cluster)
+    global.nv = 1;
+
+  std::vector<uint32_t> words;
+  words.reserve(12);
+  if (needs_scaled_address) {
+    append_scaled_vglobal_address(words, global, static_cast<uint8_t>(data + data_words),
+                                  lowering->access_bytes);
+  } else {
+    global.scale_offset = 0;
+  }
+
+  VdsFields ds{};
+  ds.vaddr = lowering->load_to_lds ? src.vdst : src.vsrc;
+  constexpr uint8_t kOpWaitLoadcnt = 64;
+  constexpr uint8_t kOpWaitStorecnt = 65;
+  constexpr uint8_t kOpWaitDscnt = 70;
+  if (lowering->load_to_lds) {
+    global.vdst = data;
+    if (!append_rdna4_vglobal_load(words, global, lowering->global_op))
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " could not encode its RDNA4 global load");
+    words.push_back(pack_sopp(kOpWaitLoadcnt, 0));
+    ds.data0 = data;
+    if (!append_rdna4_vds_inst(words, ds, lowering->ds_op))
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " could not encode its RDNA4 LDS store");
+    words.push_back(pack_sopp(kOpWaitDscnt, 0));
+  } else {
+    ds.vdst = data;
+    if (!append_rdna4_vds_inst(words, ds, lowering->ds_op))
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " could not encode its RDNA4 LDS load");
+    words.push_back(pack_sopp(kOpWaitDscnt, 0));
+    global.vsrc = data;
+    if (!append_rdna4_vglobal_load(words, global, lowering->global_op))
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " could not encode its RDNA4 global store");
+    words.push_back(pack_sopp(kOpWaitStorecnt, 0));
+  }
+
+  context.require_vgprs(static_cast<uint32_t>(*tmp_opt) + scratch_words);
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_special_vglobal(const Instruction &inst, uint32_t host_arch, uint64_t offset,
+                                    std::span<const uint8_t> source_text,
+                                    const LivenessAnalysis &liveness, TranslationContext &context,
+                                    const LaneLayout *guest_layout, const LaneLayout *host_layout) {
+  auto result = expand_cluster_load_vglobal(inst, host_arch, offset, source_text, liveness, context,
+                                            guest_layout, host_layout);
+  if (result.status != ExpandStatus::NotHandled)
+    return result;
+  result = expand_async_vglobal(inst, host_arch, offset, source_text, liveness, context,
+                                guest_layout, host_layout);
+  if (result.status != ExpandStatus::NotHandled)
+    return result;
+  return expand_scaled_vglobal(inst, host_arch, offset, source_text, liveness, context,
+                               guest_layout, host_layout);
+}
+
 ExpandResult expand_scaled_vscratch(const Instruction &inst, uint32_t, uint64_t,
                                     std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                     TranslationContext &context, const LaneLayout *,
@@ -2815,6 +3020,17 @@ std::vector<uint32_t> expand_native_global_transpose_load(const Instruction &ins
 std::vector<uint32_t> lower_s_clause_to_nop(const Instruction &, uint32_t host_arch, uint64_t,
                                             std::span<const uint8_t>, const LivenessAnalysis &,
                                             const LaneLayout *, const LaneLayout *) {
+  return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
+}
+
+std::vector<uint32_t> lower_s_wait_asynccnt_to_nop(const Instruction &, uint32_t host_arch,
+                                                   uint64_t, std::span<const uint8_t>,
+                                                   const LivenessAnalysis &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  // Every gfx1250 async VMEM operation is lowered to a synchronous global/DS
+  // sequence with its own target waits. No target counter remains for a later
+  // s_wait_asynccnt to observe, and waiting on an unrelated counter here would
+  // introduce ordering that the guest did not request.
   return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
 }
 
@@ -12820,6 +13036,7 @@ constexpr uint16_t kOpSSubNcU64 = 84;
 constexpr uint16_t kOpSClause = 5;
 constexpr uint16_t kOpSSetVgprMsb = 6;
 constexpr uint16_t kOpSWaitKmcnt = 0x47;
+constexpr uint16_t kOpSWaitAsynccnt = 0x4A;
 constexpr uint16_t kOpSWaitTensorcnt = 0x4B;
 constexpr uint16_t kOpVCvtF32F16E32 = 11;
 constexpr uint16_t kOpVMinNumF64E32 = 13;
@@ -13568,6 +13785,8 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(lower_s_set_vgpr_msb_to_setreg), nullptr, nullptr},
     {kEncSopp, kOpSWaitKmcnt, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_s_wait_kmcnt), nullptr, nullptr},
+    {kEncSopp, kOpSWaitAsynccnt, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_s_wait_asynccnt_to_nop), nullptr, nullptr},
     {kEncSopp, kOpSWaitTensorcnt, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_clause_to_nop), nullptr, nullptr},
     {kEncVop3p, kOpVPkFmaBf16Vop3p, RuleAction::Expand, 0, 0, nullptr,
@@ -14053,7 +14272,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_global_load_tr4_b64), nullptr, nullptr},
     {kEncVglobal, kOpGlobalLoadTr6B96, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_global_load_tr6_b96), nullptr, nullptr},
-    {kEncVglobal, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vglobal,
+    {kEncVglobal, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_special_vglobal,
      nullptr, nullptr},
     {kEncVglobal1, kOpGlobalLoadTr16B128, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
@@ -14061,7 +14280,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_native_global_transpose_load), nullptr, nullptr},
     {kEncVglobal1, kOpVectorPrefetchB8, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_vector_prefetch_to_nop), nullptr, nullptr},
-    {kEncVglobal1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_scaled_vglobal,
+    {kEncVglobal1, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_special_vglobal,
      nullptr, nullptr},
     {kEncSmem0, kAnyTranslationOpcode, RuleAction::Expand, 0, 0, nullptr, expand_smem_semantics,
      nullptr, nullptr},

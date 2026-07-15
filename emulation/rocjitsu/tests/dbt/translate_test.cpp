@@ -17808,3 +17808,97 @@ TEST(BinaryTranslator, Gfx1250OversizedLdsVirtualizesEntireAllocation) {
   EXPECT_TRUE(found_workgroup_invalidate);
   EXPECT_TRUE(found_global_load);
 }
+
+TEST(BinaryTranslator, Gfx1250ClusterAndAsyncGlobalMemoryUseExplicitRdna4Sequences) {
+  using namespace rocjitsu;
+
+  gfx1250::VglobalMachineInst cluster_load{};
+  cluster_load.encoding = 0xEE;
+  cluster_load.op = gfx1250::kClusterLoadB64Vglobal;
+  cluster_load.saddr = kNullSgprForTest;
+  cluster_load.vdst = 8;
+  cluster_load.vaddr = 2;
+  cluster_load.ioffset = 128;
+
+  gfx1250::VglobalMachineInst load_to_lds{};
+  load_to_lds.encoding = 0xEE;
+  load_to_lds.op = gfx1250::kGlobalLoadAsyncToLdsB128Vglobal;
+  load_to_lds.saddr = kNullSgprForTest;
+  load_to_lds.vdst = 20;
+  load_to_lds.vaddr = 4;
+
+  gfx1250::VglobalMachineInst store_from_lds{};
+  store_from_lds.encoding = 0xEE;
+  store_from_lds.op = gfx1250::kGlobalStoreAsyncFromLdsB128Vglobal;
+  store_from_lds.saddr = kNullSgprForTest;
+  store_from_lds.vsrc = 24;
+  store_from_lds.vaddr = 6;
+
+  std::array<uint32_t, 11> text_words{};
+  std::memcpy(text_words.data(), &cluster_load, sizeof(cluster_load));
+  std::memcpy(text_words.data() + 3, &load_to_lds, sizeof(load_to_lds));
+  std::memcpy(text_words.data() + 6, &store_from_lds, sizeof(store_from_lds));
+  text_words[9] = 0xBFCA0000u;  // s_wait_asynccnt 0
+  text_words[10] = 0xBFB00000u; // s_endpgm
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(has_error_diagnostic(result.diagnostics));
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto words = translated_executable_words_for_test(translated);
+  ASSERT_FALSE(words.empty());
+
+  std::optional<size_t> cluster_index;
+  std::optional<size_t> load_index;
+  std::optional<size_t> store_index;
+  for (size_t i = 0; i + 2 < words.size(); ++i) {
+    rdna4::VglobalMachineInst global{};
+    std::memcpy(&global, words.data() + i, sizeof(global));
+    if (global.encoding != 0xEE)
+      continue;
+    if (global.op == rdna4::kGlobalLoadB64Vglobal && global.vdst == cluster_load.vdst &&
+        global.vaddr == cluster_load.vaddr && global.ioffset == cluster_load.ioffset && global.nv)
+      cluster_index = i;
+    if (global.op == rdna4::kGlobalLoadB128Vglobal && global.vaddr == load_to_lds.vaddr)
+      load_index = i;
+    if (global.op == rdna4::kGlobalStoreB128Vglobal && global.vaddr == store_from_lds.vaddr)
+      store_index = i;
+  }
+
+  ASSERT_TRUE(cluster_index.has_value());
+  ASSERT_TRUE(load_index.has_value());
+  ASSERT_TRUE(store_index.has_value());
+
+  rdna4::VglobalMachineInst lowered_load{};
+  std::memcpy(&lowered_load, words.data() + *load_index, sizeof(lowered_load));
+  ASSERT_LT(*load_index + 6u, words.size());
+  EXPECT_EQ(words[*load_index + 3u], pack_sopp(rdna4::kSWaitLoadcntSopp, 0));
+  rdna4::VdsMachineInst lds_store{};
+  std::memcpy(&lds_store, words.data() + *load_index + 4u, sizeof(lds_store));
+  EXPECT_EQ(lds_store.encoding, 0x36u);
+  EXPECT_EQ(lds_store.op, rdna4::kDsStoreB128Vds);
+  EXPECT_EQ(lds_store.addr, load_to_lds.vdst);
+  EXPECT_EQ(lds_store.data0, lowered_load.vdst);
+  EXPECT_EQ(words[*load_index + 6u], pack_sopp(rdna4::kSWaitDscntSopp, 0));
+
+  ASSERT_GE(*store_index, 3u);
+  rdna4::VdsMachineInst lds_load{};
+  std::memcpy(&lds_load, words.data() + *store_index - 3u, sizeof(lds_load));
+  EXPECT_EQ(lds_load.encoding, 0x36u);
+  EXPECT_EQ(lds_load.op, rdna4::kDsLoadB128Vds);
+  EXPECT_EQ(lds_load.addr, store_from_lds.vsrc);
+  rdna4::VglobalMachineInst lowered_store{};
+  std::memcpy(&lowered_store, words.data() + *store_index, sizeof(lowered_store));
+  EXPECT_EQ(lowered_store.vsrc, lds_load.vdst);
+  EXPECT_EQ(words[*store_index - 1u], pack_sopp(rdna4::kSWaitDscntSopp, 0));
+  EXPECT_EQ(words[*store_index + 3u], pack_sopp(rdna4::kSWaitStorecntSopp, 0));
+  EXPECT_EQ(std::ranges::count(words, 0xBFCA0000u), 0u);
+}
