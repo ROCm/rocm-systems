@@ -32,9 +32,9 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(hip-graph-attribution.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(hip-graph-attribution_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hip-graph-attribution)
-target_sources(hip-graph-attribution PRIVATE hip-graph-attribution.cpp)
+target_sources(hip-graph-attribution PRIVATE hip-graph-attribution_test.cpp)
 target_compile_options(hip-graph-attribution PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
                                                      -Werror)
 
