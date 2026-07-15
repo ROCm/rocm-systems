@@ -128,13 +128,14 @@ class Flag {
                                    ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     // Round-robin distribution of host<->device SDMA copies across the
-    // PCIe/paging SDMA engines. Applies to gfx942, gfx950 and newer (CDNA in
-    // major 9, minor >= 4). With a pid seed, concurrent processes/streams pick
+    // PCIe/paging SDMA engines. Applies to CDNA parts with ISA major 9 and
+    // minor >= 4 (isa_->GetMinorVersion() >= 4; e.g. gfx940 / gfx941 / gfx942 /
+    // gfx950 and newer). With a pid seed, concurrent processes/streams pick
     // among the NumSdmaEngines general-purpose engines instead of contending
     // on the default single engine. On these parts KFD exposes only two such
     // engines and both live on the first XCD/XCC, so this stays within that
-    // XCC. Opt-in via ROCR_SDMA_ROUND_ROBIN=1; default keeps the stock pick.
-    var = os::GetEnvVar("ROCR_SDMA_ROUND_ROBIN");
+    // XCC. Opt-in via HSA_SDMA_ROUND_ROBIN=1; default keeps the stock pick.
+    var = os::GetEnvVar("HSA_SDMA_ROUND_ROBIN");
     sdma_round_robin_ = (var == "1") ? SDMA_ENABLE :
                         ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
@@ -148,14 +149,14 @@ class Flag {
     // (single-partition) mode. In CPX (core-partitioned) mode a partition is a
     // single XCD with no xGMI engines (NumSdmaXgmiEngines == 0), so this
     // degrades safely to the two-engine behavior and is a no-op. Opt-in via
-    // ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI=1; default keeps the stock pick.
-    var = os::GetEnvVar("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+    // HSA_SDMA_ROUND_ROBIN_PCIE_XGMI=1; default keeps the stock pick.
+    var = os::GetEnvVar("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
     sdma_round_robin_pcie_xgmi_ = (var == "1") ? SDMA_ENABLE :
                                   ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
 
     // Explicit SDMA engine-id offset for the round-robin pick. When set to a
     // valid non-negative integer it replaces the getpid() seed used by
-    // ROCR_SDMA_ROUND_ROBIN and ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI, so a launcher
+    // HSA_SDMA_ROUND_ROBIN and HSA_SDMA_ROUND_ROBIN_PCIE_XGMI, so a launcher
     // can hand each process a distinct offset (e.g. its local rank) and avoid
     // the aliasing that getpid() % engine_count can cause (two pids reducing to
     // the same engine). The modulus stays engine-count based (NumSdmaEngines,
@@ -178,7 +179,7 @@ class Flag {
       return true;
     };
 
-    var = os::GetEnvVar("ROCR_SDMA_ENGINE_ID_OFFSET");
+    var = os::GetEnvVar("HSA_SDMA_ENGINE_ID_OFFSET");
     sdma_engine_id_offset_ = -1;
     {
       int64_t parsed = -1;
@@ -187,7 +188,7 @@ class Flag {
 
     // Method A: resolve the final round-robin seed offset and record where it
     // came from, for debug provenance. Priority order:
-    //   1. ROCR_SDMA_ENGINE_ID_OFFSET (explicit, includes 0) -- parsed above.
+    //   1. HSA_SDMA_ENGINE_ID_OFFSET (explicit, includes 0) -- parsed above.
     //   2. a launcher-provided local-rank env var (first that parses to a valid
     //      non-negative integer), so a per-process rank from an MPI/torchrun/srun
     //      launcher becomes the seed without the caller setting the offset.
@@ -198,7 +199,7 @@ class Flag {
     sdma_seed_source_.clear();
     if (sdma_engine_id_offset_ >= 0) {
       sdma_seed_offset_ = sdma_engine_id_offset_;
-      sdma_seed_source_ = "ROCR_SDMA_ENGINE_ID_OFFSET";
+      sdma_seed_source_ = "HSA_SDMA_ENGINE_ID_OFFSET";
     } else {
       static const char* const kLocalRankVars[] = {
           "LOCAL_RANK",
@@ -228,7 +229,7 @@ class Flag {
     // 0 / unset / malformed keeps the stock behavior of spreading D2H across
     // all engines. H2D is never limited. amd_gpu_agent.cpp clamps N to the
     // engine count.
-    var = os::GetEnvVar("ROCR_SDMA_D2H_ENGINE_LIMIT");
+    var = os::GetEnvVar("HSA_SDMA_D2H_ENGINE_LIMIT");
     sdma_d2h_engine_limit_ = 0;
     {
       int64_t limit = 0;
@@ -535,7 +536,7 @@ class Flag {
   int64_t sdma_engine_id_offset() const { return sdma_engine_id_offset_; }
 
   // Final round-robin seed offset (method A): the explicit
-  // ROCR_SDMA_ENGINE_ID_OFFSET when set, else a launcher local-rank env var,
+  // HSA_SDMA_ENGINE_ID_OFFSET when set, else a launcher local-rank env var,
   // else -1 (amd_gpu_agent.cpp then falls back to getpid()). A value of 0 is
   // valid.
   int64_t sdma_seed_offset() const { return sdma_seed_offset_; }

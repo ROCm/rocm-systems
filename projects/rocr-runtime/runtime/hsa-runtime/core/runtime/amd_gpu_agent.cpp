@@ -928,31 +928,33 @@ void GpuAgent::InitDma() {
         *blits_[BlitHostToDev];
       }
 
-      // gfx942, gfx950 and newer (CDNA in major 9, minor >= 4) expose two
-      // general-purpose (PCIe/paging) SDMA copy engines for host<->device
-      // transfers, and the default reverses SDMA0/1 for those copies.
+      // CDNA parts with ISA major 9 and minor >= 4 (the isa_->GetMinorVersion()
+      // >= 4 guard below; e.g. gfx940 / gfx941 / gfx942 / gfx950 and newer)
+      // expose two general-purpose (PCIe/paging) SDMA copy engines for
+      // host<->device transfers, and the default reverses SDMA0/1 for those
+      // copies.
       //
-      // ROCR_SDMA_ROUND_ROBIN=1 spreads queue creation across the two
+      // HSA_SDMA_ROUND_ROBIN=1 spreads queue creation across the two
       // PCIe/paging engines (NumSdmaEngines) using a pid seed so concurrent
       // processes/streams land on different engines instead of contending on a
       // single one. On these parts both PCIe/paging engines live on the first
       // XCD/XCC, so this stays within that XCC.
       //
-      // ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI=1 widens the round-robin to ALL SDMA
+      // HSA_SDMA_ROUND_ROBIN_PCIE_XGMI=1 widens the round-robin to ALL SDMA
       // engines (NumSdmaEngines PCIe/paging + NumSdmaXgmiEngines xGMI). The
       // engines are grouped two-per-XCD/XCC, so spreading over the full set
       // lets concurrent processes/streams reach engines on other XCCs and use
-      // each XCC's own path to host memory, raising aggregate bandwidth in SPX
-      // (single-partition) mode. In CPX (core-partitioned) mode a partition is
-      // a single XCD with no xGMI engines (NumSdmaXgmiEngines == 0), so it
-      // degrades to the two-engine behavior and is a no-op. When both flags are
-      // set the wider PCIE_XGMI behavior takes precedence. The downstream
+      // each XCC's own path to host memory, raising aggregate bandwidth (see
+      // flag.h for the full SPX vs CPX rationale; on a single-XCD / CPX
+      // partition NumSdmaXgmiEngines == 0, so this degrades to the two-engine
+      // behavior and is a no-op). When both flags are set the wider PCIE_XGMI
+      // behavior takes precedence. The downstream
       // NumSdmaXgmiEngines guard still forces the default engine pick when no
       // xGMI engine exists.
       if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
           properties_.NumSdmaEngines > 0) {
         // Method A: the round-robin seed comes from Flag, which resolves it in
-        // priority order: ROCR_SDMA_ENGINE_ID_OFFSET (explicit, includes 0),
+        // priority order: HSA_SDMA_ENGINE_ID_OFFSET (explicit, includes 0),
         // then a launcher local-rank env var (LOCAL_RANK,
         // OMPI_COMM_WORLD_LOCAL_RANK, MPI_LOCALRANKID, PMI_LOCAL_RANK,
         // MV2_COMM_WORLD_LOCAL_RANK, SLURM_LOCALID). When none is present the
@@ -967,7 +969,7 @@ void GpuAgent::InitDma() {
         const char* sdma_seed_src =
             (sdma_seed_off >= 0) ? rt_flag.sdma_seed_source().c_str() : "getpid()";
 
-        // Method D (opt-in, ROCR_SDMA_D2H_ENGINE_LIMIT=N): restrict D2H copies
+        // Method D (opt-in, HSA_SDMA_D2H_ENGINE_LIMIT=N): restrict D2H copies
         // (isHostToDev == false) to the first N SDMA engines (the near-AID
         // subset). H2D is never limited. 0 keeps the default of spreading over
         // all engines. N is clamped to the available engine count below.
@@ -981,7 +983,7 @@ void GpuAgent::InitDma() {
             total_eng = std::min<uint32_t>(total_eng, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % total_eng;
           debug_print(
-              "ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
+              "HSA_SDMA_ROUND_ROBIN_PCIE_XGMI: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
               sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, total_eng,
               limit_d2h ? " [D2H near-AID limit]" : "");
         } else if (rt_flag.sdma_round_robin() == Flag::SDMA_ENABLE) {
@@ -989,7 +991,7 @@ void GpuAgent::InitDma() {
           if (limit_d2h)
             mod_eng = std::min<uint32_t>(mod_eng, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % mod_eng;
-          debug_print("ROCR_SDMA_ROUND_ROBIN: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
+          debug_print("HSA_SDMA_ROUND_ROBIN: seed=%u (%s) dir=%s rec_eng=%u of %u SDMA engines%s\n",
                       sdma_seed, sdma_seed_src, isHostToDev ? "H2D" : "D2H", rec_eng, mod_eng,
                       limit_d2h ? " [D2H near-AID limit]" : "");
         } else if (limit_d2h) {
@@ -999,7 +1001,7 @@ void GpuAgent::InitDma() {
               std::min<uint32_t>(properties_.NumSdmaEngines, static_cast<uint32_t>(d2h_limit));
           rec_eng = (sdma_seed + rec_eng) % mod_eng;
           debug_print(
-              "ROCR_SDMA_D2H_ENGINE_LIMIT: seed=%u (%s) dir=D2H rec_eng=%u of %u near-AID engines\n",
+              "HSA_SDMA_D2H_ENGINE_LIMIT: seed=%u (%s) dir=D2H rec_eng=%u of %u near-AID engines\n",
               sdma_seed, sdma_seed_src, rec_eng, mod_eng);
         } else {
           (void)sdma_seed_src;

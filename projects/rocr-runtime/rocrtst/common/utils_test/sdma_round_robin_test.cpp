@@ -12,7 +12,7 @@
 
 #include "core/util/flag.h"
 
-// Unit test for the ROCR_SDMA_ROUND_ROBIN and ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI
+// Unit test for the HSA_SDMA_ROUND_ROBIN and HSA_SDMA_ROUND_ROBIN_PCIE_XGMI
 // environment-variable parsing added to rocr::Flag. rocr::Flag::Refresh() maps
 // each variable onto an SDMA_OVERRIDE
 // tri-state with the rule:
@@ -34,62 +34,62 @@ rocr::Flag::SDMA_OVERRIDE ParseSdmaRoundRobin(const char* raw) {
 }
 
 rocr::Flag::SDMA_OVERRIDE ParseFromEnv() {
-  return ParseSdmaRoundRobin(std::getenv("ROCR_SDMA_ROUND_ROBIN"));
+  return ParseSdmaRoundRobin(std::getenv("HSA_SDMA_ROUND_ROBIN"));
 }
 
 rocr::Flag::SDMA_OVERRIDE ParseFromEnvPcieXgmi() {
-  return ParseSdmaRoundRobin(std::getenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI"));
+  return ParseSdmaRoundRobin(std::getenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI"));
 }
 
 }  // namespace
 
 TEST(RocrSdmaRoundRobin, EnabledWhenOne) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN", "1", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN", "1", 1));
   EXPECT_EQ(rocr::Flag::SDMA_ENABLE, ParseFromEnv());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN");
+  unsetenv("HSA_SDMA_ROUND_ROBIN");
 }
 
 TEST(RocrSdmaRoundRobin, DisabledWhenZero) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN", "0", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN", "0", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DISABLE, ParseFromEnv());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN");
+  unsetenv("HSA_SDMA_ROUND_ROBIN");
 }
 
 TEST(RocrSdmaRoundRobin, DefaultWhenUnset) {
-  unsetenv("ROCR_SDMA_ROUND_ROBIN");
+  unsetenv("HSA_SDMA_ROUND_ROBIN");
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnv());
 }
 
 TEST(RocrSdmaRoundRobin, DefaultForUnrecognizedValue) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN", "yes", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN", "yes", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnv());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN");
+  unsetenv("HSA_SDMA_ROUND_ROBIN");
 }
 
 TEST(RocrSdmaRoundRobinPcieXgmi, EnabledWhenOne) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "1", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI", "1", 1));
   EXPECT_EQ(rocr::Flag::SDMA_ENABLE, ParseFromEnvPcieXgmi());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+  unsetenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
 }
 
 TEST(RocrSdmaRoundRobinPcieXgmi, DisabledWhenZero) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "0", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI", "0", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DISABLE, ParseFromEnvPcieXgmi());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+  unsetenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
 }
 
 TEST(RocrSdmaRoundRobinPcieXgmi, DefaultWhenUnset) {
-  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+  unsetenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnvPcieXgmi());
 }
 
 TEST(RocrSdmaRoundRobinPcieXgmi, DefaultForUnrecognizedValue) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI", "yes", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI", "yes", 1));
   EXPECT_EQ(rocr::Flag::SDMA_DEFAULT, ParseFromEnvPcieXgmi());
-  unsetenv("ROCR_SDMA_ROUND_ROBIN_PCIE_XGMI");
+  unsetenv("HSA_SDMA_ROUND_ROBIN_PCIE_XGMI");
 }
 
-// ROCR_SDMA_ENGINE_ID_OFFSET lets a launcher pass an explicit non-negative
+// HSA_SDMA_ENGINE_ID_OFFSET lets a launcher pass an explicit non-negative
 // engine-id offset that replaces the getpid() seed in the round-robin pick,
 // so concurrent processes do not alias onto the same engine. The parse mirrors
 // rocr::Flag::Refresh(): a value of 0 is a valid explicit offset; unset,
@@ -116,49 +116,49 @@ int64_t ParseSdmaEngineIdOffset(const char* raw) {
 }
 
 int64_t ParseOffsetFromEnv() {
-  return ParseSdmaEngineIdOffset(std::getenv("ROCR_SDMA_ENGINE_ID_OFFSET"));
+  return ParseSdmaEngineIdOffset(std::getenv("HSA_SDMA_ENGINE_ID_OFFSET"));
 }
 
 }  // namespace
 
 TEST(RocrSdmaEngineIdOffset, UnsetIsSentinel) {
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
   EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
 }
 
 TEST(RocrSdmaEngineIdOffset, ZeroIsExplicit) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "0", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "0", 1));
   EXPECT_EQ(static_cast<int64_t>(0), ParseOffsetFromEnv());
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
 }
 
 TEST(RocrSdmaEngineIdOffset, PositiveValue) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "5", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "5", 1));
   EXPECT_EQ(static_cast<int64_t>(5), ParseOffsetFromEnv());
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
 }
 
 TEST(RocrSdmaEngineIdOffset, NonNumericFallsBack) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "abc", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "abc", 1));
   EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
 }
 
 TEST(RocrSdmaEngineIdOffset, NegativeFallsBack) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "-3", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "-3", 1));
   EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
 }
 
 TEST(RocrSdmaEngineIdOffset, OutOfRangeFallsBack) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "99999999999", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "99999999999", 1));
   EXPECT_EQ(static_cast<int64_t>(-1), ParseOffsetFromEnv());
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
 }
 
 // Method A: launcher local-rank seed detection. The final round-robin seed
 // offset is resolved in priority order (mirroring rocr::Flag::Refresh()):
-//   1. ROCR_SDMA_ENGINE_ID_OFFSET (explicit, including 0)
+//   1. HSA_SDMA_ENGINE_ID_OFFSET (explicit, including 0)
 //   2. the first launcher local-rank env var that parses to a valid
 //      non-negative integer (LOCAL_RANK, OMPI_COMM_WORLD_LOCAL_RANK,
 //      MPI_LOCALRANKID, PMI_LOCAL_RANK, MV2_COMM_WORLD_LOCAL_RANK,
@@ -188,9 +188,9 @@ const char* const kLocalRankVars[] = {
 // Resolves the seed offset (>=0) and its source name; source is "" when the
 // result is -1 (getpid() fallback).
 int64_t ResolveSeedOffset(std::string* source) {
-  int64_t offset = ParseSdmaEngineIdOffset(std::getenv("ROCR_SDMA_ENGINE_ID_OFFSET"));
+  int64_t offset = ParseSdmaEngineIdOffset(std::getenv("HSA_SDMA_ENGINE_ID_OFFSET"));
   if (offset >= 0) {
-    if (source) *source = "ROCR_SDMA_ENGINE_ID_OFFSET";
+    if (source) *source = "HSA_SDMA_ENGINE_ID_OFFSET";
     return offset;
   }
   for (const char* name : kLocalRankVars) {
@@ -206,7 +206,7 @@ int64_t ResolveSeedOffset(std::string* source) {
 }
 
 void ClearSeedEnv() {
-  unsetenv("ROCR_SDMA_ENGINE_ID_OFFSET");
+  unsetenv("HSA_SDMA_ENGINE_ID_OFFSET");
   for (const char* name : kLocalRankVars) unsetenv(name);
 }
 
@@ -214,20 +214,20 @@ void ClearSeedEnv() {
 
 TEST(RocrSdmaSeedOffset, OffsetOnly) {
   ClearSeedEnv();
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "7", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "7", 1));
   std::string src;
   EXPECT_EQ(static_cast<int64_t>(7), ResolveSeedOffset(&src));
-  EXPECT_EQ("ROCR_SDMA_ENGINE_ID_OFFSET", src);
+  EXPECT_EQ("HSA_SDMA_ENGINE_ID_OFFSET", src);
   ClearSeedEnv();
 }
 
 TEST(RocrSdmaSeedOffset, OffsetOverridesRank) {
   ClearSeedEnv();
-  ASSERT_EQ(0, setenv("ROCR_SDMA_ENGINE_ID_OFFSET", "2", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_ENGINE_ID_OFFSET", "2", 1));
   ASSERT_EQ(0, setenv("OMPI_COMM_WORLD_LOCAL_RANK", "5", 1));
   std::string src;
   EXPECT_EQ(static_cast<int64_t>(2), ResolveSeedOffset(&src));
-  EXPECT_EQ("ROCR_SDMA_ENGINE_ID_OFFSET", src);
+  EXPECT_EQ("HSA_SDMA_ENGINE_ID_OFFSET", src);
   ClearSeedEnv();
 }
 
@@ -272,7 +272,7 @@ TEST(RocrSdmaSeedOffset, NoneFallsBackToPid) {
   ClearSeedEnv();
 }
 
-// Method D: ROCR_SDMA_D2H_ENGINE_LIMIT caps the D2H round-robin to the first N
+// Method D: HSA_SDMA_D2H_ENGINE_LIMIT caps the D2H round-robin to the first N
 // SDMA engines. Parse mirrors rocr::Flag::Refresh(): 0 / unset / malformed ->
 // 0 (no limit); a valid non-negative integer -> that value (amd_gpu_agent.cpp
 // clamps it to the engine count with std::min at queue-creation time).
@@ -286,38 +286,38 @@ int64_t ParseD2hEngineLimit(const char* raw) {
 }
 
 int64_t ParseD2hLimitFromEnv() {
-  return ParseD2hEngineLimit(std::getenv("ROCR_SDMA_D2H_ENGINE_LIMIT"));
+  return ParseD2hEngineLimit(std::getenv("HSA_SDMA_D2H_ENGINE_LIMIT"));
 }
 
 }  // namespace
 
 TEST(RocrSdmaD2hEngineLimit, UnsetIsZero) {
-  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  unsetenv("HSA_SDMA_D2H_ENGINE_LIMIT");
   EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
 }
 
 TEST(RocrSdmaD2hEngineLimit, ZeroIsDisabled) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "0", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_D2H_ENGINE_LIMIT", "0", 1));
   EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
-  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  unsetenv("HSA_SDMA_D2H_ENGINE_LIMIT");
 }
 
 TEST(RocrSdmaD2hEngineLimit, ValidValue) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "8", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_D2H_ENGINE_LIMIT", "8", 1));
   EXPECT_EQ(static_cast<int64_t>(8), ParseD2hLimitFromEnv());
-  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  unsetenv("HSA_SDMA_D2H_ENGINE_LIMIT");
 }
 
 TEST(RocrSdmaD2hEngineLimit, LargeValueParsesForClamping) {
   // Values above the engine count still parse; amd_gpu_agent.cpp clamps them to
   // the available engine count via std::min at queue-creation time.
-  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "64", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_D2H_ENGINE_LIMIT", "64", 1));
   EXPECT_EQ(static_cast<int64_t>(64), ParseD2hLimitFromEnv());
-  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  unsetenv("HSA_SDMA_D2H_ENGINE_LIMIT");
 }
 
 TEST(RocrSdmaD2hEngineLimit, MalformedIsZero) {
-  ASSERT_EQ(0, setenv("ROCR_SDMA_D2H_ENGINE_LIMIT", "abc", 1));
+  ASSERT_EQ(0, setenv("HSA_SDMA_D2H_ENGINE_LIMIT", "abc", 1));
   EXPECT_EQ(static_cast<int64_t>(0), ParseD2hLimitFromEnv());
-  unsetenv("ROCR_SDMA_D2H_ENGINE_LIMIT");
+  unsetenv("HSA_SDMA_D2H_ENGINE_LIMIT");
 }
