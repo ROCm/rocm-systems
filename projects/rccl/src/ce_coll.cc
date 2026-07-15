@@ -229,7 +229,7 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t
   return true;
 }
 
-bool ncclCeScartchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType) {
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
     return false;

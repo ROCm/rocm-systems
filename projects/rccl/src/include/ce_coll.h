@@ -48,6 +48,13 @@ struct ncclCeColl {
   //         [nRanks*chunkBytes .. (nRanks+1)*chunkBytes) reduce scratch.
   uint8_t*               ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+
+  // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
+  // can deadlock on eager calls that share a graph-mode comm, so we disable CE
+  // AR during that period and re-enable it after captured plans are reclaimed.
+  // Written only from rcclCeAllReduceGraphLatchTick(); no internal lock, same
+  // single-writer-per-comm contract as localPersistentRefs (comm.h).
+  bool graphModeSeen;
 };
 
 struct ncclCeInitTask {
@@ -89,7 +96,7 @@ struct ncclCeBatchOpsParams {
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
 
-bool ncclCeScartchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
 
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 

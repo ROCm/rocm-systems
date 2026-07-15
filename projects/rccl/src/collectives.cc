@@ -497,13 +497,26 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  // CE AllReduce 
-  if (rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
+  // CE AllReduce
+  // Disable CE AllReduce while this comm has live graph-captured plans. Per-call
+  // capture checks are not enough because CE AR can still deadlock on eager
+  // calls sharing a graph-mode comm (e.g. rccl-tests warmup).
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
+  rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+  if (ceArGraphAllowed &&
+      rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d",
          count, (int)datatype, (int)op, comm->rank, comm->nRanks);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
   }
+  // Pass the decision to taskAppend() via info to avoid recomputing it.
+  info.ceCapturing = ceCapturing;
+  info.ceArGraphAllowed = ceArGraphAllowed;
+  info.ceGraphDecisionValid = true;
   size_t msgBytes = count * ncclTypeSize(datatype);
   if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&  msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) {
     if (IsArchMatch(comm->archName, "gfx1250")) {

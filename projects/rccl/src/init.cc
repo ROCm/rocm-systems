@@ -27,6 +27,7 @@
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
+#include "sym_kernels.h"
 #include "tuner.h"
 #include "ras.h"
 #include "profiler.h"
@@ -2243,6 +2244,24 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Call devCommSetup before the last barrier, making sure we don't have a thread running in front and starting to
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
+
+  // Pre-init the symmetric-kernel runtime now. It allocates device memory
+  // (window table / shadow pools) on first use, which HIP forbids during graph
+  // capture. Deferring this to the first collective is not safe: some graph
+  // users' very first call on a comm is itself captured, with no preceding
+  // eager call at all (e.g. rccl-tests' per-size warm-up-for-all-sizes loop
+  // begins capture before issuing a single collective), so there is no
+  // reliably-eager "first use" moment to hook a lazy trigger into. Doing it
+  // here makes the narrower per-collective lazy triggers no-ops.
+  //
+  // Note: the CE (copy-engine) runtime is intentionally NOT pre-inited here.
+  // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
+  // cross-rank memop barrier deadlock on graph replay), so CE is instead
+  // skipped entirely while a stream is capturing (see taskAppend() in
+  // enqueue.cc and ncclAllReduce_impl() in collectives.cc).
+  if (comm->symmetricSupport) {
+    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
+  }
 
   timers[TIMER_INIT_CONNECT] = clockNano() -  timers[TIMER_INIT_CONNECT];
 

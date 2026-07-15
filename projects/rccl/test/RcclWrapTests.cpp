@@ -1544,4 +1544,100 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
 }
 
+// ===========================================================================
+// CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
+// for the capture-vs-eager ordering bug: the latch must stay set for the
+// entire lifetime of a captured plan and must never clear mid-capture.
+// ===========================================================================
+
+TEST(RcclCeGraphLatch, SetsLatchOnFirstCapture)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+        EXPECT_TRUE(comm.ceColl.graphModeSeen) << "iteration " << i;
+    }
+}
+
+// Regression: an unrelated plan reclaiming to zero refs must not re-enable
+// CE AR while still capturing -- this previously caused a cross-rank deadlock.
+TEST(RcclCeGraphLatch, DoesNotClearMidCaptureEvenWithZeroRefs)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 1;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen)
+        << "Latch must stay set until every captured plan is reclaimed";
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+
+    // Reclaim completes: the next tick clears the latch.
+    comm.localPersistentRefs = 0;
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+
+    for(int i = 0; i < 5; ++i)
+    {
+        EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    }
+    EXPECT_TRUE(comm.ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
+}
+
+TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
 } // namespace RcclUnitTesting

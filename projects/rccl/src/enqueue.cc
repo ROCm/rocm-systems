@@ -3281,7 +3281,7 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevrWindow* sendWin,
     struct ncclDevrWindow* recvWin,
     void* ddaRecvBase, // non-null -> DDA path: local scratch buffer
-    void** ddaPeerBasesHost, // host [nRanks] peer scartch bases (DDA path)
+    void** ddaPeerBasesHost, // host [nRanks] peer scratch bases (DDA path)
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
 
@@ -3606,13 +3606,31 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
+      // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
+      // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
+      // while the stream is capturing and fall through to the graph-safe
+      // DDA/symmetric/kernel paths.
+      bool ceCapturing, ceArGraphAllowed;
+      if (info->ceGraphDecisionValid) {
+        // Already computed by ncclAllReduce_impl() for this call.
+        ceCapturing = info->ceCapturing;
+        ceArGraphAllowed = info->ceArGraphAllowed;
+      } else {
+        struct ncclCudaGraph ceGraph;
+        NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
+        ceCapturing = ncclCudaGraphValid(ceGraph);
+        rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+        ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+      }
+
       // Trigger CE initialization on the first CE-capable collective.
       // This covers collectives whose user buffers ARE registered (AllGather,
       // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
       // ceCollTaskAppend path when user buffers are not symmetrically registered.
       // Without this trigger, CE AllReduce-only workloads would never initialize
       // the CE runtime (ceARTmpBuf stays NULL).
-      if (ncclCeImplemented(info->coll, info->op, info->datatype) &&
+      if (!ceCapturing &&
+          ncclCeImplemented(info->coll, info->op, info->datatype) &&
           comm->symmetricSupport && comm->nNodes == 1 &&
           comm->ceColl.baseUCSymReadyPtr == NULL &&
           ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
@@ -3628,9 +3646,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAllReduceFits = true;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
-        if (!rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+        if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
         } else {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
@@ -3643,9 +3661,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Append CE collective task if CE is supported and requested by user
-      bool CeScartchAvailable = ncclCeScartchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      bool CeScratchAvailable = !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (rcclParamForceCe() && CeScartchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);      
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                       comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
