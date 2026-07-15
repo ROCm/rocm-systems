@@ -1059,14 +1059,19 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   std::string kernel_sym;
   if (host_accessible && memory_) {
-    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object);
-    if (range_base != 0) {
-      auto *ko = reinterpret_cast<const uint8_t *>(pkt.kernel_object);
-      auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
-      auto *elf = find_elf_base(ko, range_start);
-      if (elf) {
-        uint64_t accessible = range_size - static_cast<uint64_t>(elf - range_start);
-        kernel_sym = find_kernel_symbol(ko, elf, accessible);
+    auto [host_range_base, host_range_size] =
+        memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    if (host_range_base != 0) {
+      auto *kernel_object_page = memory_->translate_debug(pkt.kernel_object, queue.process_id);
+      auto *kernel_object_host_ptr = kernel_object_page
+                                         ? kernel_object_page + (pkt.kernel_object & 0xFFF)
+                                         : reinterpret_cast<const uint8_t *>(pkt.kernel_object);
+      auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
+      auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
+      if (elf_base) {
+        uint64_t elf_accessible =
+            host_range_size - static_cast<uint64_t>(elf_base - host_range_begin);
+        kernel_sym = find_kernel_symbol(kernel_object_host_ptr, elf_base, elf_accessible);
       }
     }
   }

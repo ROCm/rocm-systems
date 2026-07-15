@@ -7,8 +7,10 @@
 #include "aql_queue.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -22,11 +24,14 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -72,6 +77,7 @@ struct HookEvent {
   uint32_t sgpr_count = 0;
   uint64_t pc = 0;
   std::string mnemonic;
+  std::string kernel_name;
 };
 
 /// A plugin that records an ordered event log for ordering assertions.
@@ -87,6 +93,7 @@ public:
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override {
     HookEvent e{HookEvent::DISPATCH_PACKET_PROCESSED};
     e.dispatch_id = info.dispatch_id;
+    e.kernel_name = info.kernel_name;
     events.push_back(e);
   }
 
@@ -462,10 +469,144 @@ struct PluginFixture {
   }
 };
 
+std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
+                                                   std::string_view symbol_name) {
+  constexpr uint64_t dyn_offset = 0x100;
+  constexpr uint64_t symtab_offset = 0x200;
+  constexpr uint64_t strtab_offset = 0x300;
+  constexpr uint64_t hash_offset = 0x380;
+  constexpr uint64_t text_offset = 0x900;
+
+  std::vector<uint8_t> image(4096, 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = 1;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_DYNAMIC;
+  phdr.p_vaddr = dyn_offset;
+  phdr.p_memsz = 5 * sizeof(Elf64_Dyn);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  auto *dyn = reinterpret_cast<Elf64_Dyn *>(image.data() + dyn_offset);
+  dyn[0].d_tag = DT_SYMTAB;
+  dyn[0].d_un.d_val = symtab_offset;
+  dyn[1].d_tag = DT_STRTAB;
+  dyn[1].d_un.d_val = strtab_offset;
+  dyn[2].d_tag = DT_STRSZ;
+  dyn[2].d_un.d_val = symbol_name.size() + 2;
+  dyn[3].d_tag = DT_HASH;
+  dyn[3].d_un.d_val = hash_offset;
+  dyn[4].d_tag = DT_NULL;
+
+  image[strtab_offset] = '\0';
+  std::memcpy(image.data() + strtab_offset + 1, symbol_name.data(), symbol_name.size());
+
+  auto *sym = reinterpret_cast<Elf64_Sym *>(image.data() + symtab_offset);
+  sym[1].st_name = 1;
+  sym[1].st_value = kernel_descriptor_offset;
+
+  auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
+  hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = text_offset - kernel_descriptor_offset;
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  std::memcpy(image.data() + kernel_descriptor_offset, &kd, sizeof(kd));
+
+  const std::array<uint32_t, 2> code = {S_NOP, S_ENDPGM};
+  std::memcpy(image.data() + text_offset, code.data(), code.size() * sizeof(code[0]));
+
+  return image;
+}
+
 TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
+  PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+
+  constexpr uint32_t process_id = 123;
+  constexpr uint64_t code_object_va = 0x5400200000;
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_dispatch_kernel.kd");
+  std::vector<uint8_t> image_backing(image.size() + amdgpu::GpuMemory::PAGE_SIZE, 0);
+  auto *image_host = reinterpret_cast<uint8_t *>(
+      (reinterpret_cast<uintptr_t>(image_backing.data()) + amdgpu::GpuMemory::PAGE_MASK) &
+      ~static_cast<uintptr_t>(amdgpu::GpuMemory::PAGE_MASK));
+  std::memcpy(image_host, image.data(), image.size());
+
+  KfdProcess process(process_id);
+  f.mem->register_process(process_id, &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(code_object_va, image_host, image.size());
+
+  std::vector<uint8_t> ring(4096, 0);
+  std::array<uint8_t, 4096> queue_state{};
+  *reinterpret_cast<uint64_t *>(queue_state.data()) = 0;
+  *reinterpret_cast<uint64_t *>(queue_state.data() + 8) = 1;
+  uint64_t doorbell = 0;
+  constexpr uint64_t ring_va = 0x6100000000;
+  constexpr uint64_t read_ptr_va = 0x6100010000;
+  constexpr uint64_t write_ptr_va = 0x6100010008;
+  process.map_pages(ring_va, ring.data(), ring.size());
+  process.map_pages(read_ptr_va, queue_state.data(), queue_state.size());
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = 64;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 64;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+  packet.kernel_object = code_object_va + kernel_descriptor_offset;
+  std::memcpy(ring.data(), &packet, sizeof(packet));
+
+  constexpr uint32_t queue_id = 7;
+  amdgpu::HwQueue queue{};
+  queue.queue_id = queue_id;
+  queue.process_id = process_id;
+  queue.ring_base_va = ring_va;
+  queue.ring_size = static_cast<uint32_t>(ring.size());
+  queue.read_ptr_va = read_ptr_va;
+  queue.write_ptr_va = write_ptr_va;
+  queue.doorbell_base = &doorbell;
+  queue.host_accessible = true;
+  f.cp()->register_queue(std::move(queue));
+  f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
+  f.run_until_idle();
+
+  auto dispatch_event =
+      std::find_if(plugin->events.begin(), plugin->events.end(), [](const HookEvent &event) {
+        return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;
+      });
+  bool found_dispatch = dispatch_event != plugin->events.end();
+  std::string kernel_name = found_dispatch ? dispatch_event->kernel_name : "";
+
+  f.cp()->unregister_queue(queue_id, process_id);
+  f.shutdown();
+  f.mem->unregister_process(process_id);
+
+  ASSERT_TRUE(found_dispatch);
+  EXPECT_EQ(kernel_name, "vmid_dispatch_kernel");
 }
 
 // -- Ordering tests ----------------------------------------------------------
