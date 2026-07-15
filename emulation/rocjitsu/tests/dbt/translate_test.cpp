@@ -55,9 +55,11 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
@@ -837,7 +839,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
 
   std::vector<uint32_t> text_words(text_size / sizeof(uint32_t),
                                    build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
-  text_words[0] = pack_sopp(cdna4::kSWaitcntSopp, 0); // CDNA4 s_waitcnt 0 expands on RDNA4.
+  text_words[0] = cdna4::build_sopp(cdna4::kSWaitcntSopp)[0]; // Expands on RDNA4.
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -1219,6 +1221,18 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
   EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 0u);
   EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 0u);
+
+  const auto rdna1_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA1);
+  ASSERT_TRUE(rdna1_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
+  const auto rdna2_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_TRUE(rdna2_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto rdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_TRUE(rdna3_rsrc1.has_value());
@@ -2202,9 +2216,9 @@ uint32_t build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return rocjitsu::pack_sop1(0x47, sdst, 0);
+    return rocjitsu::build_sop1_encoding(arch, 0x47, sdst, 0);
   default:
-    return rocjitsu::pack_sop1(0x1c, sdst, 0);
+    return rocjitsu::build_sop1_encoding(arch, 0x1c, sdst, 0);
   }
 }
 
@@ -2213,9 +2227,9 @@ uint32_t build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return rocjitsu::pack_sop1(0x48, 0, ssrc0);
+    return rocjitsu::build_sop1_encoding(arch, 0x48, 0, ssrc0);
   default:
-    return rocjitsu::pack_sop1(0x1d, 0, ssrc0);
+    return rocjitsu::build_sop1_encoding(arch, 0x1d, 0, ssrc0);
   }
 }
 
@@ -2224,32 +2238,33 @@ uint32_t build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) 
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return rocjitsu::pack_sop1(0x49, sdst, ssrc0);
+    return rocjitsu::build_sop1_encoding(arch, 0x49, sdst, ssrc0);
   default:
-    return rocjitsu::pack_sop1(0x1e, sdst, ssrc0);
+    return rocjitsu::build_sop1_encoding(arch, 0x1e, sdst, ssrc0);
   }
 }
 
 uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
-  constexpr uint32_t kSopkEncodingPrefix = 0xb;
-  constexpr uint32_t kSCallB64Opcode = 0x15;
-  return (kSopkEncodingPrefix << 28) | (kSCallB64Opcode << 23) | ((sdst & 0x7fu) << 16) |
-         static_cast<uint16_t>(simm16);
+  return cdna4::build_sopk(cdna4::kSCallB64Sopk, {.simm16 = static_cast<uint16_t>(simm16),
+                                                  .sdst = static_cast<uint8_t>(sdst)})[0];
 }
 
 uint32_t build_s_trap(uint16_t simm16) {
   // CDNA1-4 encode S_TRAP at SOPP opcode 0x12. This helper is intentionally
   // local to the CDNA4->CDNA3 tests below; RDNA3+ uses a different SOPP opcode.
-  constexpr uint32_t kCdnaSoppTrapOpcode = 0x12;
-  return rocjitsu::pack_sopp(kCdnaSoppTrapOpcode, simm16);
+  return cdna4::build_sopp(cdna4::kSTrapSopp, {.simm16 = simm16})[0];
 }
 
 uint32_t build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
-  return rocjitsu::pack_sop2(0, sdst, ssrc0, ssrc1);
+  return cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                                 .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                                 .sdst = static_cast<uint8_t>(sdst)})[0];
 }
 
 uint32_t build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
-  return rocjitsu::pack_sop2(4, sdst, ssrc0, ssrc1);
+  return cdna4::build_sop2(cdna4::kSAddcU32Sop2, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                                  .sdst = static_cast<uint8_t>(sdst)})[0];
 }
 
 std::vector<std::unique_ptr<rocjitsu::Instruction>>
@@ -2339,7 +2354,7 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
 }
 
 TEST(BinaryTranslatorE2E, DuplicatesSharedReachableBlocksPerKernel) {
-  constexpr uint32_t kCdna4SEndpgm = rocjitsu::pack_sopp(cdna4::kSEndpgmSopp, 0);
+  constexpr uint32_t kCdna4SEndpgm = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // kernel0: 0x00 -> helper 0x08.
       rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4), // kernel1: 0x04 -> helper 0x08.
@@ -2476,9 +2491,9 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
 }
 
 TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches) {
-  constexpr uint32_t kCdna4SEndpgm = rocjitsu::pack_sopp(cdna4::kSEndpgmSopp, 0);
+  constexpr uint32_t kCdna4SEndpgm = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
   constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget =
-      rocjitsu::pack_sopp(cdna4::kSCbranchScc1Sopp, 4);
+      cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 4})[0];
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> source 0x0c.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable.
@@ -2510,7 +2525,7 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches
   // branch immediates are patched against the compact target layout.
   const std::vector<uint32_t> expected = {
       rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::pack_sopp(cdna3::kSCbranchScc1Sopp, 1),
+      cdna3::build_sopp(cdna3::kSCbranchScc1Sopp, {.simm16 = 1})[0],
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3),
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
       kCdna4SEndpgm,
@@ -2783,15 +2798,15 @@ TEST(BinaryTranslatorE2E, RewritesOneRecoveredBuilderUsedByTwoSetpcConsumers) {
   constexpr uint32_t kOriginalGetpcDelta = 28;
   constexpr uint32_t kRelocatedGetpcDelta = 24;
   const std::vector<uint32_t> words = {
-      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00.
-      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),      // 0x04.
-      kOriginalGetpcDelta,                                     // 0x08.
-      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c.
-      rocjitsu::pack_sopp(5, 1),                               // 0x10 -> second consumer.
-      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x14 first consumer.
-      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 carried consumer.
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),      // 0x1c unreachable gap.
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),      // 0x20 shared target.
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),          // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),            // 0x04.
+      kOriginalGetpcDelta,                                           // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0),       // 0x0c.
+      cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 1})[0], // 0x10 -> consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),          // 0x14 first consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),          // 0x18 carried consumer.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c unreachable gap.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x20 shared target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -2811,7 +2826,7 @@ TEST(BinaryTranslatorE2E, RewritesOneRecoveredBuilderUsedByTwoSetpcConsumers) {
   EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
   EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
   EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
-  EXPECT_EQ(target_words[4], rocjitsu::pack_sopp(5, 1));
+  EXPECT_EQ(target_words[4], cdna3::build_sopp(cdna3::kSCbranchScc1Sopp, {.simm16 = 1})[0]);
   EXPECT_EQ(target_words[5], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[6], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[7], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));

@@ -60,14 +60,27 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
-    case 3: // GinAlltoAllKernel
-    case 4: // HybridAlltoAllKernel (LSA+GIN)
+    case 3: // GinAlltoAllKernel: all CTAs participate, one barrier per CTA
       if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+      reqs->ginForceEnable = true;
+#endif
+      return testSuccess;
+    case 4: // HybridAlltoAllKernel: CTA 0 = GIN (1 barrier), CTAs 1..N = LSA
+      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
+        return testInternalError;
+      }
+      reqs->barrierCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount - 1;
+      reqs->ginSignalCount = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -90,10 +103,14 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: // GinAlltoAllKernel
-    case 4: // HybridAlltoAllKernel (LSA+GIN)
+    case 3: // GinAlltoAllKernel: all CTAs, one barrier per CTA
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+      return true;
+    case 4: // HybridAlltoAllKernel: CTA 0 = GIN (1 barrier), CTAs 1..N = LSA
+      reqs->barrierCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount - 1;
+      reqs->ginSignalCount = 1;
       return true;
 #endif
     default:
@@ -222,6 +239,10 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  //TODO: this contains a cross-node barrier with all ranks, essentially doubling latency
+  //      is it however a valid requirement that we do not start writting to the dest buffer before
+  //      the remote is ready, which is what this barrier achieves, need to think if a better alltoall
+  //      could avoid this requirement (shmem does not require it).
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -239,57 +260,80 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  //TODO: this fence presumed redundant because: RDMA dest buffer visible after waitsignal; remote done writting after waitSignal; local done writting after flush, so we are already peerwise quiet with all peers, no need for a secondary barrier to enforce it.
+  //bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
+// Hybrid LSA+GIN alltoall: CTA 0 handles remote peers via GIN,
+// CTAs 1..N handle intra-node peers via LSA.
+// GIN barrier is scoped to CTA 0 only (barrierCount=1), costing
+// O(nRanks) signals once, not O(nCTAs x nRanks).
+// LSA CTAs use their own lsaBarrier (pure intra-node, no GIN signals).
 template <typename T>
 __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  int ginContext = 0;
-  unsigned int signalIndex = 0;
-  ncclGin gin { devComm, ginContext };
-  uint64_t signalValue = gin.readSignal(signalIndex);
-
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-
-  int tid = threadIdx.x + blockIdx.x*blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
-
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int startLsa = world.rank - lsa.rank;
   const int lsaSize  = lsa.nRanks;
-
-  /* handle remote peers (i.e., non-LSA) using GIN */
   const size_t size = count * sizeof(T);
-  for (int r = tid; r < startLsa; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
-  for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
-
-  /* handle local peers with LSA */
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  for (size_t offset = tid; offset < count; offset += nthreads) {
-    for (int lp = 0; lp < lsa.nRanks; lp++) {
-      int wr = startLsa + lp;
-      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
-      recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
-    }
-  }
-
   int numRemotePeers = world.nRanks - lsa.nRanks;
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
-  gin.flush(ncclCoopCta());
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  if (blockIdx.x == 0) {
+    /* CTA 0: remote peers via GIN */
+    int ginContext = 0;
+    unsigned int signalIndex = 0;
+    ncclGin gin { devComm, ginContext };
+    uint64_t signalValue = gin.readSignal(signalIndex);
+
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
+    //TODO: this contains a cross-node barrier with all ranks, essentially doubling latency
+    //      is it however a valid requirement that we do not start writting to the dest buffer before
+    //      the remote is ready, which is what this barrier achieves, need to think if a better alltoall
+    //      could avoid this requirement (shmem does not require it).
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+
+    int tid = threadIdx.x;
+    int nthreads = blockDim.x;
+
+    for (int r = tid; r < startLsa; r += nthreads) {
+      gin.put(world, r,
+          recvwin, recvoffset + world.rank * size,
+          sendwin, sendoffset + r * size,
+          size, ncclGin_SignalInc{signalIndex});
+    }
+    for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
+      gin.put(world, r,
+          recvwin, recvoffset + world.rank * size,
+          sendwin, sendoffset + r * size,
+          size, ncclGin_SignalInc{signalIndex});
+    }
+
+    if (numRemotePeers > 0) {
+      gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
+    }
+    gin.flush(ncclCoopCta());
+
+    //TODO: this fence presumed redundant because: RDMA dest buffer visible after waitsignal; remote done writting after waitSignal; local done writting after flush, so we are already peerwise quiet with all peers, no need for a secondary barrier to enforce it.
+    //bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  } else {
+    /* CTAs 1..N: local peers via LSA */
+    ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x - 1 };
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+    int tid = threadIdx.x + (blockIdx.x - 1) * blockDim.x;
+    int nthreads = blockDim.x * (gridDim.x - 1);
+
+    T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+    for (size_t offset = tid; offset < count; offset += nthreads) {
+      for (int lp = 0; lp < lsa.nRanks; lp++) {
+        int wr = startLsa + lp;
+        T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
+        recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
+      }
+    }
+
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+  }
 }
 #endif
 #endif

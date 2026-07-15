@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
@@ -748,7 +749,7 @@ rocprofsys_init_tooling_hidden(void)
         comp::user_global_bundle::global_init();
         std::set<int> _comps{};
         // convert string into set of enumerations
-        for(auto&& itr : tim::delimit(tim::settings::global_components()))
+        for(auto&& itr : rocprofsys::delimit(tim::settings::global_components()))
             _comps.emplace(tim::runtime::enumerate(itr));
         if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
         {
@@ -1251,7 +1252,7 @@ rocprofsys_finalize_hidden(void)
                                    std::string{ env_vars::TIMEMORY_COMPONENTS })
                                    .value_or("wall_clock");
 
-            for(auto&& _comp_name : tim::delimit(_components, ",; "))
+            for(auto&& _comp_name : rocprofsys::delimit(_components, ",; "))
             {
                 if(_comp_name.empty()) continue;
 

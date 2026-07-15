@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from amdisa.codegen._generator import CodeGenerator
-from amdisa.gpuisa import InstEncoding, Instruction
+from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 
 
 def _encoding(
@@ -108,8 +108,52 @@ def test_checked_in_rdna4_headers_pin_representative_generated_constants():
 
     opcodes = (isa_dir / 'opcodes.h').read_text()
     encodings = (isa_dir / 'encodings.h').read_text()
+    builders = (isa_dir / 'builders.h').read_text()
 
     assert 'inline constexpr uint16_t kSMovB32Sop1 = 0;' in opcodes
     assert 'inline constexpr uint16_t kVop3 = 424;' in encodings
     assert 'inline constexpr uint16_t kVop3OpHi1 = 425;' in encodings
     assert 'kVop3OpHi0' not in encodings
+    assert 'struct Vop3BuilderFields {' in builders
+    assert 'build_vop3(uint16_t op' in builders
+    assert 'Vop3BuilderFields fields = {})' in builders
+
+
+def test_checked_in_gfx1250_header_exposes_generated_scalar_builders():
+    project_root = Path(__file__).resolve().parents[4]
+    builders = (
+        project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/gfx1250/builders.h'
+    ).read_text()
+
+    assert 'build_sopp(uint16_t op' in builders
+    assert 'build_sop1(uint16_t op' in builders
+    assert 'build_sop2(uint16_t op' in builders
+
+
+def test_instruction_builder_fixes_format_bits_and_exposes_data_fields(tmp_path):
+    fields = [
+        MicrocodeField('vdst', 8, 0),
+        MicrocodeField('pad_8_15', 8, 8),
+        MicrocodeField('op', 10, 16),
+        MicrocodeField('encoding', 6, 26),
+        MicrocodeField('src0', 9, 32),
+        MicrocodeField('src1', 9, 41),
+        MicrocodeField('src2', 9, 50),
+        MicrocodeField('neg', 3, 61),
+    ]
+    vop3 = InstEncoding('ENC_VOP3', 0, 64, 6, 10, fields, [])
+    vop3.primary_dt_ptrs = [416]
+    vop3.insts = [Instruction('v_add_f32', vop3.enc_name, 321, [])]
+    generator = _generator(tmp_path, [vop3])
+
+    generator.gen_instruction_builders()
+    output = (tmp_path / 'testisa' / 'builders.h').read_text()
+
+    assert 'struct Vop3BuilderFields {' in output
+    assert 'uint8_t vdst = 0;' in output
+    assert 'uint16_t src0 = 0;' in output
+    assert 'pad_8_15' not in output
+    assert 'build_vop3(uint16_t op, Vop3BuilderFields fields = {})' in output
+    # Primary selector 416 is word0 >> 23; the six-bit MachineInst encoding
+    # begins at bit 26, so the generated fixed field value is 416 >> 3 = 52.
+    assert 'builder_detail::set_field(words, 52,' in output
