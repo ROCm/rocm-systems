@@ -17,7 +17,12 @@ import pytest
 from pathlib import Path
 from rocprofsys import RocprofsysConfig
 
-pytestmark = [pytest.mark.rocprof_binary]
+# AI-NIC support is only compiled in when AMD SMI >= 26.3. Skip this build-artifact
+# check on builds against older AMD SMI, where AI-NIC is legitimately disabled.
+pytestmark = [
+    pytest.mark.rocprof_binary,
+    pytest.mark.amdsmi_min_version("26.3"),
+]
 
 # Dynamic symbols present in librocprof-sys.so only when
 # ROCPROFSYS_BUILD_AINIC=ON (calls to AMD SMI NIC APIs).
