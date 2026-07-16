@@ -349,4 +349,54 @@ std::vector<std::string> TestFilterManager::getActiveGroups() const {
   return result;
 }
 
+// ============================================================================
+// SkippedTestTracker Implementation
+// ============================================================================
+
+SkippedTestTracker& SkippedTestTracker::getInstance() {
+  static SkippedTestTracker instance;
+  return instance;
+}
+
+void SkippedTestTracker::recordSkip(const std::string& testName,
+                                     const std::string& reason) {
+  skippedByReason_[reason].push_back(testName);
+}
+
+void SkippedTestTracker::clear() {
+  skippedByReason_.clear();
+}
+
+size_t SkippedTestTracker::getTotalCount() const {
+  size_t count = 0;
+  for (const auto& entry : skippedByReason_) {
+    count += entry.second.size();
+  }
+  return count;
+}
+
+void SkippedTestTracker::printSummary(const std::string& platformName) const {
+  if (skippedByReason_.empty()) {
+    return;
+  }
+
+  std::cout << "\n========================================================\n";
+  std::cout << "Platform filtering summary (" << platformName << "):\n";
+  std::cout << "========================================================\n";
+
+  for (const auto& entry : skippedByReason_) {
+    const std::string& reason = entry.first;
+    const std::vector<std::string>& tests = entry.second;
+
+    std::cout << "\n  " << reason << ":\n";
+    for (const auto& testName : tests) {
+      std::cout << "    - " << testName << "\n";
+    }
+  }
+
+  std::cout << "\n  (" << getTotalCount()
+            << " tests skipped due to platform filtering)\n";
+  std::cout << "========================================================\n";
+}
+
 }  // namespace rocrtst
