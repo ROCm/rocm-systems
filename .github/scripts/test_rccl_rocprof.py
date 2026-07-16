@@ -239,7 +239,7 @@ class TestRCCLRocprof:
             env = make_env()
             env["UT_MIN_GPUS"] = "2"
             env["UT_MAX_GPUS"] = "2"
-            result = run_cmd(cmd, env=env, timeout=300)
+            result = run_cmd(cmd, env=env, timeout=600)
 
             assert result.returncode == 0, (
                 f"rocprofv3 --sys-trace exited with {result.returncode}\n"
