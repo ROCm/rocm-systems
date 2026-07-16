@@ -139,7 +139,7 @@ void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
 
 // LSA flat window base + stride for GIN Anvil symmetric registration (ncclGetLsaPointer layout).
-ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr,
-                                          uintptr_t* outLsaFlatBase, uint32_t* outStride4G);
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G);
 
 #endif

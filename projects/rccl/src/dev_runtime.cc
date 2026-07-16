@@ -2467,7 +2467,7 @@ static void listRemove(Obj* list, int* count, int index) {
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   uintptr_t a = reinterpret_cast<uintptr_t>(addr);
   uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-  uintptr_t flatEnd  = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
+  uintptr_t flatEnd = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
 
   // Already in the LSA flat range (resource window case)
   if (a >= flatBase && a < flatEnd) {
@@ -2489,8 +2489,8 @@ ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void
   return ncclSuccess;
 }
 
-ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr,
-                                          uintptr_t* outLsaFlatBase, uint32_t* outStride4G) {
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G) {
   if (!devr || !addr || !outLsaFlatBase || !outStride4G) return ncclInvalidArgument;
   if (devr->lsaFlatBase == nullptr || devr->bigSize == 0) return ncclInvalidArgument;
 
