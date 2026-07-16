@@ -5,6 +5,8 @@
  */
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -34,6 +36,16 @@ constexpr size_t kFragmentBlockSize = 2 * 1024 * 1024;
 inline uint8_t FragByte(uint32_t id, size_t offset) {
   uint32_t v = id * 2654435761u + static_cast<uint32_t>(offset) * 40503u + 0x9e37u;
   return static_cast<uint8_t>(v ^ (v >> 8) ^ (v >> 16));
+}
+
+// The runtime disables the fragment sub-allocator when
+// HSA_DISABLE_FRAGMENT_ALLOCATOR=1 (see core/util/flag.h). With it disabled,
+// allocations are served by dedicated BOs rather than sub-allocated fragments,
+// so the overlap / zero-init / coherence checks below no longer exercise their
+// intended path; skip instead of reporting misleading coverage.
+inline bool FragmentAllocatorDisabled() {
+  const char* v = getenv("HSA_DISABLE_FRAGMENT_ALLOCATOR");
+  return v != nullptr && std::string(v) == "1";
 }
 
 }  // namespace
@@ -142,6 +154,15 @@ static bool PoolAccessibleByAgent(hsa_agent_t agent,
 }
 
 void MemoryFragment::FragmentOverlapTest(void) {
+  if (FragmentAllocatorDisabled()) {
+    // The vendored gtest predates GTEST_SKIP(), so emit the conventional
+    // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
+    fprintf(stdout,
+            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+            "sub-allocator disabled.\n");
+    return;
+  }
+
   std::vector<hsa_agent_t> cpus;
   ASSERT_EQ(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus),
             HSA_STATUS_SUCCESS);
@@ -282,6 +303,15 @@ void MemoryFragment::FragmentOverlapOnPool(const char* label,
 }
 
 void MemoryFragment::FragmentZeroInitTest(void) {
+  if (FragmentAllocatorDisabled()) {
+    // The vendored gtest predates GTEST_SKIP(), so emit the conventional
+    // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
+    fprintf(stdout,
+            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+            "sub-allocator disabled.\n");
+    return;
+  }
+
   // Zero-initialization of recycled fragments is a system-memory guarantee
   // only: the runtime zeroes system fragments to match dedicated-BO semantics,
   // but intentionally leaves device (VRAM) fragments untouched. This test is
@@ -501,6 +531,15 @@ void MemoryFragment::FragmentCoherenceTest(hsa_agent_t cpuAgent,
 }
 
 void MemoryFragment::FragmentCoherenceTest(void) {
+  if (FragmentAllocatorDisabled()) {
+    // The vendored gtest predates GTEST_SKIP(), so emit the conventional
+    // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
+    fprintf(stdout,
+            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+            "sub-allocator disabled.\n");
+    return;
+  }
+
   hsa_status_t err;
   std::vector<hsa_agent_t> cpus;
   err = hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus);
