@@ -42,10 +42,12 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -177,6 +179,68 @@ static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metri
   static thread_local amdsmi_apu_metrics_t amdsmi_apu_metrics{};
   std::memcpy(&amdsmi_apu_metrics, rsmi_metrics.apu_metrics, sizeof(amdsmi_apu_metrics));
   amdsmi_metrics->apu_metrics = &amdsmi_apu_metrics;
+}
+
+// Gfx activity telemetry can be silenced (forced to the uint-max "not available"
+// sentinel so every layer reports N/A). The default is to show raw values.
+// AMDSMI_SILENCE_GFX_ACTIVITY, when set, takes precedence and is respected
+// verbatim: "1" silences, any other value shows. When it is unset, silencing is
+// enabled automatically only for GPUs whose graphics and RLC firmware versions
+// fall in the flagged ranges below.
+// Applied in every gpu_metrics getter (so amdsmi_get_gpu_activity()'s
+// gfx_activity, derived from average_gfx_activity, inherits it; this also covers
+// the per-XCP gfx_busy_inst / gfx_busy_acc partition fields), in
+// amdsmi_get_gpu_busy_percent() (the independent gpu_busy_percent sysfs source),
+// and in amdsmi_get_utilization_count() (the gfx activity accumulators, which
+// read gpu_metrics through rocm-smi and so bypass the getter override).
+static constexpr uint64_t kFlaggedGfxVersion = 120500;
+static constexpr uint64_t kFlaggedRlcFwMin = 0x1b;
+static constexpr uint64_t kFlaggedRlcFwMax = 0x1d;
+
+static bool has_flagged_gfx_fw(amdsmi_processor_handle processor_handle) {
+  static std::unordered_map<amdsmi_processor_handle, bool> cache;
+  static std::mutex mtx;
+  std::lock_guard<std::mutex> lock(mtx);
+  auto it = cache.find(processor_handle);
+  if (it != cache.end()) return it->second;
+
+  bool flagged = false;
+  amdsmi_asic_info_t asic{};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic) == AMDSMI_STATUS_SUCCESS &&
+      asic.target_graphics_version == kFlaggedGfxVersion) {
+    uint64_t rlc_fw_version = 0;
+    if (rsmi_wrapper(rsmi_dev_firmware_version_get, processor_handle, 0, RSMI_FW_BLOCK_RLC,
+                     &rlc_fw_version) == AMDSMI_STATUS_SUCCESS) {
+      flagged = rlc_fw_version >= kFlaggedRlcFwMin && rlc_fw_version <= kFlaggedRlcFwMax;
+    }
+  }
+  cache[processor_handle] = flagged;
+  return flagged;
+}
+
+static bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle) {
+  const char* v = std::getenv("AMDSMI_SILENCE_GFX_ACTIVITY");
+  if (v != nullptr) return std::string(v) == "1";
+  return has_flagged_gfx_fw(processor_handle);
+}
+
+static void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
+                                         amdsmi_gpu_metrics_t* metrics) {
+  if (metrics == nullptr) return;
+  if (is_gfx_activity_silenced(processor_handle)) {
+    metrics->average_gfx_activity = std::numeric_limits<uint16_t>::max();
+    metrics->gfx_activity_acc = std::numeric_limits<uint32_t>::max();
+    // Per-XCP instantaneous / accumulated gfx busy read the same source,
+    // so silence them alongside the whole-GPU value.
+    for (auto& xcp : metrics->xcp_stats) {
+      for (auto& busy_inst : xcp.gfx_busy_inst) {
+        busy_inst = std::numeric_limits<uint32_t>::max();
+      }
+      for (auto& busy_acc : xcp.gfx_busy_acc) {
+        busy_acc = std::numeric_limits<uint64_t>::max();
+      }
+    }
+  }
 }
 
 static amdsmi_status_t get_ainic_device_from_handle(amdsmi_processor_handle processor_handle,
@@ -4020,6 +4084,7 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4038,6 +4103,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4485,15 +4551,32 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
-  return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  if (status == AMDSMI_STATUS_SUCCESS && gpu_busy_percent != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    *gpu_busy_percent = std::numeric_limits<uint32_t>::max();
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                                              amdsmi_utilization_counter_t utilization_counters[],
                                              uint32_t count, uint64_t* timestamp) {
-  return rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
-                      reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters), count,
-                      timestamp);
+  auto status = rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
+                             reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters),
+                             count, timestamp);
+  if (status == AMDSMI_STATUS_SUCCESS && utilization_counters != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    for (uint32_t i = 0; i < count; ++i) {
+      if (utilization_counters[i].type == AMDSMI_COARSE_GRAIN_GFX_ACTIVITY ||
+          utilization_counters[i].type == AMDSMI_FINE_GRAIN_GFX_ACTIVITY) {
+        utilization_counters[i].value = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value[0] = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value_count = 0;
+      }
+    }
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
