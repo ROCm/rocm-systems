@@ -755,9 +755,19 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, symkOp, datatype, recvcount);
   }
 
-  if (!symEligible &&
+  // The deadlock the symEligible guard prevents is cross-rank dispatch
+  // divergence: the symmetric kernel uses an N-way LSA barrier, so if any rank
+  // runs a different RS kernel it never arrives and all symmetric-path ranks
+  // hang. The gfx1250 DDA *fabric* path (barrier / LL / LL128) is dispatched
+  // purely from cross-rank-identical comm state + call args, so every rank makes
+  // the same choice and cannot diverge. We therefore let it win over symmetric
+  // in its (small/mid) size range; sizes it declines still fall through to the
+  // symmetric path (re-selected in ncclMakeSymmetricTaskList). The IPC / Direct
+  // RS paths keep the strict !symEligible guard below.
+  const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
+  if ((!symEligible || ddaFabricArch) &&
       rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
+    if (ddaFabricArch) {
       const size_t rsShardBytes = recvcount * ncclTypeSize(datatype);
       // Small-shard fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() &&
