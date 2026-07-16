@@ -103,6 +103,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       errors_data_(err_data),
       pm4_ib_buf_(nullptr),
       pm4_ib_size_b_(0x1000),
+      pm4_ib_dev_mem_(false),
       dynamicScratchState(0),
       exceptionState(0),
       suspended_(false),
@@ -394,13 +395,30 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     exceptionState = ERROR_HANDLER_DONE;
   }
 
-  // Allocate IB for icache flushes.
-  pm4_ib_buf_ =
-      agent_->system_allocator()(pm4_ib_size_b_, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // Allocate IB for icache flushes. In DRM/UKI mode the utility queue is a DRM
+  // user queue whose CPF fetches this IB from the DRM VM; a system (KFD-VM)
+  // allocation is invisible to it and the CPF page-faults fetching the IB
+  // (INDIRECT_BUFFER jump). Route it through device memory so it lands in the
+  // DRM VM, mirroring the queue descriptor/ring device-mem workaround. Requires
+  // LargeBAR since ExecutePM4 memcpys into this buffer (CPU-writable VRAM).
+  pm4_ib_dev_mem_ =
+      core::Runtime::runtime_singleton_->flag().enable_drm() && agent_->LargeBarEnabled();
+  if (pm4_ib_dev_mem_) {
+    pm4_ib_buf_ =
+        agent_->finegrain_allocator()(pm4_ib_size_b_, core::MemoryRegion::AllocateExecutable);
+  } else {
+    pm4_ib_buf_ =
+        agent_->system_allocator()(pm4_ib_size_b_, 0x1000, core::MemoryRegion::AllocateExecutable);
+  }
   if (pm4_ib_buf_ == nullptr)
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "PM4 IB allocation failed.\n");
 
-  MAKE_NAMED_SCOPE_GUARD(PM4IBGuard, [&]() { agent_->system_deallocator()(pm4_ib_buf_); });
+  MAKE_NAMED_SCOPE_GUARD(PM4IBGuard, [&]() {
+    if (pm4_ib_dev_mem_)
+      agent_->finegrain_deallocator()(pm4_ib_buf_);
+    else
+      agent_->system_deallocator()(pm4_ib_buf_);
+  });
 
   // Set initial CU mask
   if (!core::Runtime::runtime_singleton_->flag().cu_mask_skip_init()) SetCUMasking(0, nullptr);
@@ -481,7 +499,10 @@ AqlQueue::~AqlQueue() {
       queue_event() = nullptr;
     }
   }
-  agent_->system_deallocator()(pm4_ib_buf_);
+  if (pm4_ib_dev_mem_)
+    agent_->finegrain_deallocator()(pm4_ib_buf_);
+  else
+    agent_->system_deallocator()(pm4_ib_buf_);
 }
 
 void AqlQueue::Destroy() {
