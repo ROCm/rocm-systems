@@ -161,13 +161,14 @@ def artifact_name(path: Path) -> str:
 
 
 def build_group_from_artifact(artifact: str) -> str:
+    # system-deps artifacts are named junit-build-<distro>-system-deps-<idx>,
+    # so this must be tested before the leading-distro match below (otherwise
+    # e.g. junit-build-rhel-system-deps-0 matches "junit-build-rhel-" first).
+    if "-system-deps-" in artifact:
+        return "system-deps"
     for group in ("ubuntu-22.04", "ubuntu-24.04", "debian", "rhel"):
         if artifact.startswith(f"junit-build-{group}-"):
             return group
-        if artifact.startswith(f"junit-{group}-"):
-            return group
-    if artifact.startswith("junit-system-deps-"):
-        return "system-deps"
     if artifact.startswith("junit-build-"):
         return "build"
     return "other"
