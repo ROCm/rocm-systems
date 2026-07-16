@@ -35,20 +35,20 @@ std::string ginEnvDisabledReason() {
   return "";
 }
 
-std::string ginTypeReason() {
-  const char* ginType = std::getenv("NCCL_GIN_TYPE");
-  if (!ginType)
-    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
-  int t = std::atoi(ginType);
-  if (t != 2 && t != 4)
-    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
-  return "";
-}
-
 // GIN type requested for this run (2=proxy, 4=rocshmem-gda); 0 if unset.
 int requestedGinType() {
   const char* t = std::getenv("NCCL_GIN_TYPE");
   return t ? std::atoi(t) : 0;
+}
+
+std::string ginTypeReason() {
+  const char* ginType = std::getenv("NCCL_GIN_TYPE");
+  if (!ginType)
+    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  int t = requestedGinType();
+  if (t != 2 && t != 4)
+    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  return "";
 }
 
 std::string cuMemReason() {

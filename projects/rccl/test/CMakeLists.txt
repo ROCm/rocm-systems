@@ -482,8 +482,15 @@ if(BUILD_TESTS)
           list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
         endif()
       endforeach()
-      find_library(_ROCSHMEM_DRM        drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      find_library(_ROCSHMEM_DRM_AMDGPU  drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
+      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_DRM)
+        set(_ROCSHMEM_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_DRM_AMDGPU)
+        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+      endif()
       # Enable the GIN device backend in the test kernels so ncclGinCall has a
       # dispatch case for the corresponding runtime GIN type.
       target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
