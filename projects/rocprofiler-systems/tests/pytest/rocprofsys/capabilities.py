@@ -279,7 +279,12 @@ class SystemCapabilities:
         Uses sched_getaffinity so Slurm/cgroup/taskset limits match CMake
         ProcessorCount and runtime thread-pool sizing.
         """
-        count = len(os.sched_getaffinity(0))
+        try:
+            affinity = os.sched_getaffinity(0)
+            count = len(affinity)
+        except (AttributeError, NotImplementedError, OSError):
+            count = os.cpu_count() or 0
+
         return count if count > 0 else 2
 
     @cached_property
