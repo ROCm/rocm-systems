@@ -331,6 +331,7 @@ add_executable(
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     config_test.cpp
+    daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp

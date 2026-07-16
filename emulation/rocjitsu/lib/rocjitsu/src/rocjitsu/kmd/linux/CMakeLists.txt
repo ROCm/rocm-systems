@@ -7,6 +7,7 @@ rj_add_object_library(rocjitsu_kmd
     libc_passthrough.cpp
     linux_kfd.cpp
     remote_driver.cpp
+    rj_daemon.cpp
     simulated_kfd.cpp
     sysfs.cpp
     transport.cpp
