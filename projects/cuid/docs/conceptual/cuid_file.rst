@@ -59,7 +59,7 @@ Depending on the device type, different device attributes (present in the CUID f
 
 - **GPU:** The ``device_node`` links the derived CUID to the hardware.
 
- - **CPU:** The ``package_id`` identifies the physical CPU package, which is akin to a socket ID. CPUs will also display a ``device_node`` which represents the representative logical CPU for that package (currently selected as the lowest APIC ID seen for the socket). The derived CUID is associated with the physical CPU package, not the logical CPU core.
+- **CPU:** The ``package_id`` identifies the physical CPU package, which is akin to a socket ID. CPUs will also display a ``device_node`` which represents the representative logical CPU for that package (currently selected as the lowest APIC ID seen for the socket). The derived CUID is associated with the physical CPU package, not the logical CPU core.
 
 - **NIC:** The ``device_node`` links the derived CUID to the network device.
 
