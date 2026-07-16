@@ -134,10 +134,10 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
 ::perfetto::StaticString
 PerfettoSession::get_static_event_name(const std::string& value) const
 {
-    // insert() is a no-op when the name is already cached; the returned iterator
+    // emplace() is a no-op when the name is already cached; the returned iterator
     // points to storage that stays valid for the whole PerfettoSession lifetime,
     // which is what perfetto::StaticString interning requires.
-    return ::perfetto::StaticString{static_event_names.insert(value).first->c_str()};
+    return ::perfetto::StaticString{static_event_names.emplace(value).first->c_str()};
 }
 
 PerfettoSession::~PerfettoSession()
