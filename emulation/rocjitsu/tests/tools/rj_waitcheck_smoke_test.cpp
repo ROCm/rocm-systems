@@ -290,6 +290,42 @@ TEST(RjWaitcheck, KernelEntryChecksOnlySelectedDescriptor) {
   EXPECT_TRUE(contains(stdout_text, "instructions=3 memory-events=1 diagnostics=0")) << stdout_text;
 }
 
+TEST(RjWaitcheck, ExhaustiveSchedulesKernelsAndReportsSlowest) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "multi_kernel_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"hazard", {0xE0501000u, 0x80000008u, 0x7E020300u}},
+       {"clean", {0xE0501000u, 0x80000008u, 0xBF8C0F70u, 0x7E020300u}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+      " --exhaustive --target gfx950 --summary-only --no-fail --progress -j2 "
+      "--slowest-kernels 2 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "active=")) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "100% kernels 2/2 code-objects 1/1")) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "code-objects=1/1 kernels=2/2")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "rj_waitcheck: slowest-kernels count=2")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "name=\"hazard\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "name=\"clean\"")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "entry=0x0")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "entry=0xc")) << stdout_text;
+}
+
 TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

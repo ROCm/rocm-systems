@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -33,6 +34,7 @@ constexpr int kUsageError = 1;
 constexpr int kInputError = 2;
 constexpr int kHazardDetected = 4;
 constexpr uint32_t kMaxJobs = 16;
+constexpr uint32_t kMaxSlowestKernels = 1000;
 
 enum class ProgressMode : uint8_t { Auto, Always, Never };
 
@@ -68,6 +70,7 @@ struct CliOptions {
   bool show_help = false;
   ProgressMode progress = ProgressMode::Auto;
   uint32_t jobs = 1;
+  uint32_t slowest_kernels = 0;
 };
 
 struct SelectedCodeObject {
@@ -91,6 +94,15 @@ struct ScanTotals {
   size_t diagnostics = 0;
   bool diagnostics_truncated = false;
   bool hazards = false;
+  struct SlowKernel {
+    std::chrono::nanoseconds elapsed{};
+    std::string input_path;
+    std::string target;
+    uint32_t code_object_index = 0;
+    std::string kernel_name;
+    uint64_t kernel_entry = 0;
+  };
+  std::vector<SlowKernel> slowest_kernels;
 };
 
 struct ProgressTotals {
@@ -101,6 +113,7 @@ struct ProgressTotals {
 struct CodeObjectAnalysis {
   WaitcheckReport report;
   std::string error;
+  std::optional<ScanTotals::SlowKernel> slow_kernel;
 };
 
 class ProgressDisplay {
@@ -135,7 +148,8 @@ public:
     if (current_.empty())
       current_ = input_path;
     current_ += ":" + std::string(target) + "[" + std::to_string(code_object_index) + "]";
-    render(true);
+    ++active_;
+    render(false);
   }
 
   void kernel_analyzed() {
@@ -144,10 +158,13 @@ public:
     render(false);
   }
 
-  void code_object_processed() {
+  void analysis_processed(bool code_object_completed) {
     const std::lock_guard lock(mutex_);
-    ++code_objects_processed_;
-    render(true);
+    if (active_ != 0)
+      --active_;
+    if (code_object_completed)
+      ++code_objects_processed_;
+    render(code_object_completed);
   }
 
   void before_message() {
@@ -186,7 +203,7 @@ private:
     last_percent_ = percent;
     std::cerr << "\rrj_waitcheck: " << std::setw(3) << percent << "% kernels " << kernels_processed_
               << "/" << totals_.kernels << " code-objects " << code_objects_processed_ << "/"
-              << totals_.code_objects;
+              << totals_.code_objects << " active=" << active_;
     if (!current_.empty())
       std::cerr << " " << current_;
     std::cerr << "\033[K" << std::flush;
@@ -198,6 +215,7 @@ private:
   ProgressTotals totals_;
   size_t code_objects_processed_ = 0;
   size_t kernels_processed_ = 0;
+  size_t active_ = 0;
   std::optional<size_t> last_percent_;
   std::string current_;
   std::mutex mutex_;
@@ -261,7 +279,8 @@ void print_help() {
             << "  --exhaustive             Strict recursive target sweep with completeness totals\n"
             << "  --progress               Show exhaustive kernel progress even without a TTY\n"
             << "  --no-progress            Disable exhaustive kernel progress\n"
-            << "  -j N, --jobs N           Run up to N code-object analyses in parallel (max: 16)\n"
+            << "  -j N, --jobs N           Run up to N kernel analyses in parallel (max: 16)\n"
+            << "  --slowest-kernels N      Report the N slowest individually analyzed kernels\n"
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
             << "  --stop-after-first-diagnostic\n"
@@ -440,6 +459,18 @@ void print_help() {
       options.max_diagnostics = max_diagnostics;
       continue;
     }
+    if (arg == "--slowest-kernels") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      uint32_t slowest_kernels = 0;
+      if (!parse_u32(value, slowest_kernels) || slowest_kernels > kMaxSlowestKernels) {
+        std::cerr << "invalid slow-kernel count: " << value << " (expected 0-" << kMaxSlowestKernels
+                  << ")\n";
+        return false;
+      }
+      options.slowest_kernels = slowest_kernels;
+      continue;
+    }
 
     if (!arg.empty() && arg.front() != '-') {
       options.input_paths.emplace_back(arg);
@@ -476,6 +507,10 @@ void print_help() {
   }
   if (!options.exhaustive && options.progress == ProgressMode::Always) {
     std::cerr << "--progress requires --exhaustive\n";
+    return false;
+  }
+  if (options.slowest_kernels != 0 && !options.all_code_objects) {
+    std::cerr << "--slowest-kernels requires --all-code-objects or --exhaustive\n";
     return false;
   }
 
@@ -699,10 +734,11 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   std::cerr << "rj_waitcheck: " << input_path << ": analysis error: " << reason << "\n";
 }
 
-[[nodiscard]] CodeObjectAnalysis
-run_code_object_analysis(const CliOptions &options, const std::string &input_path,
-                         rj_code_target_id_t target, uint32_t code_object_index,
-                         const AmdGpuCodeObject &code_object, ProgressDisplay *progress) {
+[[nodiscard]] CodeObjectAnalysis run_code_object_analysis(const CliOptions &options,
+                                                          rj_code_target_id_t target,
+                                                          uint32_t code_object_index,
+                                                          const AmdGpuCodeObject &code_object,
+                                                          ProgressDisplay *progress) {
   CodeObjectAnalysis result;
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
@@ -710,9 +746,6 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
     result.error = "target is not supported by waitcheck: " + std::string(target_name(target));
     return result;
   }
-
-  if (progress)
-    progress->begin_code_object(input_path, target_name(target), code_object_index);
 
   WaitcheckOptions analysis_options;
   analysis_options.max_diagnostics = options.max_diagnostics;
@@ -731,8 +764,57 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
     result.report.supported = false;
     result.report.analysis_error = "unexpected non-standard analysis failure";
   }
+  if (!result.report.supported) {
+    result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
+                   std::to_string(code_object_index) + "]";
+    if (!result.report.analysis_error.empty())
+      result.error += ": " + result.report.analysis_error;
+  }
+  return result;
+}
+
+[[nodiscard]] CodeObjectAnalysis
+run_kernel_analysis(const CliOptions &options, const std::string &input_path,
+                    rj_code_target_id_t target, uint32_t code_object_index,
+                    const AmdGpuCodeObject &code_object, const WaitcheckKernelInfo &kernel,
+                    ProgressDisplay *progress) {
+  CodeObjectAnalysis result;
+  const rj_code_arch_t arch = waitcheck_arch_for_target(target);
+  if (arch == ROCJITSU_CODE_ARCH_INVALID) {
+    result.report.supported = false;
+    result.error = "target is not supported by waitcheck: " + std::string(target_name(target));
+    return result;
+  }
+
+  WaitcheckOptions analysis_options;
+  analysis_options.max_diagnostics = options.max_diagnostics;
+  analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
   if (progress)
-    progress->code_object_processed();
+    analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
+
+  const auto start = std::chrono::steady_clock::now();
+  try {
+    result.report =
+        analyze_waitcnts_for_kernel(code_object, arch, kernel.entry_offset, analysis_options);
+  } catch (const std::exception &ex) {
+    result.report.supported = false;
+    result.report.analysis_error = std::string("unexpected analysis failure: ") + ex.what();
+  } catch (...) {
+    result.report.supported = false;
+    result.report.analysis_error = "unexpected non-standard analysis failure";
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  result.report.kernels_discovered = 1;
+
+  if (options.slowest_kernels != 0) {
+    result.slow_kernel =
+        ScanTotals::SlowKernel{std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed),
+                               input_path,
+                               std::string(target_name(target)),
+                               code_object_index,
+                               kernel.name,
+                               kernel.entry_offset};
+  }
 
   if (!result.report.supported) {
     result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
@@ -776,8 +858,8 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
                                        rj_code_target_id_t target, uint32_t code_object_index,
                                        const AmdGpuCodeObject &code_object, ScanTotals &totals,
                                        std::string &error, ProgressDisplay *progress = nullptr) {
-  const CodeObjectAnalysis result = run_code_object_analysis(
-      options, input_path, target, code_object_index, code_object, progress);
+  const CodeObjectAnalysis result =
+      run_code_object_analysis(options, target, code_object_index, code_object, progress);
   return merge_code_object_analysis(options, input_path, target, code_object_index, result, totals,
                                     error);
 }
@@ -808,6 +890,66 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
   return true;
 }
 
+void merge_kernel_analysis(CodeObjectAnalysis &code_object_result,
+                           const CodeObjectAnalysis &kernel_result, size_t max_diagnostics) {
+  WaitcheckReport &combined = code_object_result.report;
+  const WaitcheckReport &kernel = kernel_result.report;
+  if (combined.arch == ROCJITSU_CODE_ARCH_INVALID)
+    combined.arch = kernel.arch;
+  combined.instructions_analyzed += kernel.instructions_analyzed;
+  combined.memory_events_tracked += kernel.memory_events_tracked;
+  combined.kernels_discovered += kernel.kernels_discovered;
+  combined.kernels_analyzed += kernel.kernels_analyzed;
+  combined.diagnostics_observed += kernel.diagnostics_observed;
+  combined.diagnostics_truncated = combined.diagnostics_truncated || kernel.diagnostics_truncated;
+  combined.stopped_early = combined.stopped_early || kernel.stopped_early;
+
+  for (const WaitcheckDiagnostic &diagnostic : kernel.diagnostics) {
+    if (combined.diagnostics.size() >= max_diagnostics) {
+      combined.diagnostics_truncated = true;
+      break;
+    }
+    combined.diagnostics.push_back(diagnostic);
+  }
+
+  if (!kernel.supported && combined.supported) {
+    combined.supported = false;
+    combined.analysis_error = kernel.analysis_error;
+    code_object_result.error = kernel_result.error;
+  }
+}
+
+[[nodiscard]] bool slower_kernel_less(const ScanTotals::SlowKernel &lhs,
+                                      const ScanTotals::SlowKernel &rhs) {
+  if (lhs.elapsed != rhs.elapsed)
+    return lhs.elapsed > rhs.elapsed;
+  return std::tie(lhs.input_path, lhs.target, lhs.code_object_index, lhs.kernel_entry,
+                  lhs.kernel_name) < std::tie(rhs.input_path, rhs.target, rhs.code_object_index,
+                                              rhs.kernel_entry, rhs.kernel_name);
+}
+
+void record_slow_kernel(ScanTotals &totals, ScanTotals::SlowKernel kernel, size_t limit) {
+  if (limit == 0)
+    return;
+  totals.slowest_kernels.push_back(std::move(kernel));
+  std::ranges::sort(totals.slowest_kernels, slower_kernel_less);
+  if (totals.slowest_kernels.size() > limit)
+    totals.slowest_kernels.resize(limit);
+}
+
+void print_slowest_kernels(const ScanTotals &totals) {
+  std::cout << "rj_waitcheck: slowest-kernels count=" << totals.slowest_kernels.size() << "\n";
+  for (size_t i = 0; i < totals.slowest_kernels.size(); ++i) {
+    const ScanTotals::SlowKernel &kernel = totals.slowest_kernels[i];
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(kernel.elapsed).count();
+    std::cout << "rj_waitcheck: slowest-kernel rank=" << (i + 1) << " elapsed-ms=" << std::fixed
+              << std::setprecision(3) << elapsed_ms << " input=" << std::quoted(kernel.input_path)
+              << " target=" << kernel.target << " code-object=" << kernel.code_object_index
+              << " entry=" << hex_offset(kernel.kernel_entry)
+              << " name=" << std::quoted(kernel.kernel_name) << "\n";
+  }
+}
+
 [[nodiscard]] bool scan_all_code_objects(const CliOptions &options, const std::string &input_path,
                                          ScanTotals &totals, std::string &error,
                                          ProgressDisplay *progress = nullptr) {
@@ -827,12 +969,20 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
     return false;
   }
 
-  struct Task {
+  struct CodeObjectTask {
     rj_code_target_id_t target;
     uint32_t index;
     const AmdGpuCodeObject *code_object;
+    std::vector<WaitcheckKernelInfo> kernels;
+    size_t first_work_item = 0;
+    size_t work_item_count = 0;
   };
-  std::vector<Task> tasks;
+  struct WorkItem {
+    size_t code_object_task = 0;
+    std::optional<size_t> kernel_index;
+  };
+  std::vector<CodeObjectTask> code_object_tasks;
+  std::vector<WorkItem> work_items;
   for (const TargetInfo &info : kSupportedTargets) {
     if (options.target && *options.target != info.target)
       continue;
@@ -850,11 +1000,21 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
         error = os.str();
         return false;
       }
-      tasks.push_back({info.target, index, code_object});
+      CodeObjectTask task{info.target,       index, code_object, waitcheck_kernels(*code_object),
+                          work_items.size(), 0};
+      const size_t task_index = code_object_tasks.size();
+      if (task.kernels.empty()) {
+        work_items.push_back({task_index, std::nullopt});
+      } else {
+        for (size_t kernel_index = 0; kernel_index < task.kernels.size(); ++kernel_index)
+          work_items.push_back({task_index, kernel_index});
+      }
+      task.work_item_count = work_items.size() - task.first_work_item;
+      code_object_tasks.push_back(std::move(task));
     }
   }
 
-  if (tasks.empty()) {
+  if (code_object_tasks.empty()) {
     const std::string reason =
         options.target ? "no " + std::string(target_name(*options.target)) + " code objects found"
                        : "no supported code objects found";
@@ -870,22 +1030,51 @@ run_code_object_analysis(const CliOptions &options, const std::string &input_pat
     return false;
   }
 
-  std::vector<CodeObjectAnalysis> results(tasks.size());
+  std::vector<CodeObjectAnalysis> work_results(work_items.size());
+  std::vector<std::atomic<size_t>> remaining_work(code_object_tasks.size());
+  for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index)
+    remaining_work[task_index].store(code_object_tasks[task_index].work_item_count,
+                                     std::memory_order_relaxed);
   try {
-    parallel_for(tasks.size(), options.jobs, [&](size_t task_index) {
-      const Task &task = tasks[task_index];
-      results[task_index] = run_code_object_analysis(options, input_path, task.target, task.index,
-                                                     *task.code_object, progress);
+    parallel_for(work_items.size(), options.jobs, [&](size_t work_index) {
+      const WorkItem &work = work_items[work_index];
+      const CodeObjectTask &task = code_object_tasks[work.code_object_task];
+      if (progress)
+        progress->begin_code_object(input_path, target_name(task.target), task.index);
+      if (work.kernel_index) {
+        work_results[work_index] =
+            run_kernel_analysis(options, input_path, task.target, task.index, *task.code_object,
+                                task.kernels[*work.kernel_index], progress);
+      } else {
+        work_results[work_index] =
+            run_code_object_analysis(options, task.target, task.index, *task.code_object, progress);
+      }
+      const bool code_object_completed =
+          remaining_work[work.code_object_task].fetch_sub(1, std::memory_order_relaxed) == 1;
+      if (progress)
+        progress->analysis_processed(code_object_completed);
     });
   } catch (const std::exception &ex) {
     error = input_path + ": parallel analysis failed: " + ex.what();
     return false;
   }
 
-  for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
-    const Task &task = tasks[task_index];
-    if (merge_code_object_analysis(options, input_path, task.target, task.index,
-                                   results[task_index], totals, error))
+  for (const CodeObjectTask &task : code_object_tasks) {
+    CodeObjectAnalysis result;
+    if (task.kernels.empty()) {
+      result = std::move(work_results[task.first_work_item]);
+    } else {
+      for (size_t work_index = task.first_work_item;
+           work_index < task.first_work_item + task.work_item_count; ++work_index) {
+        merge_kernel_analysis(result, work_results[work_index], options.max_diagnostics);
+        if (work_results[work_index].slow_kernel) {
+          record_slow_kernel(totals, std::move(*work_results[work_index].slow_kernel),
+                             options.slowest_kernels);
+        }
+      }
+    }
+    if (merge_code_object_analysis(options, input_path, task.target, task.index, result, totals,
+                                   error))
       continue;
     if (options.exhaustive) {
       record_analysis_error(input_path, error, totals, progress);
@@ -984,6 +1173,8 @@ int main(int argc, char **argv) {
               << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated)
               << "\n";
   }
+  if (options.slowest_kernels != 0)
+    print_slowest_kernels(totals);
 
   if (options.exhaustive && (totals.analysis_errors != 0 || totals.code_objects_discovered == 0 ||
                              totals.code_objects != totals.code_objects_discovered ||
