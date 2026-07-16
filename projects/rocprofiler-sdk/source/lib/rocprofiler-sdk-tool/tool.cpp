@@ -209,14 +209,14 @@ struct buffer_ids
     rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
     rocprofiler_buffer_id_t rocdecode_api_trace     = {};
     rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
-    rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
     rocprofiler_buffer_id_t ompt_trace              = {};
     rocprofiler_buffer_id_t hip_graph_trace         = {};
+    rocprofiler_buffer_id_t rocshmem_api_trace      = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 16>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -228,10 +228,10 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
-                                                       rocshmem_api_trace,
                                                        pc_sampling_stochastic,
                                                        ompt_trace,
-                                                       hip_graph_trace};
+                                                       hip_graph_trace,
+                                                       rocshmem_api_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -3590,11 +3590,11 @@ generate_output(cleanup_mode _cleanup_mode)
                          memory_allocation_output.get_generator(),
                          rocdecode_output.get_generator(),
                          rocjpeg_output.get_generator(),
-                         rocshmem_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
                          pc_sampling_stochastic_output.get_generator(),
                          spm_counters_output.get_generator(),
-                         hip_graph_output.get_generator());
+                         hip_graph_output.get_generator(),
+                         rocshmem_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3636,11 +3636,11 @@ generate_output(cleanup_mode _cleanup_mode)
                           kfd_output.get_generator(),
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
-                          rocshmem_output.get_generator(),
                           counters_output.get_generator(),
                           spm_counters_output.get_generator(),
                           ompt_output.get_generator(),
-                          hip_graph_output.get_generator());
+                          hip_graph_output.get_generator(),
+                          rocshmem_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
