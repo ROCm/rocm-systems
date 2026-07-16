@@ -9,6 +9,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -21,6 +22,7 @@
 namespace rocjitsu {
 
 class CodeObject;
+struct WaitcheckKernelInfo;
 
 /// @brief Internal wait counters tracked by waitcheck.
 ///
@@ -78,6 +80,8 @@ struct WaitcheckOptions {
   /// analyzed. The callback is not invoked for symbol-less whole-section
   /// fallback analysis.
   std::function<void()> kernel_analyzed_callback;
+  /// @brief Optional callback with the identity and wall time of each analyzed kernel.
+  std::function<void(const WaitcheckKernelInfo &, std::chrono::nanoseconds)> kernel_timing_callback;
 };
 
 /// @brief One AMDHSA kernel discovered in a final code object.
@@ -153,5 +157,15 @@ struct WaitcheckReport {
                                                           rj_code_arch_t arch,
                                                           const WaitcheckKernelInfo &kernel,
                                                           WaitcheckOptions options = {});
+
+/// @brief Analyze an already-discovered batch of kernels with shared setup.
+///
+/// @details Each kernel is still analyzed independently, but the decoder,
+/// diagnostic state, and report are reused across the batch. This is intended
+/// for bounded-granularity offline schedulers.
+[[nodiscard]] WaitcheckReport
+analyze_waitcnts_for_kernels(const CodeObject &code_object, rj_code_arch_t arch,
+                             std::span<const WaitcheckKernelInfo> kernels,
+                             WaitcheckOptions options = {});
 
 } // namespace rocjitsu

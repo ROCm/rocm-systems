@@ -24,6 +24,9 @@
 #include <thread>
 #include <vector>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <unistd.h>
 
 using namespace rocjitsu;
@@ -35,6 +38,7 @@ constexpr int kInputError = 2;
 constexpr int kHazardDetected = 4;
 constexpr uint32_t kMaxJobs = 16;
 constexpr uint32_t kMaxSlowestKernels = 1000;
+constexpr size_t kKernelBatchSize = 8;
 
 enum class ProgressMode : uint8_t { Auto, Always, Never };
 
@@ -113,7 +117,7 @@ struct ProgressTotals {
 struct CodeObjectAnalysis {
   WaitcheckReport report;
   std::string error;
-  std::optional<ScanTotals::SlowKernel> slow_kernel;
+  std::vector<ScanTotals::SlowKernel> slow_kernels;
 };
 
 class ProgressDisplay {
@@ -774,10 +778,10 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
 }
 
 [[nodiscard]] CodeObjectAnalysis
-run_kernel_analysis(const CliOptions &options, const std::string &input_path,
-                    rj_code_target_id_t target, uint32_t code_object_index,
-                    const AmdGpuCodeObject &code_object, const WaitcheckKernelInfo &kernel,
-                    ProgressDisplay *progress) {
+run_kernel_batch_analysis(const CliOptions &options, const std::string &input_path,
+                          rj_code_target_id_t target, uint32_t code_object_index,
+                          const AmdGpuCodeObject &code_object,
+                          std::span<const WaitcheckKernelInfo> kernels, ProgressDisplay *progress) {
   CodeObjectAnalysis result;
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
@@ -791,10 +795,15 @@ run_kernel_analysis(const CliOptions &options, const std::string &input_path,
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
   if (progress)
     analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
+  if (options.slowest_kernels != 0)
+    analysis_options.kernel_timing_callback = [&](const WaitcheckKernelInfo &kernel,
+                                                  std::chrono::nanoseconds elapsed) {
+      result.slow_kernels.push_back({elapsed, input_path, std::string(target_name(target)),
+                                     code_object_index, kernel.name, kernel.entry_offset});
+    };
 
-  const auto start = std::chrono::steady_clock::now();
   try {
-    result.report = analyze_waitcnts_for_kernel(code_object, arch, kernel, analysis_options);
+    result.report = analyze_waitcnts_for_kernels(code_object, arch, kernels, analysis_options);
   } catch (const std::exception &ex) {
     result.report.supported = false;
     result.report.analysis_error = std::string("unexpected analysis failure: ") + ex.what();
@@ -802,19 +811,6 @@ run_kernel_analysis(const CliOptions &options, const std::string &input_path,
     result.report.supported = false;
     result.report.analysis_error = "unexpected non-standard analysis failure";
   }
-  const auto elapsed = std::chrono::steady_clock::now() - start;
-  result.report.kernels_discovered = 1;
-
-  if (options.slowest_kernels != 0) {
-    result.slow_kernel =
-        ScanTotals::SlowKernel{std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed),
-                               input_path,
-                               std::string(target_name(target)),
-                               code_object_index,
-                               kernel.name,
-                               kernel.entry_offset};
-  }
-
   if (!result.report.supported) {
     result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
                    std::to_string(code_object_index) + "]";
@@ -973,12 +969,12 @@ void print_slowest_kernels(const ScanTotals &totals) {
     uint32_t index;
     const AmdGpuCodeObject *code_object;
     std::vector<WaitcheckKernelInfo> kernels;
-    size_t first_work_item = 0;
-    size_t work_item_count = 0;
+    std::vector<size_t> work_item_indices;
   };
   struct WorkItem {
     size_t code_object_task = 0;
-    std::optional<size_t> kernel_index;
+    size_t first_kernel = 0;
+    size_t kernel_count = 0;
   };
   std::vector<CodeObjectTask> code_object_tasks;
   std::vector<WorkItem> work_items;
@@ -999,17 +995,8 @@ void print_slowest_kernels(const ScanTotals &totals) {
         error = os.str();
         return false;
       }
-      CodeObjectTask task{info.target,       index, code_object, waitcheck_kernels(*code_object),
-                          work_items.size(), 0};
-      const size_t task_index = code_object_tasks.size();
-      if (task.kernels.empty()) {
-        work_items.push_back({task_index, std::nullopt});
-      } else {
-        for (size_t kernel_index = 0; kernel_index < task.kernels.size(); ++kernel_index)
-          work_items.push_back({task_index, kernel_index});
-      }
-      task.work_item_count = work_items.size() - task.first_work_item;
-      code_object_tasks.push_back(std::move(task));
+      code_object_tasks.push_back(
+          {info.target, index, code_object, waitcheck_kernels(*code_object), {}});
     }
   }
 
@@ -1029,10 +1016,36 @@ void print_slowest_kernels(const ScanTotals &totals) {
     return false;
   }
 
+  // Interleave bounded kernel batches from different code objects. Each batch
+  // reuses one analyzer and decoder, while enough independent work remains for
+  // a slow kernel to pin only its current worker.
+  size_t max_batch_count = 0;
+  for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
+    CodeObjectTask &task = code_object_tasks[task_index];
+    if (task.kernels.empty()) {
+      task.work_item_indices.push_back(work_items.size());
+      work_items.push_back({task_index, 0, 0});
+    } else {
+      max_batch_count = std::max(max_batch_count,
+                                 (task.kernels.size() + kKernelBatchSize - 1) / kKernelBatchSize);
+    }
+  }
+  for (size_t batch_index = 0; batch_index < max_batch_count; ++batch_index) {
+    for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
+      CodeObjectTask &task = code_object_tasks[task_index];
+      const size_t first_kernel = batch_index * kKernelBatchSize;
+      if (first_kernel >= task.kernels.size())
+        continue;
+      task.work_item_indices.push_back(work_items.size());
+      work_items.push_back({task_index, first_kernel,
+                            std::min(kKernelBatchSize, task.kernels.size() - first_kernel)});
+    }
+  }
+
   std::vector<CodeObjectAnalysis> work_results(work_items.size());
   std::vector<std::atomic<size_t>> remaining_work(code_object_tasks.size());
   for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index)
-    remaining_work[task_index].store(code_object_tasks[task_index].work_item_count,
+    remaining_work[task_index].store(code_object_tasks[task_index].work_item_indices.size(),
                                      std::memory_order_relaxed);
   try {
     parallel_for(work_items.size(), options.jobs, [&](size_t work_index) {
@@ -1040,10 +1053,18 @@ void print_slowest_kernels(const ScanTotals &totals) {
       const CodeObjectTask &task = code_object_tasks[work.code_object_task];
       if (progress)
         progress->begin_code_object(input_path, target_name(task.target), task.index);
-      if (work.kernel_index) {
-        work_results[work_index] =
-            run_kernel_analysis(options, input_path, task.target, task.index, *task.code_object,
-                                task.kernels[*work.kernel_index], progress);
+      if (work.kernel_count != 0) {
+        work_results[work_index] = run_kernel_batch_analysis(
+            options, input_path, task.target, task.index, *task.code_object,
+            std::span<const WaitcheckKernelInfo>{task.kernels}.subspan(work.first_kernel,
+                                                                       work.kernel_count),
+            progress);
+        // Batch CFGs can be much larger than their code-object images. Return
+        // their freed pages before the worker takes another batch so glibc
+        // arenas do not retain one pathological high-water mark per thread.
+#if defined(__GLIBC__)
+        malloc_trim(0);
+#endif
       } else {
         work_results[work_index] =
             run_code_object_analysis(options, task.target, task.index, *task.code_object, progress);
@@ -1061,15 +1082,12 @@ void print_slowest_kernels(const ScanTotals &totals) {
   for (const CodeObjectTask &task : code_object_tasks) {
     CodeObjectAnalysis result;
     if (task.kernels.empty()) {
-      result = std::move(work_results[task.first_work_item]);
+      result = std::move(work_results[task.work_item_indices.front()]);
     } else {
-      for (size_t work_index = task.first_work_item;
-           work_index < task.first_work_item + task.work_item_count; ++work_index) {
+      for (size_t work_index : task.work_item_indices) {
         merge_kernel_analysis(result, work_results[work_index], options.max_diagnostics);
-        if (work_results[work_index].slow_kernel) {
-          record_slow_kernel(totals, std::move(*work_results[work_index].slow_kernel),
-                             options.slowest_kernels);
-        }
+        for (ScanTotals::SlowKernel &slow_kernel : work_results[work_index].slow_kernels)
+          record_slow_kernel(totals, std::move(slow_kernel), options.slowest_kernels);
       }
     }
     if (merge_code_object_analysis(options, input_path, task.target, task.index, result, totals,
