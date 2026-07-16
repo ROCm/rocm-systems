@@ -73,7 +73,8 @@ struct testColl allReduceTest = {
   AllReduceGetCollByteCount,
   AllReduceInitData,
   AllReduceGetBw,
-  AllReduceRunColl
+  AllReduceRunColl,
+  NULL
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

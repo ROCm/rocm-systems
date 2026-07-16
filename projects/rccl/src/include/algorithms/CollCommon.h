@@ -104,20 +104,30 @@ static inline __device__ void copyFromSrcToDest(
   }
 }
 
-template <typename T, int NRANKS, bool hasAcc>
+// Unified reduce-scatter helper for both the IPC and fabric paths.
+//   - NRANKS_CT > 0  : compile-time clique size; nRanks folds to a constant and
+//                      the peer loop is fully unrolled (the IPC / fabric 4,8
+//                      fast paths).
+//   - NRANKS_CT == 0 : runtime fallback; nRanks comes from nRanksRuntime and the
+//                      peer loop is partially unrolled 8-wide, covering any clique up to
+//                      kDdaMaxNranks.
+template <typename T, int NRANKS_CT, bool hasAcc>
 static inline __device__ void reduceScatter(
     T* const* __restrict__ ipcbuffs,
     T* __restrict__ destbuff,
     const T* __restrict__ acc,
     int selfRank,
+    int nRanksRuntime,
     const size_t idxStart,
     const size_t idxEnd,
     const size_t idxStride,
     int pattern) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
-    // pattern = 1 performs reduce-scatter (two-shot)	  
+    // pattern = 1 performs reduce-scatter (two-shot)
     size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
     size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
 
@@ -129,34 +139,38 @@ static inline __device__ void reduceScatter(
     uint4 srcVals[2];
     *reinterpret_cast<uint4*>(&srcVals[0]) =
         reinterpret_cast<const uint4*>(&ipcbuffs[0][srcIdx])[0];
-#pragma unroll NRANKS - 1
-    for (int r = 0; r < NRANKS - 1; ++r) {
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanks - 1; ++r) {
       *reinterpret_cast<uint4*>(&srcVals[(r + 1) & 1]) =
-          reinterpret_cast<const uint4*>(
-              &ipcbuffs[(r + 1) % NRANKS][srcIdx])[0];
+          reinterpret_cast<const uint4*>(&ipcbuffs[r + 1][srcIdx])[0];
       sum = vecElementAdd<T>(sum, srcVals[r & 1]);
     }
-    sum = vecElementAdd<T>(sum, srcVals[(NRANKS - 1) & 1]);
+    sum = vecElementAdd<T>(sum, srcVals[(nRanks - 1) & 1]);
 
     *reinterpret_cast<uint4*>(&destbuff[destIdx]) =
         *reinterpret_cast<const uint4*>(&sum);
   }
 }
 
-template <typename T, int NRANKS>
+// Unified all-gather helper for both the IPC and fabric paths. See reduceScatter
+// above for the NRANKS_CT / nRanksRuntime / unroll semantics.
+template <typename T, int NRANKS_CT>
 static inline __device__ void allGather(
     T* const* __restrict__ ipcbuffs,
     T* __restrict__ destbuff,
     int selfRank,
+    int nRanksRuntime,
     const size_t idxStart,
     const size_t idxEnd,
     const size_t idxStride,
     bool enable_offset) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  const int nRanks = (NRANKS_CT > 0) ? NRANKS_CT : nRanksRuntime;
+  constexpr int kUnroll = (NRANKS_CT > 0) ? NRANKS_CT : 8;
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
-#pragma unroll NRANKS
-    for (int r = 0; r < NRANKS; ++r) {
-      int srcRank = (selfRank + r) % NRANKS;
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanks; ++r) {
+      int srcRank = (selfRank + r) % nRanks;
       int destIdx = idx + srcRank * idxEnd;
       int srcIdx;
       if (enable_offset) {

@@ -43,10 +43,15 @@
 #ifndef OPENSRC_HSA_RUNTIME_CORE_INC_AMD_CORE_DUMP_HPP_
 #define OPENSRC_HSA_RUNTIME_CORE_INC_AMD_CORE_DUMP_HPP_
 
+#include <vector>
+
 namespace rocr {
+namespace AMD {
+class AqlQueue;
+}
 namespace amd {
 namespace coredump {
-hsa_status_t dump_gpu_core();
+hsa_status_t dump_gpu_core(std::vector<AMD::AqlQueue*>* suspended_queues = nullptr);
 }   //  namespace coredump
 }   //  namespace amd
 }   //  namespace rocr
