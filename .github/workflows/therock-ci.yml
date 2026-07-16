@@ -48,6 +48,7 @@ jobs:
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
       run_mi455_test: ${{ steps.linux_projects.outputs.run_mi455_test }}
+      test_type: ${{ steps.linux_projects.outputs.test_type }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -66,7 +67,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0 # 2026-07-07 commit
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -123,7 +124,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -153,13 +154,48 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
-      # TODO(geomin12): Re-enable MI455 tests once bringup is complete
-      # run_mi455_test: ${{ matrix.target_bundle.amdgpu_family == 'gfx125X-dcgpu' && needs.setup.outputs.run_mi455_test || 'false' }}
-      run_mi455_test: "false"
+
+  # TEMPORARY: MI455 (gfx125X) Build - Blocking job (included in summary)
+  # Separated from therock-ci-linux matrix so MI455 tests can depend only on this
+  # build, not on other families' tests which may take longer.
+  # TODO: Remove this separate job once MI455 test infrastructure is stable and
+  # we have sufficient MI455 machine capacity to run tests without blocking PRs.
+  therock-build-linux-mi455:
+    name: Linux MI455 Build (gfx125X-dcgpu)
+    permissions:
+      contents: read
+      id-token: write
+    needs: setup
+    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_mi455_test == 'true' }}
+    uses: ./.github/workflows/therock-build-linux.yml
+    secrets: inherit
+    with:
+      package_version: ${{ needs.setup.outputs.package_version }}
+      amdgpu_families: gfx125X-dcgpu
+      build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+
+  # TEMPORARY: MI455 (gfx125X) Test - Non-blocking job (excluded from summary)
+  # This job is intentionally excluded from therock_ci_summary to avoid blocking PRs.
+  # MI455 machines are limited, so jobs may queue for extended periods. By keeping
+  # tests separate, PRs can still merge while MI455 tests run or wait in queue.
+  # TODO: Remove this separate job once MI455 test infrastructure is stable and
+  # we have sufficient MI455 machine capacity to run tests without blocking PRs.
+  therock-test-linux-mi455:
+    name: Linux MI455 Test
+    needs: [setup, therock-build-linux-mi455]
+    if: ${{ needs.setup.outputs.run_mi455_test == 'true' }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: "hip-tests, rocrtst"
+      amdgpu_families: gfx125X-dcgpu
+      test_runs_on: linux-mi455-gpu-rocm
+      platform: linux
+      artifact_run_id: ${{ github.run_id }}
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
@@ -203,6 +239,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
@@ -214,6 +251,7 @@ jobs:
     needs:
       - setup
       - therock-ci-linux
+      - therock-build-linux-mi455
       - therock-rccl-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
