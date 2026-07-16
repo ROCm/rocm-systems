@@ -222,11 +222,9 @@ jobs:
 
           corpus_test_status=0
 
-          # Limit pytest to 8 workers to avoid oversubscription.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          PYTEST_WORKERS="$(( WORKERS < 8 ? WORKERS : 8 ))"
           corpus_test_flags=(
-            --workers "${PYTEST_WORKERS}" \
+            --workers "${WORKERS}" \
             --soft-timeout 15 \
             --hard-timeout 30 \
             --rerun-failed \
