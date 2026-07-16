@@ -587,15 +587,16 @@ rocSHMEM trace
 
 .. code-block:: shell
 
-    rocprofv3 --rocshmem-trace --output-format csv -- <application_path>
+    rocprofv3 --rocshmem-trace -- <application_path>
 
-The above command generates a ``rocshmem_api_trace`` file prefixed with the process ID.
+rocSHMEM is emitted directly only to the JSON and ``rocpd`` (default) output formats. CSV, Perfetto (``.pftrace``), and OTF2 output are produced from the rocpd database via ``rocpd convert``. ``--rocshmem-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. code-block:: shell
 
-    $ cat 41688_rocshmem_api_trace.csv
+    rocprofv3 --rocshmem-trace -- <application_path>
+    rocpd convert -i out_results.db --output-format csv
 
-Here are the contents of ``rocshmem_api_trace.csv`` file:
+The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its contents:
 
 .. csv-table:: rocSHMEM trace
    :file: /data/rocshmem_api_trace.csv
@@ -618,23 +619,6 @@ OMPT is a rocpd-only trace: records are written to the rocpd database (the defau
 .. note::
 
    Requires an OMPT-capable OpenMP runtime that implements ``ompt_start_tool`` — for example the LLVM-based ``libomp`` shipped with ROCm / AOMP. GCC's ``libgomp`` does not implement the OMPT interface (see the `GOMP status page <https://www.gnu.org/software/gcc/projects/gomp/>`_), so ``g++ -fopenmp`` binaries do not produce OMPT records.
-
-rocSHMEM trace
-+++++++++++++++
-
-`rocSHMEM <https://github.com/ROCm/rocSHMEM>`_ is an intra-kernel networking runtime that provides GPU-centric, OpenSHMEM-style communication for AMD GPUs. This option traces the rocSHMEM host-stream API.
-
-.. code-block:: shell
-
-    rocprofv3 --rocshmem-trace --output-format csv -- <application_path>
-
-The above command generates a ``rocshmem_api_trace`` file prefixed with the process ID.
-
-.. code-block:: shell
-
-    $ cat 41688_rocshmem_api_trace.csv
-
-The trace records each rocSHMEM host-stream API call together with its arguments and return value. Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
 
 Dynamic process attachment
 +++++++++++++++++++++++++++

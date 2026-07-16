@@ -123,45 +123,35 @@ def test_rocshmem(json_data):
     assert int(putmem_args["nelems"], 0) == 64, putmem_args["nelems"]
 
 
-def test_csv_data(csv_data):
-    # If rocSHMEM tracing is not supported, end early
-    if len(csv_data) <= 2:
+def test_rocpd_data(rocpd_conn, json_data):
+    # rocpd (SQLite) is the default rocprofv3 output format, so --rocshmem-trace
+    # must populate the database as well. Skip in lock-step with the other format
+    # tests when rocSHMEM tracing is unavailable.
+    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocshmem_api"]) == 0:
         return pytest.skip("rocshmem tracing unavailable")
 
-    api_calls = []
+    cur = rocpd_conn.cursor()
 
-    for row in csv_data:
-        assert "Domain" in row, "'Domain' was not present in csv data for rocshmem-trace"
-        assert (
-            "Function" in row
-        ), "'Function' was not present in csv data for rocshmem-trace"
-        assert (
-            "Process_Id" in row
-        ), "'Process_Id' was not present in csv data for rocshmem-trace"
-        assert (
-            "Thread_Id" in row
-        ), "'Thread_Id' was not present in csv data for rocshmem-trace"
-        assert (
-            "Correlation_Id" in row
-        ), "'Correlation_Id' was not present in csv data for rocshmem-trace"
-        assert (
-            "Start_Timestamp" in row
-        ), "'Start_Timestamp' was not present in csv data for rocshmem-trace"
-        assert (
-            "End_Timestamp" in row
-        ), "'End_Timestamp' was not present in csv data for rocshmem-trace"
+    # rocSHMEM host-stream APIs are ranged operations, so rocprofv3 stores them as
+    # rows in the rocpd `regions` view under the ROCSHMEM_API[_EXT] category (the
+    # category string is set in source/lib/output/domain_type.cpp; rocprofv3
+    # consumes the EXT buffer records, so the category is ROCSHMEM_API_EXT).
+    region_rows = cur.execute(
+        "SELECT name, tid, start, end FROM regions "
+        "WHERE category IN ('ROCSHMEM_API', 'ROCSHMEM_API_EXT')"
+    ).fetchall()
+    assert len(region_rows) > 0, "rocpd database contains no rocSHMEM regions"
 
-        api_calls.append(row["Function"])
+    op_names = set()
+    for name, tid, start, end in region_rows:
+        assert tid > 0
+        assert start > 0
+        assert end > 0
+        assert start < end
+        op_names.add(name)
 
-        assert row["Domain"] in ("ROCSHMEM_API", "ROCSHMEM_API_EXT")
-        assert int(row["Process_Id"]) > 0
-        assert int(row["Thread_Id"]) > 0
-        assert int(row["Start_Timestamp"]) > 0
-        assert int(row["End_Timestamp"]) > 0
-        assert int(row["Start_Timestamp"]) < int(row["End_Timestamp"])
-
-    # Every traced rocSHMEM host-stream API should surface as a function call in
-    # the CSV (mirrors the per-call assertions in rocdecode-trace and rocjpeg-trace).
+    # Every traced rocSHMEM host-stream API should surface as a named region in
+    # the rocpd database (parity with the json/csv per-call assertions above).
     for call in [
         "barrier_all_on_stream",
         "quiet_on_stream",
@@ -173,35 +163,36 @@ def test_csv_data(csv_data):
         "putmem_signal_on_stream",
         "signal_wait_until_on_stream",
     ]:
-        assert call in api_calls
+        assert call in op_names, f"rocpd missing rocSHMEM operation '{call}'"
 
+    # Function arguments are stored in rocpd_arg and surfaced (joined to their
+    # region) by the `region_args` view. Pin the putmem_on_stream signature and its
+    # known nelems value (= kPerPeBytes = 64) for parity with the json/csv checks.
+    putmem_arg_names = {
+        row[0]
+        for row in cur.execute(
+            "SELECT DISTINCT ra.name FROM region_args ra "
+            "INNER JOIN regions r ON r.id = ra.id AND r.guid = ra.guid "
+            "WHERE r.category IN ('ROCSHMEM_API', 'ROCSHMEM_API_EXT') "
+            "AND r.name = 'putmem_on_stream'"
+        ).fetchall()
+    }
+    for expected in ("dest", "source", "nelems", "pe", "stream"):
+        assert (
+            expected in putmem_arg_names
+        ), f"putmem_on_stream missing arg '{expected}' in rocpd"
 
-def test_perfetto_data(pftrace_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    # If rocSHMEM tracing is not supported, end early
-    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocshmem_api"]) == 0:
-        return pytest.skip("rocshmem tracing unavailable")
-
-    rocprofv3.test_perfetto_data(
-        pftrace_data,
-        json_data,
-        ("rocshmem_api",),
-    )
-
-
-def test_otf2_data(otf2_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    # If rocSHMEM tracing is not supported, end early
-    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocshmem_api"]) == 0:
-        return pytest.skip("rocshmem tracing unavailable")
-
-    rocprofv3.test_otf2_data(
-        otf2_data,
-        json_data,
-        ("rocshmem_api",),
-    )
+    nelems_values = [
+        row[0]
+        for row in cur.execute(
+            "SELECT ra.value FROM region_args ra "
+            "INNER JOIN regions r ON r.id = ra.id AND r.guid = ra.guid "
+            "WHERE r.category IN ('ROCSHMEM_API', 'ROCSHMEM_API_EXT') "
+            "AND r.name = 'putmem_on_stream' AND ra.name = 'nelems'"
+        ).fetchall()
+    ]
+    assert nelems_values, "no nelems arg recorded for putmem_on_stream in rocpd"
+    assert any(int(value, 0) == 64 for value in nelems_values), nelems_values
 
 
 if __name__ == "__main__":

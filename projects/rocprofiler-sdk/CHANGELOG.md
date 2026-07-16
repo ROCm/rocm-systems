@@ -98,7 +98,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - rocSHMEM API tracing support:
   - `--rocshmem-trace` flag to enable tracing of rocSHMEM host-stream APIs.
   - Included in the `--sys-trace` and `--runtime-trace` aggregate tracing options.
-  - Emits a `rocshmem_api_trace.csv` per process and contributes events to the JSON, Perfetto (`.pftrace`), and OTF2 output formats.
+  - Emitted directly to the JSON and rocpd (default, `.db`) output formats; CSV, Perfetto (`.pftrace`), and OTF2 output are produced from the rocpd database via `rocpd convert`.
 
 **Documentation:**
 

@@ -76,13 +76,8 @@ generate_stats(const output_config&                                           cf
                const metadata&                                                tool_metadata,
                const generator<rocprofiler_buffer_tracing_rccl_api_record_t>& data);
 
-// NOTE: OMPT is rocpd-only; it is exported via `rocpd convert`, so there is
-// intentionally no generate_stats() overload for OMPT.
-
-stats_entry_t
-generate_stats(const output_config&                                                   cfg,
-               const metadata&                                                        tool_metadata,
-               const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& data);
+// NOTE: OMPT and rocSHMEM do not produce direct stats/CSV output; they are exported via
+// `rocpd convert`, so there is intentionally no generate_stats() overload for either.
 
 stats_entry_t
 generate_stats(const output_config&                                                 cfg,

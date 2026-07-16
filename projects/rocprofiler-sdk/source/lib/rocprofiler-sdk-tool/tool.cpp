@@ -3435,11 +3435,12 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     output_data_v.num_output += 1;
     output_data_v.num_bytes += _num_bytes;
 
-    // OMPT is rocpd-only: direct CSV/stats (and JSON/Perfetto/OTF2) emission is not
-    // produced for OMPT. OMPT records are written to rocpd and exported to other
-    // formats via `rocpd convert`. The record count above is still tallied so that
-    // rocpd output is produced even when OMPT is the only active trace domain.
-    if constexpr(DomainT != domain_type::OMPT)
+    // OMPT and rocSHMEM do not produce direct CSV/stats output. OMPT is rocpd-only (not
+    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
+    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
+    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // active trace domain.
+    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3616,8 +3617,7 @@ generate_output(cleanup_mode _cleanup_mode)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator(),
-                             rocshmem_output.get_generator());
+                             rocjpeg_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
@@ -3656,7 +3656,6 @@ generate_output(cleanup_mode _cleanup_mode)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
-        auto rocshmem_elem_data          = rocshmem_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -3671,8 +3670,7 @@ generate_output(cleanup_mode _cleanup_mode)
                          &rccl_elem_data,
                          &memory_allocation_elem_data,
                          &rocdecode_elem_data,
-                         &rocjpeg_elem_data,
-                         &rocshmem_elem_data);
+                         &rocjpeg_elem_data);
     }
 
     if(tool::get_config().summary_output && outdata.num_output > 0 &&

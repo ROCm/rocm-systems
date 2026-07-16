@@ -22,15 +22,13 @@
 # SOFTWARE.
 
 
-import csv
 import json
 import os
+import sqlite3
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
-from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
-from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
 
 def pytest_addoption(parser):
@@ -41,22 +39,10 @@ def pytest_addoption(parser):
         help="Input JSON",
     )
     parser.addoption(
-        "--otf2-input",
+        "--rocpd-input",
         action="store",
-        default="rocshmem-tracing/out_results.otf2",
-        help="Input OTF2",
-    )
-    parser.addoption(
-        "--pftrace-input",
-        action="store",
-        default="rocshmem-tracing/out_results.pftrace",
-        help="Input pftrace file",
-    )
-    parser.addoption(
-        "--csv-input",
-        action="store",
-        default="rocshmem-tracing/out_rocshmem_api_trace.csv",
-        help="Input CSV",
+        default="rocshmem-tracing/out_results.db",
+        help="Input rocpd SQLite database",
     )
 
 
@@ -70,33 +56,11 @@ def json_data(request):
 
 
 @pytest.fixture
-def csv_data(request):
-    filename = request.config.getoption("--csv-input")
-    data = []
-    if not os.path.isfile(filename):
-        # The CSV file is not generated, because the dependency test
-        # responsible to generate this file was skipped or failed.
-        # Thus emit the message to skip this test as well.
-        return pytest.skip("rocshmem tracing unavailable")
-    else:
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-    return data
-
-
-@pytest.fixture
-def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
+def rocpd_conn(request):
+    # rocpd (SQLite) is the default rocprofv3 output format, so --rocshmem-trace
+    # must populate it too. Skipped when the database is unavailable (the
+    # dependency execute test that generates it was skipped or failed).
+    filename = request.config.getoption("--rocpd-input")
     if not os.path.isfile(filename):
         return pytest.skip("rocshmem tracing unavailable")
-    return OTF2Reader(filename).read()[0]
-
-
-@pytest.fixture
-def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
-    if not os.path.isfile(filename):
-        return pytest.skip("rocshmem tracing unavailable")
-    return PerfettoReader(filename).read()[0]
+    return sqlite3.connect(filename)

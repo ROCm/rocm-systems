@@ -66,8 +66,9 @@ set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 # launched with -np 2. Each rank gets its own per-rank output directory keyed by
 # %env{OMPI_COMM_WORLD_RANK}% so the two rocprofv3 instances don't race on the same files.
 # Validation only inspects rank 0's trace; the API surface exercised by both ranks is
-# identical. All four output formats are requested so the validator can exercise the
-# perfetto + otf2 serializers end-to-end (mirrors rocdecode-trace).
+# identical. rocSHMEM is emitted directly only to JSON (used for validation) and rocpd
+# (the default rocprofv3 output format); CSV/Perfetto/OTF2 are produced from the rocpd
+# database via `rocpd convert`, so only `json rocpd` is requested here.
 #
 # Only register the tests when the rocshmem-demo target exists. When it is absent (e.g.
 # the code-coverage build, which has no MPI/rocSHMEM), skipping registration avoids
@@ -79,7 +80,7 @@ if(TARGET rocshmem-demo)
             ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocshmem-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o
-            out --output-format json csv pftrace otf2 --log-level env --
+            out --output-format json rocpd --log-level env --
             $<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>
         DEPENDS rocshmem-demo
         TIMEOUT 60
@@ -95,12 +96,8 @@ if(TARGET rocshmem-demo)
         CONFIG pytest.ini
         ARGS --json-input
              ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.json
-             --otf2-input
-             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.otf2
-             --pftrace-input
-             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.pftrace
-             --csv-input
-             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_rocshmem_api_trace.csv
+             --rocpd-input
+             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.db
         TIMEOUT 45
         LABELS "integration-tests"
         FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
