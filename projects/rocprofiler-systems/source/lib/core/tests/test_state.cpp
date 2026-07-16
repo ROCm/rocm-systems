@@ -3,72 +3,24 @@
 
 #include "core/state.hpp"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <memory>
 #include <stdexcept>
 #include <thread>
 
 namespace
 {
-using process_state_value = rocprofsys::process_lifecycle_state;
+using rocprofsys::process_state;
 using rocprofsys::thread_state;
-using thread_state_value = rocprofsys::thread_state::State;
-
-// basic_process_state<Policy> calls Policy::get_debug_init() as a static call, so
-// per the policy-based-DI GMock pattern we use a thin static wrapper that forwards
-// to a global GMock instance (GMock mocks are non-copyable and cannot be stored as a
-// template value member).
-struct gmock_config_policy
-{
-    MOCK_METHOD(bool, get_debug_init, ());
-};
-
-std::unique_ptr<::testing::StrictMock<gmock_config_policy>> g_config_policy_mock;
-
-struct mock_config_policy
-{
-    static bool get_debug_init() { return g_config_policy_mock->get_debug_init(); }
-};
-
-using test_process_state = rocprofsys::basic_process_state<mock_config_policy>;
-
-// Second, independent policy type used only to prove that distinct Policy
-// instantiations of basic_process_state do not share storage.
-struct gmock_config_policy_b
-{
-    MOCK_METHOD(bool, get_debug_init, ());
-};
-
-std::unique_ptr<::testing::StrictMock<gmock_config_policy_b>> g_config_policy_mock_b;
-
-struct mock_config_policy_b
-{
-    static bool get_debug_init() { return g_config_policy_mock_b->get_debug_init(); }
-};
-
-using test_process_state_b = rocprofsys::basic_process_state<mock_config_policy_b>;
+using process_state_value = rocprofsys::process_state::State;
+using thread_state_value  = rocprofsys::thread_state::State;
 
 class ProcessStateTest : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        g_config_policy_mock =
-            std::make_unique<::testing::StrictMock<gmock_config_policy>>();
-        EXPECT_CALL(*g_config_policy_mock, get_debug_init())
-            .Times(::testing::AnyNumber())
-            .WillRepeatedly(::testing::Return(false));
+    void SetUp() override { process_state::reset(); }
 
-        test_process_state::reset();
-    }
-
-    void TearDown() override
-    {
-        test_process_state::reset();
-        g_config_policy_mock.reset();
-    }
+    void TearDown() override { process_state::reset(); }
 };
 
 class ThreadStateTest : public ::testing::Test
@@ -80,88 +32,31 @@ protected:
 
 TEST_F(ProcessStateTest, default_state_is_pre_init)
 {
-    EXPECT_EQ(test_process_state::get(), process_state_value::PreInit);
+    EXPECT_EQ(process_state::get(), process_state_value::PreInit);
 }
 
 TEST_F(ProcessStateTest, set_advances_state_and_returns_previous)
 {
-    auto _prior = test_process_state::set(process_state_value::Init);
+    auto _prior = process_state::set(process_state_value::Init);
     EXPECT_EQ(_prior, process_state_value::PreInit);
-    EXPECT_EQ(test_process_state::get(), process_state_value::Init);
+    EXPECT_EQ(process_state::get(), process_state_value::Init);
 }
 
 TEST_F(ProcessStateTest, set_to_lesser_value_throws_and_state_is_unchanged)
 {
-    test_process_state::set(process_state_value::Active);
+    process_state::set(process_state_value::Active);
 
-    EXPECT_THROW(test_process_state::set(process_state_value::Init), std::runtime_error);
-    EXPECT_EQ(test_process_state::get(), process_state_value::Active);
-}
-
-TEST_F(ProcessStateTest, set_invokes_policy_get_debug_init)
-{
-    // Times(AtLeast(1)), not Times(1): once this expectation is set, it becomes the
-    // matching expectation for every subsequent get_debug_init() call in this test
-    // (GMock resolves overlapping expectations by matching the most-recently-set one
-    // first, and keeps using it -- it does not fall back to an older expectation
-    // once this one is "used up"). TearDown()'s reset() call triggers one more call
-    // after this test body's, so an exact Times(1) would over-saturate.
-    EXPECT_CALL(*g_config_policy_mock, get_debug_init())
-        .Times(::testing::AtLeast(1))
-        .WillRepeatedly(::testing::Return(false));
-
-    test_process_state::set(process_state_value::Active);
+    EXPECT_THROW(process_state::set(process_state_value::Init), std::runtime_error);
+    EXPECT_EQ(process_state::get(), process_state_value::Active);
 }
 
 TEST_F(ProcessStateTest, reset_bypasses_validation_and_returns_to_pre_init)
 {
-    test_process_state::set(process_state_value::Finalized);
+    process_state::set(process_state_value::Finalized);
 
-    auto _prior = test_process_state::reset();
+    auto _prior = process_state::reset();
     EXPECT_EQ(_prior, process_state_value::Finalized);
-    EXPECT_EQ(test_process_state::get(), process_state_value::PreInit);
-}
-
-TEST_F(ProcessStateTest, reset_invokes_policy_get_debug_init)
-{
-    test_process_state::set(process_state_value::Active);
-
-    // See the comment in set_invokes_policy_get_debug_init for why this is
-    // AtLeast(1) rather than an exact Times(1): TearDown()'s own reset() call
-    // triggers one more matching call after this test body's.
-    EXPECT_CALL(*g_config_policy_mock, get_debug_init())
-        .Times(::testing::AtLeast(1))
-        .WillRepeatedly(::testing::Return(false));
-
-    test_process_state::reset();
-}
-
-TEST(ProcessStateStorageTest, distinct_policy_types_have_independent_storage)
-{
-    g_config_policy_mock = std::make_unique<::testing::StrictMock<gmock_config_policy>>();
-    g_config_policy_mock_b =
-        std::make_unique<::testing::StrictMock<gmock_config_policy_b>>();
-    EXPECT_CALL(*g_config_policy_mock, get_debug_init())
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(*g_config_policy_mock_b, get_debug_init())
-        .Times(::testing::AnyNumber())
-        .WillRepeatedly(::testing::Return(false));
-
-    test_process_state::reset();
-    test_process_state_b::reset();
-
-    test_process_state::set(process_state_value::Active);
-
-    EXPECT_EQ(test_process_state::get(), process_state_value::Active);
-    EXPECT_EQ(test_process_state_b::get(), process_state_value::PreInit)
-        << "basic_process_state<PolicyB> must not share storage with "
-           "basic_process_state<PolicyA>";
-
-    test_process_state::reset();
-    test_process_state_b::reset();
-    g_config_policy_mock.reset();
-    g_config_policy_mock_b.reset();
+    EXPECT_EQ(process_state::get(), process_state_value::PreInit);
 }
 
 TEST_F(ThreadStateTest, default_state_is_enabled)
@@ -260,16 +155,16 @@ TEST(StateFormatterTest, thread_lifecycle_state)
 
 TEST(StateFormatterTest, process_mode)
 {
-    using rocprofsys::process_mode;
-    EXPECT_EQ(fmt::format("{}", process_mode::Trace), "Trace");
-    EXPECT_EQ(fmt::format("{}", process_mode::Sampling), "Sampling");
-    EXPECT_EQ(fmt::format("{}", process_mode::Causal), "Causal");
-    EXPECT_EQ(fmt::format("{}", process_mode::Coverage), "Coverage");
+    using rocprofsys::mode::process;
+    EXPECT_EQ(fmt::format("{}", process::Trace), "Trace");
+    EXPECT_EQ(fmt::format("{}", process::Sampling), "Sampling");
+    EXPECT_EQ(fmt::format("{}", process::Causal), "Causal");
+    EXPECT_EQ(fmt::format("{}", process::Coverage), "Coverage");
 }
 
 TEST(StateFormatterTest, process_causal_mode)
 {
-    using rocprofsys::process_causal_mode;
-    EXPECT_EQ(fmt::format("{}", process_causal_mode::Line), "Line");
-    EXPECT_EQ(fmt::format("{}", process_causal_mode::Function), "Function");
+    using rocprofsys::mode::process_causal;
+    EXPECT_EQ(fmt::format("{}", process_causal::Line), "Line");
+    EXPECT_EQ(fmt::format("{}", process_causal::Function), "Function");
 }

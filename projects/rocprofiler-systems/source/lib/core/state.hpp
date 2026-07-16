@@ -17,9 +17,10 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
+namespace rocprofsys::state
 {
-enum class process_lifecycle_state : std::uint16_t
+
+enum class process_lifecycle : std::uint16_t
 {
     PreInit = 0,
     Init,
@@ -28,15 +29,19 @@ enum class process_lifecycle_state : std::uint16_t
     Disabled,
 };
 
-enum class thread_lifecycle_state : std::uint16_t
+enum class thread_lifecycle : std::uint16_t
 {
     Enabled = 0,
     Internal,
     Completed,
     Disabled,
 };
+}  // namespace rocprofsys::state
 
-enum class process_mode : std::uint16_t
+namespace rocprofsys::mode
+{
+
+enum class process : std::uint16_t
 {
     Trace = 0,
     Sampling,
@@ -44,88 +49,94 @@ enum class process_mode : std::uint16_t
     Coverage,
 };
 
-enum class process_causal_backend : std::uint16_t
+enum class process_causal : std::uint16_t
+{
+    Line = 0,
+    Function,
+};
+}  // namespace rocprofsys::mode
+
+namespace rocprofsys::backend
+{
+enum class causal : std::uint16_t
 {
     Perf = 0,
     Timer,
     Auto,
 };
 
-enum class process_causal_mode : std::uint16_t
-{
-    Line = 0,
-    Function,
-};
-}  // namespace rocprofsys
+}  // namespace rocprofsys::backend
 
 template <>
-struct fmt::formatter<rocprofsys::process_lifecycle_state>
+struct fmt::formatter<rocprofsys::state::process_lifecycle>
 : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_lifecycle_state pl_state, FormatContext& ctx) const
+    auto format(rocprofsys::state::process_lifecycle pl_state, FormatContext& ctx) const
     {
         std::string_view str = {};
         switch(pl_state)
         {
-            case rocprofsys::process_lifecycle_state::PreInit: str = "PreInit"; break;
-            case rocprofsys::process_lifecycle_state::Init: str = "Init"; break;
-            case rocprofsys::process_lifecycle_state::Active: str = "Active"; break;
-            case rocprofsys::process_lifecycle_state::Disabled: str = "Disabled"; break;
-            case rocprofsys::process_lifecycle_state::Finalized: str = "Finalized"; break;
+            case rocprofsys::state::process_lifecycle::PreInit: str = "PreInit"; break;
+            case rocprofsys::state::process_lifecycle::Init: str = "Init"; break;
+            case rocprofsys::state::process_lifecycle::Active: str = "Active"; break;
+            case rocprofsys::state::process_lifecycle::Disabled: str = "Disabled"; break;
+            case rocprofsys::state::process_lifecycle::Finalized:
+                str = "Finalized";
+                break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<rocprofsys::thread_lifecycle_state>
+struct fmt::formatter<rocprofsys::state::thread_lifecycle>
 : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::thread_lifecycle_state tl_state, FormatContext& ctx) const
+    auto format(rocprofsys::state::thread_lifecycle tl_state, FormatContext& ctx) const
     {
         std::string_view str = {};
         switch(tl_state)
         {
-            case rocprofsys::thread_lifecycle_state::Enabled: str = "Enabled"; break;
-            case rocprofsys::thread_lifecycle_state::Internal: str = "Internal"; break;
-            case rocprofsys::thread_lifecycle_state::Completed: str = "Completed"; break;
-            case rocprofsys::thread_lifecycle_state::Disabled: str = "Disabled"; break;
+            case rocprofsys::state::thread_lifecycle::Enabled: str = "Enabled"; break;
+            case rocprofsys::state::thread_lifecycle::Internal: str = "Internal"; break;
+            case rocprofsys::state::thread_lifecycle::Completed: str = "Completed"; break;
+            case rocprofsys::state::thread_lifecycle::Disabled: str = "Disabled"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<rocprofsys::process_mode> : fmt::formatter<std::string_view>
+struct fmt::formatter<rocprofsys::mode::process> : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_mode p_mode, FormatContext& ctx) const
+    auto format(rocprofsys::mode::process p_mode, FormatContext& ctx) const
     {
         std::string_view str = {};
         switch(p_mode)
         {
-            case rocprofsys::process_mode::Trace: str = "Trace"; break;
-            case rocprofsys::process_mode::Sampling: str = "Sampling"; break;
-            case rocprofsys::process_mode::Causal: str = "Causal"; break;
-            case rocprofsys::process_mode::Coverage: str = "Coverage"; break;
+            case rocprofsys::mode::process::Trace: str = "Trace"; break;
+            case rocprofsys::mode::process::Sampling: str = "Sampling"; break;
+            case rocprofsys::mode::process::Causal: str = "Causal"; break;
+            case rocprofsys::mode::process::Coverage: str = "Coverage"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<rocprofsys::process_causal_mode> : fmt::formatter<std::string_view>
+struct fmt::formatter<rocprofsys::mode::process_causal> : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_causal_mode c_mode, FormatContext& ctx) const
+    auto format(rocprofsys::mode::process_causal c_mode, FormatContext& ctx) const
     {
         std::string_view str = {};
         switch(c_mode)
         {
-            case rocprofsys::process_causal_mode::Line: str = "Line"; break;
-            case rocprofsys::process_causal_mode::Function: str = "Function"; break;
+            case rocprofsys::mode::process_causal::Line: str = "Line"; break;
+            case rocprofsys::mode::process_causal::Function: str = "Function"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
@@ -137,10 +148,10 @@ namespace rocprofsys
 class process_state final
 {
 public:
-    using State         = process_lifecycle_state;
-    using Mode          = process_mode;
-    using CausalBackend = process_causal_backend;
-    using CausalMode    = process_causal_mode;
+    using State         = state::process_lifecycle;
+    using Mode          = mode::process;
+    using CausalBackend = backend::causal;
+    using CausalMode    = mode::process_causal;
 
     process_state()                                = delete;
     process_state(const process_state&)            = delete;
@@ -188,7 +199,7 @@ private:
 class thread_state final
 {
 public:
-    using State = thread_lifecycle_state;
+    using State = state::thread_lifecycle;
 
     thread_state()                               = delete;
     thread_state(const thread_state&)            = delete;
