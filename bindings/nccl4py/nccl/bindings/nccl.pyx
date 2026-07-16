@@ -3797,14 +3797,14 @@ cpdef object get_library_path():
 cpdef str param_get_parameter(str key):
     cdef const char* value
     cdef int value_len
-    cdef bytes _key = key.encode()
-    cdef const char* _key_ptr = _key
-    cdef int status
+    cdef bytes key_bytes = key.encode()
+    cdef const char* key_ptr = key_bytes
     with nogil:
-        status = <int>ncclParamGetParameter(_key_ptr, &value, &value_len)
-    if status != 0:
+        __status__ = ncclParamGetParameter(key_ptr, &value, &value_len)
+    if __status__ == Result.InvalidArgument:
         raise KeyError(key)
-    return value.decode()
+    check_status(__status__)
+    return value[:value_len].decode()
 
 
 cpdef list param_get_all_keys():
