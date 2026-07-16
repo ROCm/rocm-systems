@@ -13,8 +13,8 @@
 #include <D3D10.h>
 #include <dxgi.h>
 #include <mutex>
-#include <unordered_map>
 
+#include "platform/context.hpp"
 #include "platform/DxxInteropExt.h"
 #include "platform/interop_d3d10.hpp"
 
@@ -22,10 +22,27 @@ namespace amd {
 namespace roc {
 namespace D3D10Interop {
 
-static std::unordered_map<const Device*, CachedExt> gExtCache;
-static std::mutex gExtCacheLock;
+static PFNAmdDxExtCreate gAmdDxExtCreate = nullptr;
+static std::once_flag gAmdDxExtCreateFlag;
 
-bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
+static PFNAmdDxExtCreate GetAmdDxExtCreate() {
+  std::call_once(gAmdDxExtCreateFlag, []() {
+#if defined _WIN64
+    static constexpr CHAR dxxModuleName[13] = "atidxx64.dll";
+#else
+    static constexpr CHAR dxxModuleName[13] = "atidxx32.dll";
+#endif
+    HMODULE hDLL = GetModuleHandle(dxxModuleName);
+    if (hDLL) {
+      gAmdDxExtCreate = reinterpret_cast<PFNAmdDxExtCreate>(
+          GetProcAddress(hDLL, "AmdDxExtCreate"));
+    }
+  });
+  return gAmdDxExtCreate;
+}
+
+bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
+                          void* gfxContext, bool validateOnly) {
   if (!device || !pd3d10Device) {
     return false;
   }
@@ -63,69 +80,73 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
     return false;
   }
 
-  // Create and cache AMD DXX extension objects for this device
-#if defined _WIN64
-  static constexpr CHAR dxxModuleName[13] = "atidxx64.dll";
-#else
-  static constexpr CHAR dxxModuleName[13] = "atidxx32.dll";
-#endif
-
-  HMODULE hDLL = GetModuleHandle(dxxModuleName);
-  if (!hDLL) {
-    LogError("atidxx DLL not loaded; D3D10 SRD queries will be unavailable");
-    return true;  // LUID matched; proceed without SRD support
-  }
-
-  PFNAmdDxExtCreate AmdDxExtCreate =
-      reinterpret_cast<PFNAmdDxExtCreate>(GetProcAddress(hDLL, "AmdDxExtCreate"));
-  if (!AmdDxExtCreate) {
+  if (validateOnly) {
     return true;
   }
 
-  IAmdDxExt* pExt = nullptr;
-  hr = AmdDxExtCreate(pd3d10Device, &pExt);
-  if (FAILED(hr) || !pExt) {
+  amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
+  if (ctx->getD3D10Ext(pd3d10Device)) {
     return true;
   }
 
-  IAmdDxExtCLInterop* pCLExt =
-      static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
-  if (!pCLExt) {
-    pExt->Release();
-    return true;
+  PFNAmdDxExtCreate AmdDxExtCreate = GetAmdDxExtCreate();
+  if (AmdDxExtCreate) {
+    IAmdDxExt* pExt = nullptr;
+    HRESULT hr = AmdDxExtCreate(pd3d10Device, &pExt);
+    if (SUCCEEDED(hr) && pExt) {
+      IAmdDxExtCLInterop* pCLExt =
+          static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
+      if (pCLExt) {
+        ctx->setD3D10Ext(pd3d10Device, pExt, pCLExt);
+      } else {
+        pExt->Release();
+      }
+    }
   }
-
-  std::lock_guard<std::mutex> sl(gExtCacheLock);
-  gExtCache[device] = {pExt, pCLExt};
 
   return true;
 }
 
-void dissociateD3D10Device(const Device* device) {
-  std::lock_guard<std::mutex> sl(gExtCacheLock);
-  auto it = gExtCache.find(device);
-  if (it != gExtCache.end()) {
-    if (it->second.pCLExt) it->second.pCLExt->Release();
-    if (it->second.pExt) it->second.pExt->Release();
-    gExtCache.erase(it);
+void dissociateD3D10Device(const Device* device, void* const gfxDevice[], void* gfxContext) {
+  if (!gfxDevice || !gfxContext) return;
+  void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
+  if (!d3d10Device) return;
+
+  amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
+  void* pExt = nullptr;
+  void* pCLExt = nullptr;
+  if (ctx->removeD3D10Ext(d3d10Device, &pExt, &pCLExt)) {
+    if (pCLExt) static_cast<IAmdDxExtCLInterop*>(pCLExt)->Release();
+    if (pExt)   static_cast<IAmdDxExt*>(pExt)->Release();
   }
 }
 
-bool Export(const Memory* memory, ID3D10Resource* d3d10Resource,
-            UINT subresource, hsa_handle_t* handle, int* offset,
+bool Export(const Memory* memory, D3D10Object* d3d10Obj,
+            hsa_handle_t* handle, int* offset,
             void* srd, UINT* srdSize, hsa_interop_map_flag_t* mapFlags) {
+  auto d3d10Resource = d3d10Obj->getD3D10Resource();
   if (!memory || !d3d10Resource || !handle || !offset || !mapFlags) {
     return false;
   }
 
-  // Use cached extension to query SRD
   if (srd && srdSize) {
-    std::lock_guard<std::mutex> sl(gExtCacheLock);
-    auto it = gExtCache.find(&memory->dev());
-    if (it != gExtCache.end() && it->second.pCLExt) {
-      HRESULT hr = it->second.pCLExt->CLQueryResource(d3d10Resource, srd, srdSize);
+    ID3D10Device* pOwnerDevice = nullptr;
+    d3d10Resource->GetDevice(&pOwnerDevice);
+    if (pOwnerDevice) {
+      amd::Context& ctx = memory->owner()->getContext();
+      IAmdDxExtCLInterop* pCLExt =
+          static_cast<IAmdDxExtCLInterop*>(ctx.getD3D10Ext(pOwnerDevice));
+      pOwnerDevice->Release();
+
+      if (!pCLExt) {
+        LogError("D3D10 device not associated with context; call clCreateContext with D3D10 device");
+        return false;
+      }
+
+      HRESULT hr = pCLExt->CLQueryResource(d3d10Resource, 0, srd, srdSize);
       if (FAILED(hr)) {
-        LogError("CLQueryResource failed for D3D10 resource");
+        LogPrintfError("CLQueryResource failed for D3D10 resource: 0x%xh", hr);
+        return false;
       }
     }
   }

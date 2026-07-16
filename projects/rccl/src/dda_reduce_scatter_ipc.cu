@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include "dda_reduce_scatter_ipc.h"
+#include "dda_reduce_scatter.h"
 
 #include "algorithms/CollCommon.h"
 #include "algorithms/reduce_scatter/reduce_scatter_dda.h"
@@ -12,7 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "ipc_gpu_barrier.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 #include <cuda_runtime.h>
 
@@ -23,9 +23,9 @@
 
 namespace {
 
-using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_ipc_detail::kDdaNranks;
+using nccl_dda_detail::DdaIpcBarrierState;
+using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaIpcTyped(
@@ -34,18 +34,18 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(
     size_t recvcount,
     ncclComm* comm,
     cudaStream_t stream) {
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr ||
+      comm->ddaPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
 
   const size_t totalCount = recvcount * comm->nRanks;
-  if (totalCount * sizeof(T) > comm->ddaIpcScratchBytes) {
+  if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
     WARN(
         "DDA IPC reduce-scatter: total element count %zu needs %zu bytes; comm scratch is %zu bytes",
         totalCount,
         totalCount * sizeof(T),
-        comm->ddaIpcScratchBytes);
+        comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -59,11 +59,11 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(
       static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   meta::comms::IpcGpuBarrier barrierHost = barrierState->barrierHost;
 
-  void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
+  void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(
-        comm->ddaIpcScratch,
+        comm->ddaScratch,
         sendbuff,
         totalCount * sizeof(T),
         cudaMemcpyDeviceToDevice,
@@ -93,8 +93,8 @@ bool ncclReduceScatterDdaIpcEligible(
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr ||
+      comm->ddaPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
   if (recvcount == 0) {
@@ -103,7 +103,7 @@ bool ncclReduceScatterDdaIpcEligible(
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_ipc_detail::kDdaNranks) {
+  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
     return false;
   }
   if (op != ncclSum) {
@@ -116,7 +116,7 @@ bool ncclReduceScatterDdaIpcEligible(
 
   size_t totalCount = recvcount * comm->nRanks;
   size_t need = totalCount * ncclTypeSize(datatype);
-  if (need > comm->ddaIpcScratchBytes) {
+  if (need > comm->ddaScratchBytes) {
     return false;
   }
 

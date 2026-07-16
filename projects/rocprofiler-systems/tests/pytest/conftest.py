@@ -39,6 +39,7 @@ from rocprofsys import (
     get_target_gpu_arch,
     get_xnack_support,
     TestResult,
+    ValidationResult,
     validate_regex,
     validate_file_regex,
     validate_perfetto_trace,
@@ -86,9 +87,6 @@ ROCPROFSYS_RUNNER_CLASSES = {
 }
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
-
-# rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
-KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
 
 # ============================================================================
 #
@@ -196,6 +194,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "rocprofiler_sdk_min_version(version): mark test as requiring minimum rocprofiler-sdk version",
     )
     config.addinivalue_line(
         "markers",
@@ -505,8 +507,11 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = ainic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "kfd" in item.keywords or "unified_memory" in item.keywords:
-            _msg = kfd_unavailable_reason(rocprof_config)
+        if "rocprofiler_sdk_min_version" in item.keywords:
+            req_version = item.get_closest_marker("rocprofiler_sdk_min_version").args[0]
+            _msg = rocprofiler_sdk_min_version_unavailable_reason(
+                rocprof_config, req_version
+            )
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
@@ -764,14 +769,25 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     return None
 
 
-def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    sdk = rocprof_config.capabilities.rocprofiler_sdk_version
-    if sdk is not None and sdk >= KFD_MIN_SDK_VERSION:
+def rocprofiler_sdk_min_version_unavailable_reason(
+    rocprof_config: RocprofsysConfig, req_version: str
+) -> Optional[str]:
+    """Return a skip reason if the detected rocprofiler-sdk is older than req_version.
+
+    ``req_version`` is a dotted version string (e.g. ``"1.2.2"``) supplied by the
+    test via the ``rocprofiler_sdk_min_version`` marker.
+    """
+    system_version = rocprof_config.capabilities.rocprofiler_sdk_version
+    min_parts = req_version.split(".")
+    min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
+    if system_version is not None and system_version >= min_tuple:
         return None
-    _req = ".".join(map(str, KFD_MIN_SDK_VERSION))
-    _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
+    _found = (
+        ".".join(map(str, system_version)) if system_version is not None else "not found"
+    )
     return (
-        f"Requires rocprofiler-sdk minimum {_req}, but system detected version {_found}"
+        f"Requires rocprofiler-sdk minimum {req_version}, "
+        f"but system detected version {_found}"
     )
 
 
@@ -1173,6 +1189,7 @@ def _ctest_generate_tests(
         "rocm_min_version",
         "amdsmi_min_version",
         "amdgpu_min_version",
+        "rocprofiler_sdk_min_version",
         "run_if_gpu_category",
         "preserve",
         # For CTests
@@ -2376,8 +2393,8 @@ def assert_rocpd(subtests, tests_dir, request):
         with subtests.test(subtest_name):
             if not check_use_rocpd():
                 pytest.skip("ROCpd is disabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
+            rocpd_files = result.rocpd_files
+            if not rocpd_files:
                 pytest.fail("ROCpd database not created")
 
             existing_rules = None
@@ -2386,35 +2403,79 @@ def assert_rocpd(subtests, tests_dir, request):
                 if not existing_rules:
                     pytest.fail("No validation rules found")
 
-            validation = validate_rocpd_database(
-                rocpd_file,
-                tests_dir=tests_dir,
-                rules_files=existing_rules,
-                timeout=timeout,
-                gpu_category_to_skip=gpu_category_to_skip,
+            def validate_candidate(rocpd_file: Path) -> ValidationResult:
+                return validate_rocpd_database(
+                    rocpd_file,
+                    tests_dir=tests_dir,
+                    rules_files=existing_rules,
+                    timeout=timeout,
+                    gpu_category_to_skip=gpu_category_to_skip,
+                )
+
+            passing_output, failures, global_failure = _validate_rocpd_candidates(
+                rocpd_files,
+                validate_candidate,
+                pass_regex=pass_regex,
+                fail_regex=fail_regex,
             )
-            output = f"Command: {validation.command}\n\n{validation.message}"
-            if not validation.is_valid:
+
+            if global_failure is not None:
+                msg = fail_message or f"ROCpd validation failed:\n{global_failure}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg, pytrace=False)
+            elif passing_output is None:
+                output = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
                 msg = fail_message or f"ROCpd validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    pytest.fail(msg)
-            if pass_regex:
-                for pattern in pass_regex:
-                    if not re.search(pattern, validation.stdout):
-                        pytest.fail(
-                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
-                        )
-            if fail_regex:
-                for pattern in fail_regex:
-                    if re.search(pattern, validation.stdout):
-                        pytest.fail(
-                            f"Fail regex found: {pattern}\n{output}", pytrace=False
-                        )
-            _print_subtest_output(request, subtest_name, output)
+                    pytest.fail(msg, pytrace=False)
+            _print_subtest_output(request, subtest_name, passing_output)
 
     return _assert_rocpd
+
+
+def _validate_rocpd_candidates(
+    rocpd_files: list[Path],
+    validate_candidate: Callable[[Path], ValidationResult],
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+) -> tuple[Optional[str], list[str], Optional[str]]:
+    """Validate ROCpd candidates and return the first passing output.
+
+    Multi-process runs can emit multiple ROCpd databases. Some rank-local
+    databases may not contain the GPU rows required by a rule set, so the
+    validation succeeds if any emitted candidate fully validates. A fail regex
+    match is a global failure and stops validation immediately.
+    """
+    failures: list[str] = []
+
+    for rocpd_file in rocpd_files:
+        validation = validate_candidate(rocpd_file)
+        output = f"Command: {validation.command}\n\n{validation.message}"
+        if fail_regex:
+            for pattern in fail_regex:
+                if re.search(pattern, validation.stdout):
+                    return None, failures, f"Fail regex found: {pattern}\n{output}"
+        if not validation.is_valid:
+            failures.append(output)
+            continue
+
+        regex_failure = None
+        if pass_regex:
+            for pattern in pass_regex:
+                if not re.search(pattern, validation.stdout):
+                    regex_failure = f"Pass regex not found: {pattern}"
+                    break
+        if regex_failure is not None:
+            failures.append(f"{regex_failure}\n{output}")
+            continue
+
+        return output, failures, None
+
+    return None, failures, None
 
 
 @pytest.fixture

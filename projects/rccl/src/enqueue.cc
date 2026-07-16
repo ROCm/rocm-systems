@@ -1168,7 +1168,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Use collAPI (collective type) rather than per-rank task counts so both
+      // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
+      bool asymmetric = p2pTasks[dir] &&
+        (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;
@@ -1242,7 +1247,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Use collAPI (collective type) rather than per-rank task counts so both
+      // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
+      bool asymmetric = p2pTasks[dir] &&
+        (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;

@@ -22,6 +22,9 @@
 #else
 #include "gin/gin_host.h"
 #endif
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
 #include "argcheck.h"
 #include <mutex>
 
@@ -1588,6 +1591,8 @@ ncclResult_t ncclDevrCommCreateInternal(
   struct ncclDevrWindow* win = nullptr;
   struct ncclWindow_vidmem* winHost = nullptr;
   size_t ginSignalShadowsOffset = 0;
+  size_t ginAnvilNetSignalsOffset = 0;
+  int nGinContextsTotal = 0;
   void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
 
@@ -1706,6 +1711,15 @@ ncclResult_t ncclDevrCommCreateInternal(
     bufSizeTotal= alignUp(bufSizeTotal, 128);
     ginSignalShadowsOffset = bufSizeTotal;
     bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
+    ginAnvilNetSignalsOffset = bufSizeTotal;
+    if (devr->ginEnabled && ginSignalTotal > 0) {
+      int ginCommCount = comm->sharedRes->ginState.ginCommCount;
+      if (ginCommCount < 1) ginCommCount = 1;
+      nGinContextsTotal = ROUNDUP(nGinContexts, ginCommCount);
+      bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t);
+    } else {
+      nGinContextsTotal = nGinContexts;
+    }
     bufSizeTotal = alignUp(bufSizeTotal, devr->granularity);
   }
 
@@ -1713,6 +1727,14 @@ ncclResult_t ncclDevrCommCreateInternal(
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECK(ncclGinDevCommSetup(comm, reqs, outDevComm));
+#ifdef ENABLE_ROCSHMEM_GIN
+    if (ginSignalTotal > 0 && devr->winSortedCount > 0) {
+      struct ncclDevrWindow* win0 = devr->winSorted[0].win;
+      NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win0->userPtr, ginAnvilNetSignalsOffset,
+                                                          nGinContextsTotal, ginSignalTotal),
+                    ret, fail);
+    }
+#endif
   }
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
@@ -2196,6 +2218,7 @@ ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, in
   return ncclSuccess;
 }
 
+
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));
@@ -2432,4 +2455,56 @@ static void listRemove(Obj* list, int* count, int index) {
     list[i] = list[i+1];
   }
   *count -= 1;
+}
+
+// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
+  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
+  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+  uintptr_t flatEnd  = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
+
+  // Already in the LSA flat range (resource window case)
+  if (a >= flatBase && a < flatEnd) {
+    *outAddr = addr;
+    return ncclSuccess;
+  }
+
+  // Search memHead for a memory whose primaryAddr matches (ncclMemAlloc case)
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
+    if (a >= mbase && a < mbase + mem->size) {
+      size_t off = a - mbase;
+      *outAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset + off;
+      return ncclSuccess;
+    }
+  }
+
+  *outAddr = nullptr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr,
+                                          uintptr_t* outLsaFlatBase, uint32_t* outStride4G) {
+  if (!devr || !addr || !outLsaFlatBase || !outStride4G) return ncclInvalidArgument;
+  if (devr->lsaFlatBase == nullptr || devr->bigSize == 0) return ncclInvalidArgument;
+
+  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
+  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
+    if (mbase != 0 && a >= mbase && a < mbase + mem->size) {
+      *outLsaFlatBase = flatBase + mem->bigOffset;
+      *outStride4G = static_cast<uint32_t>(devr->bigSize >> 32);
+      return ncclSuccess;
+    }
+    uintptr_t localFlat = flatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset;
+    if (a >= localFlat && a < localFlat + mem->size) {
+      *outLsaFlatBase = flatBase + mem->bigOffset;
+      *outStride4G = static_cast<uint32_t>(devr->bigSize >> 32);
+      return ncclSuccess;
+    }
+  }
+
+  return ncclInvalidArgument;
 }

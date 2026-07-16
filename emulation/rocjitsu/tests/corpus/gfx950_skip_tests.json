@@ -5,11 +5,13 @@
   "cts": [
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_gfx950_test",
+    "cts.gfx950.fpsan.fpsan_cvt_scalef32_mx_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp4_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp6_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp8vec_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_sr_gfx950_test",
     "cts.gfx950.fpsan.fpsan_atomic_test",
+    "cts.gfx950.fpsan.fpsan_classify_test",
     "cts.gfx950.fpsan.fpsan_hip_device_test",
     "cts.gfx950.fpsan.fpsan_wave_test",
     "cts.gfx950.fpsan.fpsan_amdgcn_math_test",

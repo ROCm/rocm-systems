@@ -452,6 +452,10 @@ rocprofiler-sdk:
           event: 23
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: CPF
           event: 24
     - name: CPF_CPF_STAT_IDLE
@@ -860,6 +864,10 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: GL1A
           event: 0
     - name: GL1A_CYCLE
@@ -870,6 +878,13 @@ rocprofiler-sdk:
             - gfx1250
           block: GL1A
           event: 77
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1A
+          event: 23
     - name: GL1C_GL2_REQ_READ_LEVEL
       description: Number of cycles in-flight for reads, atomics with return, NOP_RTN0. Average GL2 
         read latency = GL1C_PERF_SEL_GL2_REQ_READ_LEVEL/SUM_OF_REQ_COUNTERS
@@ -7123,6 +7138,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 54
         - architectures:
@@ -7153,6 +7172,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 55
         - architectures:
@@ -7348,6 +7371,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 49
         - architectures:
