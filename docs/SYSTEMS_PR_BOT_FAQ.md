@@ -1,6 +1,6 @@
 # Systems PR Bot — Policy FAQ Doc
 
-**Systems PR Bot** is an automated Pull Request (PR) gatekeeper.
+**TheRock PR Bot** is an automated Pull Request (PR) gatekeeper.
 On every Pull Request, it runs a set of policy checks — branch naming,
 title/description, forbidden files, unit tests, and required CI checks —
 then posts a single results table comment summarising what passed or failed.
