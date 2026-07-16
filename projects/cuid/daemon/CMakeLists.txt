@@ -66,6 +66,13 @@ target_compile_definitions(
     PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
 
+# Link against the CUID library
+target_link_libraries(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    amdcuid_static
+    Threads::Threads
+)
+
 # Platform-specific config directory
 if(WIN32)
     set(CONFIG_INSTALL_DIR "etc") # Relative to prefix

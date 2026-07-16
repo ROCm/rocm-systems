@@ -113,7 +113,7 @@ jobs:
           cd $BUILD_FOLDER
 
           # Configure
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }} -DBUILD_TESTS=ON
+          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
 
           # Build
           make -j $(nproc)
@@ -121,6 +121,9 @@ jobs:
           # Install
           # This requires sudo or root, container runs as root
           make install
+
+          # run post install step
+          /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
 
       - name: Run CUID Tests
         run: |
@@ -132,10 +135,10 @@ jobs:
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
 
           # set up environment for test execution
-          /opt/amdcuid/bin/amdcuid_daemon &
+          /opt/rocm/core/bin/amdcuid_daemon &
 
           # Run the test binary
-          if /opt/amdcuid/share/amd_cuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
+          if /opt/rocm/core/share/amdcuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
           else
              echo "CUID tests failed"
