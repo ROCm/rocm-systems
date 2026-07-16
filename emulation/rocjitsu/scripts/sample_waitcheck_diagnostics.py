@@ -96,6 +96,51 @@ def code_object_distribution(records: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def kernel_family(name: str | None) -> str:
+    """Return the encoded qualified function name without template arguments.
+
+    PyTorch kernel names normally use the Itanium ABI. Reading the length-prefixed
+    nested-name components groups concrete template instantiations without making
+    the sampling script depend on a particular c++filt installation.
+    """
+    if name is None:
+        return "<unknown>"
+    if not name.startswith("_ZN"):
+        return name.split("<", 1)[0]
+
+    components: list[str] = []
+    cursor = 3
+    while cursor < len(name) and name[cursor] != "E":
+        length_begin = cursor
+        while cursor < len(name) and name[cursor].isdigit():
+            cursor += 1
+        if length_begin == cursor:
+            break
+        length = int(name[length_begin:cursor])
+        component_end = cursor + length
+        if component_end > len(name):
+            break
+        components.append(name[cursor:component_end])
+        cursor = component_end
+    return "::".join(components) if components else name
+
+
+def kernel_family_distribution(records: list[dict[str, Any]]) -> dict[str, int]:
+    counts = collections.Counter(
+        kernel_family(record["kernel_name"]) for record in records
+    )
+    return dict(sorted(counts.items()))
+
+
+def instruction_pair_distribution(records: list[dict[str, Any]]) -> dict[str, int]:
+    counts = collections.Counter(
+        f"{record['producer_instruction'].split(maxsplit=1)[0]} -> "
+        f"{record['instruction'].split(maxsplit=1)[0]}"
+        for record in records
+    )
+    return dict(sorted(counts.items()))
+
+
 def sha256_file(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -129,6 +174,10 @@ def write_triage_markdown(path: pathlib.Path, records: list[dict[str, Any]]) -> 
                 f"`{markdown_code(record['kernel_entry_hex'])}`\n"
             )
             stream.write(f"- Kernel: `{markdown_code(record['kernel_name'])}`\n")
+            stream.write(
+                f"- Kernel template family: "
+                f"`{markdown_code(kernel_family(record['kernel_name']))}`\n"
+            )
             stream.write(
                 f"- Hazard: `{markdown_code(record['counter'])}` / "
                 f"`{markdown_code(record['access'])}`, required count "
@@ -256,11 +305,17 @@ def main() -> int:
             "counter": distribution(population, "counter"),
             "access": distribution(population, "access"),
             "code_object": code_object_distribution(population),
+            "kernel": distribution(population, "kernel_name"),
+            "kernel_family": kernel_family_distribution(population),
+            "instruction_pair": instruction_pair_distribution(population),
         },
         "sample_distribution": {
             "counter": distribution(selected, "counter"),
             "access": distribution(selected, "access"),
             "code_object": code_object_distribution(selected),
+            "kernel": distribution(selected, "kernel_name"),
+            "kernel_family": kernel_family_distribution(selected),
+            "instruction_pair": instruction_pair_distribution(selected),
         },
     }
     with metadata_path.open("w", encoding="utf-8") as stream:
