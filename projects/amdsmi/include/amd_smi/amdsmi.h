@@ -1792,8 +1792,10 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
-  CLK_LIMIT_MIN,  //!< Min Clock value in MHz
-  CLK_LIMIT_MAX   //!< Max Clock value in MHz
+  AMDSMI_CLK_LIMIT_MIN,                  //!< Min Clock value in MHz
+  AMDSMI_CLK_LIMIT_MAX,                  //!< Max Clock value in MHz
+  CLK_LIMIT_MIN = AMDSMI_CLK_LIMIT_MIN,  //!< Deprecated, use AMDSMI_CLK_LIMIT_MIN instead
+  CLK_LIMIT_MAX = AMDSMI_CLK_LIMIT_MAX   //!< Deprecated, use AMDSMI_CLK_LIMIT_MAX instead
 } amdsmi_clk_limit_type_t;
 
 /**
@@ -2778,9 +2780,12 @@ typedef struct {
  * @cond @tag{cpu_bm} @endcond
  */
 typedef enum {
-  AGG_BW0 = 1,  //!< Aggregate Bandwidth
-  RD_BW0 = 2,   //!< Read Bandwidth
-  WR_BW0 = 4    //!< Write Bandwidth
+  AMDSMI_AGG_BW0 = 1,        //!< Aggregate Bandwidth
+  AMDSMI_RD_BW0 = 2,         //!< Read Bandwidth
+  AMDSMI_WR_BW0 = 4,         //!< Write Bandwidth
+  AGG_BW0 = AMDSMI_AGG_BW0,  //!< Deprecated, use AMDSMI_AGG_BW0 instead
+  RD_BW0 = AMDSMI_RD_BW0,    //!< Deprecated, use AMDSMI_RD_BW0 instead
+  WR_BW0 = AMDSMI_WR_BW0     //!< Deprecated, use AMDSMI_WR_BW0 instead
 } amdsmi_io_bw_encoding_t;
 
 /**
