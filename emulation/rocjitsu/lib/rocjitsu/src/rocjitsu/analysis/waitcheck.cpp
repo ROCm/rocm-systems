@@ -53,6 +53,13 @@ static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size cha
          arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
+[[nodiscard]] uint32_t default_wavefront_size(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                 arch == ROCJITSU_CODE_ARCH_GFX1250
+             ? 32
+             : 64;
+}
+
 [[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
@@ -258,8 +265,13 @@ find_waitcheck_kernels(const CodeObject &code_object) {
         continue;
       const char *symbol_name = strtab + sym.st_name;
       const size_t symbol_name_size = strnlen(symbol_name, strtab_shdr.sh_size - sym.st_name);
-      kernels.push_back(
-          {std::string(symbol_name, symbol_name_size - 3), sym.st_value, entry_vaddr - text_vaddr});
+      const uint32_t wavefront_size =
+          (descriptor.kernel_code_properties &
+           rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0
+              ? 32
+              : 64;
+      kernels.push_back({std::string(symbol_name, symbol_name_size - 3), sym.st_value,
+                         entry_vaddr - text_vaddr, wavefront_size});
     }
   }
 
@@ -522,6 +534,7 @@ struct Analyzer {
 
   void analyze_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
                       std::string section_name, uint64_t file_offset_base) {
+    wavefront_size_ = default_wavefront_size(arch);
     auto decoder = Decoder::create(arch);
     if (!decoder) {
       report_.supported = false;
@@ -564,10 +577,11 @@ struct Analyzer {
   }
 
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                   const std::string &section_name, uint64_t file_offset_base,
-                   rj_code_arch_t arch) {
+                   const std::string &section_name, uint64_t file_offset_base, rj_code_arch_t arch,
+                   uint32_t wavefront_size) {
     if (blocks.empty())
       return;
+    wavefront_size_ = wavefront_size;
 
     std::unordered_map<const BasicBlock *, size_t> block_index;
     block_index.reserve(blocks.size());
@@ -1461,6 +1475,23 @@ private:
       du.has_exec_masked_vector_def = true;
   }
 
+  [[nodiscard]] static bool add_adjusted_destination_def(InstDefUse &du, const Instruction &inst,
+                                                         const Operand &op, int operand_index,
+                                                         const VgprMsbState &state,
+                                                         rj_code_arch_t arch,
+                                                         uint32_t wavefront_size) {
+    // V_DIV_SCALE's scalar destination is a wave mask. The encoded/disassembled
+    // operand is an SGPR pair, but Wave32 kernels only define its low half.
+    if (wavefront_size != 32 || operand_index != 1 || !starts_with(inst.mnemonic(), "v_div_scale_"))
+      return false;
+    if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR && ref->width == 2) {
+      ref->width = 1;
+      add_def(du, *ref, op, state, arch);
+      return true;
+    }
+    return false;
+  }
+
   [[nodiscard]] static bool has_enabled_scalar_address(const Instruction &inst) {
     const std::string_view mnemonic = inst.mnemonic();
     if (!starts_with(mnemonic, "global_") && !starts_with(mnemonic, "scratch_"))
@@ -1604,7 +1635,8 @@ private:
 
   [[nodiscard]] static InstDefUse inst_def_use_for_waitcheck(const Instruction &inst,
                                                              const VgprMsbState &state,
-                                                             rj_code_arch_t arch) {
+                                                             rj_code_arch_t arch,
+                                                             uint32_t wavefront_size) {
     InstDefUse du(inst);
     du.defs = {};
     du.uses = {};
@@ -1615,6 +1647,8 @@ private:
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *op = inst.dst_operand(i);
         if (op == nullptr)
+          continue;
+        if (add_adjusted_destination_def(du, inst, *op, i, state, arch, wavefront_size))
           continue;
         if (auto ref = op->to_register_ref())
           add_def(du, *ref, *op, state, arch);
@@ -2488,7 +2522,7 @@ private:
         state.age = std::min<uint32_t>(state.age + 1, kMaxTrackedAge);
       }
 
-      const InstDefUse du = inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch);
+      const InstDefUse du = inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch, wavefront_size_);
       invalidate_redefined_scalar_constraints(state.constraints, du);
 
       if (const auto predicate = scalar_scc_predicate(inst)) {
@@ -2977,7 +3011,7 @@ private:
       apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
     apply_embedded_waitcnt(state, inst);
 
-    InstDefUse du = inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch);
+    InstDefUse du = inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_);
     auto events = classify_events(inst, arch);
     if (!expert_waits_enabled(state)) {
       std::erase_if(events, [](const ClassifiedEvent &event) {
@@ -3054,6 +3088,7 @@ private:
 
   WaitcheckReport &report_;
   WaitcheckOptions options_;
+  uint32_t wavefront_size_ = 64;
   std::set<
       std::tuple<WaitCounterKind, WaitcheckAccessKind, RegClass, uint16_t, uint16_t, std::string,
                  uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, std::string, std::string>>
@@ -3171,9 +3206,9 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     const auto function_entries =
         kernels.empty() ? find_waitcheck_function_entries(code_object) : std::vector<uint64_t>{};
     if (selected_kernel_entry) {
-      const bool is_kernel = std::ranges::any_of(kernels, [&](const WaitcheckKernelInfo &kernel) {
-        return kernel.entry_offset == *selected_kernel_entry;
-      });
+      const auto kernel_it =
+          std::ranges::find(kernels, *selected_kernel_entry, &WaitcheckKernelInfo::entry_offset);
+      const bool is_kernel = kernel_it != kernels.end();
       if (!is_kernel &&
           std::ranges::find(function_entries, *selected_kernel_entry) == function_entries.end()) {
         report.supported = false;
@@ -3183,7 +3218,9 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       const std::array<uint64_t, 1> entry{*selected_kernel_entry};
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build_reachable(code_object, *decoder, arch, entry);
-      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+      const uint32_t wavefront_size =
+          is_kernel ? kernel_it->wavefront_size : default_wavefront_size(arch);
+      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size);
       if (is_kernel && report.supported && !report.stopped_early) {
         ++report.kernels_analyzed;
         if (options.kernel_analyzed_callback)
@@ -3192,16 +3229,17 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     } else if (kernels.empty() && function_entries.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
-      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, default_wavefront_size(arch));
     } else {
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
       // at once; generated Tensile libraries can contain hundreds of kernels.
-      const auto analyze_entry = [&](uint64_t entry_offset, bool is_kernel) {
+      const auto analyze_entry = [&](uint64_t entry_offset, bool is_kernel,
+                                     uint32_t wavefront_size) {
         const std::array<uint64_t, 1> entry{entry_offset};
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry);
-        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size);
         if (is_kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)
@@ -3209,13 +3247,13 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         }
       };
       for (const WaitcheckKernelInfo &kernel : kernels) {
-        analyze_entry(kernel.entry_offset, true);
+        analyze_entry(kernel.entry_offset, true, kernel.wavefront_size);
         if (!report.supported || report.stopped_early)
           break;
       }
       if (report.supported && !report.stopped_early) {
         for (uint64_t entry_offset : function_entries) {
-          analyze_entry(entry_offset, false);
+          analyze_entry(entry_offset, false, default_wavefront_size(arch));
           if (!report.supported || report.stopped_early)
             break;
         }

@@ -87,6 +87,8 @@ struct WaitcheckKernelInfo {
   uint64_t descriptor_vaddr = 0;
   /// @brief Byte offset of the kernel entry point within the `.text` section.
   uint64_t entry_offset = 0;
+  /// @brief Wavefront size selected by the AMDHSA kernel descriptor.
+  uint32_t wavefront_size = 64;
 };
 
 /// @brief Result of one waitcheck analysis run.

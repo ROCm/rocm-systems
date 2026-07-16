@@ -67,7 +67,8 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 }
 
 [[nodiscard]] inline std::vector<uint8_t> make_gfx_multi_kernel_code_object(
-    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &kernels, uint32_t mach) {
+    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &kernels, uint32_t mach,
+    bool wave32 = false) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t load_align = 0x1000;
@@ -151,6 +152,8 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   constexpr size_t kernel_code_entry_byte_offset_offset = 16;
+  constexpr size_t kernel_code_properties_offset = 56;
+  constexpr uint16_t wavefront_size32_bit = 1u << 10u;
   for (size_t i = 0; i < kernels.size(); ++i) {
     std::array<uint8_t, kernel_descriptor_size> kernel_descriptor{};
     const uint64_t descriptor_vaddr = rodata_vaddr + i * kernel_descriptor_size;
@@ -158,6 +161,9 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
                                  static_cast<int64_t>(descriptor_vaddr);
     std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
                 sizeof(entry_offset));
+    const uint16_t kernel_code_properties = wave32 ? wavefront_size32_bit : 0;
+    std::memcpy(kernel_descriptor.data() + kernel_code_properties_offset, &kernel_code_properties,
+                sizeof(kernel_code_properties));
     std::memcpy(image.data() + rodata_offset + i * kernel_descriptor_size, kernel_descriptor.data(),
                 kernel_descriptor.size());
   }
@@ -217,8 +223,8 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 }
 
 [[nodiscard]] inline std::vector<uint8_t>
-make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach) {
-  return make_gfx_multi_kernel_code_object({{"waitcheck", text_words}}, mach);
+make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach, bool wave32 = false) {
+  return make_gfx_multi_kernel_code_object({{"waitcheck", text_words}}, mach, wave32);
 }
 
 [[nodiscard]] inline std::vector<uint8_t>
