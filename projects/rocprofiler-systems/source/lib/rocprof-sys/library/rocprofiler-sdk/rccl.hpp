@@ -3,6 +3,9 @@
 
 #pragma once
 
+// Defines RCCL_API_TRACE_VERSION_PATCH, which gates the set of RCCL API ids
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
+
 #include <cstdint>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
