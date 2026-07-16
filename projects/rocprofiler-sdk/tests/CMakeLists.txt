@@ -64,9 +64,6 @@ add_subdirectory(common)
 # unit-test subdirectory only exists in rocprofiler-sdk-tests package
 add_subdirectory(unit-tests)
 
-# rocprofv3 CLI argument-parsing unit tests (no GPU required)
-add_subdirectory(rocprofv3-cli)
-
 # tool libraries used for data collection during integration tests
 add_subdirectory(tools)
 
