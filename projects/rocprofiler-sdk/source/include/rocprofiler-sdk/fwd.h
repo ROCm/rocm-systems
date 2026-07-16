@@ -183,7 +183,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
-    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,  ///< @see ::rocprofiler_hip_graph_operation_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,    ///< @see ::rocprofiler_hip_graph_operation_t
     ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,  ///< hipFILE API Tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
