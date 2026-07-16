@@ -1946,8 +1946,11 @@ TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
   int dst_dev = 1;
   int ndev = 0;
   if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
-    HIP_SKIP_TEST(ndev < 2 ? HipTest::SkipReason::kFewerThanTwoGpus
-                           : HipTest::SkipReason::kPeerAccessUnavailable);
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
   }
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);

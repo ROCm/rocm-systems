@@ -977,8 +977,11 @@ HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
   int dst_dev = 1;
   int ndev = 0;
   if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
-    HIP_SKIP_TEST(ndev < 2 ? HipTest::SkipReason::kFewerThanTwoGpus
-                           : HipTest::SkipReason::kPeerAccessUnavailable);
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
   }
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
   // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
