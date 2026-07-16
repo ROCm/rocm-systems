@@ -45,6 +45,18 @@ class _FakeSem:
         self.sets_scc = sets_scc
 
 
+@pytest.mark.parametrize(
+    'sem',
+    [
+        _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32'),
+        _FakeSem('S_MOV_B32', 'scalar_mov', 'mov', 'b32', 'nonzero'),
+    ],
+)
+def test_scc_metadata_must_match_derived_side_effects(sem):
+    with pytest.raises(ValueError, match='disagrees with derived SCC write'):
+        derive_sema_block(sem)
+
+
 def test_gfx1250_bf16_fma_mix_semantics_are_explicit():
     cases = {
         'V_FMA_MIX_F32_BF16': 'mad_mix_f32_bf16',
@@ -285,6 +297,13 @@ class TestDeriveScalarBinop:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    @pytest.mark.parametrize('name,dtype', [('S_MAX_I32', 'i32'), ('S_MAX_U32', 'u32')])
+    def test_max_scc_requires_strict_first_operand_win(self, name, dtype):
+        sem = _FakeSem(name, 'scalar_binop', 'max', dtype, 'compare')
+        cpp = lower_sema_block(derive_sema_block(sem))
+        assert 'wf.write_scc((s0 > s1))' in cpp
+        assert 'wf.write_scc((s0 >= s1))' not in cpp
+
     def test_signed_mul_uses_unsigned_result_slot(self):
         sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
         block = derive_sema_block(sem)
@@ -306,7 +325,7 @@ class TestDeriveScalarBinop:
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
         # SCC overflow is detected by the unsigned helper (simd_glue.h).
-        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
+        assert 'wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
@@ -315,7 +334,7 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result = (s0 - s1)' in cpp
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
-        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
+        assert 'wf.write_scc(::rocjitsu::amdgpu::signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
@@ -425,7 +444,7 @@ class TestDeriveScalarBinop:
 
 class TestDeriveScalarCmp:
     def test_eq(self):
-        sem = _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32')
+        sem = _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         assert block.body.kind == SemaNodeKind.ASSIGN
@@ -433,7 +452,9 @@ class TestDeriveScalarCmp:
 
     def test_all_ops(self):
         for op in ['eq', 'ne', 'lt', 'gt', 'le', 'ge']:
-            sem = _FakeSem(f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32')
+            sem = _FakeSem(
+                f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32', 'compare'
+            )
             block = derive_sema_block(sem)
             assert block is not None
             cpp = lower_sema_block(block)
@@ -445,6 +466,7 @@ class TestDeriveScalarCmp:
         assert sem.semantic_class == 'scalar_cmp'
         assert sem.operation == 'lt'
         assert sem.data_type == 'f32'
+        assert sem.sets_scc == 'compare'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
@@ -453,7 +475,7 @@ class TestDeriveScalarCmp:
 
 class TestDeriveScalarCmpk:
     def test_eq(self):
-        sem = _FakeSem('S_CMPK_EQ_U32', 'scalar_cmpk', 'eq', 'u32')
+        sem = _FakeSem('S_CMPK_EQ_U32', 'scalar_cmpk', 'eq', 'u32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
@@ -469,7 +491,7 @@ class TestDeriveScalarSopk:
 
 class TestDeriveScalarBitcmp:
     def test_bitcmp0(self):
-        sem = _FakeSem('S_BITCMP0_B32', 'scalar_bitcmp', 'bitcmp0', 'b32')
+        sem = _FakeSem('S_BITCMP0_B32', 'scalar_bitcmp', 'bitcmp0', 'b32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
@@ -477,12 +499,12 @@ class TestDeriveScalarBitcmp:
         assert '& 31' in cpp
 
     def test_bitcmp1(self):
-        sem = _FakeSem('S_BITCMP1_B32', 'scalar_bitcmp', 'bitcmp1', 'b32')
+        sem = _FakeSem('S_BITCMP1_B32', 'scalar_bitcmp', 'bitcmp1', 'b32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
 
     def test_bitcmp_b64_uses_32_bit_index_operand(self):
-        sem = _FakeSem('S_BITCMP0_B64', 'scalar_bitcmp', 'bitcmp0', 'b64')
+        sem = _FakeSem('S_BITCMP0_B64', 'scalar_bitcmp', 'bitcmp0', 'b64', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         omap = OperandMap.from_operand_names(
@@ -498,7 +520,7 @@ class TestDeriveScalarBitcmp:
 
 class TestDeriveScalarBfe:
     def test_bfe(self):
-        sem = _FakeSem('S_BFE_U32', 'scalar_bfe', data_type='u32')
+        sem = _FakeSem('S_BFE_U32', 'scalar_bfe', data_type='u32', sets_scc='nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         call_names = [
@@ -511,25 +533,26 @@ class TestDeriveScalarBfe:
 
 class TestDeriveScalarSaveexec:
     def test_and(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.AND in all_kinds
 
     def test_writes_exec_and_scc(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'set_exec' in cpp
+        assert 'wf.exec_raw()' in cpp
+        assert 'wf.set_exec_raw(' in cpp
         assert 'write_scc' in cpp
 
     def test_saves_old_exec(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
-        assert 'wf.exec()' in cpp
+        assert 'wf.exec_raw()' in cpp
 
     def test_not1_saveexec_uses_source_and_negated_exec(self):
         sem = _FakeSem(
@@ -537,6 +560,7 @@ class TestDeriveScalarSaveexec:
             'scalar_saveexec',
             'and_not1',
             'b32',
+            'nonzero',
         )
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
@@ -549,11 +573,40 @@ class TestDeriveScalarSaveexec:
             'scalar_saveexec',
             'or_not1',
             'b32',
+            'nonzero',
         )
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'src | (~old_exec)' in cpp
         assert '(~src) | old_exec' not in cpp
+
+    def test_rejects_unsupported_operation(self):
+        sem = derive_semantics('S_UNKNOWN_SAVEEXEC_B64', 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_saveexec'
+        assert sem.operation == 'unknown'
+        with pytest.raises(ValueError, match='Unsupported SAVEEXEC operation'):
+            derive_sema_block(sem)
+
+    def test_rejects_missing_operation(self):
+        sem = _FakeSem(
+            'S_MALFORMED_SAVEEXEC_B64',
+            'scalar_saveexec',
+            data_type='b64',
+            sets_scc='nonzero',
+        )
+        with pytest.raises(ValueError, match='Unsupported SAVEEXEC operation: None'):
+            derive_sema_block(sem)
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_AND_SAVEEXEC_B64_SUFFIX',
+            'S_ANDN1_WREXEC_B64_SUFFIX',
+        ],
+    )
+    def test_rejects_trailing_mnemonic_text(self, name):
+        assert derive_semantics(name, 'ENC_SOP1') is None
 
 
 # =========================================================================
@@ -2229,17 +2282,81 @@ class TestDeriveSpecialScalar:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.TERNARY in all_kinds
 
-    def test_wrexec(self):
-        sem = _FakeSem('S_OR_SAVEEXEC_B64', 'scalar_wrexec')
+    @pytest.mark.parametrize(
+        'name,operation,dtype',
+        [
+            ('S_ANDN1_WREXEC_B64', 'andn1', 'b64'),
+            ('S_ANDN2_WREXEC_B64', 'andn2', 'b64'),
+            ('S_AND_NOT0_WREXEC_B32', 'and_not0', 'b32'),
+            ('S_AND_NOT1_WREXEC_B32', 'and_not1', 'b32'),
+        ],
+    )
+    def test_wrexec(self, name, operation, dtype):
+        sem = _FakeSem(name, 'scalar_wrexec', operation, dtype, 'nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
-        assert 'set_exec' in cpp
+        assert 'write_scalar' in cpp
+        if dtype == 'b32':
+            assert 'wf.exec()' in cpp
+            assert 'wf.set_exec(' in cpp
+            assert 'exec_raw' not in cpp
+        else:
+            assert 'wf.exec_raw()' in cpp
+            assert 'wf.set_exec_raw(' in cpp
+        assert 'write_scc' in cpp
+
+    def test_wrexec_operand_orientation(self):
+        exec_not_src = lower_sema_block(
+            derive_sema_block(
+                _FakeSem(
+                    'S_AND_NOT0_WREXEC_B64',
+                    'scalar_wrexec',
+                    'and_not0',
+                    'b64',
+                    'nonzero',
+                )
+            )
+        )
+        src_not_exec = lower_sema_block(
+            derive_sema_block(
+                _FakeSem(
+                    'S_AND_NOT1_WREXEC_B64',
+                    'scalar_wrexec',
+                    'and_not1',
+                    'b64',
+                    'nonzero',
+                )
+            )
+        )
+        assert '(old_exec & (~src))' in exec_not_src
+        assert '(src & (~old_exec))' in src_not_exec
+
+    def test_wrexec_rejects_unsupported_operation(self):
+        sem = _FakeSem(
+            'S_UNKNOWN_WREXEC_B64',
+            'scalar_wrexec',
+            'unknown',
+            'b64',
+            'nonzero',
+        )
+        with pytest.raises(ValueError, match='Unsupported WREXEC operation'):
+            derive_sema_block(sem)
 
     def test_movk(self):
         sem = _FakeSem('S_MOVK_I32', 'scalar_movk')
         block = derive_sema_block(sem)
         assert block is not None
+
+    @pytest.mark.parametrize('name', ['S_ADDK_I32', 'S_ADDK_CO_I32'])
+    def test_addk_uses_signed_overflow(self, name):
+        sem = derive_semantics(name, 'ENC_SOPK')
+        assert sem.sets_scc == 'overflow'
+        cpp = lower_sema_block(derive_sema_block(sem))
+        assert 'signed_add_overflows' in cpp
+        assert 'write_scc' in cpp
+        assert '<< 16' in cpp
+        assert '>> 16' in cpp
 
 
 class TestDeriveControlFlow:
@@ -2331,8 +2448,27 @@ class TestDeriveAllClassesLower:
         from amdisa.sema_derive import _DERIVE_REGISTRY
 
         errors = []
+        scc_modes = {
+            'scalar_addk': 'overflow',
+            'scalar_bfe': 'nonzero',
+            'scalar_bitcmp': 'compare',
+            'scalar_cmp': 'compare',
+            'scalar_cmpk': 'compare',
+            'scalar_saveexec': 'nonzero',
+            'scalar_wrexec': 'nonzero',
+        }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
-            sem = _FakeSem(f'TEST_{cls_name.upper()}', cls_name, 'add', 'f32')
+            operation = {
+                'scalar_saveexec': 'and',
+                'scalar_wrexec': 'andn1',
+            }.get(cls_name, 'add')
+            sem = _FakeSem(
+                f'TEST_{cls_name.upper()}',
+                cls_name,
+                operation,
+                'f32',
+                scc_modes.get(cls_name),
+            )
             sem.elem_size = 4
             sem.num_elems = 1
             sem.sign_extend = False

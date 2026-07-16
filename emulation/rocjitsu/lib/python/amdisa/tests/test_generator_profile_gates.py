@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import xml.etree.ElementTree as elem_tree
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from amdisa import xml_schema as xs
 from amdisa.__main__ import (
     _collect_shared_execute_body_variants,
     _run_multi,
@@ -120,26 +120,6 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
-def _sop1_mrisa_scc_outputs(parser: Parser) -> dict[str, bool]:
-    outputs = {}
-    for inst_node in parser.insts_node:
-        inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
-        encodings = xs.get_node(inst_node, xs.INST_ENCODINGS)
-        for enc_node in encodings:
-            enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
-            if enc_name != 'ENC_SOP1':
-                continue
-            operands = xs.get_node(enc_node, xs.OPERANDS)
-            outputs[inst_name] = any(
-                opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
-                and opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true'
-                and xs.get_node_text(xs.get_node(opnd, xs.OPERAND_TYPE))
-                == 'OPR_SSRC_SPECIAL_SCC'
-                for opnd in operands
-            )
-    return outputs
-
-
 @pytest.mark.parametrize(
     'isa_name,profile_type',
     [
@@ -155,40 +135,209 @@ def _sop1_mrisa_scc_outputs(parser: Parser) -> dict[str, bool]:
         ('gfx1250', Gfx1250Profile),
     ],
 )
-def test_scalar_unary_sop1_scc_matches_mrisa(isa_name, profile_type):
+def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     isa_xml = _mrisa_dir() / f'amdgpu_isa_{isa_name}.xml'
-    if isa_name == 'gfx1250' and not isa_xml.is_file():
-        pytest.skip('gfx1250 MR ISA XML is NPI and unavailable in public checkouts')
-    assert isa_xml.is_file(), f'missing tracked MR ISA XML: {isa_xml}'
+    if not isa_xml.is_file():
+        pytest.skip('Semantics XML not available')
 
     parser = Parser(str(isa_xml), profile_type())
     spec = parser.parse()
     semantics = derive_all_semantics(spec)
-    mrisa_scc_outputs = _sop1_mrisa_scc_outputs(parser)
+    generator = CodeGenerator(spec, '', semantics)
+    mrisa_scc_accesses = parser.implicit_operand_accesses('OPR_SSRC_SPECIAL_SCC')
+    active_keys = {
+        (inst.name, inst.enc_name) for enc in spec.inst_encodings for inst in enc.insts
+    }
+    assert set(mrisa_scc_accesses) == active_keys
     mismatches = []
+    excluded = {
+        'S_ALLOC_VGPR',
+        'S_BARRIER_LEAVE',
+        'S_BARRIER_SIGNAL_ISFIRST',
+    }
+    expected_exclusions = {
+        'rdna4': {'S_ALLOC_VGPR', 'S_BARRIER_SIGNAL_ISFIRST'},
+        'gfx1250': excluded,
+    }
+    checked_exclusions = set()
     checked = 0
+    seen = set()
 
     for enc in spec.inst_encodings:
-        if enc.enc_name != 'ENC_SOP1':
-            continue
         for inst in enc.insts:
-            if inst.name not in semantics:
+            key = (inst.name, inst.enc_name)
+            if key in seen or key not in mrisa_scc_accesses:
                 continue
-            sem = semantics[inst.name]
-            if sem.semantic_class != 'scalar_unary':
+            seen.add(key)
+
+            mrisa_reads_scc, mrisa_writes_scc = mrisa_scc_accesses[key]
+            sem = semantics.instructions.get(inst.name)
+            if inst.name in excluded:
+                assert (
+                    mrisa_writes_scc
+                ), f'{isa_name}: stale SCC exclusion for {inst.name}'
+                assert sem is not None and sem.semantic_class == 'true_nop', (
+                    f'{isa_name}: implemented SCC exclusion must join the contract: '
+                    f'{inst.name}'
+                )
+                checked_exclusions.add(inst.name)
                 continue
 
             checked += 1
-            mrisa_writes_scc = mrisa_scc_outputs[inst.name]
-            derived_writes_scc = sem.sets_scc != 'none'
+            if mrisa_reads_scc and sem is None:
+                mismatches.append(
+                    f'{inst.name}/{inst.enc_name}: MR ISA reads SCC but has no '
+                    'derived semantics'
+                )
+                continue
+
+            derived_writes_scc = sem is not None and sem.sets_scc not in (None, 'none')
             if derived_writes_scc != mrisa_writes_scc:
                 mismatches.append(
-                    f'{inst.name}: derived sets_scc={sem.sets_scc!r}, '
+                    f'{inst.name}/{inst.enc_name}: derived '
+                    f'sets_scc={None if sem is None else sem.sets_scc!r}, '
                     f'MR ISA writes SCC={mrisa_writes_scc}'
                 )
+                continue
 
-    assert checked > 0, f'{isa_name}: no scalar-unary SOP1 instructions checked'
+            if sem is not None:
+                body = generator._gen_execute_body(inst, sem, enc.enc_name)
+                body_reads_scc = 'read_scc()' in body
+                body_writes_scc = 'write_scc(' in body
+                if body_reads_scc != mrisa_reads_scc:
+                    mismatches.append(
+                        f'{inst.name}/{inst.enc_name}: generated body reads '
+                        f'SCC={body_reads_scc}, MR ISA reads SCC={mrisa_reads_scc}'
+                    )
+                if body_writes_scc != mrisa_writes_scc:
+                    mismatches.append(
+                        f'{inst.name}/{inst.enc_name}: generated body writes '
+                        f'SCC={body_writes_scc}, MR ISA writes SCC={mrisa_writes_scc}'
+                    )
+                if (
+                    sem.semantic_class == 'scalar_addk'
+                    and 'signed_add_overflows' not in body
+                ):
+                    mismatches.append(
+                        f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                    )
+
+    assert checked > 0, f'{isa_name}: no instruction SCC contracts checked'
+    assert checked_exclusions == expected_exclusions.get(isa_name, set())
     assert not mismatches, f'{isa_name}:\n' + '\n'.join(mismatches)
+
+
+def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():
+    parser = object.__new__(Parser)
+    parser.insts_node = elem_tree.fromstring('''
+        <Instructions>
+          <Instruction>
+            <InstructionName>READ</InstructionName>
+            <InstructionEncodings>
+              <InstructionEncoding>
+                <EncodingName>ENC_READ</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands>
+                  <Operand Input="true" Output="false" IsImplicit="true">
+                    <OperandType>OPR_SCC</OperandType>
+                  </Operand>
+                </Operands>
+              </InstructionEncoding>
+            </InstructionEncodings>
+          </Instruction>
+          <Instruction>
+            <InstructionName>WRITE</InstructionName>
+            <InstructionEncodings>
+              <InstructionEncoding>
+                <EncodingName>ENC_WRITE</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands>
+                  <Operand Input="false" Output="true" IsImplicit="true">
+                    <OperandType>OPR_SCC</OperandType>
+                  </Operand>
+                </Operands>
+              </InstructionEncoding>
+            </InstructionEncodings>
+          </Instruction>
+          <Instruction>
+            <InstructionName>MERGED</InstructionName>
+            <InstructionEncodings>
+              <InstructionEncoding>
+                <EncodingName>ENC_DUP</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands>
+                  <Operand Input="true" Output="false" IsImplicit="true">
+                    <OperandType>OPR_SCC</OperandType>
+                  </Operand>
+                </Operands>
+              </InstructionEncoding>
+              <InstructionEncoding>
+                <EncodingName>ENC_DUP</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands>
+                  <Operand Input="false" Output="true" IsImplicit="true">
+                    <OperandType>OPR_SCC</OperandType>
+                  </Operand>
+                </Operands>
+              </InstructionEncoding>
+            </InstructionEncodings>
+          </Instruction>
+          <Instruction>
+            <InstructionName>EXPLICIT</InstructionName>
+            <InstructionEncodings>
+              <InstructionEncoding>
+                <EncodingName>ENC_EXPLICIT</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands>
+                  <Operand Input="true" Output="true" IsImplicit="false">
+                    <OperandType>OPR_SCC</OperandType>
+                  </Operand>
+                </Operands>
+              </InstructionEncoding>
+            </InstructionEncodings>
+          </Instruction>
+          <Instruction>
+            <InstructionName>FILTERED</InstructionName>
+            <InstructionEncodings>
+              <InstructionEncoding>
+                <EncodingName>ENC_SKIP</EncodingName>
+                <EncodingCondition>default</EncodingCondition>
+                <Operands />
+              </InstructionEncoding>
+              <InstructionEncoding>
+                <EncodingName>ENC_COND</EncodingName>
+                <EncodingCondition>skip_me</EncodingCondition>
+                <Operands />
+              </InstructionEncoding>
+            </InstructionEncodings>
+          </Instruction>
+        </Instructions>
+        ''')
+    parser.profile = SimpleNamespace(
+        skip_encodings={'ENC_SKIP'},
+        skip_inst_encoding=lambda _name, condition: condition == 'skip_me',
+    )
+    active = [
+        ('READ', 'ENC_READ'),
+        ('WRITE', 'ENC_WRITE'),
+        ('MERGED', 'ENC_DUP'),
+        ('EXPLICIT', 'ENC_EXPLICIT'),
+        ('INJECTED', 'ENC_INJECTED'),
+    ]
+    parser.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(insts=[SimpleNamespace(name=name, enc_name=encoding)])
+            for name, encoding in active
+        ]
+    )
+
+    assert parser.implicit_operand_accesses('OPR_SCC') == {
+        ('READ', 'ENC_READ'): (True, False),
+        ('WRITE', 'ENC_WRITE'): (False, True),
+        ('MERGED', 'ENC_DUP'): (True, True),
+        ('EXPLICIT', 'ENC_EXPLICIT'): (False, False),
+        ('INJECTED', 'ENC_INJECTED'): (False, False),
+    }
 
 
 def _execute_impl_body(source: str, signature: str, next_ctor: str) -> str:
@@ -1927,6 +2076,17 @@ def test_bf16_mad_mix_half_updates_read_destination_operand():
     assert not codegen._dst_is_also_source(SimpleNamespace(name='V_FMA_MIX_F32_BF16'))
     assert codegen._dst_is_also_source(SimpleNamespace(name='V_FMA_MIXLO_BF16'))
     assert codegen._dst_is_also_source(SimpleNamespace(name='V_FMA_MIXHI_BF16'))
+
+
+def test_addk_registers_its_read_write_destination_as_a_source():
+    codegen = object.__new__(CodeGenerator)
+    codegen.semantics = SimpleNamespace(
+        instructions={
+            'S_ADDK_I32': SimpleNamespace(operation=None, semantic_class='scalar_addk')
+        }
+    )
+
+    assert codegen._dst_is_also_source(SimpleNamespace(name='S_ADDK_I32'))
 
 
 def test_gfx1250_ds_atomic_routes_data_through_vgpr_resolver():
