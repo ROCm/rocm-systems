@@ -43,9 +43,8 @@
  *
  */
 
-#include <hwloc.h>
-#include <hwloc/linux-libnuma.h>
-#include <numa.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <vector>
 #include <algorithm>
@@ -111,8 +110,7 @@ MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
   gpu_local_agent1_.handle = 0;
   gpu_local_agent2_.handle = 0;
   gpu_remote_agent_.handle = 0;
-  topology_ = nullptr;
-  cpu_hwl_numa_nodeset_ = nullptr;
+  cpu_numa_node_id_ = kUnknownNumaNode;
   agent_index_ = 0;
   pool_index_ = 0;
   tran_.clear();
@@ -143,8 +141,6 @@ MemoryAsyncCopy::~MemoryAsyncCopy(void) {
 void MemoryAsyncCopy::SetUp(void) {
   TestBase::SetUp();
   if (test_skipped_) return;
-
-  hwloc_topology_init(&topology_);
 
   FindTopology();
 
@@ -603,19 +599,6 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
 }
 
 void MemoryAsyncCopy::Close() {
-  if (cpu_hwl_numa_nodeset_ != nullptr) {
-    hwloc_bitmap_free(cpu_hwl_numa_nodeset_);
-    cpu_hwl_numa_nodeset_ = nullptr;
-  }
-  hwloc_topology_destroy(topology_);
-
-  // hwloc hack - hwloc uses OpenCL which loads ROCr.  As OpenCL does not have a shutdown routine it
-  // can not free HSA state.  This will leak resources but is the only option short of isolating
-  // hwloc in it's own process.
-  while (hsa_shut_down() == HSA_STATUS_SUCCESS)
-    ;
-  hsa_init();
-
   TestBase::Close();
 }
 
@@ -712,38 +695,25 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
         name2, bus, device, function, name);
   }
 
-  uint32_t pci_domain_id = 0;
-  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN, &pci_domain_id);
-  RET_IF_HSA_ERR(err);
-
   bool is_dxg = false;
   int fd = open("/dev/dxg", O_RDWR);
   if (fd >= 0) {
     close(fd);
     is_dxg = true;
   }
-  hwloc_obj_t gpu_numa_node = nullptr;
+
+  uint32_t gpu_numa_node_id = MemoryAsyncCopy::kUnknownNumaNode;
   if ((agent_bdf_id != kDtifBdfId) && !is_dxg) {
-    hwloc_obj_t gpu_hwl_dev;
-    gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device,
-                                                                      function);
-
-    if (gpu_hwl_dev == nullptr) {
-      return HSA_STATUS_ERROR;
-    }
-
-    gpu_numa_node = hwloc_get_ancestor_obj_by_type(ptr->topology(),
-                                              HWLOC_OBJ_NUMANODE, gpu_hwl_dev);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NODE, &gpu_numa_node_id);
+    RET_IF_HSA_ERR(err);
   }
 
-  if (gpu_numa_node != nullptr) {
-    char s1[256], s2[256];
-    hwloc_bitmap_snprintf(s1, sizeof(s1), gpu_numa_node->nodeset);
-    hwloc_bitmap_snprintf(s2, sizeof(s2), ptr->cpu_hwl_numa_nodeset());
-    printf("gpu nodeset: %s\n", s1);
-    printf("cpu nodeset: %s\n", s2);
-    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset,
-                                              ptr->cpu_hwl_numa_nodeset())) {
+  if (gpu_numa_node_id != MemoryAsyncCopy::kUnknownNumaNode) {
+    if (ptr->verbosity() >= MemoryAsyncCopy::VERBOSE_STANDARD) {
+      printf("gpu numa node: %u\n", gpu_numa_node_id);
+      printf("cpu numa node: %u\n", ptr->cpu_numa_node_id());
+    }
+    if (gpu_numa_node_id != ptr->cpu_numa_node_id()) {
       if (ptr->gpu_remote_agent().handle == 0) {
         ptr->set_gpu_remote_agent(agent);
       }
@@ -768,19 +738,13 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
         return HSA_STATUS_SUCCESS;
       }
     }
-
-    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset,
-                                               ptr->cpu_hwl_numa_nodeset())) {
-      std::cout << "ASSERT: Unexpected unequal nodesets" << std::endl;
-      return HSA_STATUS_ERROR;
-    }
   } else if (ptr->verbosity() >= MemoryAsyncCopy::VERBOSE_STANDARD) {
     std::cout << "Only 1 NUMA node found.\n" << std::endl;
   }
 
   if (ptr->gpu_local_agent1().handle != 0) {
     if (ptr->gpu_local_agent2().handle != 0) {
-      if (gpu_numa_node == nullptr) {
+      if (gpu_numa_node_id == MemoryAsyncCopy::kUnknownNumaNode) {
         return HSA_STATUS_INFO_BREAK;
       } else if (ptr->gpu_remote_agent().handle == 0) {
         return HSA_STATUS_SUCCESS;
@@ -790,7 +754,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     } else {
       ptr->set_gpu_local_agent2(agent);
       if (ptr->gpu_remote_agent().handle == 0) {
-        return (gpu_numa_node == nullptr ?
+        return (gpu_numa_node_id == MemoryAsyncCopy::kUnknownNumaNode ?
                   HSA_STATUS_INFO_BREAK : HSA_STATUS_SUCCESS);
       } else {
         return HSA_STATUS_INFO_BREAK;
@@ -807,7 +771,6 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
 
   hsa_status_t err;
-  int ret;
 
   if (ptr->cpu_agent().handle != 0) {
     return HSA_STATUS_ERROR;
@@ -826,28 +789,12 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 
   ptr->set_cpu_agent(agent);
   uint32_t cpu_numa_node_id;
-  //  hwloc_obj_t cpu_numa;
-  hwloc_nodeset_t cpu_nodeset;
 
   err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE,
                                                            &cpu_numa_node_id);
   RET_IF_HSA_ERR(err);
 
-  struct bitmask *numa_node_mask = numa_allocate_nodemask();
-  cpu_nodeset = hwloc_bitmap_alloc();
-
-  numa_bitmask_setbit(numa_node_mask, cpu_numa_node_id);
-
-  ret = hwloc_nodeset_from_linux_libnuma_bitmask(ptr->topology(),
-      cpu_nodeset, numa_node_mask);
-  numa_free_nodemask(numa_node_mask);
-
-  if (ret == -1) {
-    hwloc_bitmap_free(cpu_nodeset);
-    return HSA_STATUS_ERROR;
-  }
-
-  ptr->set_cpu_hwl_numa_nodeset(cpu_nodeset);
+  ptr->set_cpu_numa_node_id(cpu_numa_node_id);
 
   err = hsa_iterate_agents(GetGPUAgents, data);
 
@@ -856,8 +803,7 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   }
 
   if (ptr->gpu_local_agent1().handle == 0) {
-    hwloc_bitmap_free(ptr->cpu_hwl_numa_nodeset());
-    ptr->set_cpu_hwl_numa_nodeset(nullptr);
+    ptr->set_cpu_numa_node_id(MemoryAsyncCopy::kUnknownNumaNode);
 
     if (ptr->gpu_local_agent2().handle != 0) {
       std::cout << "Unexpected value set for gpu_local_agent2" << std::endl;
@@ -899,11 +845,6 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 
 void MemoryAsyncCopy::FindTopology() {
   hsa_status_t err;
-
-  hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
-                                         HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
-
-  hwloc_topology_load(topology_);
 
   err = hsa_iterate_agents(GetAgentInfo, this);
 

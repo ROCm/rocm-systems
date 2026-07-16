@@ -47,7 +47,6 @@
 #define ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_NUMA_H_
 
 #if ENABLE_COPY_NUMA
-#include <hwloc.h>
 
 #include <vector>
 #include <algorithm>

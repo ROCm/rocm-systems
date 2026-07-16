@@ -188,7 +188,7 @@ platforms:
     blocked_tests:
       - rocrtstFunc.Memory_Max_Mem
       - rocrtstFunc.Memory_Available  # Uses max & available mem; not accurate
-      - rocrtstPerf.Memory_Async_Copy # Requires hwloc support
+      - rocrtstPerf.Memory_Async_Copy # NUMA topology test; may be skipped on single-node systems
       # These negative tests require device exceptions to call
       # error callback. It doesn't currently do this.
       - rocrtstNeg.*
