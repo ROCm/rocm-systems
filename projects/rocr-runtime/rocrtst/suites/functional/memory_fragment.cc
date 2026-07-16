@@ -48,17 +48,21 @@ inline bool FragmentAllocatorDisabled() {
   return v != nullptr && std::string(v) == "1";
 }
 
-}  // namespace
+// Value the coherence kernel atomically adds into each element.
+constexpr int kValue = 7;
 
-static const int kValue = 7;
-
+// Kernarg layout for test_atomic_add (see atomicOperations_kernels.cl):
+//   (int* sysMemory, int* gpuMemory, int* oldValues, int value)
+// The kernel is grid-size bounded (one work-item per element, no count arg),
+// so no element-count field is needed here.
 typedef struct __attribute__((aligned(16))) args_t {
   int* a;
   int* b;
   int* c;
   int d;
-  int n;
 } args;
+
+}  // namespace
 
 MemoryFragment::MemoryFragment() : TestBase() {
   set_num_iteration(10);
