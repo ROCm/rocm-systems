@@ -188,6 +188,15 @@ if(BUILD_TESTS
         endif()
     endif()
 
+    set(TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/source/*")
+    if(BUILD_MARKERS)
+        list(
+            APPEND
+            TTD_COVERAGE_SOURCES
+            "${CMAKE_SOURCE_DIR}/markers/*"
+            "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp")
+    endif()
+
     add_custom_target(
         coverage
         # Remove stale profiling data
@@ -200,7 +209,7 @@ if(BUILD_TESTS
                 ${CMAKE_BINARY_DIR}/coverage.info --gcov-tool gcov --ignore-errors mismatch,mismatch,gcov,empty
         # Extract only project sources (use full path to avoid matching
         # googletest-src etc.)
-        COMMAND ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info "${CMAKE_SOURCE_DIR}/source/*" --output-file
+        COMMAND ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info ${TTD_COVERAGE_SOURCES} --output-file
                 ${CMAKE_BINARY_DIR}/coverage_src.info --ignore-errors empty,unused
         # Generate HTML report
         COMMAND ${GENHTML} --quiet ${CMAKE_BINARY_DIR}/coverage_src.info --output-directory

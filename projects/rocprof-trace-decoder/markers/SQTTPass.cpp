@@ -22,29 +22,84 @@
 
 #include "SQTTPass.h"
 
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/Analysis/InlineCost.h"
-#include "llvm/IR/Constants.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Support/ErrorHandling.h"
 #if __has_include("llvm/Plugins/PassPlugin.h")
 #    include "llvm/Plugins/PassPlugin.h"
 #else
 #    include "llvm/Passes/PassPlugin.h"
 #endif
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
+#include <algorithm>
+
 using namespace llvm;
+
+namespace
+{
+
+constexpr const char* MarkerSentinelNames[] = {
+    "__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"
+};
+
+void eraseUnusedMarkerSentinels(Module& M)
+{
+    for (const char* Name : MarkerSentinelNames)
+        if (Function* F = M.getFunction(Name); F && F->use_empty()) F->eraseFromParent();
+}
+
+bool inlineMarkerWrappers(Module& M)
+{
+    SmallVector<Function*, 4> wrappers;
+    for (const char* Name : MarkerSentinelNames)
+    {
+        Function* Sentinel = M.getFunction(Name);
+        if (!Sentinel) continue;
+        for (User* U : Sentinel->users())
+        {
+            auto* Call = dyn_cast<CallInst>(U);
+            Function* Wrapper = Call ? Call->getFunction() : nullptr;
+            if (Wrapper && Wrapper != Sentinel &&
+                std::find(wrappers.begin(), wrappers.end(), Wrapper) == wrappers.end())
+                wrappers.push_back(Wrapper);
+        }
+    }
+
+    bool changed = false;
+    for (Function* Wrapper : wrappers)
+    {
+        SmallVector<CallInst*, 8> callSites;
+        for (User* U : Wrapper->users())
+            if (auto* Call = dyn_cast<CallInst>(U)) callSites.push_back(Call);
+        for (CallInst* Call : callSites)
+        {
+            InlineFunctionInfo IFI;
+            InlineFunction(*Call, IFI);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+template <typename Visit>
+bool visitTargetFunctions(Module& M, Visit&& visit)
+{
+    bool changed = false;
+    for (Function& F : M)
+    {
+        if (F.isDeclaration()) continue;
+        GfxGen gen = getGfxGen(F);
+        if (gen != GfxGen::Unknown) changed |= visit(F, gen);
+    }
+    return changed;
+}
+
+} // namespace
 
 PreservedAnalyses SQTTInstrumentPass::run(Module& M, ModuleAnalysisManager& MAM)
 {
     if (!Triple(M.getTargetTriple()).isAMDGPU()) return PreservedAnalyses::all();
-
-    if (PassMode == Mode::Early)
-        return runEarly(M);
-    else
-        return runLate(M);
+    return PassMode == Mode::Early ? runEarly(M) : runLate(M);
 }
 
 PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
@@ -53,73 +108,31 @@ PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
     LLVMContext& Ctx = M.getContext();
 
     // Force-inline all callers of the named marker sentinels.
-    for (const char* Name :
-         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
+    Changed |= inlineMarkerWrappers(M);
+
+    // Now resolve sentinel calls that are directly visible.
+    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
     {
-        Function* S = M.getFunction(Name);
-        if (!S) continue;
-        SmallVector<Function*, 4> Wrappers;
-        for (User* U : S->users())
-        {
-            auto* CI = dyn_cast<CallInst>(U);
-            if (!CI) continue;
-            Function* Wrapper = CI->getFunction();
-            if (Wrapper && Wrapper != S) Wrappers.push_back(Wrapper);
-        }
-        for (Function* W : Wrappers)
-        {
-            SmallVector<CallInst*, 8> CallSites;
-            for (User* U : W->users())
-            {
-                if (auto* CI = dyn_cast<CallInst>(U)) CallSites.push_back(CI);
-            }
-            for (auto* CS : CallSites)
-            {
-                InlineFunctionInfo IFI;
-                InlineFunction(*CS, IFI);
-                Changed = true;
-            }
-        }
-    }
+        return processMarkerCalls(F, gen, /*useBareTrace=*/true);
+    });
 
-    // Now resolve sentinel calls that are directly visible
-    for (auto& F : M)
+    eraseUnusedMarkerSentinels(M);
+
+    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
     {
-        if (F.isDeclaration()) continue;
-        GfxGen Gen = getGfxGen(F);
-        if (Gen == GfxGen::Unknown) continue;
-        Changed |= resolveNamedMarkersEarly(F, Gen);
-    }
-
-    // Clean up sentinel declarations
-    for (const char* Name :
-         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
-    {
-        Function* S = M.getFunction(Name);
-        if (!S) continue;
-        if (S->use_empty()) S->eraseFromParent();
-    }
-
-    // Store user marker map in module metadata for late pass
-    if (!UserMarkers.empty()) storeUserMarkerMetadata(M, Ctx);
-
-    for (auto& F : M)
-    {
-        if (F.isDeclaration()) continue;
-        GfxGen Gen = getGfxGen(F);
-        if (Gen == GfxGen::Unknown) continue;
-
-        if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL) continue;
-
-        if (Config.FunctionThreshold == 0) continue;
-        if (hasMustTailCall(F)) continue;
-
+        if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL || Config.FunctionThreshold == 0 ||
+            hasMustTailCall(F))
+            return false;
         uint32_t id = NextEventID++;
-        storeFuncMetadata(F, id, Ctx);
-        insertBareMarkers(F, id, Gen);
+        Type* I32 = Type::getInt32Ty(Ctx);
+        F.setMetadata("sqtt.func.id", MDNode::get(Ctx, {ConstantAsMetadata::get(ConstantInt::get(I32, id))}));
+        Markers.push_back({id, MarkerKind::Function, F.getName().str(), getFunctionSourceLoc(F),
+                           computeFunctionSize(F, Config.Mode)});
+        insertFunctionMarkers(F, id, gen, /*useBareTrace=*/true);
+        return true;
+    });
 
-        Changed = true;
-    }
+    if (!Markers.empty()) storeEarlyMarkerMetadata(M, Ctx);
 
     return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
@@ -128,85 +141,54 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
 {
     bool Changed = false;
 
-    bool hadEarlyFuncInst = M.getNamedMetadata("sqtt.funcmap.early") != nullptr;
-    bool hadEarlyMarkers = M.getNamedMetadata("sqtt.usermarkers.early") != nullptr;
-    bool hadEarlyPass = hadEarlyFuncInst || hadEarlyMarkers;
-
-    recoverUserMarkerMetadata(M);
+    bool hadEarlyFuncInst = false;
+    bool hadEarlyPass = recoverEarlyMarkerMetadata(M, hadEarlyFuncInst);
 
     if (hadEarlyFuncInst)
-    {
-        Changed |= filterInstrumentedFunctions(M);
-        NextEventID = compactFuncIDs(M);
-    }
+        Changed |= finalizeEarlyFunctionMarkers(M);
 
+    auto addSystemMarkers = [&](std::initializer_list<const char*> names)
+    {
+        uint32_t firstID = NextEventID;
+        for (const char* name : names) Markers.push_back({NextEventID++, MarkerKind::SystemPoint, name});
+        return firstID;
+    };
     if (Config.InstrumentBarriers)
-    {
-        BarrierSignalID = NextEventID++;
-        BarrierWaitID = NextEventID++;
-        BarrierFullID = NextEventID++;
-    }
-    if (Config.InstrumentMemory)
-    {
-        VmemLoadID = NextEventID++;
-        VmemStoreID = NextEventID++;
-    }
+        FirstBarrierID = addSystemMarkers({"barrier_signal", "barrier_wait", "barrier"});
+    if (Config.MemoryChunkSize)
+        FirstVmemID = addSystemMarkers({"vmem_load", "vmem_store"});
 
-    for (auto& F : M)
+    // A nonzero clock field must wait until every payload-producing protocol
+    // has been discovered. The default no-clock path can lower each function
+    // as soon as all of its markers have been inserted.
+    const bool deferFullTraceFinalization = Config.ShaderClockBits != 0;
+    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
     {
-        if (F.isDeclaration()) continue;
-        GfxGen Gen = getGfxGen(F);
-        if (Gen == GfxGen::Unknown) continue;
-
         CurScopeCheck = nullptr; // reset per function
+        bool isKernel = F.getCallingConv() == CallingConv::AMDGPU_KERNEL;
+        if (isKernel) Markers.push_back({0, MarkerKind::Kernel, F.getName().str(), getFunctionSourceLoc(F)});
 
-        bool IsKernel = F.getCallingConv() == CallingConv::AMDGPU_KERNEL;
+        bool changed = finalizeExistingMarkers(F, gen);
+        changed |= processMarkerCalls(F, gen, /*useBareTrace=*/false);
+        if (Config.InstrumentBarriers) changed |= instrumentBarriers(F, gen);
+        if (Config.MemoryChunkSize) changed |= instrumentMemoryOps(F, gen);
+        if (Config.hasAddressTracing()) changed |= instrumentAddressTraces(F, gen);
+        if (!hadEarlyPass && Config.FunctionThreshold > 0 && !isKernel)
+            changed |= instrumentFunctionDirect(F, gen);
+        if (!deferFullTraceFinalization) changed |= finalizeFullTraces(F, gen);
+        return changed;
+    });
 
-        if (IsKernel) KernelNames.push_back({F.getName().str(), getFunctionSourceLoc(F)});
+    if (Config.ShaderClockBits != 0 && std::any_of(Markers.begin(), Markers.end(), [](const MarkerRecord& entry)
+        { return entry.ExtraPayloadCount != 0; }))
+        report_fatal_error("SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0");
 
-        if (Config.needsScopeCheck()) Changed |= wrapExistingMarkers(F, Gen);
+    if (deferFullTraceFinalization)
+        Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen) { return finalizeFullTraces(F, gen); });
 
-        Changed |= addBarriersToExistingMarkers(F);
+    eraseUnusedMarkerSentinels(M);
 
-        Changed |= processNamedMarkers(F, Gen);
-
-        if (Config.InstrumentBarriers) Changed |= instrumentBarriers(F, Gen);
-
-        if (Config.InstrumentMemory) Changed |= instrumentMemoryOps(F, Gen);
-
-        if (Config.hasAddressTracing()) Changed |= instrumentAddressTraces(F, Gen);
-
-        if (!hadEarlyPass && Config.FunctionThreshold > 0 && !IsKernel) Changed |= instrumentFunctionDirect(F, Gen);
-    }
-
-    bool HasPayloadMarkers = false;
-    for (const auto& Entry : UserMarkers) HasPayloadMarkers |= Entry.ExtraPayloadCount != 0;
-    for (const auto& Entry : AddrTraceEntries) HasPayloadMarkers |= Entry.ExtraPayloadCount != 0;
-    if (HasPayloadMarkers && Config.ShaderClockBits != 0)
-        report_fatal_error(
-            "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
-        );
-
-    // Packing must happen after the address decision for the entire module.
-    for (auto& F : M)
-    {
-        if (F.isDeclaration()) continue;
-        GfxGen Gen = getGfxGen(F);
-        if (Gen == GfxGen::Unknown) continue;
-        Changed |= applyShaderClockPacking(F, Gen);
-        Changed |= lowerFullTracesWithM0Nop(F);
-    }
-
-    // Clean up sentinel declarations
-    for (const char* Name :
-         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
-    {
-        if (Function* S = M.getFunction(Name))
-            if (S->use_empty()) S->eraseFromParent();
-    }
-
-    if (!FuncMap.empty() || !KernelNames.empty() || !UserMarkers.empty() || Config.InstrumentBarriers ||
-        Config.InstrumentMemory || !AddrTraceEntries.empty() || ShaderClockBitsUsed > 0)
+    if (!Markers.empty() || ShaderClockBitsUsed > 0)
     {
         emitFuncMap(M);
         Changed = true;

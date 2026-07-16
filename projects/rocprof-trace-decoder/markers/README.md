@@ -95,9 +95,10 @@ hipcc -DSQTT_ENABLED=1 \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
-### Automatic barrier instrumentation (gfx12)
+### Automatic barrier instrumentation
 
-Insert point markers around `s_barrier_signal` and `s_barrier_wait`:
+Insert point markers around standalone `s_barrier`, `s_barrier_signal`, and
+`s_barrier_wait`:
 
 ```bash
 SQTT_INSTRUMENT_BARRIERS=1 \
@@ -169,13 +170,13 @@ python3 scripts/sqtt_memory_trace.py trace_output/ --summary
 ```
 
 The trace protocol emits a header marker, the EXEC mask, and then
-per-lane addresses for all lanes. The funcmap records the wave size as
-`W:64` or `W:32`, and address-trace header IDs get `R:ID:extra_payload_count=N`
-metadata for the number of following payload records. Markers without an
-`R:` row have an implicit count of zero. The decoder filters by the EXEC mask
-to report only active lanes. The parser demultiplexes interleaved records from
-concurrent waves by grouping on `(cu, simd, wave_id)` before parsing each
-wave's address block.
+per-lane addresses for all lanes. When at least one qualifying operation is
+traced, the funcmap records the wave size as `W:64` or `W:32`, and address-trace
+header IDs get `R:ID:extra_payload_count=N` metadata for the number of following
+payload records. Markers without an `R:` row have an implicit count of zero. The
+decoder filters by the EXEC mask to report only active lanes. The parser
+demultiplexes interleaved records from concurrent waves by grouping on `(cu,
+simd, wave_id)` before parsing each wave's address block.
 
 Any marker with `extra_payload_count > 0`, including address blocks and
 `sqtt_marker_data()`, requires `SQTT_SHADER_CLOCK_BITS=0`. Shader-clock
@@ -239,10 +240,10 @@ __global__ void my_kernel(float *data, int n) {
 Named markers require the pass plugin (`-fpass-plugin=build/lib/libsqttinstrumentpass.so`).
 The pass:
 
-1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`, and
-   `sqtt_marker_point("...")` calls
-2. Assigns unique IDs (starting at 1) with deduplication -- the same string
-   at multiple call sites gets the same ID
+1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`,
+   `sqtt_marker_point("...")`, and `sqtt_marker_data("...", value)` calls
+2. Assigns unique IDs (starting at 1) with deduplication within the same
+   scope/point/data marker kind
 3. Fuses adjacent exit+enter pairs into single `s_ttracedata` instructions
    with `exit_prev=true`, halving the overhead for scope transitions
 4. Replaces each call with `s_ttracedata` + scope checks
@@ -517,17 +518,15 @@ the ID in the `.sqtt_funcmap` section, not from encoding bits.
 | 1     | 1         | any    | exit previous + enter this ID (transition) |
 
 **IDs** are allocated dynamically from a unified pool. No reserved ranges.
-With all features enabled, a typical allocation looks like:
+When early function instrumentation runs, its function and already-resolved
+named-marker IDs are compacted together by emission count (ties by original
+ID). System IDs follow, while late-resolved named markers and address IDs
+receive the next available IDs as they are encountered:
 
 ```
-  1-N         auto-instrumented functions
-  N+1         barrier_signal          (if SQTT_INSTRUMENT_BARRIERS=1)
-  N+2         barrier_wait
-  N+3         barrier
-  N+4         vmem_load               (if SQTT_INSTRUMENT_MEMORY set)
-  N+5         vmem_store
-  N+6+        user markers
-  M+1..M+K    addr_trace_* per-op IDs (if SQTT_TRACE_ADDRESSES set)
+  1-N         early functions and named markers, compacted together
+  N+1..       barrier and vmem IDs (when enabled)
+  ...         late-resolved named and addr_trace_* IDs as encountered
 ```
 
 When address tracing is enabled, each memory operation gets its own unique

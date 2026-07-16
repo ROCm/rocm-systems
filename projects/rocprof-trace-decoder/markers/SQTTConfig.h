@@ -106,8 +106,7 @@ struct SQTTConfig
     bool InstrumentBarriers = false;
     CostMode Mode = CostMode::InstructionCount;
     unsigned FunctionThreshold = 0; // 0 = disabled
-    bool InstrumentMemory = false;
-    unsigned MemoryChunkSize = 0;   // N: ops per marker
+    unsigned MemoryChunkSize = 0;   // 0 = disabled; otherwise N ops per marker
     unsigned MemoryMaxGap = 0;      // M: max non-memory instructions between ops
     uint32_t WaveMask = 0xFFFFFFFF; // default: all waves (0-31)
     uint32_t SimdMask = 0xF;        // default: all 4 SIMDs
@@ -202,15 +201,8 @@ struct SQTTConfig
         {
             llvm::StringRef s(funcEnv);
             if (s.consume_front("cost:"))
-            {
                 c.Mode = CostMode::WeightedCost;
-                s.getAsInteger(10, c.FunctionThreshold);
-            }
-            else
-            {
-                c.Mode = CostMode::InstructionCount;
-                s.getAsInteger(10, c.FunctionThreshold);
-            }
+            s.getAsInteger(10, c.FunctionThreshold);
         }
 
         // SQTT_INSTRUMENT_MEMORY=N:M  (N=chunk size, M=max gap)
@@ -223,7 +215,6 @@ struct SQTTConfig
             unsigned n = 0, m = 0;
             if (!nStr.getAsInteger(10, n) && !mStr.empty() && !mStr.getAsInteger(10, m) && n > 0)
             {
-                c.InstrumentMemory = true;
                 c.MemoryChunkSize = n;
                 c.MemoryMaxGap = m;
             }
@@ -254,7 +245,7 @@ struct SQTTConfig
                                     "category '"
                                  << t << "'\n";
             }
-            if (c.hasAddressTracing() && c.InstrumentMemory)
+            if (c.hasAddressTracing() && c.MemoryChunkSize)
             {
                 llvm::errs() << "SQTT: error: SQTT_TRACE_ADDRESSES and "
                                 "SQTT_INSTRUMENT_MEMORY are mutually exclusive\n";

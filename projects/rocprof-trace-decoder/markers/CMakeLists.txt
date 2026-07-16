@@ -6,8 +6,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         VERSION 0.0.0
         LANGUAGES C CXX)
 
-    set(CMAKE_CXX_STANDARD 20)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(TTD_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
     include(GNUInstallDirs)
@@ -44,14 +42,12 @@ add_library(
     SQTTPass.cpp
     SQTTMarkers.cpp
     SQTTNamedMarkers.cpp
-    SQTTBarriers.cpp
-    SQTTMemory.cpp
+    SQTTAutomatic.cpp
     SQTTAddressTrace.cpp
     SQTTFunctions.cpp
     SQTTFuncMap.cpp)
 
-target_include_directories(SQTTInstrumentPass PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}
-                                                      ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx)
+target_include_directories(SQTTInstrumentPass PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(SQTTInstrumentPass PRIVATE ${LLVM_DEFINITIONS})
 target_compile_features(SQTTInstrumentPass PRIVATE cxx_std_17)
 
@@ -91,35 +87,3 @@ install(
     DIRECTORY ${TTD_PROJECT_SOURCE_DIR}/docs/markers/
     DESTINATION ${CMAKE_INSTALL_DOCDIR}/markers
     COMPONENT devel)
-
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format-14)
-    find_program(CMAKE_FORMAT_EXECUTABLE NAMES cmake-format)
-
-    if(CLANG_FORMAT_EXECUTABLE)
-        set(_fmt_cxx_cmd
-            COMMAND
-            ${CLANG_FORMAT_EXECUTABLE}
-            -i
-            --style=file
-            ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/*.h
-            ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp)
-    else()
-        set(_fmt_cxx_cmd COMMAND ${CMAKE_COMMAND} -E echo "warning: clang-format not found, skipping C++ formatting")
-    endif()
-
-    if(CMAKE_FORMAT_EXECUTABLE)
-        set(_fmt_cmake_cmd COMMAND ${CMAKE_FORMAT_EXECUTABLE} -i ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
-    else()
-        set(_fmt_cmake_cmd COMMAND ${CMAKE_COMMAND} -E echo
-                           "warning: cmake-format not found, skipping CMake formatting")
-    endif()
-
-    add_custom_target(
-        format
-        ${_fmt_cxx_cmd} ${_fmt_cmake_cmd}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Formatting SQTT marker sources"
-        VERBATIM)
-endif()

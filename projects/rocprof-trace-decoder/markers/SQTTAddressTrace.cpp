@@ -25,77 +25,89 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
 namespace
 {
 
-// Keep the explicit EXEC trace sequence together on every target.
-void emitExecMaskTrace(IRBuilder<>& B, LLVMContext& Ctx, bool high)
+constexpr const char* MemoryTraceNames[] = {
+    "addr_trace_load", "addr_trace_store", "addr_trace_atomic"
+};
+constexpr const char* LDSTraceNames[] = {
+    "addr_trace_lds_load", "addr_trace_lds_store", "addr_trace_lds_atomic"
+};
+constexpr const char* BufferTraceNames[][3] = {
+    {"addr_trace_buffer_load", "addr_trace_buffer_store", "addr_trace_buffer_atomic"},
+    {"addr_trace_struct_buffer_load", "addr_trace_struct_buffer_store", "addr_trace_struct_buffer_atomic"}
+};
+
+unsigned traceOperationIndex(bool isStore, bool isAtomic) { return isAtomic ? 2 : isStore; }
+
+static constexpr const char ExecTraceAsm[] =
+    "s_mov_b32 m0, exec_lo\n"
+    "s_nop 0\n"
+    "s_ttracedata\n"
+    "s_mov_b32 m0, exec_hi\n"
+    "s_nop 0\n"
+    "s_ttracedata";
+
+void emitExecMaskTraces(IRBuilder<>& B)
 {
-    const char* Asm = high ? "s_mov_b32 m0, exec_hi\n"
-                             "s_nop 0\n"
-                             "s_ttracedata"
-                           : "s_mov_b32 m0, exec_lo\n"
-                             "s_nop 0\n"
-                             "s_ttracedata";
-    // Model the M0 definition as a fixed output. `m0` is reserved on AMDGPU,
-    // so a `~{m0}` clobber is diagnosed as undefined behavior by LLVM.
-    InlineAsm* trace = InlineAsm::get(
-        FunctionType::get(Type::getInt32Ty(Ctx), false), Asm, "={m0}", /*hasSideEffects=*/true
-    );
-    B.CreateCall(trace);
+    LLVMContext& Ctx = B.getContext();
+    B.CreateCall(InlineAsm::get(
+        FunctionType::get(Type::getInt32Ty(Ctx), false), ExecTraceAsm, "={m0}", /*hasSideEffects=*/true
+    ));
 }
 
 } // namespace
 
-SQTTInstrumentPass::AddrTraceKind SQTTInstrumentPass::classifyAddrTraceOp(
+SQTTInstrumentPass::AddrTraceOp SQTTInstrumentPass::classifyAddrTraceOp(
     Instruction* I, bool traceMemory, bool traceLDS
 )
 {
-    // Helper lambda for pointer-based address space classification
-    auto classifyAS = [&](unsigned AS) -> AddrTraceKind
+    const auto none = [=] { return AddrTraceOp{I, nullptr, AddrTraceKind::None, 0, false}; };
+    if (Value* pointer = getMemoryPointer(I))
     {
-        if (AS == 3) return traceLDS ? AddrTraceKind::LDS : AddrTraceKind::None;
         // The memory address protocol is defined only for flat (0) and
         // global (1) pointers.  Other AMDGPU address spaces have different
         // representations and must not be reinterpreted as global addresses.
-        if (AS == 0 || AS == 1) return traceMemory ? AddrTraceKind::Memory : AddrTraceKind::None;
-        return AddrTraceKind::None;
-    };
-
-    if (auto* LI = dyn_cast<LoadInst>(I)) return classifyAS(LI->getPointerAddressSpace());
-    if (auto* SI = dyn_cast<StoreInst>(I)) return classifyAS(SI->getPointerAddressSpace());
-    if (auto* AI = dyn_cast<AtomicRMWInst>(I)) return classifyAS(AI->getPointerAddressSpace());
-    if (auto* AX = dyn_cast<AtomicCmpXchgInst>(I)) return classifyAS(AX->getPointerAddressSpace());
-
-    if (auto* CI = dyn_cast<CallInst>(I))
-    {
-        Function* Callee = CI->getCalledFunction();
-        if (!Callee) return AddrTraceKind::None;
-        StringRef Name = Callee->getName();
-        // buffer.load.lds has a distinct operand layout (including an LDS
-        // destination pointer), so the ordinary buffer component protocol is
-        // not valid for it.  Leave it uninstrumented until it has its own
-        // protocol.
-        if (traceMemory && isBufferOp(Name) && !Name.ends_with(".buffer.load.lds"))
-            return AddrTraceKind::Buffer;
-        auto IID = Callee->getIntrinsicID();
-        if (traceLDS && (IID == Intrinsic::amdgcn_ds_permute || IID == Intrinsic::amdgcn_ds_bpermute ||
-                         IID == Intrinsic::amdgcn_ds_bpermute_fi_b32))
-            return AddrTraceKind::Permute;
+        unsigned AS = cast<PointerType>(pointer->getType())->getAddressSpace();
+        bool isStore = isa<StoreInst>(I);
+        unsigned op = traceOperationIndex(isStore, isa<AtomicRMWInst>(I) || isa<AtomicCmpXchgInst>(I));
+        if (AS == 3 && traceLDS) return {I, LDSTraceNames[op], AddrTraceKind::LDS, 0, false};
+        if ((AS == 0 || AS == 1) && traceMemory)
+            return {I, MemoryTraceNames[op], AddrTraceKind::Memory, 0, false};
+        return none();
     }
-    return AddrTraceKind::None;
-}
 
-Value* SQTTInstrumentPass::getMemOpPointer(Instruction* I)
-{
-    if (auto* LI = dyn_cast<LoadInst>(I)) return LI->getPointerOperand();
-    if (auto* SI = dyn_cast<StoreInst>(I)) return SI->getPointerOperand();
-    if (auto* AI = dyn_cast<AtomicRMWInst>(I)) return AI->getPointerOperand();
-    if (auto* AX = dyn_cast<AtomicCmpXchgInst>(I)) return AX->getPointerOperand();
-    return nullptr;
+    auto* CI = dyn_cast<CallInst>(I);
+    Function* Callee = CI ? CI->getCalledFunction() : nullptr;
+    if (!Callee) return none();
+
+    StringRef Name = Callee->getName();
+    BufferOpKind bufferKind = classifyBufferOp(Name);
+    // buffer.load.lds has a distinct operand layout (including an LDS
+    // destination pointer), so the ordinary buffer component protocol is not
+    // valid for it.
+    if (traceMemory && bufferKind != BufferOpKind::None && !Name.ends_with(".buffer.load.lds"))
+    {
+        bool isStruct = isStructBuffer(Name);
+        unsigned op = static_cast<unsigned>(bufferKind) - 1;
+        unsigned rsrc = bufferKind == BufferOpKind::Load ? 0 : isBufferCmpSwap(Name) ? 2 : 1;
+        return {I, BufferTraceNames[isStruct][op], AddrTraceKind::Buffer, rsrc, isStruct};
+    }
+
+    auto IID = Callee->getIntrinsicID();
+    if (traceLDS && (IID == Intrinsic::amdgcn_ds_permute || IID == Intrinsic::amdgcn_ds_bpermute ||
+                     IID == Intrinsic::amdgcn_ds_bpermute_fi_b32))
+    {
+        bool isBPermute = IID == Intrinsic::amdgcn_ds_bpermute || IID == Intrinsic::amdgcn_ds_bpermute_fi_b32;
+        return {I, isBPermute ? "addr_trace_ds_bpermute" : "addr_trace_ds_permute", AddrTraceKind::Permute, 0,
+                false};
+    }
+    return none();
 }
 
 std::string SQTTInstrumentPass::getSourceLoc(Instruction* I)
@@ -133,161 +145,139 @@ std::string SQTTInstrumentPass::getFunctionSourceLoc(Function& F)
     return out;
 }
 
-const char* SQTTInstrumentPass::addrTraceKindName(AddrTraceKind kind, bool isStore, bool isAtomic)
-{
-    switch (kind)
-    {
-        case AddrTraceKind::LDS:
-            if (isAtomic) return "addr_trace_lds_atomic";
-            return isStore ? "addr_trace_lds_store" : "addr_trace_lds_load";
-        case AddrTraceKind::Memory:
-            if (isAtomic) return "addr_trace_atomic";
-            return isStore ? "addr_trace_store" : "addr_trace_load";
-        case AddrTraceKind::Buffer:
-            // Buffer names encode struct vs raw via the caller; here we give the
-            // base name which gets refined in instrumentAddressTraces.
-            if (isAtomic) return "addr_trace_buffer_atomic";
-            return isStore ? "addr_trace_buffer_store" : "addr_trace_buffer_load";
-        case AddrTraceKind::Permute: return "addr_trace_ds_permute"; // bpermute distinguished by caller
-        default: return "addr_trace_unknown";
-    }
-}
-
 void SQTTInstrumentPass::emitAddressTrace(
-    IRBuilder<>& B, Instruction* memOp, AddrTraceKind kind, uint32_t headerID, Function& F, GfxGen gen
+    IRBuilder<>& B, const AddrTraceOp& op, uint32_t headerID, GfxGen gen
 )
 {
+    Module* M = B.GetInsertBlock()->getParent()->getParent();
+    LLVMContext& Ctx = M->getContext();
+    Type* I32 = Type::getInt32Ty(Ctx);
+
+    bool schedBarrier = !Config.needsScopeCheck();
+    emitTraceBoundary(B, /*after=*/false, schedBarrier);
+    emitBareTrace(B, encodeMarker(headerID, false, false), M, gen);
+    unsigned waveSize = getWaveSize(gen);
+
+    switch (op.Kind)
+    {
+        case AddrTraceKind::Buffer:
+        {
+            CallInst* bufOp = cast<CallInst>(op.I);
+            Value* rsrc = bufOp->getArgOperand(op.BufferRsrcIndex);
+            Value* vindex = op.StructBuffer ? bufOp->getArgOperand(op.BufferRsrcIndex + 1) : nullptr;
+            Value* voffset = bufOp->getArgOperand(op.BufferRsrcIndex + (op.StructBuffer ? 2 : 1));
+            Value* soffset = bufOp->getArgOperand(op.BufferRsrcIndex + (op.StructBuffer ? 3 : 2));
+
+            // Header, EXEC, descriptor words, scalar offset, then lane data.
+            emitExecMaskTraces(B);
+            Value *rsrcLo, *rsrcHi;
+            if (rsrc->getType()->isVectorTy())
+            {
+                rsrcLo = B.CreateExtractElement(rsrc, uint64_t{0});
+                rsrcHi = B.CreateExtractElement(rsrc, uint64_t{1});
+            }
+            else
+            {
+                Value* rsrcInt = B.CreatePtrToInt(rsrc, Type::getIntNTy(Ctx, 128));
+                rsrcLo = B.CreateTrunc(rsrcInt, I32);
+                rsrcHi = B.CreateTrunc(B.CreateLShr(rsrcInt, 32), I32);
+            }
+            emitBareTraceValue(B, rsrcLo, M);
+            emitBareTraceValue(B, rsrcHi, M);
+            if (soffset->getType() != I32) soffset = B.CreateZExtOrTrunc(soffset, I32);
+            emitBareTraceValue(B, soffset, M);
+            emitReadlaneTraceLoop(B, voffset, nullptr, waveSize);
+            if (vindex)
+                emitReadlaneTraceLoop(B, vindex, nullptr, waveSize);
+            break;
+        }
+        case AddrTraceKind::Permute:
+            emitExecMaskTraces(B);
+            emitReadlaneTraceLoop(
+                B, cast<CallInst>(op.I)->getArgOperand(0), nullptr, waveSize
+            );
+            break;
+        case AddrTraceKind::Memory:
+        case AddrTraceKind::LDS:
+        {
+            Value* ptr = getMemoryPointer(op.I);
+            assert(ptr && "expected Load/Store/Atomic instruction");
+            Value *addrLo, *addrHi = nullptr;
+            if (op.Kind == AddrTraceKind::Memory)
+            {
+                Value* addr = B.CreatePtrToInt(ptr, Type::getInt64Ty(Ctx));
+                addrLo = B.CreateTrunc(addr, I32);
+                addrHi = B.CreateTrunc(B.CreateLShr(addr, 32), I32);
+            }
+            else
+                addrLo = B.CreatePtrToInt(ptr, I32);
+            emitExecMaskTraces(B);
+            emitReadlaneTraceLoop(B, addrLo, addrHi, waveSize);
+            break;
+        }
+        default: llvm_unreachable("unsupported address trace kind");
+    }
+
+    emitTraceBoundary(B, /*after=*/true, schedBarrier);
+}
+
+void SQTTInstrumentPass::emitReadlaneTraceLoop(
+    IRBuilder<>& B,
+    Value* firstValue,
+    Value* secondValue,
+    unsigned waveSize
+)
+{
+    Function& F = *B.GetInsertBlock()->getParent();
     Module* M = F.getParent();
     LLVMContext& Ctx = M->getContext();
     Type* I32 = Type::getInt32Ty(Ctx);
-    Type* I64 = Type::getInt64Ty(Ctx);
+    if (firstValue->getType() != I32) firstValue = B.CreateZExtOrTrunc(firstValue, I32);
+    if (secondValue && secondValue->getType() != I32) secondValue = B.CreateZExtOrTrunc(secondValue, I32);
 
-    emitTraceBlockBoundary(B, /*after=*/false);
-
-    // Buffer and permute ops use specialized trace protocols
-    if (kind == AddrTraceKind::Buffer)
-    {
-        emitBufferTrace(B, cast<CallInst>(memOp), headerID, F, gen);
-        emitTraceBlockBoundary(B, /*after=*/true);
-        return;
-    }
-    if (kind == AddrTraceKind::Permute)
-    {
-        emitPermuteTrace(B, cast<CallInst>(memOp), headerID, F, gen);
-        emitTraceBlockBoundary(B, /*after=*/true);
-        return;
-    }
-
-    // 1. Header marker
-    emitBareTrace(B, encodeMarker(headerID, false, false), M, gen);
-
-    // 2. Get pointer and convert to integer
-    Value* ptr = getMemOpPointer(memOp);
-    assert(ptr && "expected Load/Store/Atomic instruction");
-
-    bool is64bit = (kind == AddrTraceKind::Memory);
-    Value *addrLo, *addrHi = nullptr;
-    if (is64bit)
-    {
-        Value* addrI64 = B.CreatePtrToInt(ptr, I64);
-        addrLo = B.CreateTrunc(addrI64, I32);
-        addrHi = B.CreateTrunc(B.CreateLShr(addrI64, 32), I32);
-    }
-    else
-    {
-        // LDS: 32-bit address
-        addrLo = B.CreatePtrToInt(ptr, I32);
-    }
-
-    // 3. EXEC mask
-    unsigned waveSize = getWaveSize(gen);
-
-    emitExecMaskTrace(B, Ctx, /*high=*/false);
-    emitExecMaskTrace(B, Ctx, /*high=*/true);
-
-    // 4. Readlane loop
     Function* ReadLane = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readlane, {I32});
-
     BasicBlock* PreheaderBB = B.GetInsertBlock();
     BasicBlock* AfterBB;
-
-    bool atEnd = (B.GetInsertPoint() == PreheaderBB->end());
-    if (!atEnd)
+    if (B.GetInsertPoint() == PreheaderBB->end())
+        AfterBB = BasicBlock::Create(Ctx, "sqtt.lanes.after", &F, PreheaderBB->getNextNode());
+    else
     {
-        Instruction* SplitPt = &*B.GetInsertPoint();
-        AfterBB = PreheaderBB->splitBasicBlock(SplitPt, "sqtt.addr.after");
+        AfterBB = PreheaderBB->splitBasicBlock(B.GetInsertPoint(), "sqtt.lanes.after");
         PreheaderBB->getTerminator()->eraseFromParent();
     }
-    else { AfterBB = BasicBlock::Create(Ctx, "sqtt.addr.after", &F, PreheaderBB->getNextNode()); }
+    BasicBlock* LoopBB = BasicBlock::Create(Ctx, "sqtt.lanes.loop", &F, AfterBB);
 
-    BasicBlock* LoopBB = BasicBlock::Create(Ctx, "sqtt.addr.loop", &F, AfterBB);
-
-    // Preheader -> LoopBB
     IRBuilder<> PreB(PreheaderBB);
     PreB.CreateBr(LoopBB);
 
-    // Loop body
     IRBuilder<> LoopB(LoopBB);
     PHINode* Lane = LoopB.CreatePHI(I32, 2, "lane");
     Lane->addIncoming(ConstantInt::get(I32, 0), PreheaderBB);
-
-    Value* laneLo = LoopB.CreateCall(ReadLane, {addrLo, Lane});
-    emitBareTraceValue(LoopB, laneLo, M, gen);
-
-    if (is64bit)
-    {
-        Value* laneHi = LoopB.CreateCall(ReadLane, {addrHi, Lane});
-        emitBareTraceValue(LoopB, laneHi, M, gen);
-    }
+    emitBareTraceValue(LoopB, LoopB.CreateCall(ReadLane, {firstValue, Lane}), M);
+    if (secondValue) emitBareTraceValue(LoopB, LoopB.CreateCall(ReadLane, {secondValue, Lane}), M);
 
     Value* LaneNext = LoopB.CreateAdd(Lane, ConstantInt::get(I32, 1), "lane.next");
     Lane->addIncoming(LaneNext, LoopBB);
     Value* Done = LoopB.CreateICmpEQ(LaneNext, ConstantInt::get(I32, waveSize));
-    BranchInst* LoopBr = LoopB.CreateCondBr(Done, AfterBB, LoopBB);
+    auto* LoopBr = LoopB.CreateCondBr(Done, AfterBB, LoopBB);
 
-    // Attach loop metadata to disable unrolling
-    MDNode* LoopID = MDNode::getDistinct(
-        Ctx,
-        {nullptr, // placeholder for self-reference
-         MDNode::get(Ctx, {MDString::get(Ctx, "llvm.loop.unroll.disable")})}
-    );
+    MDNode* LoopID =
+        MDNode::getDistinct(Ctx, {nullptr, MDNode::get(Ctx, {MDString::get(Ctx, "llvm.loop.unroll.disable")})});
     LoopID->replaceOperandWith(0, LoopID);
     LoopBr->setMetadata(LLVMContext::MD_loop, LoopID);
-
-    // Restore insertion point to AfterBB
     B.SetInsertPoint(AfterBB, AfterBB->begin());
-    emitTraceBlockBoundary(B, /*after=*/true);
 }
 
 bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
 {
-    struct AddrOp
-    {
-        Instruction* I;
-        AddrTraceKind Kind;
-        bool IsStore;
-        bool IsAtomic;
-    };
-    SmallVector<AddrOp, 16> Ops;
+    SmallVector<AddrTraceOp, 16> Ops;
     for (auto& BB : F)
     {
         for (auto& I : BB)
         {
-            AddrTraceKind kind = classifyAddrTraceOp(&I, Config.TraceMemoryAddrs, Config.TraceLDSAddrs);
-            if (kind == AddrTraceKind::None) continue;
-            bool isStore = isa<StoreInst>(&I);
-            bool isAtomic = isa<AtomicRMWInst>(&I) || isa<AtomicCmpXchgInst>(&I);
-            if (auto* CI = dyn_cast<CallInst>(&I))
-            {
-                Function* Callee = CI->getCalledFunction();
-                if (Callee)
-                {
-                    StringRef Name = Callee->getName();
-                    if (isBufferStore(Name)) isStore = true;
-                    if (isBufferAtomic(Name)) isAtomic = true;
-                }
-            }
-            Ops.push_back({&I, kind, isStore, isAtomic});
+            if (AddrTraceOp op = classifyAddrTraceOp(&I, Config.TraceMemoryAddrs, Config.TraceLDSAddrs);
+                op.Kind != AddrTraceKind::None)
+                Ops.push_back(op);
         }
     }
     if (Ops.empty()) return false;
@@ -298,275 +288,26 @@ bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
     // the decoder treats exec_hi=0 padding as "no upper-half lanes" so the
     // wider format stays correct for both.
     unsigned waveSize = getWaveSize(gen);
-    if (AddrTraceWaveSize == 0)
-        AddrTraceWaveSize = waveSize;
-    else if (AddrTraceWaveSize != waveSize)
-        AddrTraceWaveSize = 64;
+    if (waveSize > AddrTraceWaveSize) AddrTraceWaveSize = waveSize;
 
     for (auto& op : Ops)
     {
         uint32_t opID = NextEventID++;
-        uint32_t extraPayloadCount = 2; // exec_lo + exec_hi
-
-        // Determine funcmap name — for buffers, refine with struct prefix
-        std::string kindName;
-        if (op.Kind == AddrTraceKind::Buffer)
-        {
-            auto* CI = cast<CallInst>(op.I);
-            StringRef Name = CI->getCalledFunction()->getName();
-            bool isStruct = isStructBuffer(Name);
-            const char* base = addrTraceKindName(op.Kind, op.IsStore, op.IsAtomic);
-            kindName =
-                isStruct ? std::string("addr_trace_struct_") + (base + strlen("addr_trace_")) : std::string(base);
-            extraPayloadCount += 3 + waveSize * (isStruct ? 2 : 1);
-        }
-        else if (op.Kind == AddrTraceKind::Permute)
-        {
-            auto* CI = cast<CallInst>(op.I);
-            auto IID = CI->getCalledFunction()->getIntrinsicID();
-            kindName = (IID == Intrinsic::amdgcn_ds_bpermute || IID == Intrinsic::amdgcn_ds_bpermute_fi_b32)
-                         ? "addr_trace_ds_bpermute"
-                         : "addr_trace_ds_permute";
-            extraPayloadCount += waveSize;
-        }
-        else
-        {
-            kindName = addrTraceKindName(op.Kind, op.IsStore, op.IsAtomic);
-            extraPayloadCount += waveSize * (op.Kind == AddrTraceKind::Memory ? 2 : 1);
-        }
-        std::string srcLoc = getSourceLoc(op.I);
-        AddrTraceEntries.push_back({opID, kindName, srcLoc, extraPayloadCount});
+        unsigned extraPayloadCount =
+            2 + (op.Kind == AddrTraceKind::Buffer ? 3 : 0) +
+            waveSize * ((op.Kind == AddrTraceKind::Memory || op.StructBuffer) ? 2 : 1);
+        Markers.push_back({opID, MarkerKind::AddressPoint, op.Name, getSourceLoc(op.I), 0, extraPayloadCount});
 
         IRBuilder<> B(op.I);
-        if (Config.needsScopeCheck())
-        {
-            Value* Ok = getOrCreateScopeCheck(F, gen);
-            Instruction* SplitPt = &*B.GetInsertPoint();
-            BasicBlock* OrigBB = SplitPt->getParent();
-            BasicBlock* TailBB = OrigBB->splitBasicBlock(SplitPt, "sqtt.addr.skip");
-            BasicBlock* TraceBB = BasicBlock::Create(B.getContext(), "sqtt.addr.trace", &F, TailBB);
-
-            OrigBB->getTerminator()->eraseFromParent();
-            IRBuilder<> BrB(OrigBB);
-            BrB.CreateCondBr(Ok, TraceBB, TailBB);
-
-            IRBuilder<> TB(TraceBB);
-            emitAddressTrace(TB, op.I, op.Kind, opID, F, gen);
-            TB.CreateBr(TailBB);
-        }
-        else { emitAddressTrace(B, op.I, op.Kind, opID, F, gen); }
+        emitScopedTrace(
+            B,
+            F,
+            gen,
+            "sqtt.addr.trace",
+            "sqtt.addr.skip",
+            /*pinSkipHead=*/false,
+            [&](IRBuilder<>& Trace) { emitAddressTrace(Trace, op, opID, gen); }
+        );
     }
     return true;
-}
-
-// ============================================================================
-// Buffer intrinsic operand extraction
-// ============================================================================
-
-SQTTInstrumentPass::BufferOperands SQTTInstrumentPass::getBufferOperands(CallInst* CI)
-{
-    Function* Callee = CI->getCalledFunction();
-    StringRef Name = Callee->getName();
-    bool isStruct = isStructBuffer(Name);
-    bool isCmpSwap = isBufferCmpSwap(Name);
-    bool isLoad = isBufferLoad(Name);
-
-    // Operand layout varies by intrinsic variant:
-    //   raw.buffer.load:              rsrc=0, voffset=1, soffset=2
-    //   raw.buffer.store:             rsrc=1, voffset=2, soffset=3
-    //   raw.buffer.atomic.*:          rsrc=1, voffset=2, soffset=3
-    //   raw.buffer.atomic.cmpswap:    rsrc=2, voffset=3, soffset=4
-    //   struct.buffer.load:           rsrc=0, vindex=1, voffset=2, soffset=3
-    //   struct.buffer.store:          rsrc=1, vindex=2, voffset=3, soffset=4
-    //   struct.buffer.atomic.*:       rsrc=1, vindex=2, voffset=3, soffset=4
-    //   struct.buffer.atomic.cmpswap: rsrc=2, vindex=3, voffset=4, soffset=5
-
-    unsigned rsrcIdx;
-    if (isLoad)
-        rsrcIdx = 0;
-    else if (isCmpSwap)
-        rsrcIdx = 2; // src, cmp, rsrc, ...
-    else
-        rsrcIdx = 1; // vdata, rsrc, ...
-
-    BufferOperands ops;
-    ops.IsStruct = isStruct;
-    ops.Rsrc = CI->getArgOperand(rsrcIdx);
-
-    if (isStruct)
-    {
-        ops.VIndex = CI->getArgOperand(rsrcIdx + 1);
-        ops.VOffset = CI->getArgOperand(rsrcIdx + 2);
-        ops.SOffset = CI->getArgOperand(rsrcIdx + 3);
-    }
-    else
-    {
-        ops.VIndex = nullptr;
-        ops.VOffset = CI->getArgOperand(rsrcIdx + 1);
-        ops.SOffset = CI->getArgOperand(rsrcIdx + 2);
-    }
-    return ops;
-}
-
-// ============================================================================
-// Buffer trace emission (component-based protocol)
-// ============================================================================
-
-void SQTTInstrumentPass::emitBufferTrace(IRBuilder<>& B, CallInst* bufOp, uint32_t headerID, Function& F, GfxGen gen)
-{
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-
-    BufferOperands ops = getBufferOperands(bufOp);
-
-    // 1. Header marker
-    emitBareTrace(B, encodeMarker(headerID, false, false), M, gen);
-
-    // 2. EXEC mask (same as memory/LDS traces)
-    unsigned waveSize = getWaveSize(gen);
-    emitExecMaskTrace(B, Ctx, /*high=*/false);
-    emitExecMaskTrace(B, Ctx, /*high=*/true);
-
-    // 3. rsrc base (lo/hi words)
-    Value* rsrc = ops.Rsrc;
-    Value *rsrcLo, *rsrcHi;
-    Type* rsrcTy = rsrc->getType();
-
-    if (rsrcTy->isVectorTy())
-    {
-        // Legacy <4 x i32> resource descriptor
-        rsrcLo = B.CreateExtractElement(rsrc, (uint64_t) 0);
-        rsrcHi = B.CreateExtractElement(rsrc, (uint64_t) 1);
-    }
-    else
-    {
-        // ptr addrspace(8) — ptrtoint to i128, extract lo/hi
-        Type* I128 = Type::getIntNTy(Ctx, 128);
-        Value* rsrcInt = B.CreatePtrToInt(rsrc, I128);
-        rsrcLo = B.CreateTrunc(rsrcInt, I32);
-        rsrcHi = B.CreateTrunc(B.CreateLShr(rsrcInt, 32), I32);
-    }
-    emitBareTraceValue(B, rsrcLo, M, gen);
-    emitBareTraceValue(B, rsrcHi, M, gen);
-
-    // 4. Scalar offset (uniform SGPR)
-    Value* soffset = ops.SOffset;
-    if (soffset->getType() != I32) soffset = B.CreateZExtOrTrunc(soffset, I32);
-    emitBareTraceValue(B, soffset, M, gen);
-
-    // 5. Per-lane readlane loop over voffset
-    Function* ReadLane = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readlane, {I32});
-
-    Value* voffset = ops.VOffset;
-    if (voffset->getType() != I32) voffset = B.CreateZExtOrTrunc(voffset, I32);
-
-    // Helper lambda: emit a readlane loop for a VGPR value
-    auto emitReadlaneLoop = [&](Value* vgprVal)
-    {
-        BasicBlock* PreheaderBB = B.GetInsertBlock();
-        BasicBlock* AfterBB;
-        bool atEnd = (B.GetInsertPoint() == PreheaderBB->end());
-        if (!atEnd)
-        {
-            Instruction* SplitPt = &*B.GetInsertPoint();
-            AfterBB = PreheaderBB->splitBasicBlock(SplitPt, "sqtt.buf.after");
-            PreheaderBB->getTerminator()->eraseFromParent();
-        }
-        else { AfterBB = BasicBlock::Create(Ctx, "sqtt.buf.after", &F, PreheaderBB->getNextNode()); }
-        BasicBlock* LoopBB = BasicBlock::Create(Ctx, "sqtt.buf.loop", &F, AfterBB);
-
-        IRBuilder<> PreB(PreheaderBB);
-        PreB.CreateBr(LoopBB);
-
-        IRBuilder<> LoopB(LoopBB);
-        PHINode* Lane = LoopB.CreatePHI(I32, 2, "lane");
-        Lane->addIncoming(ConstantInt::get(I32, 0), PreheaderBB);
-
-        Value* laneVal = LoopB.CreateCall(ReadLane, {vgprVal, Lane});
-        emitBareTraceValue(LoopB, laneVal, M, gen);
-
-        Value* LaneNext = LoopB.CreateAdd(Lane, ConstantInt::get(I32, 1), "lane.next");
-        Lane->addIncoming(LaneNext, LoopBB);
-        Value* Done = LoopB.CreateICmpEQ(LaneNext, ConstantInt::get(I32, waveSize));
-        BranchInst* LoopBr = LoopB.CreateCondBr(Done, AfterBB, LoopBB);
-
-        MDNode* LoopID =
-            MDNode::getDistinct(Ctx, {nullptr, MDNode::get(Ctx, {MDString::get(Ctx, "llvm.loop.unroll.disable")})});
-        LoopID->replaceOperandWith(0, LoopID);
-        LoopBr->setMetadata(LLVMContext::MD_loop, LoopID);
-
-        B.SetInsertPoint(AfterBB, AfterBB->begin());
-    };
-
-    emitReadlaneLoop(voffset);
-
-    // 6. For struct buffers: second readlane loop over vindex
-    if (ops.VIndex)
-    {
-        Value* vindex = ops.VIndex;
-        if (vindex->getType() != I32) vindex = B.CreateZExtOrTrunc(vindex, I32);
-        emitReadlaneLoop(vindex);
-    }
-}
-
-// ============================================================================
-// ds_permute / ds_bpermute trace emission
-// ============================================================================
-
-void SQTTInstrumentPass::emitPermuteTrace(
-    IRBuilder<>& B, CallInst* permuteOp, uint32_t headerID, Function& F, GfxGen gen
-)
-{
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-
-    // 1. Header marker
-    emitBareTrace(B, encodeMarker(headerID, false, false), M, gen);
-
-    // 2. EXEC mask
-    unsigned waveSize = getWaveSize(gen);
-    emitExecMaskTrace(B, Ctx, /*high=*/false);
-    emitExecMaskTrace(B, Ctx, /*high=*/true);
-
-    // 3. Per-lane readlane loop over index operand (arg 0)
-    Value* index = permuteOp->getArgOperand(0);
-    if (index->getType() != I32) index = B.CreateZExtOrTrunc(index, I32);
-
-    Function* ReadLane = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readlane, {I32});
-
-    BasicBlock* PreheaderBB = B.GetInsertBlock();
-    BasicBlock* AfterBB;
-    bool atEnd = (B.GetInsertPoint() == PreheaderBB->end());
-    if (!atEnd)
-    {
-        Instruction* SplitPt = &*B.GetInsertPoint();
-        AfterBB = PreheaderBB->splitBasicBlock(SplitPt, "sqtt.perm.after");
-        PreheaderBB->getTerminator()->eraseFromParent();
-    }
-    else { AfterBB = BasicBlock::Create(Ctx, "sqtt.perm.after", &F, PreheaderBB->getNextNode()); }
-    BasicBlock* LoopBB = BasicBlock::Create(Ctx, "sqtt.perm.loop", &F, AfterBB);
-
-    IRBuilder<> PreB(PreheaderBB);
-    PreB.CreateBr(LoopBB);
-
-    IRBuilder<> LoopB(LoopBB);
-    PHINode* Lane = LoopB.CreatePHI(I32, 2, "lane");
-    Lane->addIncoming(ConstantInt::get(I32, 0), PreheaderBB);
-
-    Value* laneVal = LoopB.CreateCall(ReadLane, {index, Lane});
-    emitBareTraceValue(LoopB, laneVal, M, gen);
-
-    Value* LaneNext = LoopB.CreateAdd(Lane, ConstantInt::get(I32, 1), "lane.next");
-    Lane->addIncoming(LaneNext, LoopBB);
-    Value* Done = LoopB.CreateICmpEQ(LaneNext, ConstantInt::get(I32, waveSize));
-    BranchInst* LoopBr = LoopB.CreateCondBr(Done, AfterBB, LoopBB);
-
-    MDNode* LoopID =
-        MDNode::getDistinct(Ctx, {nullptr, MDNode::get(Ctx, {MDString::get(Ctx, "llvm.loop.unroll.disable")})});
-    LoopID->replaceOperandWith(0, LoopID);
-    LoopBr->setMetadata(LLVMContext::MD_loop, LoopID);
-
-    B.SetInsertPoint(AfterBB, AfterBB->begin());
 }

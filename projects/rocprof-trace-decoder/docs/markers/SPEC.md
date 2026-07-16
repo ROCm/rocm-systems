@@ -98,8 +98,9 @@ SQTT hardware only captures the low 8 bits from `s_ttracedata_imm`, so the
 
 For the supported gfx12 targets, marker headers include a truncated shader clock.
 gfx1250 uses `s_get_shader_cycles_u64`; gfx1200 and gfx1201 use
-`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, shift, bits)`. When enabled, the
-default window is source bits 4-15 (`SQTT_SHADER_CLOCK_SHIFT=4`, `SQTT_SHADER_CLOCK_BITS=12`),
+`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, shift, bits)`. With a 12-bit
+setting at the default shift, the window is source bits 4-15
+(`SQTT_SHADER_CLOCK_SHIFT=4`, `SQTT_SHADER_CLOCK_BITS=12`),
 stored in marker bits 31-20, leaving 18 marker ID bits plus the two low flags:
 
 ```python
@@ -121,8 +122,9 @@ The clock field is the target-specific shader-clock sample, not the realtime
 clock associated with `s_sendmsg`. The funcmap records the active layout with
 `M:shader_clock_bits=N;shader_clock_shift=S`. When `SQTT_SHADER_CLOCK_BITS=0`,
 gfx12 uses the no-clock full-ID layout and may use `s_ttracedata_imm`.
-A nonzero `shader_clock_bits` value requires `shader_clock_shift`; a malformed
-packed row uses the no-clock full-ID layout.
+At compile time, an omitted `SQTT_SHADER_CLOCK_SHIFT` uses its default value of
+4; an `M:` row that omits `shader_clock_shift` is malformed and uses the
+no-clock full-ID layout.
 
 Any marker with `R:extra_payload_count > 0`, including address traces and
 named `sqtt_marker_data()` records, requires `SQTT_SHADER_CLOCK_BITS=0`.
@@ -239,14 +241,14 @@ time based on which features are enabled.
 
 ### Allocation order
 
-Function and user marker IDs are allocated first and compacted to enable
-`s_ttracedata_imm` coverage. System event IDs follow:
+When early function instrumentation runs, its function and already-resolved
+named-marker IDs are compacted together by emission count (ties by original ID)
+to enable `s_ttracedata_imm` coverage. System event IDs follow:
 
-1. User marker IDs (allocated when resolving named sentinels in the early pass)
-2. Function IDs (compacted contiguously starting from 1, skipping user marker IDs)
-3. Barrier IDs (if `SQTT_INSTRUMENT_BARRIERS=1`)
-4. Memory op IDs (if `SQTT_INSTRUMENT_MEMORY` set)
-5. Address trace IDs — one per memory operation (if `SQTT_TRACE_ADDRESSES` set)
+1. Early function and named marker IDs (compacted together)
+2. Barrier IDs (if `SQTT_INSTRUMENT_BARRIERS=1`)
+3. Memory op IDs (if `SQTT_INSTRUMENT_MEMORY` set)
+4. Late-resolved named markers and address trace IDs, as encountered during late instrumentation
 
 ### Funcmap format
 
@@ -258,7 +260,7 @@ K:name[@source_loc]     — kernel (for vaddr lookup, not instrumented)
 U:id:name               — user scope marker (enter/exit)
 P:id:name               — point marker (barrier, memory op, user point)
 P:id:name@source_loc    — point marker with source location (addr trace ops)
-W:N                     — wave size (32 or 64), present when address tracing is enabled
+W:N                     — wave size (32 or 64), present when a qualifying address operation is traced
 R:id:extra_payload_count=N
                         — optional record metadata; number of following
                           s_ttracedata records consumed by this marker header
@@ -293,7 +295,7 @@ Barrier IDs are allocated dynamically. Placement rules:
 
 | Barrier pattern                | Marker placement                       |
 |--------------------------------|----------------------------------------|
-| `s_barrier` (pre-gfx12)       | Point marker inserted **before**       |
+| `s_barrier` (standalone)      | Point marker inserted **before**       |
 | `s_barrier_signal` (unpaired) | Point marker inserted **after**        |
 | `s_barrier_wait` (unpaired)   | Point marker inserted **before**       |
 | `signal` + `wait` (consecutive, same BB) | Single point marker **between** them |
@@ -321,7 +323,8 @@ Example with `N=2, M=5` and sequence `load load store load load load`:
 For a function assigned id=N:
 
 - **Entry**: `encoded = (N << 2) | ENTER = (N << 2) | 2`
-- **Exit**: `encoded = 0x1` (pure exit_prev, always `s_ttracedata_imm` on RDNA)
+- **Exit**: `encoded = 0x1` (pure exit_prev; `s_ttracedata_imm` on RDNA
+  when shader-clock packing is inactive)
 
 ---
 
@@ -409,9 +412,10 @@ case the pass plants a single `sched_barrier(0)` at the head of the `sqtt.skip`
 basic block (right before the sync), pinning the sync as the first real
 instruction. This applies to:
 
-- `SQTT_INSTRUMENT_BARRIERS=1` markers (always — the marker exists *because*
-  of the adjacent sync)
-- User markers (`sqtt_marker_enter/exit/point`) whose immediate next
+- Barrier markers whose insertion point is immediately before the sync
+  (wait/full and paired signal+wait); an unpaired signal is pinned only when
+  it is immediately followed by a sync
+- User markers (`sqtt_marker_enter/exit/point/data`) whose immediate next
   non-sentinel instruction is a workgroup sync (e.g. wrapping a
   `__syncthreads()` call)
 
@@ -429,14 +433,17 @@ Function instrumentation uses a two-phase design to correctly handle inlining:
 - Registered at `PipelineEarlySimplificationEP` (skipped at `-O0`)
 - Force-inlines wrappers around named marker sentinels
   (`__sqtt_named_marker_enter`, `__sqtt_named_marker_exit`,
-  `__sqtt_named_marker_point`), then resolves sentinel calls to bare
+  `__sqtt_named_marker_point`, `__sqtt_named_marker_data`), then resolves
+  sentinel calls to bare
   `s_ttracedata` intrinsics. Adjacent exit+enter pairs in the same basic block
   are fused into a single `s_ttracedata` with `exit_prev=true`.
-- Instruments **all** non-kernel device functions with bare `s_ttracedata`
-  markers (no scope checks or barriers) at entry and all return points
+- When `SQTT_INSTRUMENT_FUNCTIONS` is nonzero, instruments eligible non-kernel
+  device functions with bare `s_ttracedata` markers (no scope checks or
+  barriers) at entry and all return points
 - Tags each function with `!sqtt.func.id` metadata
-- Stores `{id, name, pre_opt_size}` in `!sqtt.funcmap.early` module metadata
-- Stores user marker IDs in `!sqtt.usermarkers.early` module metadata
+- Stores the typed marker ledger (function/user kind, ID, name, source
+  location, pre-opt size, and payload count) in `!sqtt.markers.early`
+  module metadata
 
 When functions are inlined by LLVM, the markers travel with the code into the
 caller.
@@ -444,7 +451,7 @@ caller.
 ### Phase 2: Late (after inliner)
 
 - Registered at `OptimizerLastEP` (or `PipelineStartEP` at `-O0`)
-- Reads `!sqtt.funcmap.early` metadata
+- Reads the `!sqtt.markers.early` ledger
 - For each function that still exists: measures post-optimization size,
   compares to threshold. Below threshold: removes markers from the **entire
   module** (including inlined copies in callers)
@@ -457,7 +464,8 @@ caller.
   checks (if scope filtering is active)
 - Adds `sched_barrier(0)` and optional memory barriers around surviving
   early-pass markers (skipped when scope check provides equivalent ordering)
-- Processes any remaining named marker sentinels (with exit+enter fusion)
+- Processes any remaining named marker sentinels, including data markers
+  (with exit+enter fusion)
 - Allocates barrier and memory op IDs from the unified counter
 - Instruments barrier intrinsics and memory operations
 - Emits the `.sqtt_funcmap` ELF section with type prefixes (`F:`, `U:`, `P:`, `K:`)
@@ -539,8 +547,9 @@ using the marker's `R:id:extra_payload_count=1` metadata.
 2. The compiler emits calls to `__sqtt_named_marker_enter(const char*)` and
    the matching named marker sentinel respectively
 3. The Early pass force-inlines the wrappers, resolves the string literal,
-   assigns a unique ID (starting at 1, with deduplication across all marker
-   types), and replaces each call with a bare `s_ttracedata` intrinsic
+   assigns a unique ID (starting at 1, with deduplication within each
+   scope/point/data marker kind), and replaces each call with a bare
+   `s_ttracedata` intrinsic
 4. Adjacent exit+enter sentinel calls in the same basic block are fused into
    a single `s_ttracedata` with `exit_prev=true`, halving marker overhead
 5. The ID-to-name mapping is stored in `.sqtt_funcmap` as `U:id:name`
@@ -570,7 +579,7 @@ P:ID:marker_name                               -- point marker (barrier, memory 
 P:ID:addr_trace_load@kernel.hip:59 -> hip_runtime.h:264
                                                -- address trace op with inline chain source location
 R:ID:extra_payload_count=130                   -- following payload records for that header
-W:64                                           -- wave size (present when address tracing is enabled)
+W:64                                           -- wave size (present when a qualifying address operation is traced)
 M:shader_clock_bits=12;shader_clock_shift=4    -- gfx12 marker header clock packing
 ```
 
@@ -740,8 +749,8 @@ Each marker emits the following instruction sequence (worst case):
 |-----------------------|-------------|----------------------------|
 | `s_sched_barrier 0`   | 1           | No scope check active      |
 | reorder boundary      | 0-1         | depends on `SQTT_MEM_BARRIER` (see below) |
-| `s_ttracedata`        | 1 (+ m0 setup) | id > 63 or gfx9        |
-| `s_ttracedata_imm`    | 1           | id <= 63 and gfx10+        |
+| `s_ttracedata`        | 1 (+ m0 setup) | id > 63, gfx9, or clock packing active |
+| `s_ttracedata_imm`    | 1           | id <= 63, gfx10+, and clock packing inactive |
 | reorder boundary      | 0-1         | depends on `SQTT_MEM_BARRIER` (see below) |
 | `s_sched_barrier 0`   | 1           | No scope check active      |
 
@@ -754,8 +763,8 @@ because the conditional branch provides equivalent scheduling constraints.
 With `SQTT_MEM_BARRIER=none` on gfx10+ with a small ID, the overhead is a
 single `s_ttracedata_imm` instruction (plus `sched_barrier` if no scope check).
 
-A *pure* exit marker is always `s_ttracedata_imm 1` on RDNA (no m0 setup
-needed) regardless of function ID. A *fused* exit+enter (see below) encodes
+A *pure* exit marker is `s_ttracedata_imm 1` on RDNA when clock packing is
+inactive (no m0 setup needed), regardless of function ID. A *fused* exit+enter (see below) encodes
 as `(id << 2) | 0x3`, so it only fits in `s_ttracedata_imm` when the entered
 ID is `<= 63`; larger entry IDs fall back to `s_ttracedata` with the usual
 m0 setup.
@@ -969,7 +978,7 @@ an `R:` row have an implicit count of zero.
 For each qualifying memory operation, the pass emits (before the op):
 
 1. Allocate a unique ID from `NextEventID++`
-2. Record the ID, kind name, and source location in `AddrTraceEntries`
+2. Record the ID, kind name, and source location in the marker ledger
 3. Header point marker via `emitBareTrace()` with the unique ID
 4. EXEC mask via inline asm: `s_mov_b32 m0, exec_lo` / `exec_hi`, then
    `s_nop 0` and `s_ttracedata`.

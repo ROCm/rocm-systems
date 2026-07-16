@@ -31,6 +31,10 @@
 
 #include "SQTTConfig.h"
 
+constexpr const char* SQTT_MARKER_HEADER_METADATA = "sqtt.marker_header";
+constexpr const char* SQTT_RAW_PAYLOAD_METADATA = "sqtt.raw_payload";
+constexpr const char* SQTT_PAYLOAD_GROUP_METADATA = "sqtt.payload_group";
+
 // ============================================================================
 // Architecture detection
 // ============================================================================
@@ -63,10 +67,8 @@ inline bool hasShaderCyclesU64(const llvm::Function& F)
     if (!A.isValid()) return false;
     llvm::StringRef CPU = A.getValueAsString();
     if (!CPU.consume_front("gfx")) return false;
-    size_t digits = 0;
-    while (digits < CPU.size() && CPU[digits] >= '0' && CPU[digits] <= '9') ++digits;
     unsigned target = 0;
-    return digits != 0 && !CPU.take_front(digits).getAsInteger(10, target) && target > 1201;
+    return !CPU.consumeInteger(10, target) && target > 1201;
 }
 
 // Does this GfxGen support s_ttracedata_imm?
@@ -85,35 +87,32 @@ struct HwRegEncodings
 
 inline HwRegEncodings getHwRegEncodings(GfxGen gen)
 {
-    switch (gen)
-    {
-        case GfxGen::GFX9: return {GFX9_HWREG_WAVE, GFX9_HWREG_SIMD, GFX9_HWREG_CU, GFX9_HWREG_WG};
-        case GfxGen::RDNA: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
-        case GfxGen::GFX12: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
-        default: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
-    }
+    if (gen == GfxGen::GFX9) return {GFX9_HWREG_WAVE, GFX9_HWREG_SIMD, GFX9_HWREG_CU, GFX9_HWREG_WG};
+    return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
 }
 
-inline unsigned getShaderClockBits(const SQTTConfig& config, GfxGen gen)
+inline llvm::Value* getMemoryPointer(llvm::Instruction* I)
 {
-    (void) gen;
-    return config.ShaderClockBits;
-}
-
-inline bool usesShaderClockPacking(const SQTTConfig& config, GfxGen gen)
-{
-    return gen == GfxGen::GFX12 && getShaderClockBits(config, gen) != 0;
+    if (auto* LI = llvm::dyn_cast<llvm::LoadInst>(I)) return LI->getPointerOperand();
+    if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(I)) return SI->getPointerOperand();
+    if (auto* AI = llvm::dyn_cast<llvm::AtomicRMWInst>(I)) return AI->getPointerOperand();
+    if (auto* AX = llvm::dyn_cast<llvm::AtomicCmpXchgInst>(I)) return AX->getPointerOperand();
+    return nullptr;
 }
 
 // ============================================================================
 // Instruction cost model
 // ============================================================================
 
+inline bool isCountedInstruction(const llvm::Instruction& I)
+{
+    return !llvm::isa<llvm::PHINode>(I) && !llvm::isa<llvm::AllocaInst>(I) && !I.isDebugOrPseudoInst() &&
+           !llvm::isa<llvm::UnreachableInst>(I);
+}
+
 inline unsigned instructionCost(const llvm::Instruction& I)
 {
-    if (llvm::isa<llvm::PHINode>(I) || llvm::isa<llvm::AllocaInst>(I)) return 0;
-    if (I.isDebugOrPseudoInst()) return 0;
-    if (llvm::isa<llvm::UnreachableInst>(I)) return 0;
+    if (!isCountedInstruction(I)) return 0;
     // Check for lifetime intrinsics
     if (auto* CI = llvm::dyn_cast<llvm::CallInst>(&I))
     {
@@ -153,51 +152,38 @@ inline unsigned computeFunctionSize(const llvm::Function& F, CostMode mode)
         {
             // Pass-owned marker calls must not make a function appear large
             // enough to retain the instrumentation that introduced them.
-            if (I.getMetadata("sqtt.marker_header") || I.getMetadata("sqtt.raw_payload")) continue;
-            if (mode == CostMode::WeightedCost)
-                total += instructionCost(I);
-            else
-            {
-                // Instruction count: skip non-substantive
-                if (!llvm::isa<llvm::PHINode>(I) && !llvm::isa<llvm::AllocaInst>(I) && !I.isDebugOrPseudoInst() &&
-                    !llvm::isa<llvm::UnreachableInst>(I))
-                    total += 1;
-            }
+            if (I.getMetadata(SQTT_MARKER_HEADER_METADATA) || I.getMetadata(SQTT_RAW_PAYLOAD_METADATA) ||
+                I.getMetadata(SQTT_PAYLOAD_GROUP_METADATA))
+                continue;
+            total += mode == CostMode::WeightedCost ? instructionCost(I) : isCountedInstruction(I);
         }
     }
     return total;
 }
 
-// ============================================================================
-// Buffer intrinsic classification
-// ============================================================================
-
-inline bool isBufferLoad(llvm::StringRef Name)
+enum class BufferOpKind : uint8_t
 {
-    return Name.starts_with("llvm.amdgcn.raw.buffer.load") || Name.starts_with("llvm.amdgcn.struct.buffer.load") ||
-           Name.starts_with("llvm.amdgcn.raw.ptr.buffer.load") ||
-           Name.starts_with("llvm.amdgcn.struct.ptr.buffer.load");
+    None,
+    Load,
+    Store,
+    Atomic
+};
+
+inline BufferOpKind classifyBufferOp(llvm::StringRef name)
+{
+    for (const char* prefix : {"llvm.amdgcn.raw.buffer.", "llvm.amdgcn.struct.buffer.",
+                               "llvm.amdgcn.raw.ptr.buffer.", "llvm.amdgcn.struct.ptr.buffer."})
+    {
+        llvm::StringRef opcode = name;
+        if (!opcode.consume_front(prefix)) continue;
+        if (opcode.starts_with("load")) return BufferOpKind::Load;
+        if (opcode.starts_with("store")) return BufferOpKind::Store;
+        if (opcode.starts_with("atomic")) return BufferOpKind::Atomic;
+        return BufferOpKind::None;
+    }
+    return BufferOpKind::None;
 }
 
-inline bool isBufferStore(llvm::StringRef Name)
-{
-    return Name.starts_with("llvm.amdgcn.raw.buffer.store") || Name.starts_with("llvm.amdgcn.struct.buffer.store") ||
-           Name.starts_with("llvm.amdgcn.raw.ptr.buffer.store") ||
-           Name.starts_with("llvm.amdgcn.struct.ptr.buffer.store");
-}
+inline bool isStructBuffer(llvm::StringRef name) { return name.contains("struct"); }
 
-inline bool isBufferAtomic(llvm::StringRef Name)
-{
-    return Name.starts_with("llvm.amdgcn.raw.buffer.atomic") || Name.starts_with("llvm.amdgcn.struct.buffer.atomic") ||
-           Name.starts_with("llvm.amdgcn.raw.ptr.buffer.atomic") ||
-           Name.starts_with("llvm.amdgcn.struct.ptr.buffer.atomic");
-}
-
-inline bool isBufferOp(llvm::StringRef Name)
-{
-    return isBufferLoad(Name) || isBufferStore(Name) || isBufferAtomic(Name);
-}
-
-inline bool isStructBuffer(llvm::StringRef Name) { return Name.contains("struct"); }
-
-inline bool isBufferCmpSwap(llvm::StringRef Name) { return Name.contains("cmpswap"); }
+inline bool isBufferCmpSwap(llvm::StringRef name) { return name.contains("cmpswap"); }

@@ -200,8 +200,7 @@ if(BUILD_MARKERS)
         ${MARKER_SRC_DIR}/SQTTPass.cpp
         ${MARKER_SRC_DIR}/SQTTMarkers.cpp
         ${MARKER_SRC_DIR}/SQTTNamedMarkers.cpp
-        ${MARKER_SRC_DIR}/SQTTBarriers.cpp
-        ${MARKER_SRC_DIR}/SQTTMemory.cpp
+        ${MARKER_SRC_DIR}/SQTTAutomatic.cpp
         ${MARKER_SRC_DIR}/SQTTAddressTrace.cpp
         ${MARKER_SRC_DIR}/SQTTFunctions.cpp
         ${MARKER_SRC_DIR}/SQTTFuncMap.cpp)

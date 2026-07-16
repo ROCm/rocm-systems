@@ -23,427 +23,222 @@
 #include "SQTTPass.h"
 
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/InlineAsm.h"
 
-#include <set>
+#include <algorithm>
 
 using namespace llvm;
 
-void SQTTInstrumentPass::insertBareMarkers(Function& F, uint32_t id, GfxGen gen)
+void SQTTInstrumentPass::insertFunctionMarkers(Function& F, uint32_t id, GfxGen gen, bool useBareTrace)
 {
-    Module* M = F.getParent();
+    auto emit = [&](Instruction* I, uint32_t marker)
+    {
+        IRBuilder<> B(I);
+        if (useBareTrace)
+            emitBareTrace(B, marker, F.getParent(), gen);
+        else
+            insertTraceMarker(B, marker, F, gen);
+    };
 
-    // Entry marker
-    BasicBlock& EntryBB = F.getEntryBlock();
-    IRBuilder<> EntryB(&*EntryBB.getFirstInsertionPt());
-    emitBareTrace(EntryB, encodeMarker(id, /*enter=*/true, /*exit_prev=*/false), M, gen);
+    Instruction* Entry = useBareTrace || !CurScopeCheck ? &*F.getEntryBlock().getFirstInsertionPt()
+                                                         : cast<Instruction>(CurScopeCheck)->getNextNode();
+    emit(Entry, encodeMarker(id, /*enter=*/true, /*exit_prev=*/false));
 
-    // Exit markers before every ret.
     SmallVector<ReturnInst*, 4> Rets;
     for (auto& BB : F)
         if (auto* RI = dyn_cast<ReturnInst>(BB.getTerminator())) Rets.push_back(RI);
     for (auto* RI : Rets)
-    {
-        IRBuilder<> RetB(RI);
-        emitBareTrace(RetB, encodeMarker(id, /*enter=*/false, /*exit_prev=*/true), M, gen);
-    }
+        emit(RI, useBareTrace ? encodeMarker(id, /*enter=*/false, /*exit_prev=*/true) : FLAG_EXIT_PREV);
 }
 
-void SQTTInstrumentPass::storeFuncMetadata(Function& F, uint32_t id, LLVMContext& Ctx)
+void SQTTInstrumentPass::storeEarlyMarkerMetadata(Module& M, LLVMContext& Ctx)
 {
     Type* I32 = Type::getInt32Ty(Ctx);
-    MDNode* MD = MDNode::get(Ctx, {ConstantAsMetadata::get(ConstantInt::get(I32, id))});
-    F.setMetadata("sqtt.func.id", MD);
-
-    unsigned preOptSize = computeFunctionSize(F, Config.Mode);
-    std::string srcLoc = getFunctionSourceLoc(F);
-
-    Module* M = F.getParent();
-    NamedMDNode* NMD = M->getOrInsertNamedMetadata("sqtt.funcmap.early");
-    NMD->addOperand(MDNode::get(
-        Ctx,
-        {ConstantAsMetadata::get(ConstantInt::get(I32, id)),
-         MDString::get(Ctx, F.getName()),
-         ConstantAsMetadata::get(ConstantInt::get(I32, preOptSize)),
-         MDString::get(Ctx, srcLoc)}
-    ));
-}
-
-void SQTTInstrumentPass::storeUserMarkerMetadata(Module& M, LLVMContext& Ctx)
-{
-    Type* I32 = Type::getInt32Ty(Ctx);
-    NamedMDNode* NMD = M.getOrInsertNamedMetadata("sqtt.usermarkers.early");
-    for (auto& entry : UserMarkers)
-    {
+    NamedMDNode* NMD = M.getOrInsertNamedMetadata("sqtt.markers.early");
+    auto asInt = [&](uint32_t value) { return ConstantAsMetadata::get(ConstantInt::get(I32, value)); };
+    for (const auto& entry : Markers)
         NMD->addOperand(MDNode::get(
             Ctx,
-            {ConstantAsMetadata::get(ConstantInt::get(I32, entry.ID)),
+            {asInt(entry.ID),
+             asInt(static_cast<unsigned>(entry.Kind)),
              MDString::get(Ctx, entry.Name),
-             ConstantAsMetadata::get(ConstantInt::get(I32, entry.IsPoint ? 1 : 0)),
-             ConstantAsMetadata::get(ConstantInt::get(I32, entry.ExtraPayloadCount))}
+             asInt(entry.PreOptSize),
+             MDString::get(Ctx, entry.SourceLoc),
+             asInt(entry.ExtraPayloadCount)}
         ));
-    }
 }
 
-void SQTTInstrumentPass::recoverUserMarkerMetadata(Module& M)
+bool SQTTInstrumentPass::recoverEarlyMarkerMetadata(Module& M, bool& hasEarlyFunctions)
 {
-    NamedMDNode* NMD = M.getNamedMetadata("sqtt.usermarkers.early");
-    if (!NMD) return;
-    for (unsigned i = 0; i < NMD->getNumOperands(); i++)
+    hasEarlyFunctions = false;
+    NamedMDNode* NMD = M.getNamedMetadata("sqtt.markers.early");
+    if (!NMD) return false;
+    for (MDNode* Op : NMD->operands())
     {
-        MDNode* Op = NMD->getOperand(i);
-        if (Op->getNumOperands() < 3) continue;
+        if (Op->getNumOperands() < 6) continue;
         auto* IdC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(0));
-        auto* NameS = dyn_cast<MDString>(Op->getOperand(1));
-        auto* PointC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(2));
-        if (!IdC || !NameS || !PointC) continue;
-        uint32_t id = IdC->getZExtValue();
-        std::string name = NameS->getString().str();
-        bool isPoint = PointC->getZExtValue() != 0;
-        uint32_t extraPayloadCount = 0;
-        if (Op->getNumOperands() >= 4)
+        auto* KindC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(1));
+        auto* NameS = dyn_cast<MDString>(Op->getOperand(2));
+        auto* SizeC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(3));
+        auto* LocS = dyn_cast<MDString>(Op->getOperand(4));
+        auto* PayloadC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(5));
+        if (!IdC || !KindC || !NameS || !SizeC || !LocS || !PayloadC) continue;
+
+        MarkerKind markerKind = static_cast<MarkerKind>(KindC->getZExtValue());
+        if (markerKind != MarkerKind::Function && markerKind != MarkerKind::UserScope &&
+            markerKind != MarkerKind::Point)
+            continue;
+        hasEarlyFunctions |= markerKind == MarkerKind::Function;
+        uint32_t id = static_cast<uint32_t>(IdC->getZExtValue());
+        Markers.push_back({id, markerKind, NameS->getString().str(), LocS->getString().str(),
+                           static_cast<uint32_t>(SizeC->getZExtValue()), static_cast<uint32_t>(PayloadC->getZExtValue())});
+        MarkerRecord& entry = Markers.back();
+        if (markerKind == MarkerKind::UserScope || markerKind == MarkerKind::Point)
         {
-            if (auto* ExtraC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(3)))
-                extraPayloadCount = ExtraC->getZExtValue();
+            std::string key = std::string(markerKind == MarkerKind::Point ? "P:" : "U:") +
+                              std::to_string(entry.ExtraPayloadCount) + ":" + entry.Name;
+            UserMarkerMap[key] = id;
         }
-        UserMarkers.push_back({id, name, isPoint, extraPayloadCount});
-        std::string key = std::string(isPoint ? "P:" : "U:") + std::to_string(extraPayloadCount) + ":" + name;
-        UserMarkerMap[key] = id;
-        if (id >= NextEventID) NextEventID = id + 1;
+        // Function IDs are compacted below.  Only user IDs need to advance
+        // the no-op fallback counter used when every function is filtered.
+        if (markerKind != MarkerKind::Function && id >= NextEventID) NextEventID = id + 1;
     }
     NMD->eraseFromParent();
+    return true;
 }
 
-bool SQTTInstrumentPass::filterInstrumentedFunctions(Module& M)
+bool SQTTInstrumentPass::finalizeEarlyFunctionMarkers(Module& M)
 {
-    if (Config.FunctionThreshold == 0) return false;
-
-    bool Changed = false;
-
-    struct EarlyEntry
+    // One state entry owns all transient state for one early marker ID.
+    struct Entry
     {
-        std::string Name;
-        unsigned PreOptSize;
-        std::string SourceLoc;
+        MarkerRecord* Record;
+        uint64_t Count = 0;
+        uint32_t NewID = 0;
+        bool Seen = false, Disabled = false;
     };
-    std::map<uint32_t, EarlyEntry> EarlyMap;
-    if (NamedMDNode* NMD = M.getNamedMetadata("sqtt.funcmap.early"))
+    std::map<uint32_t, Entry> entries;
+    for (auto& record : Markers)
+        if (record.ID) entries.emplace(record.ID, Entry{&record});
+    auto find = [&](uint32_t id) -> Entry*
     {
-        for (unsigned i = 0; i < NMD->getNumOperands(); i++)
-        {
-            MDNode* Op = NMD->getOperand(i);
-            if (Op->getNumOperands() < 2) continue;
-            auto* IdC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(0));
-            auto* NameS = dyn_cast<MDString>(Op->getOperand(1));
-            if (!IdC || !NameS) continue;
+        auto it = entries.find(id);
+        return it == entries.end() ? nullptr : &it->second;
+    };
 
-            unsigned preOptSize = 0;
-            if (Op->getNumOperands() >= 3)
-            {
-                if (auto* SzC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(2))) preOptSize = SzC->getZExtValue();
-            }
-            std::string srcLoc;
-            if (Op->getNumOperands() >= 4)
-            {
-                if (auto* LocS = dyn_cast<MDString>(Op->getOperand(3))) srcLoc = LocS->getString().str();
-            }
-            EarlyMap[IdC->getZExtValue()] = {NameS->getString().str(), preOptSize, srcLoc};
-        }
-        NMD->eraseFromParent();
-    }
-
-    SmallVector<uint32_t, 8> RemoveIDs;
-
-    for (auto& F : M)
+    bool changed = false;
+    if (Config.FunctionThreshold != 0)
     {
-        if (F.isDeclaration()) continue;
-        MDNode* MD = F.getMetadata("sqtt.func.id");
-        if (!MD) continue;
-
-        auto* IdC = mdconst::dyn_extract<ConstantInt>(MD->getOperand(0));
-        if (!IdC) continue;
-        uint32_t id = IdC->getZExtValue();
-
-        unsigned size = computeFunctionSize(F, Config.Mode);
-        if (size > Config.FunctionThreshold)
+        // A clone group shares one early ID, so a below-threshold copy prunes
+        // every copy that carries that ID.
+        for (auto& F : M)
         {
-            auto it = EarlyMap.find(id);
-            if (it != EarlyMap.end())
+            if (F.isDeclaration()) continue;
+            MDNode* MD = F.getMetadata("sqtt.func.id");
+            auto* IdC = MD ? mdconst::dyn_extract<ConstantInt>(MD->getOperand(0)) : nullptr;
+            if (!IdC) continue;
+
+            Entry* entry = find(IdC->getZExtValue());
+            F.setMetadata("sqtt.func.id", nullptr);
+            if (!entry || entry->Record->Kind != MarkerKind::Function) continue;
+
+            bool firstCopy = !entry->Seen;
+            entry->Seen = true;
+            if (computeFunctionSize(F, Config.Mode) <= Config.FunctionThreshold)
             {
-                // Prefer the live function's current source loc (debug info
-                // may have been updated by optimization passes); fall back
-                // to the value stashed pre-inline.
+                changed |= !entry->Disabled;
+                entry->Disabled = true;
+            }
+            else if (firstCopy)
+            {
                 std::string loc = getFunctionSourceLoc(F);
-                if (loc.empty()) loc = it->second.SourceLoc;
-                FuncMap.push_back({id, it->second.Name, loc});
-                EarlyMap.erase(it);
+                if (!loc.empty()) entry->Record->SourceLoc = std::move(loc);
             }
         }
-        else
-        {
-            RemoveIDs.push_back(id);
-            EarlyMap.erase(id);
-        }
 
-        F.setMetadata("sqtt.func.id", nullptr);
+        for (auto& [id, entry] : entries)
+            if (entry.Record->Kind == MarkerKind::Function && !entry.Seen &&
+                entry.Record->PreOptSize <= Config.FunctionThreshold)
+            {
+                changed |= !entry.Disabled;
+                entry.Disabled = true;
+            }
     }
 
-    for (auto it = EarlyMap.begin(); it != EarlyMap.end();)
-    {
-        auto& [id, entry] = *it;
-        if (entry.PreOptSize > Config.FunctionThreshold)
-        {
-            FuncMap.push_back({id, entry.Name, entry.SourceLoc});
-            ++it;
-        }
-        else
-        {
-            RemoveIDs.push_back(id);
-            it = EarlyMap.erase(it);
-        }
-    }
-
-    for (uint32_t id : RemoveIDs)
-    {
-        removeFuncMarkersFromModule(M, id);
-        Changed = true;
-    }
-
-    return Changed;
-}
-
-uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
-{
-    if (FuncMap.empty() && UserMarkers.empty()) return NextEventID;
-
-    // Count emissions per marker ID in the IR. The most-emitted markers
-    // get the lowest new IDs, so they fit s_ttracedata_imm's 6-bit field.
-    std::map<uint32_t, uint64_t> Counts;
+    // Snapshot first: pruning and lowering erase calls while preserving the
+    // stable state pointer that owns each old ID.
+    SmallVector<std::pair<CallInst*, Entry*>, 16> traces;
     for (auto& F : M)
-    {
-        if (F.isDeclaration()) continue;
         for (auto& BB : F)
-        {
             for (auto& I : BB)
             {
                 auto* CI = dyn_cast<CallInst>(&I);
-                if (!CI) continue;
-                Function* Callee = CI->getCalledFunction();
-                if (!Callee) continue;
-                auto IID = Callee->getIntrinsicID();
-                if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
-                if (isRawPayloadTrace(CI)) continue;
-                if (!isMarkerHeaderTrace(CI)) continue;
-                auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
-                if (!Arg) continue;
-                uint32_t val = Arg->getZExtValue();
-                if (val == FLAG_EXIT_PREV) continue; // bare exit pop, no id
-                uint32_t id = val >> 2;
-                if (id == 0) continue;
-                Counts[id]++;
+                if (!isTraceDataCall(CI) || !CI->getMetadata(SQTT_MARKER_HEADER_METADATA)) continue;
+                auto* arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
+                if (arg)
+                    if (Entry* entry = find(static_cast<uint32_t>(arg->getZExtValue()) >> 2))
+                        traces.emplace_back(CI, entry);
             }
+
+    for (auto [call, entry] : traces)
+    {
+        uint32_t flags = cast<ConstantInt>(call->getArgOperand(0))->getZExtValue() & FLAG_MASK;
+        if (entry->Disabled && (flags == FLAG_ENTER || flags == FLAG_EXIT_PREV))
+        {
+            call->eraseFromParent();
+            changed = true;
+            continue;
         }
+        if (!entry->Disabled) ++entry->Count;
     }
 
-    // Build candidate set: every ID that has a record (user marker or func).
-    std::set<uint32_t> Candidates;
-    for (auto& entry : FuncMap) Candidates.insert(entry.ID);
-    for (auto& entry : UserMarkers) Candidates.insert(entry.ID);
-
-    // Sort by descending emission count, ties broken by old ID for stability.
-    std::vector<uint32_t> Sorted(Candidates.begin(), Candidates.end());
-    std::sort(
-        Sorted.begin(),
-        Sorted.end(),
-        [&](uint32_t a, uint32_t b)
-        {
-            uint64_t ca = Counts.count(a) ? Counts[a] : 0;
-            uint64_t cb = Counts.count(b) ? Counts[b] : 0;
-            if (ca != cb) return ca > cb;
-            return a < b;
-        }
-    );
-
-    std::map<uint32_t, uint32_t> IDMap;
+    std::vector<Entry*> sorted;
+    sorted.reserve(entries.size());
+    for (auto& [id, entry] : entries)
+        if (!entry.Disabled) sorted.push_back(&entry);
+    std::sort(sorted.begin(), sorted.end(), [](const Entry* a, const Entry* b)
+    {
+        if (a->Count != b->Count) return a->Count > b->Count;
+        return a->Record->ID < b->Record->ID;
+    });
     uint32_t nextID = 1;
-    for (uint32_t old : Sorted) IDMap[old] = nextID++;
+    for (Entry* entry : sorted) entry->NewID = nextID++;
 
-    // Apply IR rewrite.
-    for (auto& F : M)
+    for (auto [call, entry] : traces)
     {
-        if (F.isDeclaration()) continue;
-        GfxGen gen = getGfxGen(F);
+        // Disabled calls may have been erased above, so never dereference
+        // their CallInst here.
+        if (entry->Disabled) continue;
+        GfxGen gen = getGfxGen(*call->getFunction());
         if (gen == GfxGen::Unknown) continue;
-        rewriteMarkerIDs(F, IDMap, gen);
+        uint32_t value = cast<ConstantInt>(call->getArgOperand(0))->getZExtValue();
+        IRBuilder<> B(call);
+        CallInst* replacement = emitBareTrace(
+            B,
+            (value & FLAG_MASK) == FLAG_EXIT_PREV ? FLAG_EXIT_PREV : (entry->NewID << 2) | (value & FLAG_MASK),
+            &M,
+            gen
+        );
+        replacement->copyMetadata(*call);
+        call->eraseFromParent();
+        changed = true;
     }
 
-    // Update internal records.
-    for (auto& entry : FuncMap)
-    {
-        auto it = IDMap.find(entry.ID);
-        if (it != IDMap.end()) entry.ID = it->second;
-    }
-    for (auto& entry : UserMarkers)
-    {
-        auto it = IDMap.find(entry.ID);
-        if (it != IDMap.end()) entry.ID = it->second;
-    }
-    for (auto& kv : UserMarkerMap)
-    {
-        auto it = IDMap.find(kv.second);
-        if (it != IDMap.end()) kv.second = it->second;
-    }
-
-    // Keep FuncMap sorted by new ID for deterministic .sqtt_funcmap output.
-    std::sort(FuncMap.begin(), FuncMap.end(), [](const FuncMapEntry& a, const FuncMapEntry& b) { return a.ID < b.ID; });
-    return nextID;
-}
-
-void SQTTInstrumentPass::rewriteMarkerIDs(Function& F, const std::map<uint32_t, uint32_t>& IDMap, GfxGen gen)
-{
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-    Type* I16 = Type::getInt16Ty(Ctx);
-
-    SmallVector<std::pair<CallInst*, uint32_t>, 8> Rewrites;
-
-    for (auto& BB : F)
-    {
-        for (auto& I : BB)
+    Markers.erase(
+        std::remove_if(Markers.begin(), Markers.end(), [&](const MarkerRecord& record)
         {
-            auto* CI = dyn_cast<CallInst>(&I);
-            if (!CI) continue;
-            Function* Callee = CI->getCalledFunction();
-            if (!Callee) continue;
-
-            auto IID = Callee->getIntrinsicID();
-            if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
-            if (isRawPayloadTrace(CI)) continue;
-            if (!isMarkerHeaderTrace(CI)) continue;
-
-            auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
-            if (!Arg) continue;
-            uint32_t val = Arg->getZExtValue();
-
-            uint32_t flags = val & FLAG_MASK;
-            uint32_t id = val >> 2;
-
-            auto it = IDMap.find(id);
-            if (it == IDMap.end()) continue;
-
-            uint32_t newVal;
-            if (flags & FLAG_ENTER)
-            {
-                // Enter (and possibly fused exit+enter) — preserve flags
-                newVal = (it->second << 2) | flags;
-            }
-            else if (flags & FLAG_EXIT_PREV)
-            {
-                // Pure exit pop — id payload is unused at decode time
-                newVal = FLAG_EXIT_PREV;
-            }
-            else
-            {
-                // Point marker (flags == 0, id != 0) — preserve id, no flags
-                newVal = (it->second << 2);
-            }
-            Rewrites.push_back({CI, newVal});
-        }
-    }
-
-    for (auto& [CI, newVal] : Rewrites)
+            Entry* entry = find(record.ID);
+            return record.Kind == MarkerKind::Function && entry && entry->Disabled;
+        }),
+        Markers.end()
+    );
+    auto remap = [&](uint32_t& id)
     {
-        IRBuilder<> B(CI);
-        CallInst* replacement;
-        if (canUseImm(newVal) && supportsImmTrace(gen))
-        {
-            Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-            replacement = B.CreateCall(TTDImm, {ConstantInt::get(I16, newVal)});
-        }
-        else
-        {
-            Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-            replacement = B.CreateCall(TTD, {ConstantInt::get(I32, newVal)});
-        }
-        replacement->copyMetadata(*CI);
-        CI->eraseFromParent();
-    }
-}
-
-void SQTTInstrumentPass::removeFuncMarkersFromModule(Module& M, uint32_t id)
-{
-    uint32_t entryEncoded = encodeMarker(id, /*enter=*/true, /*exit_prev=*/false);
-    uint32_t exitEncoded = encodeMarker(id, /*enter=*/false, /*exit_prev=*/true);
-
-    SmallVector<CallInst*, 8> ToRemove;
-    for (auto& F : M)
-    {
-        for (auto& BB : F)
-        {
-            for (auto& I : BB)
-            {
-                auto* CI = dyn_cast<CallInst>(&I);
-                if (!CI) continue;
-                Function* Callee = CI->getCalledFunction();
-                if (!Callee) continue;
-
-                auto IID = Callee->getIntrinsicID();
-                if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
-                if (isRawPayloadTrace(CI)) continue;
-                if (!isMarkerHeaderTrace(CI)) continue;
-
-                auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
-                if (!Arg) continue;
-                uint32_t val = Arg->getZExtValue();
-                if (val == entryEncoded || val == exitEncoded) ToRemove.push_back(CI);
-            }
-        }
-    }
-
-    for (auto* CI : ToRemove)
-    {
-        removeAdjacentBarriers(CI);
-        CI->eraseFromParent();
-    }
-}
-
-void SQTTInstrumentPass::removeAdjacentBarriers(CallInst* CI)
-{
-    auto isSQTTBarrier = [](Instruction* I) -> bool
-    {
-        if (!I) return false;
-        auto* C = dyn_cast<CallInst>(I);
-        if (!C) return false;
-        Function* F = C->getCalledFunction();
-        if (F && F->getIntrinsicID() == Intrinsic::amdgcn_sched_barrier) return true;
-        if (C->isInlineAsm() && C->getType()->isVoidTy() && C->arg_empty())
-        {
-            if (auto* IA = dyn_cast<InlineAsm>(C->getCalledOperand()))
-                if (IA->getAsmString().empty()) return true;
-        }
-        return false;
+        if (Entry* entry = find(id)) id = entry->NewID;
     };
-
-    // Remove barriers after CI
-    Instruction* Next = CI->getNextNode();
-    while (Next && isSQTTBarrier(Next))
-    {
-        Instruction* AfterNext = Next->getNextNode();
-        Next->eraseFromParent();
-        Next = AfterNext;
-    }
-
-    // Remove barriers before CI
-    BasicBlock* BB = CI->getParent();
-    BasicBlock::iterator It(CI);
-    while (It != BB->begin())
-    {
-        Instruction* Prev = &*std::prev(It);
-        if (!isSQTTBarrier(Prev)) break;
-        It = Prev->getIterator();
-        Prev->eraseFromParent();
-    }
+    for (auto& entry : Markers) remap(entry.ID);
+    for (auto& [name, id] : UserMarkerMap) remap(id);
+    NextEventID = nextID;
+    return changed;
 }
 
 bool SQTTInstrumentPass::hasMustTailCall(const Function& F)
@@ -456,27 +251,10 @@ bool SQTTInstrumentPass::hasMustTailCall(const Function& F)
 
 bool SQTTInstrumentPass::instrumentFunctionDirect(Function& F, GfxGen gen)
 {
-    if (hasMustTailCall(F)) return false;
-
-    unsigned size = computeFunctionSize(F, Config.Mode);
-    if (size <= Config.FunctionThreshold) return false;
+    if (hasMustTailCall(F) || computeFunctionSize(F, Config.Mode) <= Config.FunctionThreshold) return false;
 
     uint32_t id = NextEventID++;
-    FuncMap.push_back({id, F.getName().str(), getFunctionSourceLoc(F)});
-
-    BasicBlock& EntryBB = F.getEntryBlock();
-    Instruction* InsertPt =
-        CurScopeCheck ? cast<Instruction>(CurScopeCheck)->getNextNode() : &*EntryBB.getFirstInsertionPt();
-    IRBuilder<> EntryB(InsertPt);
-    insertTraceMarker(EntryB, encodeMarker(id, true, false), F, gen);
-
-    SmallVector<ReturnInst*, 4> Rets;
-    for (auto& BB : F)
-        if (auto* RI = dyn_cast<ReturnInst>(BB.getTerminator())) Rets.push_back(RI);
-    for (auto* RI : Rets)
-    {
-        IRBuilder<> RetB(RI);
-        insertTraceMarker(RetB, FLAG_EXIT_PREV, F, gen);
-    }
+    Markers.push_back({id, MarkerKind::Function, F.getName().str(), getFunctionSourceLoc(F)});
+    insertFunctionMarkers(F, id, gen, /*useBareTrace=*/false);
     return true;
 }

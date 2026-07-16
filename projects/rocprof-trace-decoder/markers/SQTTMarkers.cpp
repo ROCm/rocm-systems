@@ -31,40 +31,70 @@
 
 using namespace llvm;
 
-static constexpr const char* MarkerHeaderMetadataName = "sqtt.marker_header";
-static constexpr const char* RawPayloadMetadataName = "sqtt.raw_payload";
 static constexpr uint32_t GFX12_SHADER_CYCLES_LO = 29;
 
-// True for instructions that already act as a *scheduling* boundary at the
-// IR/MIR level — i.e. the optimizer/scheduler will not move s_ttracedata
-// across them. Only sched_barrier and IR fences qualify.
-//
-// NOTE: s_barrier (and the split signal/wait family) intentionally do NOT
-// belong here. They are marked IntrNoMem in the AMDGPU intrinsic table, so
-// from the optimizer's point of view they do not constrain reordering of
-// s_ttracedata (which is IntrInaccessibleMemOnly). Without an explicit
-// sched_barrier(0), the trace marker will drift away from the s_barrier and
-// the recorded trace timing becomes meaningless.
+// Only sched_barrier and IR fences constrain ttracedata scheduling. AMDGPU
+// barriers are IntrNoMem, so they still need an explicit sched_barrier(0).
 static bool isHardSchedBoundary(Instruction* I)
 {
     if (!I) return false;
-    if (auto* CI = dyn_cast<CallInst>(I))
-    {
-        if (Function* F = CI->getCalledFunction())
-        {
-            if (F->getIntrinsicID() == Intrinsic::amdgcn_sched_barrier) return true;
-        }
-    }
     if (isa<FenceInst>(I)) return true;
-    return false;
+    auto* CI = dyn_cast<CallInst>(I);
+    Function* F = CI ? CI->getCalledFunction() : nullptr;
+    return F && F->getIntrinsicID() == Intrinsic::amdgcn_sched_barrier;
 }
 
-// Emit a memory-reordering barrier per Config.MemBarrier:
-//   None       — nothing
-//   AsmClobber — empty inline asm with "~{memory}" (compiler fence only)
-//   Fence      — fence syncscope("workgroup") acq_rel with AMDGPU MMRA
-//                metadata limiting hardware synchronization to LDS/local.
-//                The IR fence remains a compiler-visible ordering boundary.
+static bool isCanonicalSchedBarrier(Instruction* I)
+{
+    auto* CI = dyn_cast_or_null<CallInst>(I);
+    Function* F = CI ? CI->getCalledFunction() : nullptr;
+    auto* Arg = CI && CI->arg_size() == 1 ? dyn_cast<ConstantInt>(CI->getArgOperand(0)) : nullptr;
+    return F && F->getIntrinsicID() == Intrinsic::amdgcn_sched_barrier && Arg && Arg->isZero();
+}
+
+static bool isMarkerSentinel(Instruction* I)
+{
+    auto* CI = dyn_cast_or_null<CallInst>(I);
+    Function* F = CI ? CI->getCalledFunction() : nullptr;
+    return F && F->getName().starts_with("__sqtt_named_marker_");
+}
+
+static Instruction* nextRealInstruction(Instruction* I)
+{
+    while (I && (I->isDebugOrPseudoInst() || I->isLifetimeStartOrEnd() || isMarkerSentinel(I)))
+        I = I->getNextNode();
+    return I;
+}
+
+static bool isPayloadSequence(CallInst* header, CallInst* payload, MDNode* group)
+{
+    for (Instruction* I = header->getNextNode(); I != payload; I = I ? I->getNextNode() : nullptr)
+        if (!I || (I->getMetadata(SQTT_PAYLOAD_GROUP_METADATA) != group && !I->isDebugOrPseudoInst() &&
+                   !I->isLifetimeStartOrEnd()))
+            return false;
+    return true;
+}
+
+static void branchToScopedTrace(
+    BasicBlock* source, BasicBlock* trace, BasicBlock* skip, Value* ok, bool pinSkipHead
+)
+{
+    source->getTerminator()->eraseFromParent();
+    IRBuilder<>(source).CreateCondBr(ok, trace, skip);
+    if (!pinSkipHead) return;
+
+    Module* M = source->getParent()->getParent();
+    Type* I32 = Type::getInt32Ty(M->getContext());
+    Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
+    IRBuilder<>(&*skip->getFirstInsertionPt()).CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
+}
+
+bool SQTTInstrumentPass::isSyncInstruction(Instruction* I)
+{
+    return isa<FenceInst>(I) || classifyBarrier(dyn_cast<CallInst>(I)) != BarrierKind::None;
+}
+
+// Emit the configured compiler ordering barrier; the fence is limited to LDS.
 static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
 {
     if (mode == MemBarrierMode::None) return;
@@ -80,147 +110,80 @@ static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
     SyncScope::ID WG = Ctx.getOrInsertSyncScopeID("workgroup");
     FenceInst* F = B.CreateFence(AtomicOrdering::AcquireRelease, WG);
 
-    // SQTT markers do not read or write global memory; the fence exists to
-    // keep optimizers and schedulers from moving markers away from nearby
-    // memory operations.  AMDGPU's amdgpu-synchronize-as MMRA lets the backend
-    // keep the fence as an ordering boundary while avoiding global cache
-    // invalidation for this marker-only fence.
+    // Keep compiler ordering without global cache invalidation.
     Metadata* LocalSyncAS[] = {MDString::get(Ctx, "amdgpu-synchronize-as"), MDString::get(Ctx, "local")};
     F->setMetadata(LLVMContext::MD_mmra, MDNode::get(Ctx, LocalSyncAS));
 }
 
-void SQTTInstrumentPass::emitTraceBlockBoundary(IRBuilder<>& B, bool after)
+void SQTTInstrumentPass::emitTraceBoundary(IRBuilder<>& B, bool after, bool schedBarrier)
 {
     Module* M = B.GetInsertBlock()->getParent()->getParent();
     Type* I32 = Type::getInt32Ty(B.getContext());
-    Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-
-    // Keep the complete address block between two scheduling boundaries,
-    // rather than adding one around every raw payload.
-    if (after)
-    {
-        emitMemBarrier(B, Config.MemBarrier);
-        B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-    }
-    else
-    {
-        B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-        emitMemBarrier(B, Config.MemBarrier);
-    }
+    Function* SchedBarrier =
+        schedBarrier ? Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier) : nullptr;
+    if (!after && SchedBarrier) B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
+    emitMemBarrier(B, Config.MemBarrier);
+    if (after && SchedBarrier) B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
 }
 
-void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen)
-{
-    insertTraceMarkerWithPayload(B, markerID, nullptr, F, gen);
-}
-
-void SQTTInstrumentPass::insertTraceMarkerWithPayload(
-    IRBuilder<>& B, uint32_t markerID, Value* payload, Function& F, GfxGen gen
+void SQTTInstrumentPass::emitTraceBoundaries(
+    IRBuilder<>& B, Instruction* first, Instruction* last, bool schedBarrier
 )
 {
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-    Type* I16 = Type::getInt16Ty(Ctx);
+    Instruction* next = last->getNextNode();
+    IRBuilder<> Before(first);
+    emitTraceBoundary(Before, /*after=*/false, schedBarrier && !isHardSchedBoundary(first->getPrevNode()));
+    // Newly-built scoped traces end after `last`; existing traces have a tail.
+    if (next) B.SetInsertPoint(next);
+    emitTraceBoundary(B, /*after=*/true, schedBarrier && !isHardSchedBoundary(next));
+}
 
-    bool needsBarriers = !Config.needsScopeCheck();
-
-    auto emitMarker = [&](IRBuilder<>& Builder)
-    {
-        // If the marker is being inserted adjacent to a real hard scheduling
-        // boundary (s_barrier, fence, etc.), skip the redundant sched_barrier
-        // on that side — it would only inhibit useful scheduling without
-        // adding any reordering protection.
-        BasicBlock* IBB = Builder.GetInsertBlock();
-        auto IP = Builder.GetInsertPoint();
-        Instruction* PrevI = (IP == IBB->begin()) ? nullptr : &*std::prev(IP);
-        Instruction* NextI = (IP == IBB->end()) ? nullptr : &*IP;
-        bool skipSchedBefore = isHardSchedBoundary(PrevI);
-        bool skipSchedAfter = isHardSchedBoundary(NextI);
-
-        if (needsBarriers && !skipSchedBefore)
-        {
-            Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-            Builder.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-        }
-        emitMemBarrier(Builder, Config.MemBarrier);
-
-        CallInst* trace;
-        if (canUseImm(markerID) && supportsImmTrace(gen))
-        {
-            Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-            trace = Builder.CreateCall(TTDImm, {ConstantInt::get(I16, markerID)});
-        }
-        else
-        {
-            Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-            trace = Builder.CreateCall(TTD, {ConstantInt::get(I32, markerID)});
-        }
-        markMarkerHeaderTrace(trace);
-
-        if (payload)
-        {
-            if (payload->getType() != I32) payload = Builder.CreateZExtOrTrunc(payload, I32);
-            emitRawTracePayload(Builder, payload, M);
-        }
-
-        emitMemBarrier(Builder, Config.MemBarrier);
-        if (needsBarriers && !skipSchedAfter)
-        {
-            Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-            Builder.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-        }
-    };
-
+void SQTTInstrumentPass::emitScopedTrace(
+    IRBuilder<>& B,
+    Function& F,
+    GfxGen gen,
+    const char* traceBlockName,
+    const char* skipBlockName,
+    bool pinSkipHead,
+    function_ref<void(IRBuilder<>&)> emit
+)
+{
     if (!Config.needsScopeCheck())
     {
-        emitMarker(B);
+        emit(B);
         return;
     }
 
     Value* Ok = getOrCreateScopeCheck(F, gen);
-
     Instruction* SplitPt = &*B.GetInsertPoint();
     BasicBlock* OrigBB = SplitPt->getParent();
-    BasicBlock* TailBB = OrigBB->splitBasicBlock(SplitPt, "sqtt.skip");
-    BasicBlock* TraceBB = BasicBlock::Create(Ctx, "sqtt.trace", &F, TailBB);
+    BasicBlock* TailBB = OrigBB->splitBasicBlock(SplitPt, skipBlockName);
+    BasicBlock* TraceBB = BasicBlock::Create(F.getContext(), traceBlockName, &F, TailBB);
+    branchToScopedTrace(OrigBB, TraceBB, TailBB, Ok, pinSkipHead);
 
-    OrigBB->getTerminator()->eraseFromParent();
-    B.SetInsertPoint(OrigBB);
-    B.CreateCondBr(Ok, TraceBB, TailBB);
-
-    B.SetInsertPoint(TraceBB);
-    emitMarker(B);
-    B.CreateBr(TailBB);
-
-    // Pin both ends of the trace site with sched_barrier(0). Without these,
-    // late codegen / sinking happily fills the gap between the cbranch
-    // fall-through (the trace marker) and the surrounding code with
-    // unrelated instructions, and the recorded trace timing drifts away
-    // from whatever the marker is supposed to be measuring.
-    //
-    //   - TraceBB tail pin: sits just before the unconditional br back to
-    //     TailBB, preventing code from being sunk into TraceBB after the
-    //     marker. Mostly defensive — TraceBB is conditionally entered so
-    //     sinking into it is rare — but cheap to plant.
-    //   - TailBB head pin: sits at the very top of TailBB (before any code
-    //     that could be sunk in), anchoring the marker to the merge point
-    //     rather than letting the sync drift down past sunk-in work.
-    //
-    // We always plant both — the per-marker scheduling cost is small and
-    // marker accuracy matters universally (point markers, user markers,
-    // function entry/exit are all timed events).
-    Function* SchedBarrier = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-    {
-        IRBuilder<> TraceTail(TraceBB->getTerminator());
-        TraceTail.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-    }
-    {
-        IRBuilder<> TailHead(&*TailBB->getFirstInsertionPt());
-        TailHead.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
-    }
+    IRBuilder<> Trace(TraceBB);
+    emit(Trace);
+    Trace.CreateBr(TailBB);
 
     B.SetInsertPoint(&*TailBB->begin());
+}
+
+void SQTTInstrumentPass::insertTraceMarker(
+    IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen, Value* payload
+)
+{
+    Module* M = F.getParent();
+    bool needsBarriers = !Config.needsScopeCheck();
+    bool pinSkipHead = Config.needsScopeCheck() && isSyncInstruction(nextRealInstruction(&*B.GetInsertPoint()));
+
+    auto emitMarker = [&](IRBuilder<>& Builder)
+    {
+        CallInst* first = emitBareTrace(Builder, markerID, M, gen);
+        Instruction* last = payload ? emitRawTracePayload(Builder, payload, M, first) : first;
+        emitTraceBoundaries(Builder, first, last, needsBarriers);
+    };
+
+    emitScopedTrace(B, F, gen, "sqtt.trace", "sqtt.skip", pinSkipHead, emitMarker);
 }
 
 Value* SQTTInstrumentPass::buildScopeCheck(IRBuilder<>& B, GfxGen gen)
@@ -258,79 +221,78 @@ Value* SQTTInstrumentPass::getOrCreateScopeCheck(Function& F, GfxGen gen)
     return CurScopeCheck;
 }
 
-// True for instructions that we are willing to leave inside a scope-check
-// trace block alongside grouped markers — i.e. their semantics are unchanged
-// (or harmless) when they only execute on the trace path:
-//   - other ttracedata calls (these are the markers themselves)
-//   - sched_barrier (compile-time scheduling hint, no runtime effect)
-//   - debug intrinsics, lifetime markers (no runtime effect)
-// Anything else between two markers prevents coalescing — we never want to
-// move arbitrary code (loads/stores/arithmetic visible after the merge
-// point) into a conditionally executed region.
+// Only marker/hint/debug/lifetime instructions may move into a conditional trace block.
 static bool isIgnorableBetweenMarkers(Instruction* I)
 {
     auto* CI = dyn_cast<CallInst>(I);
-    if (!CI) return false;
-    Function* F = CI->getCalledFunction();
+    Function* F = CI ? CI->getCalledFunction() : nullptr;
     if (!F) return false;
-    switch (F->getIntrinsicID())
-    {
-        case Intrinsic::amdgcn_s_ttracedata:
-        case Intrinsic::amdgcn_s_ttracedata_imm:
-        case Intrinsic::amdgcn_sched_barrier:
-        case Intrinsic::dbg_declare:
-        case Intrinsic::dbg_value:
-        case Intrinsic::dbg_label:
-        case Intrinsic::lifetime_start:
-        case Intrinsic::lifetime_end: return true;
-        default: return false;
-    }
+    auto ID = F->getIntrinsicID();
+    return ID == Intrinsic::amdgcn_s_ttracedata || ID == Intrinsic::amdgcn_s_ttracedata_imm ||
+           isCanonicalSchedBarrier(I) || ID == Intrinsic::dbg_declare || ID == Intrinsic::dbg_value ||
+           ID == Intrinsic::dbg_label || ID == Intrinsic::lifetime_start || ID == Intrinsic::lifetime_end;
 }
 
-bool SQTTInstrumentPass::wrapExistingMarkers(Function& F, GfxGen gen)
+bool SQTTInstrumentPass::finalizeExistingMarkers(Function& F, GfxGen gen)
 {
-    // Collect markers per BB, preserving instruction order. Wrapping each
-    // marker independently produces one diamond per marker; after the early
-    // phase + inlining flattens many tiny device functions into a hot
-    // region, you get a chain of N back-to-back condbrs all on the same
-    // cached scope-check predicate. SimplifyCFG would normally fold that,
-    // but we run at OptimizerLastEP — nothing simplifies after us.
-    //
-    // Instead, group runs of markers that are adjacent (only ignorable
-    // instructions between them in the same BB) and wrap each run with a
-    // single diamond. This is purely a CFG-shape optimization: marker
-    // ordering, IDs, and the cached predicate value are unchanged.
-    SmallVector<std::pair<BasicBlock*, SmallVector<CallInst*, 4>>, 8> ByBB;
+    struct TraceRange
+    {
+        CallInst *First, *Last;
+    };
+    SmallVector<SmallVector<TraceRange, 4>, 8> ByBlock;
     for (auto& BB : F)
     {
-        SmallVector<CallInst*, 4> InBB;
+        SmallVector<TraceRange, 4> InBB;
         for (auto& I : BB)
         {
             auto* CI = dyn_cast<CallInst>(&I);
-            if (!CI) continue;
-            Function* Callee = CI->getCalledFunction();
-            if (!Callee) continue;
-            auto IID = Callee->getIntrinsicID();
-            if (IID == Intrinsic::amdgcn_s_ttracedata || IID == Intrinsic::amdgcn_s_ttracedata_imm) InBB.push_back(CI);
+            if (!isTraceDataCall(CI)) continue;
+            MDNode* group = CI->getMetadata(SQTT_PAYLOAD_GROUP_METADATA);
+            if (CI->getMetadata(SQTT_RAW_PAYLOAD_METADATA) && group && !InBB.empty() &&
+                InBB.back().First == InBB.back().Last &&
+                InBB.back().First->getMetadata(SQTT_MARKER_HEADER_METADATA) &&
+                InBB.back().First->getMetadata(SQTT_PAYLOAD_GROUP_METADATA) == group &&
+                isPayloadSequence(InBB.back().First, CI, group))
+                InBB.back().Last = CI;
+            else
+                InBB.push_back({CI, CI});
         }
-        if (!InBB.empty()) ByBB.push_back({&BB, std::move(InBB)});
+        if (!InBB.empty()) ByBlock.push_back(std::move(InBB));
     }
-    if (ByBB.empty()) return false;
+    if (ByBlock.empty()) return false;
 
-    for (auto& [BB, Markers] : ByBB)
+    const bool scopeCheck = Config.needsScopeCheck();
+    auto addBoundaries = [&](const TraceRange& range)
     {
-        size_t i = 0;
-        while (i < Markers.size())
+        IRBuilder<> B(range.First);
+        emitTraceBoundaries(B, range.First, range.Last, !scopeCheck);
+    };
+
+    for (auto& Ranges : ByBlock)
+    {
+        if (!scopeCheck)
         {
-            // Extend the group as long as Markers[j-1] and Markers[j] are
-            // separated only by ignorable instructions. We only check
-            // strictly-between instructions — the markers themselves are
-            // the things being grouped.
-            size_t j = i + 1;
-            while (j < Markers.size())
+            for (const TraceRange& range : Ranges) addBoundaries(range);
+            continue;
+        }
+        for (const TraceRange& range : Ranges)
+        {
+            while (isCanonicalSchedBarrier(range.First->getPrevNode()))
+                range.First->getPrevNode()->eraseFromParent();
+            while (isCanonicalSchedBarrier(range.Last->getNextNode()))
+                range.Last->getNextNode()->eraseFromParent();
+        }
+
+        // Coalesce adjacent marker runs: OptimizerLastEP has no later
+        // SimplifyCFG. Wrap each run before adding its boundaries.
+        for (size_t first = 0; first < Ranges.size();)
+        {
+            size_t last = first;
+            while (last + 1 < Ranges.size())
             {
                 bool canExtend = true;
-                for (Instruction* I = Markers[j - 1]->getNextNode(); I && I != Markers[j]; I = I->getNextNode())
+                for (Instruction* I = Ranges[last].Last->getNextNode(); I && I != Ranges[last + 1].First;
+                     I = I->getNextNode())
                 {
                     if (!isIgnorableBetweenMarkers(I))
                     {
@@ -339,171 +301,107 @@ bool SQTTInstrumentPass::wrapExistingMarkers(Function& F, GfxGen gen)
                     }
                 }
                 if (!canExtend) break;
-                ++j;
+                ++last;
             }
-            wrapRangeWithScopeCheck(Markers[i], Markers[j - 1], F, gen);
-            i = j;
+            bool pinSkipHead = isSyncInstruction(nextRealInstruction(Ranges[last].Last->getNextNode()));
+            wrapRangeWithScopeCheck(Ranges[first].First, Ranges[last].Last, F, gen, pinSkipHead);
+            for (size_t i = first; i <= last; ++i) addBoundaries(Ranges[i]);
+            first = last + 1;
         }
     }
     return true;
 }
 
-void SQTTInstrumentPass::wrapRangeWithScopeCheck(CallInst* First, CallInst* Last, Function& F, GfxGen gen)
+void SQTTInstrumentPass::wrapRangeWithScopeCheck(
+    CallInst* First, CallInst* Last, Function& F, GfxGen gen, bool pinSkipHead
+)
 {
     Value* Ok = getOrCreateScopeCheck(F, gen);
-
     BasicBlock* OrigBB = First->getParent();
     BasicBlock* TraceBB = OrigBB->splitBasicBlock(First->getIterator(), "sqtt.trace");
 
-    // After the first split, [First..Last] and everything after them lives
-    // in TraceBB. Split again immediately after Last so TailBB starts with
-    // the first non-grouped instruction.
+    // Split after the run so the tail begins with the first non-marker.
     BasicBlock* TailBB = TraceBB->splitBasicBlock(Last->getNextNode()->getIterator(), "sqtt.skip");
-
-    OrigBB->getTerminator()->eraseFromParent();
-    IRBuilder<> BrB(OrigBB);
-    BrB.CreateCondBr(Ok, TraceBB, TailBB);
-}
-
-bool SQTTInstrumentPass::addBarriersToExistingMarkers(Function& F)
-{
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-
-    SmallVector<CallInst*, 8> Markers;
-    for (auto& BB : F)
-    {
-        for (auto& I : BB)
-        {
-            auto* CI = dyn_cast<CallInst>(&I);
-            if (!CI) continue;
-            Function* Callee = CI->getCalledFunction();
-            if (!Callee) continue;
-            auto IID = Callee->getIntrinsicID();
-            if (IID == Intrinsic::amdgcn_s_ttracedata || IID == Intrinsic::amdgcn_s_ttracedata_imm)
-                Markers.push_back(CI);
-        }
-    }
-    if (Markers.empty()) return false;
-
-    bool needsSchedBarrier = !Config.needsScopeCheck();
-
-    for (auto* CI : Markers)
-    {
-        // Adjacent hard sync (e.g. __syncthreads) is already a scheduling
-        // boundary — a sched_barrier on that side is redundant and prevents
-        // useful reorderings. sched_barrier itself is in the set so we also
-        // dedup against barriers we just emitted around the previous marker.
-        Instruction* PrevI = CI->getPrevNode();
-        Instruction* NextI = CI->getNextNode();
-        bool skipBefore = isHardSchedBoundary(PrevI);
-        bool skipAfter = isHardSchedBoundary(NextI);
-
-        IRBuilder<> Before(CI);
-        if (needsSchedBarrier && !skipBefore)
-        {
-            Function* SB = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-            Before.CreateCall(SB, {ConstantInt::get(I32, 0)});
-        }
-        emitMemBarrier(Before, Config.MemBarrier);
-
-        IRBuilder<> After(CI->getNextNode());
-        emitMemBarrier(After, Config.MemBarrier);
-        if (needsSchedBarrier && !skipAfter)
-        {
-            Function* SB = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_sched_barrier);
-            After.CreateCall(SB, {ConstantInt::get(I32, 0)});
-        }
-    }
-    return true;
+    branchToScopedTrace(OrigBB, TraceBB, TailBB, Ok, pinSkipHead);
 }
 
 CallInst* SQTTInstrumentPass::emitBareTrace(IRBuilder<>& B, uint32_t encoded, Module* M, GfxGen gen)
 {
     LLVMContext& Ctx = M->getContext();
-    CallInst* CI;
-    if (canUseImm(encoded) && supportsImmTrace(gen))
-    {
-        Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-        CI = B.CreateCall(TTDImm, {ConstantInt::get(Type::getInt16Ty(Ctx), encoded)});
-    }
-    else
-    {
-        Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-        CI = B.CreateCall(TTD, {ConstantInt::get(Type::getInt32Ty(Ctx), encoded)});
-    }
-    markMarkerHeaderTrace(CI);
+    bool useImm = canUseImm(encoded) && supportsImmTrace(gen);
+    Function* TTD = Intrinsic::getOrInsertDeclaration(
+        M, useImm ? Intrinsic::amdgcn_s_ttracedata_imm : Intrinsic::amdgcn_s_ttracedata
+    );
+    CallInst* CI = B.CreateCall(TTD, {ConstantInt::get(useImm ? Type::getInt16Ty(Ctx) : Type::getInt32Ty(Ctx), encoded)});
+    CI->setMetadata(SQTT_MARKER_HEADER_METADATA, MDNode::get(Ctx, {}));
     return CI;
 }
 
-CallInst* SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Module* M, GfxGen gen)
+CallInst* SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Module* M)
 {
-    (void) gen;
     Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-    CallInst* CI = B.CreateCall(TTD, {val});
-    markRawPayloadTrace(CI);
-    return CI;
+    CallInst* trace = B.CreateCall(TTD, {val});
+    trace->setMetadata(SQTT_RAW_PAYLOAD_METADATA, MDNode::get(B.getContext(), {}));
+    return trace;
 }
 
-CallInst* SQTTInstrumentPass::emitRawTracePayload(IRBuilder<>& B, Value* val, Module* M)
+bool SQTTInstrumentPass::isTraceDataCall(const CallInst* CI)
+{
+    if (!CI) return false;
+    const Function* Callee = CI->getCalledFunction();
+    if (!Callee) return false;
+    auto ID = Callee->getIntrinsicID();
+    return ID == Intrinsic::amdgcn_s_ttracedata || ID == Intrinsic::amdgcn_s_ttracedata_imm;
+}
+
+CallInst* SQTTInstrumentPass::emitRawTracePayload(IRBuilder<>& B, Value* val, Module* M, CallInst* header)
 {
     // Full s_ttracedata lowers through M0, so its input must be scalar. The
     // intrinsic lowering normally inserts this readfirstlane for a divergent
     // named data value; retain that behavior before the explicit asm lowering.
     Type* I32 = Type::getInt32Ty(M->getContext());
-    if (val->getType() != I32) val = B.CreateZExtOrTrunc(val, I32);
+    MDNode* group = MDNode::getDistinct(B.getContext(), {});
+    header->setMetadata(SQTT_PAYLOAD_GROUP_METADATA, group);
+    if (val->getType() != I32)
+    {
+        val = B.CreateZExtOrTrunc(val, I32);
+        if (auto* I = dyn_cast<Instruction>(val)) I->setMetadata(SQTT_PAYLOAD_GROUP_METADATA, group);
+    }
     if (!isa<ConstantInt>(val))
     {
         Function* ReadFirstLane =
             Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readfirstlane, {I32});
-        val = B.CreateCall(ReadFirstLane, {val});
+        CallInst* prep = B.CreateCall(ReadFirstLane, {val});
+        prep->setMetadata(SQTT_PAYLOAD_GROUP_METADATA, group);
+        val = prep;
     }
-    Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-    CallInst* CI = B.CreateCall(TTD, {val});
-    markRawPayloadTrace(CI);
-    return CI;
+    CallInst* trace = emitBareTraceValue(B, val, M);
+    trace->setMetadata(SQTT_PAYLOAD_GROUP_METADATA, group);
+    return trace;
 }
 
-void SQTTInstrumentPass::markRawPayloadTrace(CallInst* CI)
+bool SQTTInstrumentPass::finalizeFullTraces(Function& F, GfxGen gen)
 {
-    if (!CI) return;
-    CI->setMetadata(RawPayloadMetadataName, MDNode::get(CI->getContext(), {}));
-}
+    unsigned clockBits = Config.ShaderClockBits;
+    const bool packClock = gen == GfxGen::GFX12 && clockBits != 0;
+    if (packClock && clockBits > 29)
+        report_fatal_error("SQTT_SHADER_CLOCK_BITS must leave at least one marker ID bit");
+    if (packClock && (Config.ShaderClockShift >= 32 || Config.ShaderClockShift + clockBits > 32))
+        report_fatal_error("SQTT shader clock window must fit in shader_cycles_lo bits [31:0]");
 
-bool SQTTInstrumentPass::isRawPayloadTrace(CallInst* CI)
-{
-    return CI && CI->getMetadata(RawPayloadMetadataName) != nullptr;
-}
+    const unsigned idBits = packClock ? 30 - clockBits : 0;
+    const uint32_t maxID = packClock ? (uint32_t(1) << idBits) - 1u : 0;
+    const uint32_t markerAndFlagMask = packClock ? (uint32_t(1) << (idBits + 2)) - 1u : 0;
 
-void SQTTInstrumentPass::markMarkerHeaderTrace(CallInst* CI)
-{
-    if (!CI) return;
-    CI->setMetadata(MarkerHeaderMetadataName, MDNode::get(CI->getContext(), {}));
-}
-
-bool SQTTInstrumentPass::isMarkerHeaderTrace(CallInst* CI)
-{
-    return CI && CI->getMetadata(MarkerHeaderMetadataName) != nullptr;
-}
-
-bool SQTTInstrumentPass::lowerFullTracesWithM0Nop(Function& F)
-{
-    SmallVector<CallInst*, 16> traces;
-    for (auto& BB : F)
-    {
-        for (auto& I : BB)
-        {
-            auto* CI = dyn_cast<CallInst>(&I);
-            if (!CI) continue;
-            Function* Callee = CI->getCalledFunction();
-            if (Callee && Callee->getIntrinsicID() == Intrinsic::amdgcn_s_ttracedata) traces.push_back(CI);
-        }
-    }
-    if (traces.empty()) return false;
-
-    LLVMContext& Ctx = F.getContext();
+    Module* M = F.getParent();
+    LLVMContext& Ctx = M->getContext();
     Type* I32 = Type::getInt32Ty(Ctx);
+    const bool useShaderCyclesU64 = packClock && hasShaderCyclesU64(F);
+    Function* SGetReg = nullptr;
+    InlineAsm* GetShaderCycles = nullptr;
+    uint32_t hwreg = packClock ? GETREG_IMMED(clockBits - 1, Config.ShaderClockShift, GFX12_SHADER_CYCLES_LO) : 0;
+    uint32_t clockDestShift = packClock ? 32 - clockBits : 0;
+
     // Model M0 as a fixed output instead of a clobber. M0 is reserved on
     // AMDGPU and LLVM diagnoses `~{m0}` as undefined behavior.
     FunctionType* TraceTy = FunctionType::get(I32, {I32}, false);
@@ -511,122 +409,84 @@ bool SQTTInstrumentPass::lowerFullTracesWithM0Nop(Function& F)
         "s_mov_b32 m0, $1\n"
         "s_nop 0\n"
         "s_ttracedata";
-    // Constants can be encoded directly in the M0 move. Non-constant values
-    // reaching this helper are required to be scalar.
     InlineAsm* ImmediateTrace =
         InlineAsm::get(TraceTy, TraceAsmText, "={m0},i", /*hasSideEffects=*/true);
     InlineAsm* ScalarTrace = InlineAsm::get(TraceTy, TraceAsmText, "={m0},s", /*hasSideEffects=*/true);
 
-    for (CallInst* CI : traces)
-    {
-        Value* value = CI->getArgOperand(0);
-        InlineAsm* TraceAsm = isa<ConstantInt>(value) ? ImmediateTrace : ScalarTrace;
-        IRBuilder<> B(CI);
-        CallInst* replacement = B.CreateCall(TraceAsm, {value});
-        replacement->setDebugLoc(CI->getDebugLoc());
-        replacement->copyMetadata(*CI);
-        CI->eraseFromParent();
-    }
-    return true;
-}
-
-bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
-{
-    unsigned clockBits = getShaderClockBits(Config, gen);
-    if (!usesShaderClockPacking(Config, gen)) return false;
-
-    if (clockBits > 29)
-        report_fatal_error("SQTT_SHADER_CLOCK_BITS must leave at least one marker ID bit");
-    if (Config.ShaderClockShift >= 32 || Config.ShaderClockShift + clockBits > 32)
-        report_fatal_error("SQTT shader clock window must fit in shader_cycles_lo bits [31:0]");
-
-    const unsigned idBits = 30 - clockBits;
-    const uint32_t maxID = (uint32_t(1) << idBits) - 1u;
-    const unsigned markerAndFlagBits = idBits + 2;
-    const uint32_t markerAndFlagMask =
-        markerAndFlagBits >= 32 ? 0xFFFFFFFFu : ((uint32_t(1) << markerAndFlagBits) - 1u);
-
-    SmallVector<std::pair<CallInst*, Value*>, 16> Rewrites;
+    bool changed = false;
     for (auto& BB : F)
     {
-        for (auto& I : BB)
+        for (auto It = BB.begin(), End = BB.end(); It != End;)
         {
-            auto* CI = dyn_cast<CallInst>(&I);
-            if (!CI || isRawPayloadTrace(CI)) continue;
-            Function* Callee = CI->getCalledFunction();
-            if (!Callee) continue;
-            auto IID = Callee->getIntrinsicID();
-            if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
+            auto* CI = dyn_cast<CallInst>(&*It++);
+            if (!isTraceDataCall(CI)) continue;
 
-            Value* encodedValue = CI->getArgOperand(0);
-            bool header = isMarkerHeaderTrace(CI);
-            if (auto* Arg = dyn_cast<ConstantInt>(encodedValue))
+            bool packThisTrace = false;
+            if (packClock && !CI->getMetadata(SQTT_RAW_PAYLOAD_METADATA))
             {
-                uint32_t encoded = Arg->getZExtValue();
-                // A bare exit has no ID and cannot be distinguished from the
-                // numeric API in trace data, so keep all of them packed.
-                if (!header && encoded != FLAG_EXIT_PREV) continue;
-                uint32_t markerID = encoded >> 2;
-                if (markerID > maxID)
+                Value* encoded = CI->getArgOperand(0);
+                if (auto* Arg = dyn_cast<ConstantInt>(encoded))
                 {
-                    report_fatal_error(
-                        Twine("SQTT marker ID ") + Twine(markerID) + " does not fit with SQTT_SHADER_CLOCK_BITS=" +
-                        Twine(clockBits)
-                    );
+                    // A bare exit has no ID and cannot be distinguished from
+                    // the numeric API in trace data, so keep all of them
+                    // packed.
+                    if (CI->getMetadata(SQTT_MARKER_HEADER_METADATA) || Arg->getZExtValue() == FLAG_EXIT_PREV)
+                    {
+                        uint32_t markerID = Arg->getZExtValue() >> 2;
+                        if (markerID > maxID)
+                            report_fatal_error(
+                                Twine("SQTT marker ID ") + Twine(markerID) +
+                                " does not fit with SQTT_SHADER_CLOCK_BITS=" + Twine(clockBits)
+                            );
+                        packThisTrace = true;
+                    }
                 }
+                else
+                    packThisTrace = CI->getMetadata(SQTT_MARKER_HEADER_METADATA);
             }
-            else if (!header)
+
+            if (!packThisTrace && CI->getCalledFunction()->getIntrinsicID() != Intrinsic::amdgcn_s_ttracedata)
                 continue;
-            Rewrites.push_back({CI, encodedValue});
+
+            IRBuilder<> B(CI);
+            Value* value = CI->getArgOperand(0);
+            if (packThisTrace)
+            {
+                if (value->getType() != I32) value = B.CreateZExtOrTrunc(value, I32);
+                Value* markerAndFlags = B.CreateAnd(value, ConstantInt::get(I32, markerAndFlagMask));
+                Value* clock;
+                if (useShaderCyclesU64)
+                {
+                    if (!GetShaderCycles)
+                        GetShaderCycles = InlineAsm::get(
+                            FunctionType::get(Type::getInt64Ty(Ctx), false),
+                            "s_get_shader_cycles_u64 $0",
+                            "=s",
+                            /*hasSideEffects=*/true
+                        );
+                    Value* cyclesLo = B.CreateTrunc(B.CreateCall(GetShaderCycles), I32);
+                    // The final shift below discards all but clockBits,
+                    // matching the right-aligned field returned by s_getreg
+                    // on gfx1200 and gfx1201.
+                    clock = B.CreateLShr(cyclesLo, ConstantInt::get(I32, Config.ShaderClockShift));
+                }
+                else
+                {
+                    if (!SGetReg) SGetReg = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_getreg);
+                    clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
+                }
+                value = B.CreateOr(B.CreateShl(clock, ConstantInt::get(I32, clockDestShift)), markerAndFlags);
+                ShaderClockBitsUsed = clockBits;
+            }
+
+            InlineAsm* TraceAsm = isa<ConstantInt>(value) ? ImmediateTrace : ScalarTrace;
+            CallInst* replacement = B.CreateCall(TraceAsm, {value});
+            replacement->setDebugLoc(CI->getDebugLoc());
+            replacement->copyMetadata(*CI);
+            CI->eraseFromParent();
+            changed = true;
         }
     }
-    if (Rewrites.empty()) return false;
 
-    Module* M = F.getParent();
-    LLVMContext& Ctx = M->getContext();
-    Type* I32 = Type::getInt32Ty(Ctx);
-    const bool useShaderCyclesU64 = hasShaderCyclesU64(F);
-    Function* SGetReg =
-        useShaderCyclesU64 ? nullptr : Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_getreg);
-    InlineAsm* GetShaderCycles = nullptr;
-    if (useShaderCyclesU64)
-    {
-        GetShaderCycles = InlineAsm::get(
-            FunctionType::get(Type::getInt64Ty(Ctx), false),
-            "s_get_shader_cycles_u64 $0",
-            "=s",
-            /*hasSideEffects=*/true
-        );
-    }
-    Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-    uint32_t hwreg = GETREG_IMMED(clockBits - 1, Config.ShaderClockShift, GFX12_SHADER_CYCLES_LO);
-    uint32_t clockDestShift = 32 - clockBits;
-
-    for (auto& [CI, encoded] : Rewrites)
-    {
-        IRBuilder<> B(CI);
-        Value* markerAndFlags = encoded;
-        if (markerAndFlags->getType() != I32) markerAndFlags = B.CreateZExtOrTrunc(markerAndFlags, I32);
-        markerAndFlags = B.CreateAnd(markerAndFlags, ConstantInt::get(I32, markerAndFlagMask));
-        Value* clock;
-        if (GetShaderCycles)
-        {
-            Value* cyclesLo = B.CreateTrunc(B.CreateCall(GetShaderCycles), I32);
-            // The final shift below discards all but clockBits, matching the
-            // right-aligned field returned by s_getreg on gfx1200 and gfx1201.
-            clock = B.CreateLShr(cyclesLo, ConstantInt::get(I32, Config.ShaderClockShift));
-        }
-        else
-            clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
-        Value* shiftedClock = B.CreateShl(clock, ConstantInt::get(I32, clockDestShift));
-        Value* packed = B.CreateOr(shiftedClock, markerAndFlags);
-        CallInst* packedTrace = B.CreateCall(TTD, {packed});
-        packedTrace->setDebugLoc(CI->getDebugLoc());
-        packedTrace->copyMetadata(*CI);
-        CI->eraseFromParent();
-    }
-
-    ShaderClockBitsUsed = clockBits;
-    ShaderClockShiftUsed = Config.ShaderClockShift;
-    return true;
+    return changed;
 }

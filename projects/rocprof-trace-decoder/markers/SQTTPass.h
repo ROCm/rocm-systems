@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -35,26 +35,8 @@
 #include "SQTTConfig.h"
 #include "SQTTTarget.h"
 
-// ============================================================================
-// The pass (two-phase: Early + Late)
-//
-// Early phase (before inliner):
-//   - Force-inlines wrappers around named marker sentinels, then resolves
-//     sentinel calls to bare s_ttracedata intrinsics. This eliminates
-//     opaque extern calls before the optimizer runs, avoiding VGPR
-//     pressure from conservative register allocation.
-//   - Instruments all non-kernel device functions with bare entry/exit
-//     markers (no scope checks or barriers). When functions are inlined,
-//     their markers travel with the code.
-//
-// Late phase (after inliner):
-//   - Evaluates the cost/size threshold on the now-optimized IR and
-//     removes markers from functions that are too small.
-//   - Adds scope checks and sched/mem barriers around surviving markers.
-//   - Handles any remaining named marker sentinel calls (fallback).
-//   - Instruments barriers and emits the .sqtt_funcmap ELF section.
-//   - Reassigns compact function IDs to enable s_ttracedata_imm.
-// ============================================================================
+// Early resolves named calls and inserts bare function markers before inlining.
+// Late filters/compacts them, adds guards and boundaries, then emits the funcmap.
 
 class SQTTInstrumentPass : public llvm::PassInfoMixin<SQTTInstrumentPass>
 {
@@ -72,148 +54,89 @@ public:
 private:
     SQTTConfig Config;
     Mode PassMode;
-    uint32_t NextEventID = 1; // unified counter for all marker types
-    // Instrumented device functions.  SourceLoc is the function definition
-    // location (file:line) from DWARF, "" if no debug info.
-    struct FuncMapEntry
+    uint32_t NextEventID = 1;
+    // One ledger backs both the early-pass handoff and the final funcmap.
+    // Function and kernel definition locations are "file:line" when available.
+    enum class MarkerKind : uint8_t
     {
-        uint32_t ID;
+        Function,
+        Kernel,
+        UserScope,
+        Point,
+        SystemPoint,
+        AddressPoint
+    };
+    struct MarkerRecord
+    {
+        uint32_t ID = 0; // Kernels have no shaderdata ID.
+        MarkerKind Kind;
         std::string Name;
         std::string SourceLoc;
+        uint32_t PreOptSize = 0;       // Function rows only, before inlining.
+        uint32_t ExtraPayloadCount = 0; // Header rows only.
     };
-    std::vector<FuncMapEntry> FuncMap;
-    // Kernels (not instrumented, recorded for vaddr lookup).
-    struct KernelEntry
-    {
-        std::string Name;
-        std::string SourceLoc;
-    };
-    std::vector<KernelEntry> KernelNames;
+    std::vector<MarkerRecord> Markers;
+    // Name-to-ID is rebuilt by compaction along with the ledger IDs.
     std::map<std::string, uint32_t> UserMarkerMap;
-    // User markers: (id, name, is_point).  Scope markers use U: prefix,
-    // point markers use P: prefix in the funcmap.
-    struct UserMarkerEntry
-    {
-        uint32_t ID;
-        std::string Name;
-        bool IsPoint;
-        uint32_t ExtraPayloadCount;
-    };
-    std::vector<UserMarkerEntry> UserMarkers;
     llvm::Value* CurScopeCheck = nullptr; // cached per-function scope check result
     uint32_t ShaderClockBitsUsed = 0;
-    uint32_t ShaderClockShiftUsed = 0;
 
-    // Dynamically allocated IDs for system events
-    uint32_t BarrierSignalID = 0;
-    uint32_t BarrierWaitID = 0;
-    uint32_t BarrierFullID = 0;
-    uint32_t VmemLoadID = 0;
-    uint32_t VmemStoreID = 0;
+    // Automatic marker groups are allocated in their classifier enum order.
+    uint32_t FirstBarrierID = 0;
+    uint32_t FirstVmemID = 0;
 
-    // Per-op unique IDs for address tracing.  Each memory op gets its own ID
-    // so the decoder can correlate traces back to individual source locations.
-    struct AddrTraceEntry
-    {
-        uint32_t ID;
-        std::string Kind;             // "addr_trace_load", "addr_trace_store", etc.
-        std::string SourceLoc;        // "file.hip:42" or "" if no debug info
-        uint32_t ExtraPayloadCount;   // following s_ttracedata records after the header
-    };
-    std::vector<AddrTraceEntry> AddrTraceEntries;
     unsigned AddrTraceWaveSize = 0; // set once during instrumentAddressTraces
 
-    // -----------------------------------------------------------------
-    // Phase entry points
-    // -----------------------------------------------------------------
+    // Phase entry points.
     llvm::PreservedAnalyses runEarly(llvm::Module& M);
     llvm::PreservedAnalyses runLate(llvm::Module& M);
 
-    // -----------------------------------------------------------------
-    // Marker insertion
-    // -----------------------------------------------------------------
-    void insertTraceMarker(llvm::IRBuilder<>& B, uint32_t markerID, llvm::Function& F, GfxGen gen);
-    void insertTraceMarkerWithPayload(
-        llvm::IRBuilder<>& B, uint32_t markerID, llvm::Value* payload, llvm::Function& F, GfxGen gen
+    // Marker insertion and scope filtering.
+    void insertTraceMarker(
+        llvm::IRBuilder<>& B, uint32_t markerID, llvm::Function& F, GfxGen gen, llvm::Value* payload = nullptr
     );
 
-    // -----------------------------------------------------------------
-    // Scope check
-    // -----------------------------------------------------------------
     llvm::Value* buildScopeCheck(llvm::IRBuilder<>& B, GfxGen gen);
     llvm::Value* getOrCreateScopeCheck(llvm::Function& F, GfxGen gen);
-    bool wrapExistingMarkers(llvm::Function& F, GfxGen gen);
-    // Wraps a contiguous run of marker calls [First..Last] (inclusive, same
-    // basic block, separated only by ignorable instructions) in a single
-    // scope-check diamond.  Used by wrapExistingMarkers to coalesce adjacent
-    // markers that would otherwise produce a chain of identical-condition
-    // branches after inlining.
-    void wrapRangeWithScopeCheck(llvm::CallInst* First, llvm::CallInst* Last, llvm::Function& F, GfxGen gen);
+    bool finalizeExistingMarkers(llvm::Function& F, GfxGen gen);
+    // Wrap an adjacent marker run in one scope-check diamond.
+    void wrapRangeWithScopeCheck(
+        llvm::CallInst* First, llvm::CallInst* Last, llvm::Function& F, GfxGen gen, bool pinSkipHead
+    );
 
-    // -----------------------------------------------------------------
-    // Barriers around existing markers
-    // -----------------------------------------------------------------
-    bool addBarriersToExistingMarkers(llvm::Function& F);
-
-    // -----------------------------------------------------------------
-    // Named marker helpers
-    // -----------------------------------------------------------------
-    enum class MarkerType
-    {
-        Enter,
-        Exit,
-        Point,
-        Data
-    };
-    struct MarkerCall
-    {
-        llvm::CallInst* CI;
-        MarkerType Type;
-    };
-
-    llvm::SmallVector<MarkerCall, 8> collectSentinelCalls(llvm::Function& F);
-    uint32_t resolveMarkerString(llvm::CallInst* CI, MarkerType type);
+    uint32_t resolveMarkerString(llvm::CallInst* CI, uint8_t flags);
 
     llvm::CallInst* emitBareTrace(llvm::IRBuilder<>& B, uint32_t encoded, llvm::Module* M, GfxGen gen);
-    llvm::CallInst* emitBareTraceValue(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M, GfxGen gen);
-    llvm::CallInst* emitRawTracePayload(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M);
-    static void markMarkerHeaderTrace(llvm::CallInst* CI);
-    static bool isMarkerHeaderTrace(llvm::CallInst* CI);
-    static void markRawPayloadTrace(llvm::CallInst* CI);
-    static bool isRawPayloadTrace(llvm::CallInst* CI);
+    llvm::CallInst* emitBareTraceValue(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M);
+    llvm::CallInst* emitRawTracePayload(
+        llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M, llvm::CallInst* header
+    );
+    static bool isTraceDataCall(const llvm::CallInst* CI);
 
-    bool resolveNamedMarkersEarly(llvm::Function& F, GfxGen gen);
-    bool processNamedMarkers(llvm::Function& F, GfxGen gen);
     bool processMarkerCalls(llvm::Function& F, GfxGen gen, bool useBareTrace);
 
-    // -----------------------------------------------------------------
-    // Barrier auto-instrumentation
-    // -----------------------------------------------------------------
-    enum class BarrierKind
+    // Automatic barrier and memory instrumentation.
+    enum class BarrierKind : uint32_t
     {
-        Signal,
+        Signal = 0,
         Wait,
         Full,
         None
     };
     static BarrierKind classifyBarrier(llvm::CallInst* CI);
+    static bool isSyncInstruction(llvm::Instruction* I);
     bool instrumentBarriers(llvm::Function& F, GfxGen gen);
 
-    // -----------------------------------------------------------------
-    // Memory operation auto-instrumentation
-    // -----------------------------------------------------------------
-    enum class MemOpKind
+    enum class MemOpKind : uint32_t
     {
-        Load,
+        Load = 0,
         Store,
         None
     };
     static MemOpKind classifyMemOp(llvm::Instruction* I);
     bool instrumentMemoryOps(llvm::Function& F, GfxGen gen);
 
-    // -----------------------------------------------------------------
-    // Address trace instrumentation
-    // -----------------------------------------------------------------
+    // Address tracing.
     enum class AddrTraceKind
     {
         Memory,
@@ -222,77 +145,63 @@ private:
         Permute,
         None
     };
-    static AddrTraceKind classifyAddrTraceOp(llvm::Instruction* I, bool traceMemory, bool traceLDS);
-    static llvm::Value* getMemOpPointer(llvm::Instruction* I);
+    // Everything needed after the initial scan.  Keeping the protocol shape
+    // here avoids rediscovering buffer spelling and operand layout while the
+    // CFG is being rewritten.
+    struct AddrTraceOp
+    {
+        llvm::Instruction* I;
+        const char* Name;
+        AddrTraceKind Kind;
+        unsigned BufferRsrcIndex;
+        bool StructBuffer;
+    };
+    static AddrTraceOp classifyAddrTraceOp(llvm::Instruction* I, bool traceMemory, bool traceLDS);
     void emitAddressTrace(
         llvm::IRBuilder<>& B,
-        llvm::Instruction* memOp,
-        AddrTraceKind kind,
+        const AddrTraceOp& op,
         uint32_t headerID,
-        llvm::Function& F,
         GfxGen gen
     );
-    // One ordering boundary on each side of a complete address-trace block.
-    // This deliberately does not put a boundary around every raw payload.
-    void emitTraceBlockBoundary(llvm::IRBuilder<>& B, bool after);
-    // Source location for an instruction.  Walks the inline chain via
-    // DILocation::getInlinedAt() and joins entries with " -> " (innermost
-    // first, then each outward call site).  Matches the format used by
-    // rocprofiler-sdk's codeobj DWARF inline chain printer.
-    // Returns "" if no debug info.
-    static std::string getSourceLoc(llvm::Instruction* I);
-    // Source location for a function's definition (from DISubprogram).
-    // No inline chain — returns just "file:line", or "" if no debug info.
-    static std::string getFunctionSourceLoc(llvm::Function& F);
-    static const char* addrTraceKindName(AddrTraceKind kind, bool isStore, bool isAtomic = false);
-
-    // Buffer intrinsic operand extraction
-    struct BufferOperands
-    {
-        llvm::Value* Rsrc;
-        llvm::Value* VOffset;
-        llvm::Value* SOffset;
-        llvm::Value* VIndex; // null for raw buffers
-        bool IsStruct;
-    };
-    static BufferOperands getBufferOperands(llvm::CallInst* CI);
-
-    void emitBufferTrace(llvm::IRBuilder<>& B, llvm::CallInst* bufOp, uint32_t headerID, llvm::Function& F, GfxGen gen);
-    void emitPermuteTrace(
-        llvm::IRBuilder<>& B, llvm::CallInst* permuteOp, uint32_t headerID, llvm::Function& F, GfxGen gen
+    void emitReadlaneTraceLoop(
+        llvm::IRBuilder<>& B,
+        llvm::Value* firstValue,
+        llvm::Value* secondValue,
+        unsigned waveSize
     );
+    void emitTraceBoundary(llvm::IRBuilder<>& B, bool after, bool schedBarrier = true);
+    void emitTraceBoundaries(
+        llvm::IRBuilder<>& B, llvm::Instruction* first, llvm::Instruction* last, bool schedBarrier
+    );
+    // Emit a sequence directly or inside the configured scope-check diamond.
+    void emitScopedTrace(
+        llvm::IRBuilder<>& B,
+        llvm::Function& F,
+        GfxGen gen,
+        const char* traceBlockName,
+        const char* skipBlockName,
+        bool pinSkipHead,
+        llvm::function_ref<void(llvm::IRBuilder<>&)> emit
+    );
+    // Return the innermost-to-outermost inline chain, or "" without debug info.
+    static std::string getSourceLoc(llvm::Instruction* I);
+    static std::string getFunctionSourceLoc(llvm::Function& F);
 
     bool instrumentAddressTraces(llvm::Function& F, GfxGen gen);
 
-    // -----------------------------------------------------------------
-    // Early phase helpers
-    // -----------------------------------------------------------------
-    void insertBareMarkers(llvm::Function& F, uint32_t id, GfxGen gen);
-    void storeFuncMetadata(llvm::Function& F, uint32_t id, llvm::LLVMContext& Ctx);
-    void storeUserMarkerMetadata(llvm::Module& M, llvm::LLVMContext& Ctx);
-    void recoverUserMarkerMetadata(llvm::Module& M);
+    // Insert function entry/exit markers for either pass phase.
+    void insertFunctionMarkers(llvm::Function& F, uint32_t id, GfxGen gen, bool useBareTrace);
+    void storeEarlyMarkerMetadata(llvm::Module& M, llvm::LLVMContext& Ctx);
+    bool recoverEarlyMarkerMetadata(llvm::Module& M, bool& hasEarlyFunctions);
 
-    // -----------------------------------------------------------------
-    // Late phase: threshold filter and ID compaction
-    // -----------------------------------------------------------------
-    bool filterInstrumentedFunctions(llvm::Module& M);
-    uint32_t compactFuncIDs(llvm::Module& M);
-    void rewriteMarkerIDs(llvm::Function& F, const std::map<uint32_t, uint32_t>& IDMap, GfxGen gen);
-    bool applyShaderClockPacking(llvm::Function& F, GfxGen gen);
-    // Lower full traces after all marker transformations to explicit asm with
-    // the required M0 hazard spacing.
-    bool lowerFullTracesWithM0Nop(llvm::Function& F);
-    void removeFuncMarkersFromModule(llvm::Module& M, uint32_t id);
-    void removeAdjacentBarriers(llvm::CallInst* CI);
+    // Late phase: filtering, ID compaction, packing, and lowering.
+    bool finalizeEarlyFunctionMarkers(llvm::Module& M);
+    // Pack gfx12 shader-clock headers and lower full traces through M0/NOP.
+    bool finalizeFullTraces(llvm::Function& F, GfxGen gen);
 
-    // -----------------------------------------------------------------
-    // -O0 fallback: direct function instrumentation
-    // -----------------------------------------------------------------
+    // -O0 fallback.
     static bool hasMustTailCall(const llvm::Function& F);
     bool instrumentFunctionDirect(llvm::Function& F, GfxGen gen);
 
-    // -----------------------------------------------------------------
-    // Emit .sqtt_funcmap ELF section
-    // -----------------------------------------------------------------
     void emitFuncMap(llvm::Module& M);
 };
