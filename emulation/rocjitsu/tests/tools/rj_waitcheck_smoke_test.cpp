@@ -711,7 +711,7 @@ TEST(RjWaitcheck, ExhaustiveProgressHasKernelDenominatorWhenForced) {
 
   const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
                               shell_quote(corpus.string()) +
-                              " --exhaustive --target gfx1200 --summary-only --progress > " +
+                              " --exhaustive --target gfx1200 --summary-only --progress -j16 > " +
                               shell_quote(output.string()) + " 2> " + shell_quote(error.string());
 
   const int status = std::system(command.c_str());
@@ -800,6 +800,15 @@ TEST(RjWaitcheck, ExhaustiveSweepRequiresTargetAndFullAnalysis) {
   std::filesystem::remove(output);
   EXPECT_TRUE(command_exited_with(status, 1)) << stderr_text;
   EXPECT_TRUE(contains(stderr_text, "--progress requires --exhaustive")) << stderr_text;
+
+  const std::string jobs_command = shell_quote(g_waitcheck_tool.string()) +
+                                   " . --all-code-objects -j17 > /dev/null 2> " +
+                                   shell_quote(output.string());
+  status = std::system(jobs_command.c_str());
+  stderr_text = read_text_file(output);
+  std::filesystem::remove(output);
+  EXPECT_TRUE(command_exited_with(status, 1)) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "invalid job count: 17 (expected 1-16)")) << stderr_text;
 }
 
 int main(int argc, char **argv) {

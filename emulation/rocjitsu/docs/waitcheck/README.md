@@ -64,7 +64,7 @@ tree or another release corpus:
 
 ```sh
 build/tools/rj_waitcheck /path/to/site-packages/torch \
-  --exhaustive --target gfx950 --summary-only
+  --exhaustive --target gfx950 --summary-only -j16
 ```
 
 `--exhaustive` implies `--recursive --all-code-objects`. Files that do not
@@ -79,7 +79,9 @@ kernels. When standard error is an interactive terminal, exhaustive mode first
 counts the selected code objects and kernel descriptors and then displays
 progress as `kernels C/D code-objects C/D`. Redirected and procedural runs are
 silent by default; use `--progress` to force the display or `--no-progress` to
-disable it.
+disable it. Code objects are independent analysis units, so `-j N` runs up to
+`N` of them concurrently. The default is `-j1`, and the maximum is `-j16` to
+bound memory use.
 
 Useful options:
 
@@ -93,6 +95,7 @@ Useful options:
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. |
 | `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
 | `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
+| `-j N`, `--jobs N` | Analyze up to N code objects concurrently. The default is 1 and the maximum is 16. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |

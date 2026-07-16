@@ -6,17 +6,21 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include <unistd.h>
@@ -28,6 +32,7 @@ namespace {
 constexpr int kUsageError = 1;
 constexpr int kInputError = 2;
 constexpr int kHazardDetected = 4;
+constexpr uint32_t kMaxJobs = 16;
 
 enum class ProgressMode : uint8_t { Auto, Always, Never };
 
@@ -62,6 +67,7 @@ struct CliOptions {
   bool no_fail = false;
   bool show_help = false;
   ProgressMode progress = ProgressMode::Auto;
+  uint32_t jobs = 1;
 };
 
 struct SelectedCodeObject {
@@ -92,6 +98,11 @@ struct ProgressTotals {
   size_t kernels = 0;
 };
 
+struct CodeObjectAnalysis {
+  WaitcheckReport report;
+  std::string error;
+};
+
 class ProgressDisplay {
 public:
   explicit ProgressDisplay(ProgressMode mode)
@@ -103,11 +114,13 @@ public:
   void begin_discovery() {
     if (!enabled_)
       return;
+    const std::lock_guard lock(mutex_);
     std::cerr << "\rrj_waitcheck: discovering kernels...\033[K" << std::flush;
     line_active_ = true;
   }
 
   void set_totals(ProgressTotals totals) {
+    const std::lock_guard lock(mutex_);
     totals_ = totals;
     render(true);
   }
@@ -116,6 +129,7 @@ public:
                          uint32_t code_object_index) {
     if (!enabled_)
       return;
+    const std::lock_guard lock(mutex_);
     const std::filesystem::path path(input_path);
     current_ = path.filename().string();
     if (current_.empty())
@@ -125,31 +139,41 @@ public:
   }
 
   void kernel_analyzed() {
+    const std::lock_guard lock(mutex_);
     ++kernels_processed_;
     render(false);
   }
 
   void code_object_processed() {
+    const std::lock_guard lock(mutex_);
     ++code_objects_processed_;
     render(true);
   }
 
   void before_message() {
-    if (!enabled_ || !line_active_)
+    if (!enabled_)
       return;
-    std::cerr << "\n";
-    line_active_ = false;
+    const std::lock_guard lock(mutex_);
+    before_message_locked();
   }
 
   void finish() {
     if (!enabled_)
       return;
+    const std::lock_guard lock(mutex_);
     if (!line_active_)
       render(true);
-    before_message();
+    before_message_locked();
   }
 
 private:
+  void before_message_locked() {
+    if (!line_active_)
+      return;
+    std::cerr << "\n";
+    line_active_ = false;
+  }
+
   void render(bool force) {
     if (!enabled_)
       return;
@@ -176,7 +200,46 @@ private:
   size_t kernels_processed_ = 0;
   std::optional<size_t> last_percent_;
   std::string current_;
+  std::mutex mutex_;
 };
+
+template <typename Function> void parallel_for(size_t count, uint32_t jobs, Function &&function) {
+  if (count == 0)
+    return;
+  const size_t worker_count = std::min<size_t>(count, jobs);
+  if (worker_count == 1) {
+    for (size_t index = 0; index < count; ++index)
+      function(index);
+    return;
+  }
+
+  std::atomic<size_t> next_index = 0;
+  std::exception_ptr first_exception;
+  std::mutex exception_mutex;
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (size_t worker = 0; worker < worker_count; ++worker) {
+    workers.emplace_back([&] {
+      try {
+        while (true) {
+          const size_t index = next_index.fetch_add(1, std::memory_order_relaxed);
+          if (index >= count)
+            return;
+          function(index);
+        }
+      } catch (...) {
+        const std::lock_guard lock(exception_mutex);
+        if (!first_exception)
+          first_exception = std::current_exception();
+        next_index.store(count, std::memory_order_relaxed);
+      }
+    });
+  }
+  for (std::thread &worker : workers)
+    worker.join();
+  if (first_exception)
+    std::rethrow_exception(first_exception);
+}
 
 void print_supported_targets(std::ostream &os) {
   for (size_t i = 0; i < kSupportedTargets.size(); ++i) {
@@ -198,6 +261,7 @@ void print_help() {
             << "  --exhaustive             Strict recursive target sweep with completeness totals\n"
             << "  --progress               Show exhaustive kernel progress even without a TTY\n"
             << "  --no-progress            Disable exhaustive kernel progress\n"
+            << "  -j N, --jobs N           Run up to N code-object analyses in parallel (max: 16)\n"
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
             << "  --stop-after-first-diagnostic\n"
@@ -294,6 +358,27 @@ void print_help() {
     }
     if (arg == "--no-progress") {
       options.progress = ProgressMode::Never;
+      continue;
+    }
+    if (arg == "--jobs" || arg == "-j") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      uint32_t jobs = 0;
+      if (!parse_u32(value, jobs) || jobs == 0 || jobs > kMaxJobs) {
+        std::cerr << "invalid job count: " << value << " (expected 1-" << kMaxJobs << ")\n";
+        return false;
+      }
+      options.jobs = jobs;
+      continue;
+    }
+    if (arg.starts_with("-j") && arg.size() > 2) {
+      uint32_t jobs = 0;
+      value = arg.substr(2);
+      if (!parse_u32(value, jobs) || jobs == 0 || jobs > kMaxJobs) {
+        std::cerr << "invalid job count: " << value << " (expected 1-" << kMaxJobs << ")\n";
+        return false;
+      }
+      options.jobs = jobs;
       continue;
     }
     if (arg == "--skip-unsupported") {
@@ -614,17 +699,18 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   std::cerr << "rj_waitcheck: " << input_path << ": analysis error: " << reason << "\n";
 }
 
-[[nodiscard]] bool analyze_code_object(const CliOptions &options, const std::string &input_path,
-                                       rj_code_target_id_t target, uint32_t code_object_index,
-                                       const AmdGpuCodeObject &code_object, ScanTotals &totals,
-                                       std::string &error, ProgressDisplay *progress = nullptr) {
+[[nodiscard]] CodeObjectAnalysis
+run_code_object_analysis(const CliOptions &options, const std::string &input_path,
+                         rj_code_target_id_t target, uint32_t code_object_index,
+                         const AmdGpuCodeObject &code_object, ProgressDisplay *progress) {
+  CodeObjectAnalysis result;
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
-    error = "target is not supported by waitcheck: " + std::string(target_name(target));
-    return false;
+    result.report.supported = false;
+    result.error = "target is not supported by waitcheck: " + std::string(target_name(target));
+    return result;
   }
 
-  ++totals.code_objects_discovered;
   if (progress)
     progress->begin_code_object(input_path, target_name(target), code_object_index);
 
@@ -633,13 +719,38 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
   if (progress)
     analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
-  WaitcheckReport report =
-      options.kernel_entry
-          ? analyze_waitcnts_for_kernel(code_object, arch, *options.kernel_entry, analysis_options)
-          : analyze_waitcnts(code_object, arch, analysis_options);
+  try {
+    result.report = options.kernel_entry
+                        ? analyze_waitcnts_for_kernel(code_object, arch, *options.kernel_entry,
+                                                      analysis_options)
+                        : analyze_waitcnts(code_object, arch, analysis_options);
+  } catch (const std::exception &ex) {
+    result.report.supported = false;
+    result.report.analysis_error = std::string("unexpected analysis failure: ") + ex.what();
+  } catch (...) {
+    result.report.supported = false;
+    result.report.analysis_error = "unexpected non-standard analysis failure";
+  }
   if (progress)
     progress->code_object_processed();
 
+  if (!result.report.supported) {
+    result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
+                   std::to_string(code_object_index) + "]";
+    if (!result.report.analysis_error.empty())
+      result.error += ": " + result.report.analysis_error;
+  }
+  return result;
+}
+
+[[nodiscard]] bool merge_code_object_analysis(const CliOptions &options,
+                                              const std::string &input_path,
+                                              rj_code_target_id_t target,
+                                              uint32_t code_object_index,
+                                              const CodeObjectAnalysis &result, ScanTotals &totals,
+                                              std::string &error) {
+  const WaitcheckReport &report = result.report;
+  ++totals.code_objects_discovered;
   totals.kernels_discovered += report.kernels_discovered;
   totals.kernels_analyzed += report.kernels_analyzed;
   totals.instructions_analyzed += report.instructions_analyzed;
@@ -648,10 +759,7 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   totals.diagnostics_truncated = totals.diagnostics_truncated || report.diagnostics_truncated;
   totals.hazards = totals.hazards || !report.passed();
   if (!report.supported) {
-    error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
-            std::to_string(code_object_index) + "]";
-    if (!report.analysis_error.empty())
-      error += ": " + report.analysis_error;
+    error = result.error;
     return false;
   }
 
@@ -662,6 +770,16 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
     print_diagnostics(input_path, target, code_object_index, report, options.max_diagnostics);
   }
   return true;
+}
+
+[[nodiscard]] bool analyze_code_object(const CliOptions &options, const std::string &input_path,
+                                       rj_code_target_id_t target, uint32_t code_object_index,
+                                       const AmdGpuCodeObject &code_object, ScanTotals &totals,
+                                       std::string &error, ProgressDisplay *progress = nullptr) {
+  const CodeObjectAnalysis result = run_code_object_analysis(
+      options, input_path, target, code_object_index, code_object, progress);
+  return merge_code_object_analysis(options, input_path, target, code_object_index, result, totals,
+                                    error);
 }
 
 [[nodiscard]] bool scan_selected_code_object(const CliOptions &options,
@@ -709,7 +827,12 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
     return false;
   }
 
-  bool found = false;
+  struct Task {
+    rj_code_target_id_t target;
+    uint32_t index;
+    const AmdGpuCodeObject *code_object;
+  };
+  std::vector<Task> tasks;
   for (const TargetInfo &info : kSupportedTargets) {
     if (options.target && *options.target != info.target)
       continue;
@@ -727,24 +850,11 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
         error = os.str();
         return false;
       }
-      found = true;
-      if (!analyze_code_object(options, input_path, info.target, index, *code_object, totals, error,
-                               progress)) {
-        if (options.exhaustive) {
-          record_analysis_error(input_path, error, totals, progress);
-          continue;
-        }
-        if (options.skip_unsupported) {
-          skip_input(input_path, error, totals, options.summary_only);
-          continue;
-        }
-        error = input_path + ": " + error;
-        return false;
-      }
+      tasks.push_back({info.target, index, code_object});
     }
   }
 
-  if (!found) {
+  if (tasks.empty()) {
     const std::string reason =
         options.target ? "no " + std::string(target_name(*options.target)) + " code objects found"
                        : "no supported code objects found";
@@ -757,6 +867,35 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
       return true;
     }
     error = input_path + ": " + reason;
+    return false;
+  }
+
+  std::vector<CodeObjectAnalysis> results(tasks.size());
+  try {
+    parallel_for(tasks.size(), options.jobs, [&](size_t task_index) {
+      const Task &task = tasks[task_index];
+      results[task_index] = run_code_object_analysis(options, input_path, task.target, task.index,
+                                                     *task.code_object, progress);
+    });
+  } catch (const std::exception &ex) {
+    error = input_path + ": parallel analysis failed: " + ex.what();
+    return false;
+  }
+
+  for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
+    const Task &task = tasks[task_index];
+    if (merge_code_object_analysis(options, input_path, task.target, task.index,
+                                   results[task_index], totals, error))
+      continue;
+    if (options.exhaustive) {
+      record_analysis_error(input_path, error, totals, progress);
+      continue;
+    }
+    if (options.skip_unsupported) {
+      skip_input(input_path, error, totals, options.summary_only);
+      continue;
+    }
+    error = input_path + ": " + error;
     return false;
   }
 
