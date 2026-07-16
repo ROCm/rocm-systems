@@ -161,9 +161,6 @@ def artifact_name(path: Path) -> str:
 
 
 def build_group_from_artifact(artifact: str) -> str:
-    # system-deps artifacts are named junit-build-<distro>-system-deps-<idx>,
-    # so this must be tested before the leading-distro match below (otherwise
-    # e.g. junit-build-rhel-system-deps-0 matches "junit-build-rhel-" first).
     if "-system-deps-" in artifact:
         return "system-deps"
     for group in ("ubuntu-22.04", "ubuntu-24.04", "debian", "rhel"):
@@ -375,8 +372,7 @@ def read_statuses(paths: Iterable[Path]) -> Dict[str, SanitizerStatus]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             print(
-                f"warning: skipping unreadable status file {path}: {exc}",
-                file=sys.stderr,
+                f"warning: skipping unreadable status file {path}: {exc}", file=sys.stderr
             )
             continue
         sanitizer = str(data.get("sanitizer", "")).strip().lower()
