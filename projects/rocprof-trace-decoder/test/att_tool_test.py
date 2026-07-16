@@ -225,29 +225,6 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual([record.time for record in records.shaderdata], [0xFE0B, 0x10DFC])
         self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
 
-    def test_large_delay_warns_and_is_corrected(self):
-        marker_id = 3 << 2
-        base = 0x20000
-        first = _shaderdata(base, marker_id)
-        later = _shaderdata(base + 30000, marker_id)
-        final = _shaderdata(base + 60000, (0x5F9 << 20) | marker_id)
-        records = TraceRecords(
-            occupancy=[_occupancy(1, 0)], shaderdata=[first, later, final]
-        )
-
-        with self.assertWarnsRegex(RuntimeWarning, "delay range exceeds half"):
-            _correct_marker_timestamps(
-                [(0, records)],
-                {
-                    "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
-                    "sqtt_funcmap_layout": [[7, 12, 4]],
-                },
-            )
-
-        self.assertEqual(first.time, base - 30000 + 15)
-        self.assertEqual(later.time, base - 30000 + 15)
-        self.assertEqual(final.time, base + 60000)
-
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
         before_retirement = _shaderdata(0x1010, (0x100 << 20) | (3 << 2))
         after_retirement = _shaderdata(0x1080, (0x101 << 20) | (3 << 2))

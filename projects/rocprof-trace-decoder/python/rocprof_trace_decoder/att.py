@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -241,11 +240,6 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             for _record, time, clock, _payloads in domain_headers
         ]
         minimum = min(delays)
-        if max(delays) - minimum > half_window:
-            warnings.warn(
-                f"SQTT marker correction for {clock_domain}: delay range exceeds half the window",
-                RuntimeWarning,
-            )
         for (record, _time, _clock, header_payloads), delay in zip(domain_headers, delays):
             correction = max(0, delay - minimum - (bucket_size - 1))
             if correction:
