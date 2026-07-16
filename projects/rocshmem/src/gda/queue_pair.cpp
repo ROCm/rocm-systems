@@ -486,32 +486,6 @@ void QueuePair::buffer_unregister_all() {
                       sizeof(struct user_buf_info_t) * num_user_buffers));
 }
 
-__device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
-  /* Check if in heap */
-  if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
-    return lkey;
-  }
-
-  /* Get the correct lkey for the user buffer */
-  for (size_t i=0; i<num_user_buffers; i++) {
-    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
-      return user_buf_info[i].lkey;
-    }
-  }
-
-  /* Get the correct lkey for a registered symmetric buffer */
-  int n = symm_count ? *symm_count : 0;
-  for (int i = 0; i < n; ++i) {
-    if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length,
-                        addr)) {
-      return symm_entries[i].lkey;
-    }
-  }
-
-  LOGD_ERROR_ABORT("Valid lkey buffer not found");
-  return 0;
-}
-
 }  // namespace rocshmem
 
 // Exported C function for GIN QP factory to initialize __constant__ constmem.

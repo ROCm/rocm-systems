@@ -368,13 +368,13 @@ class QueuePair {
    */
   __device__ __forceinline__ raddr_info get_raddr_info(const void *sym_addr) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
-    if ((addr - base_heap) < base_heap_size) {
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
       return {remote_heap_base + (addr - base_heap), rkey};
     }
     int n = symm_count ? *symm_count : 0;
     for (int i = 0; i < n; ++i) {
       uintptr_t local_base = symm_entries[i].local_base;
-      if ((addr - local_base) < symm_entries[i].length) {
+      if (is_ptr_in_range(local_base, symm_entries[i].length, addr)) {
         return {symm_entries[i].remote_base + (addr - local_base),
                 symm_entries[i].rkey};
       }
@@ -389,7 +389,32 @@ class QueuePair {
    * and registered symmetric buffers use their own per-NIC local key. Aborts if
    * the address belongs to none of them.
    */
-  __device__ uint32_t get_lkey(uintptr_t addr);
+  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr) {
+    /* Check if in heap */
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+      return lkey;
+    }
+
+    /* Get the correct lkey for the user buffer */
+    for (size_t i = 0; i < num_user_buffers; i++) {
+      if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length,
+                          addr)) {
+        return user_buf_info[i].lkey;
+      }
+    }
+
+    /* Get the correct lkey for a registered symmetric buffer */
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length,
+                          addr)) {
+        return symm_entries[i].lkey;
+      }
+    }
+
+    LOGD_ERROR_ABORT("Valid lkey buffer not found");
+    return 0;
+  }
 
  private:
   /**
