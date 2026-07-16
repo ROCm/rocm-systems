@@ -113,6 +113,9 @@ def setup_ld_library_path(lib_dirs: list[Path]) -> str:
     create_soname_symlinks(lib_dirs)
 
     parts = [str(d) for d in lib_dirs]
+    rocm_lib = Path("/opt/rocm/lib")
+    if rocm_lib.is_dir():
+        parts.insert(0, str(rocm_lib))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -164,6 +167,34 @@ def diagnose_shared_libs(lib_dirs: list[Path]) -> None:
                     log.info("  %s", line.strip())
     except ImportError:
         log.info("xla_rocm7 plugin not installed — skipping plugin ldd")
+
+
+def populate_rocm_lib_dir(lib_dirs: list[Path]) -> None:
+    """Populate /opt/rocm/lib with symlinks to artifact libraries.
+
+    JAX's xla_rocm_plugin.so typically has RUNPATH set to /opt/rocm/lib.
+    With ELF RUNPATH semantics, transitive dependencies are resolved via
+    RUNPATH rather than LD_LIBRARY_PATH. In a container with no system
+    ROCm, we populate /opt/rocm/lib so the loader can find them.
+    """
+    rocm_lib = Path("/opt/rocm/lib")
+    try:
+        rocm_lib.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        log.warning("Cannot create %s — not running as root", rocm_lib)
+        return
+
+    count = 0
+    for d in lib_dirs:
+        for so_file in d.iterdir():
+            if ".so" not in so_file.name:
+                continue
+            target = rocm_lib / so_file.name
+            if target.exists() or target.is_symlink():
+                continue
+            target.symlink_to(so_file.resolve())
+            count += 1
+    log.info("Created %d symlinks in %s", count, rocm_lib)
 
 
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
@@ -503,7 +534,8 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
+    # Step 2: Set up library paths and verify override
+    populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
     diagnose_shared_libs(lib_dirs)
