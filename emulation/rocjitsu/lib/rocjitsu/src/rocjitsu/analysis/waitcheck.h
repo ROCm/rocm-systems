@@ -76,6 +76,14 @@ struct WaitcheckOptions {
   /// @details This is intended for large corpus sweeps where only hazard
   /// presence is needed. Report counts become lower bounds when enabled.
   bool stop_after_first_diagnostic = false;
+  /// @brief Maximum combined bytes retained for forward and reverse CFG
+  /// reachability memoization by one analyzer.
+  ///
+  /// @details Lossless diagnostic runs can query many distinct producer and
+  /// consumer blocks in a large call-context graph. The cache is only a speed
+  /// optimization; entries beyond this budget are computed transiently, so
+  /// reducing the budget does not change diagnostic results.
+  size_t max_reachability_cache_bytes = 16 * 1024 * 1024;
   /// @brief Optional callback invoked after each kernel descriptor is fully
   /// analyzed. The callback is not invoked for symbol-less whole-section
   /// fallback analysis.

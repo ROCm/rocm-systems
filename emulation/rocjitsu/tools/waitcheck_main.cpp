@@ -1294,12 +1294,6 @@ void print_slowest_kernels(const ScanTotals &totals) {
             std::span<const WaitcheckKernelInfo>{task.kernels}.subspan(work.first_kernel,
                                                                        work.kernel_count),
             progress);
-        // Batch CFGs can be much larger than their code-object images. Return
-        // their freed pages before the worker takes another batch so glibc
-        // arenas do not retain one pathological high-water mark per thread.
-#if defined(__GLIBC__)
-        malloc_trim(0);
-#endif
       } else {
         work_results[work_index] =
             run_code_object_analysis(options, task.target, task.index, *task.code_object, progress);
@@ -1309,8 +1303,20 @@ void print_slowest_kernels(const ScanTotals &totals) {
             work.kernel_count == 1 ? &task.kernels[work.first_kernel] : nullptr;
         diagnostic_writer->write(input_path, task.target, task.index, kernel,
                                  work_results[work_index].report.diagnostics);
-        work_results[work_index].report.diagnostics.clear();
+        // Lossless runs can materialize many diagnostics for one kernel. Drop
+        // both their strings and the vector allocation before trimming the
+        // worker arena; clear() alone retains one high-water capacity in every
+        // work-result slot until the whole executable finishes.
+        std::vector<WaitcheckDiagnostic>().swap(work_results[work_index].report.diagnostics);
       }
+      // Batch CFGs and diagnostic payloads can be much larger than their
+      // code-object images. Return their freed pages before the worker takes
+      // another batch so glibc arenas do not retain a pathological high-water
+      // mark per thread.
+#if defined(__GLIBC__)
+      if (work.kernel_count != 0)
+        malloc_trim(0);
+#endif
       const bool code_object_completed =
           remaining_work[work.code_object_task].fetch_sub(1, std::memory_order_relaxed) == 1;
       if (progress)
