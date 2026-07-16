@@ -1181,7 +1181,7 @@ hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr) {
   }
   // Execute the node without VM support, so runtime can release memory into cache
   if (!HIP_MEM_POOL_USE_VM) {
-    mem_free_node->Execute(s);
+    (void)mem_free_node->Execute(s);
   }
   s->SetLastCapturedNode(mem_free_node);
   return hipSuccess;
