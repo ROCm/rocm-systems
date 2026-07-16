@@ -20,6 +20,11 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::amdgpu {
 
+// AMD vendor-specific packet format 0 is unassigned; 200 is reserved and unreleased.
+
+/// ROCR-internal PM4 indirect-buffer packet format.
+constexpr uint8_t kAmdAqlFormatPm4Ib = 1;
+
 /// AMD vendor-specific packet format selector for barrier-value packets.
 constexpr uint8_t kHsaAmdPacketTypeBarrierValue = 2;
 

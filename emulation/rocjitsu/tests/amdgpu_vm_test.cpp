@@ -853,6 +853,8 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
 
     hsa_kernel_dispatch_packet_t barrier{};
     barrier.header = packet_type | (1 << HSA_PACKET_HEADER_BARRIER);
+    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+      barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
     barrier.completion_signal.handle = kBarrierCompletionSignal;
 
     test::AqlQueue queue(f.mem(), f.cp());
@@ -870,6 +872,25 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
 
     EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
     EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+  }
+}
+
+TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
+  constexpr std::array<uint8_t, 2> unsupported_formats{0, 200};
+
+  for (const auto amd_format : unsupported_formats) {
+    SCOPED_TRACE(static_cast<unsigned>(amd_format));
+    VmFixture f(arch(), 1, 8);
+
+    amdgpu::AmdExtKernelDispatchPacket packet{};
+    packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    packet.amd_format = amd_format;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(packet);
+
+    EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   }
 }
 

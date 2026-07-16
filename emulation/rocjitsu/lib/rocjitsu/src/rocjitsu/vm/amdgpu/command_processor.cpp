@@ -1351,10 +1351,9 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
         process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
-      } else {
+      } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
         constexpr uint32_t SIG_OFF = 56;
-        uint64_t sig = 0;
-        sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
+        const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
         DispatchEntry dp{
             .dispatch_id = next_dispatch_id_++,
@@ -1365,6 +1364,9 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         };
 
         qs.entries.push_back(std::move(dp));
+      } else {
+        throw std::runtime_error("Unsupported AMD vendor-specific AQL packet format: " +
+                                 std::to_string(ext.amd_format));
       }
     }
 
