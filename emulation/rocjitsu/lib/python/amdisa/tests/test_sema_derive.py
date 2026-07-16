@@ -23,7 +23,7 @@ from amdisa.codegen.execute.sema_lower import (
     RegClass,
     lower_sema_block,
 )
-from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_ternary
+from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_cvt_pk,
@@ -1979,6 +1979,20 @@ class TestDerivePacked:
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_pk_mov_b32_generator_uses_op_sel_for_both_outputs(self):
+        cpp = gen_pk_mov_b32(
+            ['inst.vdst'],
+            ['inst.src0', 'inst.src1'],
+            opsel_exprs=('inst.inst_.op_sel', 'inst.inst_.op_sel_hi'),
+        )
+
+        assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
+        assert 'uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane)' in cpp
+        assert 'uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane)' in cpp
+        assert 'encoding_value_ >= 256' not in cpp
 
 
 class TestDeriveDot:
