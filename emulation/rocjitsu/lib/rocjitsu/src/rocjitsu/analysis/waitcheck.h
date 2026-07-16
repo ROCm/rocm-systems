@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <span>
 #include <string>
@@ -73,6 +74,10 @@ struct WaitcheckOptions {
   /// @details This is intended for large corpus sweeps where only hazard
   /// presence is needed. Report counts become lower bounds when enabled.
   bool stop_after_first_diagnostic = false;
+  /// @brief Optional callback invoked after each kernel descriptor is fully
+  /// analyzed. The callback is not invoked for symbol-less whole-section
+  /// fallback analysis.
+  std::function<void()> kernel_analyzed_callback;
 };
 
 /// @brief One AMDHSA kernel discovered in a final code object.
@@ -90,6 +95,8 @@ struct WaitcheckReport {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   size_t instructions_analyzed = 0;
   size_t memory_events_tracked = 0;
+  size_t kernels_discovered = 0;
+  size_t kernels_analyzed = 0;
   size_t diagnostics_observed = 0;
   bool diagnostics_truncated = false;
   bool stopped_early = false;

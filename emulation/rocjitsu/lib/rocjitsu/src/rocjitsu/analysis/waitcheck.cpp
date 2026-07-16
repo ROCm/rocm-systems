@@ -3167,6 +3167,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
                                     : 0;
   try {
     const auto kernels = find_waitcheck_kernels(code_object);
+    report.kernels_discovered = kernels.size();
     const auto function_entries =
         kernels.empty() ? find_waitcheck_function_entries(code_object) : std::vector<uint64_t>{};
     if (selected_kernel_entry) {
@@ -3183,6 +3184,11 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build_reachable(code_object, *decoder, arch, entry);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+      if (is_kernel && report.supported && !report.stopped_early) {
+        ++report.kernels_analyzed;
+        if (options.kernel_analyzed_callback)
+          options.kernel_analyzed_callback();
+      }
     } else if (kernels.empty() && function_entries.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build(code_object, *decoder, arch);
@@ -3191,18 +3197,28 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
       // at once; generated Tensile libraries can contain hundreds of kernels.
-      std::vector<uint64_t> entries;
-      entries.reserve(kernels.size() + function_entries.size());
-      std::ranges::transform(kernels, std::back_inserter(entries),
-                             &WaitcheckKernelInfo::entry_offset);
-      entries.insert(entries.end(), function_entries.begin(), function_entries.end());
-      for (uint64_t entry_offset : entries) {
+      const auto analyze_entry = [&](uint64_t entry_offset, bool is_kernel) {
         const std::array<uint64_t, 1> entry{entry_offset};
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
+        if (is_kernel && report.supported && !report.stopped_early) {
+          ++report.kernels_analyzed;
+          if (options.kernel_analyzed_callback)
+            options.kernel_analyzed_callback();
+        }
+      };
+      for (const WaitcheckKernelInfo &kernel : kernels) {
+        analyze_entry(kernel.entry_offset, true);
         if (!report.supported || report.stopped_early)
           break;
+      }
+      if (report.supported && !report.stopped_early) {
+        for (uint64_t entry_offset : function_entries) {
+          analyze_entry(entry_offset, false);
+          if (!report.supported || report.stopped_early)
+            break;
+        }
       }
     }
   } catch (const util::Exception &ex) {
