@@ -229,7 +229,7 @@ build_standalone(rocprof_trace_decoder_handle_t handle,
                  uint64_t                       offset_end,
                  std::vector<uint8_t>&          output)
 {
-    if(offset_end <= offset_begin) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
+    if(offset_end <= offset_begin) return false;
 
     output.resize(offset_end - offset_begin + 4096);
     auto output_size = static_cast<uint64_t>(output.size());
@@ -363,11 +363,12 @@ backend_code_object_load(agent_state_t&                                         
 }
 
 uint64_t
-send_overlapping_requests(scan_context_t&                        context,
-                          rocprofiler_thread_trace_shader_data_t shader_data,
-                          std::vector<trace_range_t>&            ranges)
+send_overlapping_requests(scan_context_t&             context,
+                          const uint8_t*              scan_data,
+                          uint64_t                    scan_size,
+                          std::vector<trace_range_t>& ranges)
 {
-    auto  chunk_index = shader_data.chunk_index;
+    auto  chunk_index = context.chunk_index;
     auto& state       = *context.state;
 
     // Signal next chunk to continue from an active trace
@@ -401,13 +402,13 @@ send_overlapping_requests(scan_context_t&                        context,
     if(requested)
     {
         state.pending_requests--;
-        offset = context.first_valid_offset ? context.first_valid_offset : shader_data.data_size;
+        offset = context.first_valid_offset ? context.first_valid_offset : scan_size;
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);
 
         std::vector<uint8_t> ret_data{};
         ret_data.resize(offset);
-        std::memcpy(ret_data.data(), shader_data.data, offset);
+        std::memcpy(ret_data.data(), scan_data, offset);
 
         ROCP_INFO << "Request send: " << chunk_index << " with size " << ret_data.size();
 
@@ -432,7 +433,8 @@ fetch_overlapping_requests(scan_context_t& context, uint64_t chunk_index)
         state.data_cv.wait(lock, [&]() {
             return state.chunk_failed || chunk_data.find(chunk_index) != chunk_data.end();
         });
-        data_retrieved = std::move(chunk_data.at(chunk_index));
+
+        data_retrieved = std::move(chunk_data[chunk_index]);
         chunk_data.erase(chunk_index);
     }
 
@@ -483,7 +485,7 @@ backend_shader_data(agent_state_t&                         state,
         }
     }
 
-    uint64_t overlap_offset = send_overlapping_requests(context, shader_data, completed);
+    uint64_t overlap_offset = send_overlapping_requests(context, scan_data, scan_size, completed);
 
     uint64_t avg_trace_length = 0;
     for(auto& trace : completed)
