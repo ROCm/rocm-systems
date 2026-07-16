@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -24,6 +25,34 @@ extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t fa
 extern "C" void OnUnload();
 
 namespace {
+
+using ExpectedQueueInterceptPacketWriter = void (*)(const void *, uint64_t);
+using ExpectedQueueInterceptHandler = void (*)(const void *, uint64_t, uint64_t, void *,
+                                               ExpectedQueueInterceptPacketWriter);
+using ExpectedQueueInterceptCreate = hsa_status_t(HSA_API *)(
+    hsa_agent_t, uint32_t, hsa_queue_type32_t, void (*)(hsa_status_t, hsa_queue_t *, void *),
+    void *, uint32_t, uint32_t, hsa_queue_t **);
+using ExpectedQueueInterceptRegister = hsa_status_t(HSA_API *)(hsa_queue_t *,
+                                                               ExpectedQueueInterceptHandler,
+                                                               void *);
+
+static_assert(
+    std::is_same_v<hsa_amd_queue_intercept_packet_writer_t, ExpectedQueueInterceptPacketWriter>);
+static_assert(std::is_same_v<hsa_amd_queue_intercept_handler_t, ExpectedQueueInterceptHandler>);
+static_assert(std::is_same_v<hsa_amd_queue_intercept_create_fn_t, ExpectedQueueInterceptCreate>);
+static_assert(
+    std::is_same_v<hsa_amd_queue_intercept_register_fn_t, ExpectedQueueInterceptRegister>);
+static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn),
+                             ExpectedQueueInterceptCreate>);
+static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn),
+                             ExpectedQueueInterceptRegister>);
+
+TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
+  EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn),
+                              ExpectedQueueInterceptCreate>));
+  EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn),
+                              ExpectedQueueInterceptRegister>));
+}
 
 constexpr hsa_agent_t kGuestAgent{1};
 constexpr hsa_agent_t kHostAgent{2};
