@@ -145,4 +145,13 @@ struct WaitcheckReport {
                                                           uint64_t kernel_entry_offset,
                                                           WaitcheckOptions options = {});
 
+/// @brief Analyze an already-discovered kernel without repeating descriptor discovery.
+///
+/// @details This overload is intended for schedulers and runtime hooks that
+/// obtained @p kernel from waitcheck_kernels().
+[[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,
+                                                          rj_code_arch_t arch,
+                                                          const WaitcheckKernelInfo &kernel,
+                                                          WaitcheckOptions options = {});
+
 } // namespace rocjitsu

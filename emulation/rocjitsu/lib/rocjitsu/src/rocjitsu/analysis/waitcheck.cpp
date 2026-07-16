@@ -3170,6 +3170,7 @@ namespace {
 
 WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_t arch,
                                     std::optional<uint64_t> selected_kernel_entry,
+                                    const WaitcheckKernelInfo *known_kernel,
                                     WaitcheckOptions options) {
   WaitcheckReport report;
   report.arch = arch;
@@ -3201,7 +3202,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
                                     ? code_object.text_sections().front()->sectionOffset()
                                     : 0;
   try {
-    const auto kernels = find_waitcheck_kernels(code_object);
+    const auto kernels = known_kernel ? std::vector<WaitcheckKernelInfo>{*known_kernel}
+                                      : find_waitcheck_kernels(code_object);
     report.kernels_discovered = kernels.size();
     const auto function_entries =
         kernels.empty() ? find_waitcheck_function_entries(code_object) : std::vector<uint64_t>{};
@@ -3290,13 +3292,19 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
 
 WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                  WaitcheckOptions options) {
-  return analyze_code_object(code_object, arch, std::nullopt, options);
+  return analyze_code_object(code_object, arch, std::nullopt, nullptr, options);
 }
 
 WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
                                             uint64_t kernel_entry_offset,
                                             WaitcheckOptions options) {
-  return analyze_code_object(code_object, arch, kernel_entry_offset, options);
+  return analyze_code_object(code_object, arch, kernel_entry_offset, nullptr, options);
+}
+
+WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
+                                            const WaitcheckKernelInfo &kernel,
+                                            WaitcheckOptions options) {
+  return analyze_code_object(code_object, arch, kernel.entry_offset, &kernel, options);
 }
 
 } // namespace rocjitsu
