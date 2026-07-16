@@ -14,7 +14,11 @@
 #include <string>
 #include <vector>
 
-#include "../hip_internal.hpp"  // hip::g_devices, hip::ihipGetDeviceProperties
+namespace hip {
+class Device;
+extern std::vector<hip::Device*> g_devices;
+extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
+}  // namespace hip
 
 namespace hrr_cap {
 namespace metadata {
@@ -118,10 +122,8 @@ std::string collect_comgr_json() {
   amd_comgr_get_version(&major, &minor);
   std::ostringstream os;
   os << "{\n"
-     << "    \"available\": true,\n"
      << "    \"major\": " << static_cast<unsigned long long>(major) << ",\n"
-     << "    \"minor\": " << static_cast<unsigned long long>(minor) << ",\n"
-     << "    \"source\": \"amd_comgr_get_version\"\n"
+     << "    \"minor\": " << static_cast<unsigned long long>(minor) << "\n"
      << "  }";
   return os.str();
 }

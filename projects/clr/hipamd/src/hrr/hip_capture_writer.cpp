@@ -278,12 +278,6 @@ static bool is_json_object_fragment(const std::string& json) {
   return end != std::string::npos && json[end] == '}';
 }
 
-static void write_metadata_file_if_available() {
-  if (g_output_dir.empty() || !is_json_object_fragment(g_metadata_json)) return;
-  const std::string path = g_output_dir + "/metadata.json";
-  (void)atomic_write_file(path, g_metadata_json.data(), g_metadata_json.size());
-}
-
 // ---------------------------------------------------------------------------
 // manifest writers
 // ---------------------------------------------------------------------------
@@ -509,7 +503,6 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
   }
   fprintf(mf, "}\n");
   fclose(mf);
-  write_metadata_file_if_available();
 }
 
 struct ProcessManifestEntry {
@@ -581,6 +574,43 @@ static std::string read_text_file(const std::string& path) {
   return out;
 }
 
+static std::string extract_json_object_member(const std::string& json, const char* key) {
+  const std::string needle = std::string("\"") + key + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return {};
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return {};
+  pos = json.find('{', pos + 1);
+  if (pos == std::string::npos) return {};
+
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (size_t i = pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0)
+        return json.substr(pos, i - pos + 1);
+    }
+  }
+  return {};
+}
+
 static uint64_t derive_owner_pid(const std::vector<ProcessManifestEntry>& entries) {
   if (entries.empty()) return 0;
   for (const auto& candidate : entries) {
@@ -601,8 +631,9 @@ static void update_root_manifest() {
     const std::string name = ent.path().filename().string();
     if (name.rfind("pid-", 0) != 0) continue;
     ProcessManifestEntry entry{};
-    if (read_process_manifest((ent.path() / "manifest.json").string(), &entry)) {
-      std::string metadata = read_text_file((ent.path() / "metadata.json").string());
+    const std::string manifest_path = (ent.path() / "manifest.json").string();
+    if (read_process_manifest(manifest_path, &entry)) {
+      std::string metadata = extract_json_object_member(read_text_file(manifest_path), "metadata");
       if (is_json_object_fragment(metadata))
         entry.metadata_json = std::move(metadata);
       entries.push_back(entry);
@@ -1065,7 +1096,6 @@ void set_capture_metadata_json(std::string metadata_json) {
   if (!is_json_object_fragment(metadata_json)) return;
   std::lock_guard<std::mutex> lk(g_file_mu);
   g_metadata_json = std::move(metadata_json);
-  write_metadata_file_if_available();
 }
 
 }  // namespace writer

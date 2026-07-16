@@ -16,8 +16,7 @@ namespace metadata {
 // APIs that would re-enter hip::init().
 class Metadata {
  public:
-  // Returns a complete JSON object. The object is always valid JSON; individual
-  // sections carry an "available": false marker when optional probes fail.
+  // Returns a JSON object string containing capture environment metadata.
   std::string collect_json() const;
 };
 

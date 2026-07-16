@@ -124,6 +124,42 @@ static long long json_integer_value(const std::string& json, const std::string& 
   return (end == json.c_str() + pos) ? missing : value;
 }
 
+static std::string json_object_value(const std::string& json, const std::string& key) {
+  const std::string needle = "\"" + key + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return {};
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return {};
+  pos = json.find('{', pos + 1);
+  if (pos == std::string::npos) return {};
+
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (size_t i = pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) return json.substr(pos, i - pos + 1);
+    }
+  }
+  return {};
+}
+
 // ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
@@ -734,11 +770,10 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   fs::path archive_path = hrr_single_process_archive(cap.path);
   REQUIRE(fs::exists(cap.path / "manifest.json"));
   REQUIRE(fs::exists(archive_path / "manifest.json"));
-  REQUIRE(fs::exists(archive_path / "metadata.json"));
 
   const std::string root_manifest = read_text_file(cap.path / "manifest.json");
   const std::string proc_manifest = read_text_file(archive_path / "manifest.json");
-  const std::string metadata = read_text_file(archive_path / "metadata.json");
+  const std::string metadata = json_object_value(proc_manifest, "metadata");
 
   INFO("Root manifest:\n" << root_manifest);
   INFO("Process manifest:\n" << proc_manifest);
@@ -747,6 +782,7 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   REQUIRE(json_integer_value(root_manifest, "version") == 2);
   REQUIRE(json_has_key(root_manifest, "metadata"));
   REQUIRE(json_has_key(proc_manifest, "metadata"));
+  REQUIRE_FALSE(metadata.empty());
   REQUIRE(json_has_key(root_manifest, "has_metadata"));
   REQUIRE(root_manifest.find("\"has_metadata\": true") != std::string::npos);
 
@@ -758,7 +794,10 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK_FALSE(runtime_version.empty());
   CHECK_FALSE(driver_version.empty());
   CHECK(json_has_key(metadata, "comgr"));
-  CHECK(json_has_key(metadata, "available"));
+  const std::string comgr = json_object_value(metadata, "comgr");
+  CHECK_FALSE(comgr.empty());
+  CHECK(json_has_key(comgr, "major"));
+  CHECK(json_has_key(comgr, "minor"));
   CHECK(json_has_key(metadata, "device_count"));
   CHECK(json_integer_value(metadata, "device_count") >= 1);
   CHECK(json_has_key(metadata, "devices"));
