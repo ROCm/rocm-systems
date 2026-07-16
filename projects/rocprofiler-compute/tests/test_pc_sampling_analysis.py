@@ -29,6 +29,7 @@ from utils.file_io import (
 )
 from utils.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
+    _merge_stall_reason_rows,
     load_non_mertrics_table,
     load_pc_sampling_data,
     load_pc_sampling_data_per_kernel,
@@ -857,19 +858,19 @@ def test_load_per_kernel_invalid_sorting_type() -> None:
 
 def test_load_pc_sampling_data_empty_prefix() -> None:
     """Return an empty DataFrame when the file prefix is an empty string."""
-    df = load_pc_sampling_data(schema.Workload(), "", "count", make_tool_data())
+    df = load_pc_sampling_data(schema.Workload(), "", "count", [make_tool_data()])
     assert df.empty
 
 
 def test_load_pc_sampling_data_none_prefix() -> None:
     """Return an empty DataFrame when the file prefix is the literal 'none'."""
-    df = load_pc_sampling_data(schema.Workload(), "none", "count", make_tool_data())
+    df = load_pc_sampling_data(schema.Workload(), "none", "count", [make_tool_data()])
     assert df.empty
 
 
 def test_load_pc_sampling_data_no_tool_data() -> None:
     """Return an empty DataFrame when no parsed tool data is provided."""
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", None)
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", [])
     assert df.empty
 
 
@@ -894,14 +895,19 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
         **{method: samples},
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
-    no_filter = load_pc_sampling_data(schema.Workload(), "ps_file", "offset", tool_data)
+    no_filter = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "offset",
+        [tool_data],
+    )
     single = load_pc_sampling_data(
         schema.Workload(
             filter_kernel_ids=[0], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
         ),
         "ps_file",
         "offset",
-        tool_data,
+        [tool_data],
     )
     assert list(no_filter.columns) == list(single.columns)
     assert "Kernel_Name" in no_filter.columns
@@ -918,7 +924,7 @@ def test_load_pc_sampling_data_multiple_kernels_error() -> None:
     tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+        df = load_pc_sampling_data(workload, "ps_file", "count", [tool_data])
     assert df.empty
 
 
@@ -935,7 +941,7 @@ def test_load_pc_sampling_data_single_kernel_valid() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "ps_file", "count", [tool_data])
     assert not df.empty
 
 
@@ -954,7 +960,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds() -> None:
             })
         },
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "ps_file", "count", [tool_data])
     assert df.empty
 
 
@@ -968,7 +974,7 @@ def test_load_pc_sampling_data_method_not_detected() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "ps_file", "count", [tool_data])
     assert df.empty
 
 
@@ -998,7 +1004,7 @@ def test_load_pc_sampling_data_method_detection(
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "ps_file", "count", [tool_data])
     assert len(df.columns) == expected_column_count
 
 
@@ -1011,10 +1017,84 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", [tool_data])
     assert not df.empty
     assert df.iloc[0]["instruction"] is None
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
+
+
+def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
+    """Rows from separate result records are summed by shared kernel and offset."""
+    first_tool_data = make_tool_data(
+        stochastic=[
+            make_record(
+                5,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+            ),
+            make_record(
+                5,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+            ),
+            make_record(6, 0x20, 1, dispatch_id=1, wave_issued=True),
+        ],
+        instructions=["v_mov", "v_add"],
+        comments=["/src/shared.cpp:10", "/src/distinct.cpp:20"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "sharedKernel"),
+            make_kernel_symbol(101, 6, "distinctKernel"),
+        ],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
+        code_objects=[make_code_object(5), make_code_object(6)],
+        pid=101,
+    )
+    second_tool_data = make_tool_data(
+        stochastic=[
+            make_record(7, 0x10, 0, dispatch_id=0, wave_issued=True),
+        ],
+        instructions=["v_mov"],
+        comments=["/src/shared.cpp:10"],
+        kernel_symbols=[make_kernel_symbol(200, 7, "sharedKernel")],
+        kernel_dispatch=[make_dispatch(0, 200)],
+        code_objects=[make_code_object(7)],
+        pid=202,
+    )
+
+    df = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        [first_tool_data, second_tool_data],
+    )
+
+    assert set(df["Kernel_Name"]) == {"sharedKernel", "distinctKernel"}
+    shared_row = df[df["Kernel_Name"] == "sharedKernel"].iloc[0]
+    assert shared_row["offset"] == "0x10"
+    assert shared_row["count"] == 3
+    assert shared_row["count_issued"] == 1
+    assert shared_row["count_stalled"] == 2
+    assert shared_row["stall_reason"] == [("WAITCNT", 2)]
+
+
+def test_merge_stall_reason_rows_sums_counts_and_skips_empty_rows() -> None:
+    stall_reason_rows = pd.Series([
+        [("WAITCNT", 2), ("ALU_DEPENDENCY", 1)],
+        [],
+        None,
+        [("WAITCNT", 3)],
+    ])
+
+    assert _merge_stall_reason_rows(stall_reason_rows) == [
+        ("WAITCNT", 5),
+        ("ALU_DEPENDENCY", 1),
+    ]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1135,19 +1215,20 @@ def test_load_pc_sampling_results_returns_empty_for_missing_folder(
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_load_pc_sampling_results_missing_returns_none(tmp_path: Path) -> None:
-    """Return None when the results json is absent."""
-    assert load_pc_sampling_results(str(tmp_path)) is None
+def test_load_pc_sampling_results_missing_returns_empty_list(tmp_path: Path) -> None:
+    """Return an empty list when the results json is absent."""
+    assert load_pc_sampling_results(str(tmp_path)) == []
 
 
 def test_load_pc_sampling_results_parses_tool_record(tmp_path: Path) -> None:
-    """Return the rocprofiler-sdk-tool[0] dict when the results json exists."""
+    """Return a list containing the rocprofiler-sdk-tool[0] dict."""
     write_results_json(
         tmp_path / "ps_file_results.json",
         kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
     )
-    tool_data = load_pc_sampling_results(str(tmp_path))
-    assert tool_data is not None
+    tool_data_records = load_pc_sampling_results(str(tmp_path))
+    assert len(tool_data_records) == 1
+    tool_data = tool_data_records[0]
     assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "vecCopy"
 
 
@@ -1282,27 +1363,27 @@ def make_db_analysis(workload_path: str) -> db_analysis:
 
 
 def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
-    """Tool data loads whenever PC sampling was collected, else returns None."""
+    """Tool data loads whenever PC sampling was collected, else returns empty."""
     write_results_json(tmp_path / "ps_file_results.json", **sample_tool_data_kwargs())
     instance = make_db_analysis(str(tmp_path))
 
     instance._profiling_config = {"filter_blocks": ["21", "2"]}  # mixed
     assert instance.pc_sampling_collected() is True
     assert instance.pc_sampling_only() is False
-    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+    assert instance.load_pc_sampling_tool_data(str(tmp_path))
 
     instance._profiling_config = {"filter_blocks": ["21"]}  # pc sampling only
     assert instance.pc_sampling_only() is True
-    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+    assert instance.load_pc_sampling_tool_data(str(tmp_path))
 
     instance._profiling_config = {"filter_blocks": ["2"]}  # counters only
     assert instance.pc_sampling_collected() is False
-    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is None
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
 
 
 def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
     """load_table_data forwards tool data to load_non_mertrics_table."""
-    sentinel = {"sentinel": True}
+    sentinel = [{"sentinel": True}]
     args = argparse.Namespace(debug=False)
     workload = schema.Workload()
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
@@ -1330,7 +1411,7 @@ def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
     tool_data = make_tool_data(**sample_tool_data_kwargs())
     load_non_mertrics_table(
-        workload, str(tmp_path), args, pc_sampling_tool_data=tool_data
+        workload, str(tmp_path), args, pc_sampling_tool_data=[tool_data]
     )
     assert not workload.dfs[2101].empty
 
@@ -1494,7 +1575,7 @@ def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", [tool_data])
     assert len(df) == 2
     assert (df["source_line"] == "N/A").all()
 
@@ -1522,7 +1603,7 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     )
     instance = make_db_analysis(str(tmp_path))
     instance._profiling_config = {"filter_blocks": ["21"]}  # pc_sampling_only -> True
-    result = instance.calc_dispatch_data({str(tmp_path): tool_data})
+    result = instance.calc_dispatch_data({str(tmp_path): [tool_data]})
     df = result[str(tmp_path)]
     assert list(df.columns) == [
         "dispatch_id",
@@ -1533,6 +1614,33 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     ]
     assert df.iloc[0]["kernel_name"] == "vecCopy"
     assert df.iloc[0]["gpu_id"] == 0
+
+
+def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
+    tmp_path: Path,
+) -> None:
+    first_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100, agent_handle=20, start=10, end=20)],
+        agents=[make_agent(handle=20, node_id=2, agent_type=2)],
+        pid=101,
+    )
+    second_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(200, 7, "vecAdd")],
+        kernel_dispatch=[make_dispatch(1, 200, agent_handle=30, start=30, end=40)],
+        agents=[make_agent(handle=30, node_id=3, agent_type=2)],
+        pid=202,
+    )
+    instance = make_db_analysis(str(tmp_path))
+    instance._profiling_config = {"filter_blocks": ["21"]}
+
+    result = instance.calc_dispatch_data({
+        str(tmp_path): [first_tool_data, second_tool_data]
+    })
+
+    df = result[str(tmp_path)]
+    assert set(df["kernel_name"]) == {"vecCopy", "vecAdd"}
+    assert set(df["dispatch_id"]) == {0, 1}
 
 
 # ═══════════════════════════════════════════════════════════════
