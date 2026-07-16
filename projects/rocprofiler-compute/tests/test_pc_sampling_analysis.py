@@ -24,6 +24,7 @@ from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map_from_json,
+    discover_pc_sampling_result_files,
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
 )
@@ -1069,6 +1070,68 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
     )
     nullify_unevaluated_metric_values(workload)
     assert workload.dfs[30].empty
+
+
+# ═══════════════════════════════════════════════════════════════
+# discover_pc_sampling_result_files
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_discover_pc_sampling_result_files_returns_all_numeric_candidates(
+    tmp_path: Path,
+) -> None:
+    first_path = tmp_path / "111_ps_file_results.json"
+    second_path = tmp_path / "222_ps_file_results.json"
+    first_path.touch()
+    second_path.touch()
+
+    selected_files = discover_pc_sampling_result_files(tmp_path)
+
+    assert set(selected_files) == {first_path, second_path}
+
+
+def test_discover_pc_sampling_result_files_prefers_pid_candidates_over_legacy(
+    tmp_path: Path,
+) -> None:
+    pid_path = tmp_path / "42_ps_file_results.json"
+    legacy_path = tmp_path / "ps_file_results.json"
+    pid_path.touch()
+    legacy_path.touch()
+
+    selected_files = discover_pc_sampling_result_files(tmp_path)
+
+    assert selected_files == (pid_path,)
+
+
+def test_discover_pc_sampling_result_files_falls_back_to_legacy(
+    tmp_path: Path,
+) -> None:
+    legacy_path = tmp_path / "ps_file_results.json"
+    legacy_path.touch()
+
+    selected_files = discover_pc_sampling_result_files(tmp_path)
+
+    assert selected_files == (legacy_path,)
+
+
+def test_discover_pc_sampling_result_files_returns_empty_selection(
+    tmp_path: Path,
+) -> None:
+    selected_files = discover_pc_sampling_result_files(tmp_path)
+
+    assert selected_files == ()
+
+
+def test_discover_pc_sampling_result_files_ignores_nested_candidates(
+    tmp_path: Path,
+) -> None:
+    nested_path = tmp_path / "nested"
+    nested_path.mkdir()
+    (nested_path / "42_ps_file_results.json").touch()
+
+    selected_files = discover_pc_sampling_result_files(tmp_path)
+
+    assert selected_files == ()
 
 
 # ═══════════════════════════════════════════════════════════════
