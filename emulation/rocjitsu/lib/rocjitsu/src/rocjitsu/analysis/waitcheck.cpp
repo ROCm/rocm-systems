@@ -25,10 +25,12 @@ RJ_DIAGNOSTIC_POP
 #include <bitset>
 #include <charconv>
 #include <cstring>
+#include <deque>
 #include <iomanip>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -578,7 +580,7 @@ struct Analyzer {
 
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
                    const std::string &section_name, uint64_t file_offset_base, rj_code_arch_t arch,
-                   uint32_t wavefront_size) {
+                   uint32_t wavefront_size, std::span<const uint64_t> entry_offsets = {}) {
     if (blocks.empty())
       return;
     wavefront_size_ = wavefront_size;
@@ -596,7 +598,13 @@ struct Analyzer {
     using CallFrame = std::pair<size_t, uint16_t>;
     using AnalysisNodeKey = std::pair<size_t, std::vector<CallFrame>>;
     constexpr size_t kMaxCallDepth = 32;
-    const size_t max_analysis_nodes = std::max(blocks.size() * 32, blocks.size() + 1024);
+    // Real code objects can have tens of thousands of distinct depth-two
+    // contexts when many wrappers share a small set of helpers. Keep a hard
+    // bound, but do not reject that finite graph merely because the underlying
+    // CFG is small.
+    constexpr size_t kCallContextNodeAllowance = 65536;
+    const size_t max_analysis_nodes =
+        std::max(blocks.size() * 32, blocks.size() + kCallContextNodeAllowance);
 
     std::map<AnalysisNodeKey, size_t> analysis_node_index;
     std::vector<AnalysisNodeKey> analysis_node_keys;
@@ -618,7 +626,27 @@ struct Analyzer {
       return index;
     };
 
-    for (size_t i = 0; i < blocks.size(); ++i) {
+    std::vector<size_t> root_blocks;
+    if (entry_offsets.empty()) {
+      // Symbol-less section analysis has no distinguished entry point.
+      root_blocks.resize(blocks.size());
+      std::iota(root_blocks.begin(), root_blocks.end(), 0);
+    } else {
+      // Reachable kernel CFGs must start with an empty call stack only at the
+      // real entry points. Seeding every helper as another empty-stack root
+      // duplicates its graph and analyzes returns without their callers.
+      for (uint64_t entry_offset : entry_offsets) {
+        const auto it = std::ranges::find_if(
+            blocks, [&](const auto &block) { return block->start_offset() == entry_offset; });
+        if (it == blocks.end()) {
+          report_.supported = false;
+          report_.analysis_error = "waitcheck CFG entry block is missing";
+          return;
+        }
+        root_blocks.push_back(static_cast<size_t>(std::distance(blocks.begin(), it)));
+      }
+    }
+    for (size_t i : root_blocks) {
       if (!get_or_add_node({i, {}})) {
         report_.supported = false;
         report_.analysis_error = "waitcheck call-context graph exceeded node limit";
@@ -703,8 +731,14 @@ struct Analyzer {
     std::vector<PendingState> out(analysis_blocks.size());
     std::vector<uint8_t> out_initialized(analysis_blocks.size());
 
-    bool changed = true;
-    size_t iterations = 0;
+    // Revisit only successors whose merged input may have changed. Large
+    // generated kernels otherwise spend most of their time rescanning stable
+    // blocks on every fixed-point iteration.
+    std::deque<size_t> dataflow_worklist;
+    std::vector<uint8_t> queued(analysis_blocks.size(), 1);
+    for (size_t i = 0; i < analysis_blocks.size(); ++i)
+      dataflow_worklist.push_back(i);
+    size_t node_visits = 0;
     size_t last_changed_node = 0;
     std::string last_changed_components;
     auto differing_components = [](const PendingState &lhs, const PendingState &rhs) {
@@ -734,34 +768,44 @@ struct Analyzer {
         append("expert-scheduling");
       return result;
     };
-    const size_t max_iterations = analysis_blocks.size() * 8 + 32;
-    while (changed && iterations++ < max_iterations) {
-      changed = false;
-      for (size_t i = 0; i < analysis_blocks.size(); ++i) {
-        PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
-        PendingState next_out =
-            analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
-        const bool input_changed = !(merged == in[i]);
-        const bool output_changed = !(next_out == out[i]);
-        if (out_initialized[i] == 0 || input_changed || output_changed) {
-          last_changed_node = i;
-          last_changed_components.clear();
-          if (input_changed)
-            last_changed_components = "in:" + differing_components(merged, in[i]);
-          if (output_changed) {
-            if (!last_changed_components.empty())
-              last_changed_components += ';';
-            last_changed_components += "out:" + differing_components(next_out, out[i]);
-          }
-          in[i] = std::move(merged);
-          out[i] = std::move(next_out);
-          out_initialized[i] = 1;
-          changed = true;
+    const size_t max_node_visits = analysis_blocks.size() * 64 + 1024;
+    while (!dataflow_worklist.empty() && node_visits++ < max_node_visits) {
+      const size_t i = dataflow_worklist.front();
+      dataflow_worklist.pop_front();
+      queued[i] = 0;
+
+      PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
+      PendingState next_out =
+          analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
+      const bool input_changed = !(merged == in[i]);
+      const bool output_changed = out_initialized[i] == 0 || !(next_out == out[i]);
+      if (!input_changed && !output_changed)
+        continue;
+
+      last_changed_node = i;
+      last_changed_components.clear();
+      if (input_changed)
+        last_changed_components = "in:" + differing_components(merged, in[i]);
+      if (output_changed) {
+        if (!last_changed_components.empty())
+          last_changed_components += ';';
+        last_changed_components += "out:" + differing_components(next_out, out[i]);
+      }
+      in[i] = std::move(merged);
+      out[i] = std::move(next_out);
+      out_initialized[i] = 1;
+
+      if (output_changed) {
+        for (size_t successor : cfg_successors[i]) {
+          if (queued[successor] != 0)
+            continue;
+          queued[successor] = 1;
+          dataflow_worklist.push_back(successor);
         }
       }
     }
 
-    if (changed) {
+    if (!dataflow_worklist.empty()) {
       report_.supported = false;
       std::ostringstream os;
       os << "waitcheck CFG dataflow did not converge at .text+0x" << std::hex
@@ -3229,7 +3273,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
           BasicBlock::build_reachable(code_object, *decoder, arch, entry);
       const uint32_t wavefront_size =
           is_kernel ? kernel_it->wavefront_size : default_wavefront_size(arch);
-      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size);
+      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
       if (is_kernel && report.supported && !report.stopped_early) {
         ++report.kernels_analyzed;
         if (options.kernel_analyzed_callback)
@@ -3253,7 +3297,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         const auto start = std::chrono::steady_clock::now();
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry);
-        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size);
+        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
         if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)
