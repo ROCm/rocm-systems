@@ -192,20 +192,22 @@ int main(int argc, char **argv) {
 
             // Sync thread: waits for submitted decodes and syncs them
             std::thread sync_thread([&]() {
-                hipSetDevice(device_id);
+                CHECK_HIP(hipSetDevice(device_id));
                 for (int iter = 0; iter < num_iterations; iter++) {
                     RocJpegImage* img;
                     {
                         std::unique_lock<std::mutex> lock(mtx);
-                        cv_pending.wait(lock, [&]{ return !pending_queue.empty(); });
+                        cv_pending.wait(lock, [&]{ return !pending_queue.empty() || sync_error; });
+                        if (sync_error) return;
                         img = pending_queue.front();
                         pending_queue.pop();
                     }
-                    RocJpegStatus s = rocJpegSyncSurface(rocjpeg_handle, img);
-                    if (s != ROCJPEG_STATUS_SUCCESS) {
-                        std::lock_guard<std::mutex> lock(mtx);
-                        status = s;
-                        sync_error = true;
+                    status = rocJpegSyncSurface(rocjpeg_handle, img);
+                    if (status != ROCJPEG_STATUS_SUCCESS) {
+                        {
+                            std::lock_guard<std::mutex> lock(mtx);
+                            sync_error = true;
+                        }
                         cv_available.notify_one();
                         return;
                     }
@@ -228,7 +230,16 @@ int main(int argc, char **argv) {
                     img = available_queue.front();
                     available_queue.pop();
                 }
-                CHECK_ROCJPEG(rocJpegDecodeAsync(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, img));
+                status = rocJpegDecodeAsync(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, img);
+                if (status != ROCJPEG_STATUS_SUCCESS) {
+                    std::cout << "rocJpegDecodeAsync return: " << rocJpegGetErrorName(status) << std::endl;
+                    {
+                        std::lock_guard<std::mutex> lock(mtx);
+                        sync_error = true;
+                    }
+                    cv_pending.notify_one();
+                    break;
+                }
                 {
                     std::lock_guard<std::mutex> lock(mtx);
                     pending_queue.push(img);

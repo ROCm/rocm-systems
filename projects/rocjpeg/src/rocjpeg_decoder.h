@@ -85,6 +85,21 @@ public:
    RocJpegStatus Decode(RocJpegStreamHandle jpeg_stream, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
    /**
+    * Decodes a batch of JPEG streams.
+    *
+    * This function decodes a batch of JPEG streams specified by `jpeg_streams` into a batch of destination images specified by `destinations`.
+    * The number of JPEG streams in the batch is specified by `batch_size`.
+    * The decoding parameters are specified by `decode_params`.
+    *
+    * @param jpeg_streams The array of JPEG stream handles.
+    * @param batch_size The number of JPEG streams in the batch.
+    * @param decode_params The decoding parameters.
+    * @param destinations The array of destination images.
+    * @return The status of the decoding operation.
+    */
+   RocJpegStatus DecodeBatched(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+
+   /**
     * @brief Submits a JPEG decode operation and stores pending state in this decoder handle.
     * @param jpeg_stream The handle to the JPEG stream.
     * @param decode_params The decoding parameters.
@@ -99,21 +114,6 @@ public:
     * @return The status of the sync operation.
     */
    RocJpegStatus SyncSurface(RocJpegImage *destination);
-
-   /**
-    * Decodes a batch of JPEG streams.
-    *
-    * This function decodes a batch of JPEG streams specified by `jpeg_streams` into a batch of destination images specified by `destinations`.
-    * The number of JPEG streams in the batch is specified by `batch_size`.
-    * The decoding parameters are specified by `decode_params`.
-    *
-    * @param jpeg_streams The array of JPEG stream handles.
-    * @param batch_size The number of JPEG streams in the batch.
-    * @param decode_params The decoding parameters.
-    * @param destinations The array of destination images.
-    * @return The status of the decoding operation.
-    */
-   RocJpegStatus DecodeBatched(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 
 private:
    struct AsyncDecodeState {
@@ -200,6 +200,7 @@ private:
    hipDeviceProp_t hip_dev_prop_; // HIP device properties
    hipStream_t hip_stream_; // HIP stream
    std::mutex mutex_; // Mutex for thread safety
+   std::mutex stream_mutex_; // Mutex for HIP stream
    RocJpegBackend backend_; // RocJpeg backend
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination

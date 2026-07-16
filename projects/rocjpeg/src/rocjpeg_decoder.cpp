@@ -26,6 +26,7 @@ RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
     num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend} {}
 
 RocJpegDecoder::~RocJpegDecoder() {
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto &[dest, state] : pending_decodes_) {
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SyncSurface(state.surface_id);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
@@ -259,6 +260,8 @@ RocJpegStatus RocJpegDecoder::SyncDecodeSurface(VASurfaceID current_surface_id, 
         is_roi_valid = false;
     }
 
+    // Serialize HIP stream for concurrent SyncSurface calls
+    std::lock_guard<std::mutex> stream_lock(stream_mutex_);
     switch (decode_params->output_format) {
         case ROCJPEG_OUTPUT_NATIVE:
             // Copy the native decoded output buffers from interop memory directly to the destination buffers
@@ -300,6 +303,7 @@ RocJpegStatus RocJpegDecoder::SyncDecodeSurface(VASurfaceID current_surface_id, 
 
     CHECK_HIP(hipStreamSynchronize(hip_stream_));
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id));
+    FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
 

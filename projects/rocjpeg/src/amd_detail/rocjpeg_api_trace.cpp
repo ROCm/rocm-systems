@@ -41,10 +41,10 @@ RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, Ro
 RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
 RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
 RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
-RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
-RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
+RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+RocJpegStatus ROCJPEGAPI rocJpegSyncSurface(RocJpegHandle handle, RocJpegImage *destination);
 }
 
 namespace rocjpeg {
@@ -144,6 +144,7 @@ ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_get_image_info, 5)
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode, 6)
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_batched, 7)
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_get_error_name, 8)
+// ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_async, 9)
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_sync_surface, 10)
 
