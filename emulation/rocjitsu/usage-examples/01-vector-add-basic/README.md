@@ -21,7 +21,7 @@ Learn to debug a simple HIP vector addition kernel using rocjitsu:
 ### 1. Kernel Launch Verification
 - Are grid/block dimensions correct?
 - Is the kernel dispatched successfully?
-- Enable `RJ_LOG=1` to see dispatch events
+- Enable `RJ_LOG=1` to see kernel dispatch metadata on stderr (`grid`, `wg`, `wgs`)
 
 ### 2. Memory Transfer Debugging
 - Host-to-device copy before kernel
@@ -109,45 +109,43 @@ Copying results back to host...
   
 Verification: PASSED
   All 1024 elements correct!
-  Sample: C[0] = 0.3 (A[0]=0.1 + B[0]=0.2)
-  Sample: C[512] = 153.9 (A[512]=51.3 + B[512]=102.6)
+  Sample: C[0] = 0 (A[0]=0 + B[0]=0)
+  Sample: C[512] = 153.6 (A[512]=51.2 + B[512]=102.4)
   
 Cleanup complete.
 ```
 
 ### With Verbose Logging (RJ_LOG=1)
+
+`RJ_LOG=1` enables the kernel logging plugin only. It does **not** trace HIP API
+calls (`hipMalloc`, `hipMemcpy`, etc.) or print kernel names.
+
 ```
-[rocjitsu] Initializing KMD interposer
-[rocjitsu] Config: amdgpu_cdna4_kmd.json
-[rocjitsu] Creating GPU agent: gfx950
+[rocjitsu] Logging enabled (RJ_LOG)
 Vector addition: C = A + B
   Vector size: 1024 elements (4096 bytes)
-  
-[rocjitsu] hipMalloc: 4096 bytes at 0x7f8a40000000
-[rocjitsu] hipMalloc: 4096 bytes at 0x7f8a40001000
-[rocjitsu] hipMalloc: 4096 bytes at 0x7f8a40002000
+
 Allocating device memory...
-[rocjitsu] hipMemcpy: H2D, 4096 bytes
-[rocjitsu] hipMemcpy: H2D, 4096 bytes
 Copying input data to device...
-[rocjitsu] Kernel dispatch: vector_add
-[rocjitsu]   Grid: (16, 1, 1), Block: (64, 1, 1)
-[rocjitsu]   Executing 1024 workitems
 Launching kernel: grid(16, 1, 1), block(64, 1, 1)
-[rocjitsu] Kernel completed: 1024 workitems executed
-[rocjitsu] hipMemcpy: D2H, 4096 bytes
 Copying results back to host...
-  
+
+[rocjitsu] Kernel #2 dispatch
+  entry_pc=0x...  grid=[1024,1,1]  wg=[64,1,1]
+  wgs=16  wfs/wg=1  sgprs=...  vgprs=...
+
 Verification: PASSED
   All 1024 elements correct!
-  Sample: C[0] = 0.3 (A[0]=0.1 + B[0]=0.2)
-  Sample: C[512] = 153.9 (A[512]=51.3 + B[512]=102.6)
-  
-[rocjitsu] hipFree: 0x7f8a40000000
-[rocjitsu] hipFree: 0x7f8a40001000
-[rocjitsu] hipFree: 0x7f8a40002000
+  Sample: C[0] = 0 (A[0]=0 + B[0]=0)
+  Sample: C[512] = 153.6 (A[512]=51.2 + B[512]=102.4)
+
 Cleanup complete.
 ```
+
+**Reading dispatch lines:** `grid` is the global work-item count (here 1024 total
+threads). `wg` is the block (workgroup) size. `wgs` is the number of blocks.
+Kernel #1 and #3 (if present) are usually HIP runtime setup kernels, not your
+`vector_add_kernel`.
 
 ## Common Issues and Debugging
 
@@ -156,10 +154,11 @@ Cleanup complete.
 **Symptom**: Verification fails, some elements differ
 
 **Debug Steps**:
-1. Enable verbose logging: `RJ_LOG=1 make run`
-2. Check kernel launch parameters
-3. Verify array indexing: `i = blockIdx.x * blockDim.x + threadIdx.x`
-4. Check boundary condition: `if (i < N)`
+1. Enable logging: `RJ_LOG=1 make run`
+2. Check app stdout for `Launching kernel: grid(...), block(...)`
+3. On stderr, find your kernel dispatch (`grid=[...] wg=[...] wgs=...`)
+4. Verify array indexing: `i = blockIdx.x * blockDim.x + threadIdx.x`
+5. Check boundary condition: `if (i < N)`
 
 **Example Fix**:
 ```cpp
@@ -207,7 +206,7 @@ __global__ void vector_add(float *A, float *B, float *C, int N) {
 ## Key Takeaways
 
 - rocjitsu simulates GPU execution without physical hardware
-- `RJ_LOG=1` enables detailed execution tracing
+- `RJ_LOG=1` prints kernel dispatch metadata on stderr (`grid`, `wg`, `wgs`)
 - Always check bounds in GPU kernels
 - Verify results against CPU reference implementation
 - Use daemon mode for complex applications (PyTorch, etc.)
