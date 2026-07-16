@@ -70,7 +70,6 @@ bool amd::ClGlEvent::waitForFence() {
   }
 #else  // Lnx
   Display* tempDpy_ = context().glenv()->glXGetCurrentDisplay_();
-  GLXDrawable tempDrawable_ = context().glenv()->glXGetCurrentDrawable_();
   GLXContext tempCtx_ = context().glenv()->glXGetCurrentContext_();
   // Set internal Display and GLXContext
   if (tempDpy_ && tempCtx_) {

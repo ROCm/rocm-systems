@@ -1151,8 +1151,8 @@ bool NumaNode::GetAffinity() {
   auto iter = affinity->begin();
   // To parse from the end (little-endian layout)
   for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
-    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
-    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+    uint32_t start = (i >= static_cast<int>(kHexsPerUInt64)) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= static_cast<int>(kHexsPerUInt64)) ? kHexsPerUInt64 : i;
 
     const std::string chunk = line.substr(start, len);
     const uint64_t value = std::stoul(chunk, nullptr, 16);
