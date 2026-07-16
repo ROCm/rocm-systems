@@ -206,28 +206,6 @@
   .endif
  .endm
 
- // ============================================================================
- // GFX9.4+ PC Sampling Refactored Macros
- // ============================================================================
- // These macros unify duplicated code between hosttrap and stochastic paths.
-
- // CALC_XCC_OFFSET_GFX94 - Calculate per-XCC buffer address for multi-XCC systems
- // Input:
- //   ttmp[2:3] = buffer base address
- //   ttmp4     = per_xcc_size (stride per XCC)
- //   ttmp5     = XCC_ID
- // Output:
- //   ttmp[14:15] = buffer_base + (XCC_ID * per_xcc_size)
- // Clobbers: ttmp[14:15] (output), uses ttmp4, ttmp5
- .macro CALC_XCC_OFFSET_GFX94
-  .if (.amdgcn.gfx_generation_minor >= 4)
-    s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
-    s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
-    s_add_u32                             ttmp14, ttmp2, ttmp14           // ttmp14:15 = base + offset
-    s_addc_u32                            ttmp15, ttmp3, ttmp15
-  .endif
- .endm
-
  // FILL_SAMPLE_COMMON_GFX94 - Store common sample fields shared by hosttrap and stochastic
  // This stores: timestamp, EXEC mask, workgroup IDs, wave_in_wg with chiplet, HW_ID
  // Input:
@@ -364,33 +342,14 @@ trap_entry:
 
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0   // ttmp[2:3] = host_trap_buffers base
 .if .amdgcn.gfx_generation_minor >= 4
-  // GFX9.4+ (multi-XCC): PC sampling bits cleared at trap_entry (bits 21-22)
-  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
-  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  // GFX9.4+ (multi-XCC): mark hosttrap and branch to profile handler
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP  // set bit 22 in TTMP13
-  s_waitcnt                             lgkmcnt(0)
-
-  // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, exit cleanly - hosttrap and stochastic are mutually exclusive.
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  // Calculate per-XCC buffer address: ttmp[14:15] = ttmp[2:3] + (ttmp4 * ttmp5)
-  CALC_XCC_OFFSET_GFX94
   s_branch                              .profile_trap_handlers_gfx9
 .else
   // GFX9.0-9.3 (single-XCC): Simple pointer copy, no per-XCC offset needed
   s_bitset1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP  // Set bit 22 in TTMP11
   s_waitcnt                             lgkmcnt(0)
-
-  // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, exit cleanly - nothing to do (no stochastic on GFX9.0-9.3).
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  s_mov_b64                             ttmp[14:15], ttmp[2:3]          // ttmp14:15 = host_trap_buffers
   s_branch                              .profile_trap_handlers_gfx9
 .endif
 .else
@@ -424,23 +383,11 @@ trap_entry:
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
   s_cbranch_scc0                        .no_skip_debugtrap
 
-  // Handle stochastic trap (PC sampling bits cleared at trap_entry)
-  s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
+  // Handle stochastic trap: load buffer base, mark in ttmp13, branch to profile handler
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8     // ttmp[2:3] = stochastic_trap_buffers base
-  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
-  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 21 in TTMP13
-  s_waitcnt                             lgkmcnt(0)
-
-  // Check if stochastic_trap_buffers is NULL (not configured for stochastic).
-  // If NULL, exit cleanly - nothing to do for this trap.
-  s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .exit_trap
-
-  // Calculate per-XCC buffer address: ttmp[14:15] = ttmp[2:3] + (ttmp4 * ttmp5)
-  CALC_XCC_OFFSET_GFX94
-  s_branch                              .profile_trap_handlers_gfx9      // Off to the profile handlers
+  s_branch                              .profile_trap_handlers_gfx9
 .else
   s_branch                              .no_skip_debugtrap
 .endif // PC_SAMPLING_GFX9
@@ -485,8 +432,26 @@ trap_entry:
   //  }
   //}
 
-  // ttmp[14:15] is tma->host_trap_buffers; Available: ttmp[2:3], ttmp[4:5], ttmp7, ttmp13
+  // ttmp[14:15] is tma->host_trap_buffers; ttmp[2:3] is buffer base (for NULL check); Available: ttmp[4:5], ttmp7, ttmp13
 .profile_trap_handlers_gfx9:
+  // Exit immediately if the buffer pointer is NULL (sampling not configured for this trap type).
+  s_cmp_eq_u64                          ttmp[2:3], 0
+  s_cbranch_scc1                        .exit_trap
+
+.if .amdgcn.gfx_generation_minor >= 4
+  // GFX9.4+ (multi-XCC): ttmp[14:15] = ttmp[2:3] + (XCC_ID * per_xcc_size)
+  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
+  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  s_waitcnt                             lgkmcnt(0)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // hi32(offset)
+  s_add_u32                             ttmp14, ttmp2, ttmp14
+  s_addc_u32                            ttmp15, ttmp3, ttmp15
+.else
+  // GFX9.0-9.3 (single-XCC): buffer pointer needs no per-XCC adjustment
+  s_mov_b64                             ttmp[14:15], ttmp[2:3]
+.endif
+
   s_mov_b64                             ttmp[2:3], 1                    // atomic increment buf_write_val
   s_atomic_add_x2                       ttmp[2:3], ttmp[14:15], glc     // ttmp[2:3] = packed local_entry
   S_LOAD_DWORD_PCS_TTMP_REG1            ttmp[14:15], 0x8                // TTMP_REG1 = tma->buf_size
