@@ -37,6 +37,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
   - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
 
+- **Fixed ctypes `DeprecationWarning` from `amdsmi_wrapper.py` on Python 3.14**.  
+  - Python 3.14 deprecates the implicit ctypes structure layout when `_pack_` is set (slated to become an error in 3.19). Each packed structure/union in the generated wrapper now sets `_layout_ = 'ms'`, preserving the existing MSVC-compatible layout (no ABI change) while silencing the warning.
+
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
@@ -138,9 +141,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the unused `amdsmi_nic_link_type_t` enum from the public header**. No API or struct referenced it; NIC link types are reported through `amdsmi_link_type_t`, which gains `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` in this release.
 
 ### Resolved Issues
-
-- **Fixed ctypes `DeprecationWarning` from `amdsmi_wrapper.py` on Python 3.14**.  
-  - Python 3.14 deprecates the implicit ctypes structure layout when `_pack_` is set (slated to become an error in 3.19). Each packed structure/union in the generated wrapper now sets `_layout_ = 'ms'`, preserving the existing MSVC-compatible layout (no ABI change) while silencing the warning.
 
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
