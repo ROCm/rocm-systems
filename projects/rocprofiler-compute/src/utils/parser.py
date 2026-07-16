@@ -485,7 +485,7 @@ def load_pc_sampling_data(
     workload: schema.Workload,
     file_prefix: str,
     sorting_type: str,
-    tool_data: Optional[dict[str, Any]],
+    tool_data_records: list[dict[str, Any]],
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """Return the detailed per-instruction table for a single kernel or all.
@@ -493,12 +493,12 @@ def load_pc_sampling_data(
     Thin dispatcher over :func:`load_pc_sampling_data_per_kernel`: detects the
     method, then builds the table for all kernels (no ``-k``) or a single
     kernel (one ``-k``). The output schema is identical either way. Callers
-    pass the already-parsed *tool_data*.
+    pass the already-parsed *tool_data_records*.
     """
-    if not file_prefix or file_prefix.lower() == "none" or tool_data is None:
+    if not file_prefix or file_prefix.lower() == "none" or not tool_data_records:
         return pd.DataFrame()
 
-    pc_sampling_method = detect_pc_sampling_method(tool_data)
+    pc_sampling_method = detect_pc_sampling_method(tool_data_records[0])
     if pc_sampling_method is None:
         console_warning(
             f"PC sampling: can not detect pc sampling method for {file_prefix}"
@@ -507,9 +507,9 @@ def load_pc_sampling_data(
 
     # No kernel filter: return every kernel's rows.
     if not workload.filter_kernel_ids:
-        return load_pc_sampling_data_per_kernel(
+        return _load_pc_sampling_data_from_records(
             pc_sampling_method,
-            tool_data,
+            tool_data_records,
             sorting_type,
             num_rows=num_rows,
         )
@@ -533,12 +533,96 @@ def load_pc_sampling_data(
         return pd.DataFrame()
 
     kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-    return load_pc_sampling_data_per_kernel(
+    return _load_pc_sampling_data_from_records(
         pc_sampling_method,
-        tool_data,
+        tool_data_records,
         sorting_type,
         kernel_name,
         num_rows=num_rows,
+    )
+
+
+def _load_pc_sampling_data_from_records(
+    method: str,
+    tool_data_records: list[dict[str, Any]],
+    sorting_type: str,
+    kernel_name: Optional[str] = None,
+    num_rows: Optional[int] = None,
+) -> pd.DataFrame:
+    process_frames = [
+        load_pc_sampling_data_per_kernel(
+            method,
+            tool_data,
+            sorting_type,
+            kernel_name,
+        )
+        for tool_data in tool_data_records
+    ]
+    process_frames = [frame for frame in process_frames if not frame.empty]
+    if not process_frames:
+        return pd.DataFrame()
+
+    df = pd.concat(process_frames, ignore_index=True)
+    df = _aggregate_pc_sampling_display_rows(df, method)
+    df = _sort_pc_sampling_display_rows(df, sorting_type)
+
+    if num_rows and num_rows > 0:
+        df = df.head(num_rows)
+
+    return df
+
+
+def _aggregate_pc_sampling_display_rows(
+    df: pd.DataFrame,
+    method: str,
+) -> pd.DataFrame:
+    aggregations: dict[str, Any] = {
+        "source_line": ("source_line", "first"),
+        "instruction": ("instruction", "first"),
+        "code_object_id": ("code_object_id", "first"),
+        "count": ("count", "sum"),
+    }
+    if method == "stochastic":
+        aggregations.update({
+            "count_issued": ("count_issued", "sum"),
+            "count_stalled": ("count_stalled", "sum"),
+            "stall_reason": ("stall_reason", _merge_stall_reason_rows),
+        })
+
+    return df.groupby(["Kernel_Name", "offset"], as_index=False).agg(**aggregations)
+
+
+def _sort_pc_sampling_display_rows(
+    df: pd.DataFrame,
+    sorting_type: str,
+) -> pd.DataFrame:
+    if sorting_type == "count":
+        return df.sort_values(by=["count"], ascending=False)
+    if sorting_type != "offset":
+        console_error(
+            'Error: pc sampling sorting_type must be either "offset" or "count".'
+        )
+        return pd.DataFrame()
+
+    df = df.assign(offset_value=df["offset"].apply(lambda offset: int(offset, 16)))
+    return df.sort_values(by=["Kernel_Name", "offset_value"]).drop(
+        columns=["offset_value"]
+    )
+
+
+def _merge_stall_reason_rows(
+    stall_reason_rows: pd.Series,
+) -> list[tuple[str, int]]:
+    merged_reasons: dict[str, int] = {}
+    for stall_reasons in stall_reason_rows:
+        if not stall_reasons:
+            continue
+        for reason, count in stall_reasons:
+            merged_reasons[reason] = merged_reasons.get(reason, 0) + count
+    return sorted(
+        merged_reasons.items(),
+        key=lambda item: item[1],
+        reverse=True,
     )
 
 
@@ -586,7 +670,7 @@ def load_non_mertrics_table(
     workload: schema.Workload,
     dir_path: str,
     args: argparse.Namespace,
-    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
+    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -629,7 +713,7 @@ def load_non_mertrics_table(
                 workload,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
-                pc_sampling_tool_data,
+                pc_sampling_tool_data or [],
                 num_rows=args.pc_sampling_rows,
             )
 
@@ -649,7 +733,7 @@ def load_table_data(
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
-    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
+    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """
     - Load data for all "raw_csv_table"
