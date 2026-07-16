@@ -35,8 +35,11 @@
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -81,6 +84,44 @@ static fs::path hrr_single_process_archive(const fs::path& root) {
   INFO("Process archive count: " << archives.size());
   REQUIRE(archives.size() == 1);
   return archives.front();
+}
+
+static std::string read_text_file(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+static bool json_has_key(const std::string& json, const std::string& key) {
+  return json.find("\"" + key + "\"") != std::string::npos;
+}
+
+static std::string json_string_value(const std::string& json, const std::string& key) {
+  const std::string needle = "\"" + key + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return {};
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return {};
+  pos = json.find('"', pos + 1);
+  if (pos == std::string::npos) return {};
+  size_t end = json.find('"', pos + 1);
+  if (end == std::string::npos) return {};
+  return json.substr(pos + 1, end - pos - 1);
+}
+
+static long long json_integer_value(const std::string& json, const std::string& key,
+                                    long long missing = -1) {
+  const std::string needle = "\"" + key + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return missing;
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return missing;
+  ++pos;
+  while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
+  char* end = nullptr;
+  long long value = std::strtoll(json.c_str() + pos, &end, 10);
+  return (end == json.c_str() + pos) ? missing : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +717,60 @@ HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
 HIP_TEST_CASE(Unit_HRR_DeviceInfoRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_deviceinfo"};
   hrr_run_roundtrip("Unit_HRR_DeviceInfo_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_manifest"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    INFO("Metadata capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(cap.path / "manifest.json"));
+  REQUIRE(fs::exists(archive_path / "manifest.json"));
+  REQUIRE(fs::exists(archive_path / "metadata.json"));
+
+  const std::string root_manifest = read_text_file(cap.path / "manifest.json");
+  const std::string proc_manifest = read_text_file(archive_path / "manifest.json");
+  const std::string metadata = read_text_file(archive_path / "metadata.json");
+
+  INFO("Root manifest:\n" << root_manifest);
+  INFO("Process manifest:\n" << proc_manifest);
+  INFO("Metadata:\n" << metadata);
+
+  REQUIRE(json_integer_value(root_manifest, "version") == 2);
+  REQUIRE(json_has_key(root_manifest, "metadata"));
+  REQUIRE(json_has_key(proc_manifest, "metadata"));
+  REQUIRE(json_has_key(root_manifest, "has_metadata"));
+  REQUIRE(root_manifest.find("\"has_metadata\": true") != std::string::npos);
+
+  CHECK(json_integer_value(metadata, "schema_version") == 1);
+  const std::string runtime_version = json_string_value(metadata, "hip_runtime_version");
+  const std::string driver_version = json_string_value(metadata, "hip_driver_version");
+  INFO("hip_runtime_version=" << runtime_version);
+  INFO("hip_driver_version=" << driver_version);
+  CHECK_FALSE(runtime_version.empty());
+  CHECK_FALSE(driver_version.empty());
+  CHECK(json_has_key(metadata, "comgr"));
+  CHECK(json_has_key(metadata, "available"));
+  CHECK(json_has_key(metadata, "device_count"));
+  CHECK(json_integer_value(metadata, "device_count") >= 1);
+  CHECK(json_has_key(metadata, "devices"));
+  CHECK(json_has_key(metadata, "ordinal"));
+  CHECK(json_has_key(metadata, "properties"));
+  CHECK(json_has_key(metadata, "name"));
+  CHECK(json_has_key(metadata, "gcn_arch_name"));
+  CHECK(json_has_key(metadata, "total_global_mem"));
+  CHECK(json_has_key(metadata, "multi_processor_count"));
+  CHECK(json_has_key(metadata, "compute_capability"));
+  CHECK(json_has_key(metadata, "pci"));
+  CHECK(json_has_key(metadata, "uuid"));
 }
 
 HIP_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {

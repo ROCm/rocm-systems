@@ -157,6 +157,7 @@ static constexpr size_t   kBufCap           = 256u * 1024u;
 static constexpr uint64_t kCheckpointEvents = 4096;
 // Path buffers are filled at open() so the signal path never touches std::string.
 static constexpr size_t   kPathMax          = 4096;
+static constexpr uint32_t kRootManifestVersion = 2;
 
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
@@ -168,6 +169,7 @@ static std::string  g_output_dir;
 static char         g_manifest_path[kPathMax] = {0};
 static uint64_t     g_pid = 0;
 static uint64_t     g_parent_pid = 0;
+static std::string  g_metadata_json;
 
 // App-managed write buffer for events.bin (protected by g_file_mu).
 static uint8_t  g_buf[kBufCap];
@@ -268,6 +270,19 @@ static void ensure_dir(const std::string& path) {
 }
 
 static bool atomic_write_file(const std::string& path, const void* data, size_t len);
+
+static bool is_json_object_fragment(const std::string& json) {
+  const auto begin = json.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos || json[begin] != '{') return false;
+  const auto end = json.find_last_not_of(" \t\r\n");
+  return end != std::string::npos && json[end] == '}';
+}
+
+static void write_metadata_file_if_available() {
+  if (g_output_dir.empty() || !is_json_object_fragment(g_metadata_json)) return;
+  const std::string path = g_output_dir + "/metadata.json";
+  (void)atomic_write_file(path, g_metadata_json.data(), g_metadata_json.size());
+}
 
 // ---------------------------------------------------------------------------
 // manifest writers
@@ -481,14 +496,20 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           "  \"parent_pid\": %llu,\n"
           "  \"complete\": %s,\n"
           "  \"event_count\": %llu,\n"
-          "  \"blob_count\": %llu\n"
-          "}\n",
+          "  \"blob_count\": %llu",
           static_cast<unsigned long long>(g_pid),
           static_cast<unsigned long long>(g_parent_pid),
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
+  if (is_json_object_fragment(g_metadata_json)) {
+    fprintf(mf, ",\n  \"metadata\": %s\n", g_metadata_json.c_str());
+  } else {
+    fprintf(mf, "\n");
+  }
+  fprintf(mf, "}\n");
   fclose(mf);
+  write_metadata_file_if_available();
 }
 
 struct ProcessManifestEntry {
@@ -497,6 +518,7 @@ struct ProcessManifestEntry {
   uint64_t event_count = 0;
   uint64_t blob_count = 0;
   bool complete = false;
+  std::string metadata_json;
 };
 
 static bool read_process_manifest(const std::string& path, ProcessManifestEntry* out) {
@@ -537,6 +559,28 @@ static bool read_process_manifest(const std::string& path, ProcessManifestEntry*
   return true;
 }
 
+static std::string read_text_file(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f) return {};
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return {};
+  }
+  const long len = ftell(f);
+  if (len < 0) {
+    fclose(f);
+    return {};
+  }
+  rewind(f);
+  std::string out(static_cast<size_t>(len), '\0');
+  if (!out.empty() && fread(out.data(), 1, out.size(), f) != out.size()) {
+    fclose(f);
+    return {};
+  }
+  fclose(f);
+  return out;
+}
+
 static uint64_t derive_owner_pid(const std::vector<ProcessManifestEntry>& entries) {
   if (entries.empty()) return 0;
   for (const auto& candidate : entries) {
@@ -557,19 +601,40 @@ static void update_root_manifest() {
     const std::string name = ent.path().filename().string();
     if (name.rfind("pid-", 0) != 0) continue;
     ProcessManifestEntry entry{};
-    if (read_process_manifest((ent.path() / "manifest.json").string(), &entry))
+    if (read_process_manifest((ent.path() / "manifest.json").string(), &entry)) {
+      std::string metadata = read_text_file((ent.path() / "metadata.json").string());
+      if (is_json_object_fragment(metadata))
+        entry.metadata_json = std::move(metadata);
       entries.push_back(entry);
+    }
   }
 
   std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.pid < b.pid; });
   const uint64_t owner_pid = derive_owner_pid(entries);
+  std::string root_metadata;
+  for (const auto& e : entries) {
+    if (e.pid == owner_pid && is_json_object_fragment(e.metadata_json)) {
+      root_metadata = e.metadata_json;
+      break;
+    }
+  }
+  if (root_metadata.empty()) {
+    for (const auto& e : entries) {
+      if (is_json_object_fragment(e.metadata_json)) {
+        root_metadata = e.metadata_json;
+        break;
+      }
+    }
+  }
 
   std::string json;
   json += "{\n";
-  json += "  \"version\": 1,\n";
+  json += "  \"version\": " + std::to_string(kRootManifestVersion) + ",\n";
   json += "  \"capture_mode\": \"in-tree\",\n";
   json += "  \"owner_pid\": " + std::to_string(owner_pid) + ",\n";
+  if (is_json_object_fragment(root_metadata))
+    json += "  \"metadata\": " + root_metadata + ",\n";
   json += "  \"processes\": [\n";
   for (size_t i = 0; i < entries.size(); ++i) {
     const auto& e = entries[i];
@@ -577,7 +642,9 @@ static void update_root_manifest() {
             ", \"parent_pid\": " + std::to_string(e.parent_pid) +
             ", \"complete\": " + (e.complete ? "true" : "false") +
             ", \"event_count\": " + std::to_string(e.event_count) +
-            ", \"blob_count\": " + std::to_string(e.blob_count) + " }";
+            ", \"blob_count\": " + std::to_string(e.blob_count) +
+            ", \"has_metadata\": " + (is_json_object_fragment(e.metadata_json) ? "true" : "false") +
+            " }";
     json += (i + 1 == entries.size()) ? "\n" : ",\n";
   }
   json += "  ]\n";
@@ -993,6 +1060,13 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 bool     is_open()      { std::lock_guard<std::mutex> lk(g_file_mu); return g_events_fd >= 0; }
 uint64_t event_count()  { return g_event_count.load(); }
 uint64_t blob_count()   { return g_blob_count.load(); }
+
+void set_capture_metadata_json(std::string metadata_json) {
+  if (!is_json_object_fragment(metadata_json)) return;
+  std::lock_guard<std::mutex> lk(g_file_mu);
+  g_metadata_json = std::move(metadata_json);
+  write_metadata_file_if_available();
+}
 
 }  // namespace writer
 }  // namespace hrr_cap
