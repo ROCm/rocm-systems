@@ -314,6 +314,21 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
