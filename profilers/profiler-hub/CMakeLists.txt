@@ -262,19 +262,51 @@ endforeach()
 # target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
 # object library), so consumers of the *installed* static package would
 # otherwise get no transitive link requirements at all. Explicitly restore
-# the ones that are genuinely find_package()-imported and thus resolvable
-# by real consumers; queries, sqlite3, and profiler-hub-objects itself are
-# always in-tree-only and never belong here. profiler-hub (SHARED) needs no
-# such list: its dependencies are already fully baked into the .so.
+# the ones that are genuinely resolvable by real consumers; queries,
+# sqlite3, and profiler-hub-objects itself are always in-tree-only and
+# never belong here. profiler-hub (SHARED) needs no such list: its
+# dependencies are already fully baked into the .so.
+#
+# Deliberately not keyed off ${_dep}_FOUND: that variable just reflects the
+# most recent find_package(${_dep}) call in this directory scope, and can
+# flip to TRUE later on (e.g. a nested FetchContent'd dependency probing for
+# its own external ${_dep}) even though the actual ${_dep}::${_dep} target
+# still refers to the FIRST definition - which, when the initial
+# find_package() failed and we fell back to FetchContent, is our own
+# in-tree, non-IMPORTED build target (aliased, not exported). Superbuild
+# environments that redirect find_package() to a super-project package
+# (e.g. TheRock) can legitimately fail a version-pinned find_package() while
+# a later, unversioned one for the same package succeeds elsewhere in this
+# scope, so check the target's actual IMPORTED-ness instead of the latching
+# _FOUND variable.
 set(profiler_hub_static_iface_libs "")
 foreach(_dep fmt spdlog nlohmann_json)
-    if(${_dep}_FOUND)
-        list(
-            APPEND profiler_hub_static_iface_libs
-            "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
+    set(_profiler_hub_dep_target "${_dep}::${_dep}")
+    if(TARGET ${_profiler_hub_dep_target})
+        get_target_property(
+            _profiler_hub_dep_aliased
+            ${_profiler_hub_dep_target}
+            ALIASED_TARGET
         )
+        if(_profiler_hub_dep_aliased)
+            set(_profiler_hub_dep_target "${_profiler_hub_dep_aliased}")
+        endif()
+        get_target_property(
+            _profiler_hub_dep_is_imported
+            ${_profiler_hub_dep_target}
+            IMPORTED
+        )
+        if(_profiler_hub_dep_is_imported)
+            list(
+                APPEND profiler_hub_static_iface_libs
+                "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
+            )
+        endif()
     endif()
 endforeach()
+unset(_profiler_hub_dep_target)
+unset(_profiler_hub_dep_aliased)
+unset(_profiler_hub_dep_is_imported)
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     list(
         APPEND profiler_hub_static_iface_libs
@@ -328,13 +360,34 @@ install(
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 
-if(fmt_FOUND)
+# See the comment above profiler_hub_static_iface_libs: keyed off fmt::fmt's
+# actual IMPORTED-ness rather than fmt_FOUND, for the same reason.
+set(_profiler_hub_fmt_target "fmt::fmt")
+if(TARGET ${_profiler_hub_fmt_target})
+    get_target_property(
+        _profiler_hub_fmt_aliased
+        ${_profiler_hub_fmt_target}
+        ALIASED_TARGET
+    )
+    if(_profiler_hub_fmt_aliased)
+        set(_profiler_hub_fmt_target "${_profiler_hub_fmt_aliased}")
+    endif()
+    get_target_property(
+        _profiler_hub_fmt_is_imported
+        ${_profiler_hub_fmt_target}
+        IMPORTED
+    )
+endif()
+if(_profiler_hub_fmt_is_imported)
     set(PROFILER_HUB_FMT_FIND_DEPENDENCY
         "include(CMakeFindDependencyMacro)\nfind_dependency(fmt)"
     )
 else()
     set(PROFILER_HUB_FMT_FIND_DEPENDENCY "")
 endif()
+unset(_profiler_hub_fmt_target)
+unset(_profiler_hub_fmt_aliased)
+unset(_profiler_hub_fmt_is_imported)
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/profiler-hub-config.cmake.in
