@@ -14,11 +14,11 @@ ROCJITSU_BIN ?= $(ROCJITSU_ROOT)/build/tools/rocjitsu/rocjitsu
 TARGET_BUGGY = $(BUILD_DIR)/bounds_error
 TARGET_FIXED = $(BUILD_DIR)/bounds_fixed
 
-.PHONY: all build run-buggy run-fixed compare clean help
+.PHONY: all compile run-buggy run-fixed compare clean help
 
-all: build
+all: compile
 
-build: $(TARGET_BUGGY) $(TARGET_FIXED)
+compile: $(TARGET_BUGGY) $(TARGET_FIXED)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
