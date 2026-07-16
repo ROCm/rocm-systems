@@ -689,3 +689,32 @@ class TestPlotMemChartGfx9:
         assert re.search(r"<(?!-+>)-{3,}", output)
         assert re.search(r"(?<![<-])-{3,}>", output)
         assert re.search(r"<-{3,}>", output)
+
+    def test_contains_panel_heading_with_single_normalization(self):
+        """CDNA output prints the panel heading outside the chart."""
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                "per_kernel",
+                dict(GFX9_SAMPLE_METRICS),
+            )
+        )
+        output_lines = output.splitlines()
+
+        assert output_lines[0] == "3. Memory Chart (Normalization: per_kernel)"
+        assert "3. Memory Chart" not in "\n".join(output_lines[1:])
+        assert "Instr Buff" in output_lines[4]
+        assert output.count("(Normalization: per_kernel)") == 1
+
+    def test_chart_title_override(self):
+        """CDNA output uses an explicit chart title when provided."""
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                "per_kernel",
+                dict(GFX9_SAMPLE_METRICS),
+                chart_title="7. Memory Chart (Normalization: per_kernel)",
+            )
+        )
+        output_lines = output.splitlines()
+
+        assert output_lines[0] == "7. Memory Chart (Normalization: per_kernel)"
+        assert "3. Memory Chart" not in output
