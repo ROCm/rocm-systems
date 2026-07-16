@@ -705,7 +705,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    (void)pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }

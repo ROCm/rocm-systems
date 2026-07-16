@@ -161,7 +161,7 @@ class BlitManager {
   ) const = 0;
 
   //! Copies an image object to a buffer object
-  virtual bool copyImageToBuffer(
+  [[nodiscard]] virtual bool copyImageToBuffer(
       Memory& srcMemory,                                    //!< Source memory object
       Memory& dstMemory,                                    //!< Destination memory object
       const amd::Coord3D& srcOrigin,                        //!< Source origin
@@ -174,7 +174,7 @@ class BlitManager {
   ) const = 0;
 
   //! Copies a buffer object to an image object
-  virtual bool copyBufferToImage(
+  [[nodiscard]] virtual bool copyBufferToImage(
       Memory& srcMemory,                                    //!< Source memory object
       Memory& dstMemory,                                    //!< Destination memory object
       const amd::Coord3D& srcOrigin,                        //!< Source origin

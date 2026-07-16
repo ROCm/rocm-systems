@@ -1220,7 +1220,7 @@ Image* Image::createView(const Context& context, const Format& format, device::V
       for (uint i = 0; i < numDevices_; ++i) {
         // Make sure the parent's device memory is avaialbe
         if ((deviceMemories_[i].ref_ != nullptr) && (deviceMemories_[i].value_ != nullptr)) {
-          view->getDeviceMemory(*(deviceMemories_[i].ref_));
+          (void)view->getDeviceMemory(*(deviceMemories_[i].ref_));
         }
       }
     }
