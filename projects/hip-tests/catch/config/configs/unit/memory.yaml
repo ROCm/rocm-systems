@@ -506,6 +506,9 @@ memory:
   Unit_hipManagedMultiGpuVaConsistency_MultiDevice:
     <<: *level_2
     tags: [alloc, multigpu]
+  Unit_hipManagedMultiGpuVaConsistency_HostAllocNoDivergence:
+    <<: *level_2
+    tags: [alloc, multigpu]
   Unit_hipMemset_Negative_InvalidPtr:
     <<: *level_2
     tags: [memset]
