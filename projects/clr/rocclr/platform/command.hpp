@@ -1095,8 +1095,8 @@ class BatchMemoryOperationCommand : public Command {
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
-        paramArray_(paramArray),
         flags_(flags),
+        paramArray_(paramArray),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -2264,8 +2264,8 @@ class SvmPrefetchAsyncCommand : public Command {
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
-        dev_(dev),
-        numa_id_(numa_id) {}
+        numa_id_(numa_id),
+        dev_(dev) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 

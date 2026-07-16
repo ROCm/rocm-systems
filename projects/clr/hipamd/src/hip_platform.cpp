@@ -166,7 +166,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
-static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
+[[maybe_unused]] static bool isCompatibleCodeObject(const std::string& codeobj_target_id,
+                                                    const char* device_name) {
   // Workaround for device name mismatch.
   // Device name may contain feature strings delimited by '+', e.g.
   // gfx900+xnack. Currently HIP-Clang does not include feature strings
@@ -553,7 +554,7 @@ namespace hip_impl {
 static hipError_t clusterDimensions(dim3& dimensions, const hipLaunchConfig_t& launchConfig,
                                     const device::Kernel::WorkGroupInfo& wrkGrpInfo,
                                     const amd::device::Info& deviceInfo) {
-  int numAttr = 0;
+  unsigned int numAttr = 0;
   const size_t* infoClusterSize = wrkGrpInfo.clusterSize_;
 
   dimensions = {std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(),
