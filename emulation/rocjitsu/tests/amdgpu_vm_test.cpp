@@ -171,7 +171,8 @@ void step_until_halted(simdojo::SimulationEngine &engine,
 }
 
 std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
-                                                   std::string_view symbol_name) {
+                                                   std::string_view symbol_name,
+                                                   bool include_symbol_terminator = true) {
   constexpr uint64_t dyn_offset = 0x100;
   constexpr uint64_t symtab_offset = 0x200;
   constexpr uint64_t strtab_offset = 0x300;
@@ -204,7 +205,7 @@ std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_of
   dyn[1].d_tag = DT_STRTAB;
   dyn[1].d_un.d_val = strtab_offset;
   dyn[2].d_tag = DT_STRSZ;
-  dyn[2].d_un.d_val = symbol_name.size() + 2;
+  dyn[2].d_un.d_val = 1 + symbol_name.size() + (include_symbol_terminator ? 1 : 0);
   dyn[3].d_tag = DT_HASH;
   dyn[3].d_un.d_val = hash_offset;
   dyn[4].d_tag = DT_NULL;
@@ -220,6 +221,17 @@ std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_of
   hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
 
   return image;
+}
+
+TEST(KernelSymbolTest, RejectsDynstrSymbolWithoutTerminator) {
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  constexpr std::string_view symbol_name = "unterminated_kernel.kd";
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, symbol_name,
+                                             /*include_symbol_terminator=*/false);
+
+  EXPECT_TRUE(
+      find_kernel_symbol(image.data() + kernel_descriptor_offset, image.data(), image.size())
+          .empty());
 }
 
 TEST(GpuMemoryTest, ReadWriteRoundTrip) {

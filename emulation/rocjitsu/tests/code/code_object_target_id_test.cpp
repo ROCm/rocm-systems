@@ -263,6 +263,8 @@ TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
                                 "15CUDAFunctor_addIfEESt5arrayIPcLm3EEEEviT0_T1_"),
             "at::native::vectorized_elementwise_kernel<4,at::native::CUDAFunctor_add<float>,std::"
             "array<char*,3ul>>");
+  EXPECT_EQ(kernel_display_name("_ZN12_GLOBAL__N_16kernelEPf"), "(anonymousnamespace)::kernel");
+  EXPECT_EQ(kernel_display_name("_Z3fooIPFviEEvv"), "foo<void(*)(int)>");
   EXPECT_EQ(kernel_display_name("__amd_rocclr_copyBuffer"), "__amd_rocclr_copyBuffer");
   EXPECT_EQ(kernel_display_name(tensile_symbol), tensile_symbol);
 }

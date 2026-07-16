@@ -1270,8 +1270,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   if (host_accessible && memory_) {
     auto [host_range_base, host_range_size] =
         memory_->find_host_range(pkt.kernel_object, queue.process_id);
-    auto *kernel_object_page =
-        memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    auto *kernel_object_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
     if (host_range_base != 0 && kernel_object_page) {
       auto *kernel_object_host_ptr =
           kernel_object_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);

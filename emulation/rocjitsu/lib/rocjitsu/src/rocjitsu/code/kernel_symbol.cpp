@@ -20,6 +20,38 @@ bool in_range(const uint8_t *ptr, uint64_t size, const uint8_t *base, uint64_t r
          static_cast<uint64_t>(ptr - base) <= range_size - size;
 }
 
+size_t find_outer_argument_list(std::string_view text) {
+  size_t argument_list = std::string_view::npos;
+  int angle_depth = 0;
+  int parenthesis_depth = 0;
+
+  for (size_t pos = 0; pos < text.size(); ++pos) {
+    switch (text[pos]) {
+    case '<':
+      if (parenthesis_depth == 0)
+        ++angle_depth;
+      break;
+    case '>':
+      if (angle_depth > 0 && parenthesis_depth == 0)
+        --angle_depth;
+      break;
+    case '(':
+      if (angle_depth == 0 && parenthesis_depth == 0)
+        argument_list = pos;
+      ++parenthesis_depth;
+      break;
+    case ')':
+      if (parenthesis_depth > 0)
+        --parenthesis_depth;
+      break;
+    default:
+      break;
+    }
+  }
+
+  return argument_list;
+}
+
 } // namespace
 
 std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *elf_base,
@@ -166,7 +198,7 @@ std::string demangle_kernel_symbol(std::string_view symbol) {
 
 std::string kernel_display_name(std::string_view symbol) {
   std::string result = demangle_kernel_symbol(symbol);
-  size_t parenthesis_position = result.find('(');
+  size_t parenthesis_position = find_outer_argument_list(result);
   if (parenthesis_position != std::string::npos)
     result.resize(parenthesis_position);
   if (result.starts_with("void "))
