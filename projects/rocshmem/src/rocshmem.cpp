@@ -1321,9 +1321,9 @@ __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                             const void *source, size_t size,
+                                             const void *source, size_t nelems,
                                              hipStream_t stream) {
-  RocshmemGetFunctionTable()->alltoallmem_on_stream_fn(team, dest, source, size, stream);
+  RocshmemGetFunctionTable()->alltoallmem_on_stream_fn(team, dest, source, nelems, stream);
 }
 
 __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,

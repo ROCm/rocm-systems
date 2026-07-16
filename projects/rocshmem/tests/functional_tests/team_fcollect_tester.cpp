@@ -79,7 +79,7 @@ __global__ void TeamFcollectTest(int loop, int skip, long long int *start_time,
     wg_team_fcollect<T1>(ctx, teams[wg_id],
                          dest_buf,          // T* dest
                          source_buf,        // const T* source
-                         num_elems);        // int nelement
+                         num_elems);        // int nelems
   }
 
   __syncthreads();

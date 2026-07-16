@@ -85,7 +85,7 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
     wg_team_broadcast<T1>(ctx, teams[wg_id],
                           dest_buf,         // T* dest
                           source_buf,       // const T* source
-                          size,             // int nelement
+                          size,             // int nelems
                           0);               // int PE_root
   }
 
