@@ -96,6 +96,7 @@ The first domains are:
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `driver_texture_object`: driver-style texture object creation and descriptor-introspection contracts
 - `texture_reference`: image-gated deprecated texture-reference set/get and bind/unbind contracts
+- `texture_reference_symbol`: image-gated symbol-backed texture-reference bind, module-texref address/array round-trip, and deprecated-stub border-color/mipmap contracts
 - `context`: driver-style device and context query contracts
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
