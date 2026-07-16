@@ -78,7 +78,13 @@ def make_policy(**overrides: Any) -> pc.Policy:
         max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
-        unit_test_patterns=["test_*", "*_test.*"],
+        unit_test_patterns=[
+            "test_*",
+            "testing_*",
+            "*_test.*",
+            "*_tests.*",
+            "**/test/gtest/**",
+        ],
         unit_test_exempt_paths=[],
         bump_bot_authors=["assistant-librarian", "systems-assistant"],
         required_checks=["pre-commit"],
@@ -417,6 +423,34 @@ class UnitTestRuleTests(unittest.TestCase):
         # This PASSES because test_memory.cc matches the test_* pattern.
         self.assertEqual(e, [])
 
+    def test_testing_prefix_satisfies_requirement(self) -> None:
+        # Files with the 'testing_' prefix are recognized as test files.
+        files = [make_file("src/module.py"), make_file("tests/testing_module.py")]
+        self.assertEqual(self._errs(files), [])
+
+    def test_plural_tests_suffix_satisfies_requirement(self) -> None:
+        # Files matching '*_tests.*' (plural) are recognized as test files.
+        for test_path in [
+            "tests/module_tests.py",
+            "src/parser_tests.cpp",
+            "deep/nested/foo_tests.cc",
+        ]:
+            with self.subTest(test_path=test_path):
+                files = [make_file("src/module.py"), make_file(test_path)]
+                self.assertEqual(self._errs(files), [])
+
+    def test_gtest_folder_files_satisfy_requirement(self) -> None:
+        # Any file under a 'test/gtest/' directory counts as a unit test,
+        # regardless of its basename.
+        for test_path in [
+            "projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp",
+            "test/gtest/foo.cpp",
+            "a/b/c/test/gtest/deep/bar.cc",
+        ]:
+            with self.subTest(test_path=test_path):
+                files = [make_file("src/module.py"), make_file(test_path)]
+                self.assertEqual(self._errs(files), [])
+
 
 # ----------------------------- reviewable size -------------------------------
 
@@ -603,7 +637,9 @@ class LoadPolicyTests(unittest.TestCase):
         # Verify the three allowed patterns ARE present.
         self.assertIn("test_*", policy.unit_test_patterns)
         self.assertIn("*_test.*", policy.unit_test_patterns)
+        self.assertIn("*_tests.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
+        self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
 
 
 if __name__ == "__main__":

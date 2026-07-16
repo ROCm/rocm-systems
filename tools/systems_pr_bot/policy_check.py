@@ -458,6 +458,24 @@ def _matches_forbidden(filename: str, pattern: str) -> bool:
     return False
 
 
+def _is_test_file(filename: str, patterns: Iterable[str]) -> bool:
+    """Return True if `filename` is recognised as a test file.
+
+    Patterns that contain a '/' are treated as FULL-PATH globs (e.g.
+    '**/test/gtest/**' matches any file under a test/gtest/ directory).
+    Patterns without a '/' are matched against the BASENAME only
+    (e.g. 'test_*', '*_test.*').
+    """
+    base = Path(filename).name
+    for pat in patterns:
+        if "/" in pat:
+            if _matches_forbidden(filename, pat):
+                return True
+        elif fnmatch.fnmatch(base, pat):
+            return True
+    return False
+
+
 def ensure_no_forbidden_files(
     policy: Policy, pr_files: Iterable[Dict[str, Any]], errors: List[str]
 ) -> None:
@@ -517,7 +535,7 @@ def ensure_unit_tests(
         ext = Path(filename).suffix.lower()
 
         # A test file satisfies the requirement.
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
+        if _is_test_file(filename, policy.unit_test_patterns):
             has_test = True
             continue
 
@@ -555,7 +573,7 @@ def pr_has_code_files(policy: Policy, pr_files: Iterable[Dict[str, Any]]) -> boo
             continue
         base = Path(filename).name
         ext = Path(filename).suffix.lower()
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
+        if _is_test_file(filename, policy.unit_test_patterns):
             continue
         if ext in policy.unit_test_code_extensions:
             return True
