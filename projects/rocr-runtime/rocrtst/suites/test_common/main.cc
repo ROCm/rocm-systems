@@ -599,6 +599,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
     RunCustomTestEpilog(&vmt);
 }
 
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
+}
+
 TEST(rocrtstFunc, Filter_Devices_Test) {
     FilterDevicesTest fd;
     if (!RunCustomTestProlog(&fd)) return;

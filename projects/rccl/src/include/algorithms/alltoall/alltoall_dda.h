@@ -19,8 +19,17 @@ template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllToAllIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                 const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+    __global__ void ddaAllToAllIpc(
+        T* const* __restrict__ ipcbuffs,
+        T* __restrict__ recvbuff,
+        size_t count,
+        const T* __restrict__ sendbuff,
+        int selfRank,
+        IpcGpuBarrier barrier) {
+  barrier.syncOnSameBlockIdx<
+      false /* hasPreviousMemAccess */,
+      true /* hasSubsequentMemAccess */>();
+ 
   // use uint4 to do 16-byte loads to maximize memory efficiency
   // We assume that count % countPerThread == 0. This assumption is enforced
   // before kernel launch
@@ -31,14 +40,7 @@ __launch_bounds__(512)
 
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
-  const size_t copyCount = count * NRANKS;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  // It is expensive to launch hipMemcpyAsync on ROCm
-  // Move data copy here. Each block copies part of sendbuff data
-  copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
-
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll NRANKS
@@ -46,12 +48,16 @@ __launch_bounds__(512)
       int srcRank = r;
       int srcIdx = idx + selfRank * idxEnd;
       int destIdx = idx + r * idxEnd;
-      *reinterpret_cast<uint4*>(&recvbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
+      *reinterpret_cast<uint4*>(&recvbuff[destIdx]) =
+          reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
   }
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<
+      true /* hasPreviousMemAccess */,
+      false /* hasSubsequentMemAccess */>();
 }
 
 } // namespace meta::comms
+
