@@ -16,75 +16,59 @@
 #include "../utility.h"
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
-    Coop coop, ncclTeam innerTeam, ncclTeam outerTeam, ncclGin gin,
-    ncclLsaBarrierHandle innerHandle, ncclGinBarrierHandle outerHandle,
-    uint32_t index, bool multimem, ncclMultimemHandle innerMmHandle
-  ):
-  ncclBarrierSession_internal<Coop>(coop,
-    nccl::utility::present(gin),
-    nccl::utility::present(coop, gin.comm, innerTeam, innerHandle, index, multimem, innerMmHandle),
-    nccl::utility::present(coop, gin, outerTeam, outerHandle, index)
-  ) {
-}
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(Coop coop, ncclTeam innerTeam, ncclTeam outerTeam,
+                                                                ncclGin gin, ncclLsaBarrierHandle innerHandle,
+                                                                ncclGinBarrierHandle outerHandle, uint32_t index,
+                                                                bool multimem, ncclMultimemHandle innerMmHandle)
+  : ncclBarrierSession_internal<Coop>(coop, nccl::utility::present(gin),
+                                      nccl::utility::present(coop, gin.comm, innerTeam, innerHandle, index, multimem,
+                                                             innerMmHandle),
+                                      nccl::utility::present(coop, gin, outerTeam, outerHandle, index)) {}
 #endif
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
-    Coop coop, ncclTeamTagWorld, ncclGin gin, uint32_t index, bool multimem
-  ):
-  ncclBarrierSession<Coop>(
-    coop, ncclTeamLsa(gin.comm), ncclTeamRail(gin.comm), gin,
-    gin.comm.hybridLsaBarrier, gin.comm.hybridRailGinBarrier,
-    index, multimem, gin.comm.lsaMultimem
-  ) {
-}
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(Coop coop, ncclTeamTagWorld, ncclGin gin,
+                                                                uint32_t index, bool multimem)
+  : ncclBarrierSession<Coop>(coop, ncclTeamLsa(gin.comm), ncclTeamRail(gin.comm), gin, gin.comm.hybridLsaBarrier,
+                             gin.comm.hybridRailGinBarrier, index, multimem, gin.comm.lsaMultimem) {}
 #endif
 
 #if __CUDACC__
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
-    Coop coop, ncclTeamTagLsa, ncclDevComm const& comm, uint32_t index, bool multimem
-  ):
-  ncclBarrierSession_internal<Coop>(coop,
-    nccl::utility::Absent(),
-    nccl::utility::present(coop, comm, ncclTeamLsa(comm), comm.hybridLsaBarrier, index, multimem, comm.lsaMultimem),
-    nccl::utility::Absent()
-  ) {
-}
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(Coop coop, ncclTeamTagLsa, ncclDevComm const& comm,
+                                                                uint32_t index, bool multimem)
+  : ncclBarrierSession_internal<Coop>(coop, nccl::utility::Absent(),
+                                      nccl::utility::present(coop, comm, ncclTeamLsa(comm), comm.hybridLsaBarrier,
+                                                             index, multimem, comm.lsaMultimem),
+                                      nccl::utility::Absent()) {}
 #endif
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
-    Coop coop, ncclTeamTagRail, ncclGin gin, uint32_t index
-  ):
-  ncclBarrierSession_internal<Coop>(coop,
-    nccl::utility::present(gin),
-    nccl::utility::Absent(),
-    nccl::utility::present(coop, gin, ncclTeamRail(gin.comm), gin.comm.hybridRailGinBarrier, index)
-  ) {
-}
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(Coop coop, ncclTeamTagRail, ncclGin gin, uint32_t index)
+  : ncclBarrierSession_internal<Coop>(coop, nccl::utility::present(gin), nccl::utility::Absent(),
+                                      nccl::utility::present(coop, gin, ncclTeamRail(gin.comm),
+                                                             gin.comm.hybridRailGinBarrier, index)) {}
 #endif
 
 #if __CUDACC__
-template<typename Coop>
+template <typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>& ncclBarrierSession<Coop>::lsaBarrier() {
   return this->innerLsaBar.thing;
 }
 #endif
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
+template <typename Coop>
 NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ncclBarrierSession<Coop>::ginBarrier() {
   return this->outerGinBar.thing;
 }
 #endif
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
+template <typename Coop>
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
   if (this->innerLsaBar.present) {
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
@@ -97,19 +81,16 @@ NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order 
 #endif
 
 #if NCCL_CHECK_CUDACC
-template<typename Coop>
-NCCL_DEVICE_INLINE ncclResult_t ncclBarrierSession<Coop>::sync(
-    Coop, cuda::memory_order ord, ncclGinFenceLevel fence, uint64_t timeoutCycles) {
+template <typename Coop>
+NCCL_DEVICE_INLINE ncclResult_t ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,
+                                                               uint64_t timeoutCycles) {
   ncclResult_t lsaResult = ncclSuccess, railResult = ncclSuccess;
 
   // Inner LSA barrier (if present) - detects remote CTA/rank issues
   if (this->innerLsaBar.present) {
     uint64_t startCycle = clock64();
     lsaResult = this->innerLsaBar.thing.sync(
-      this->coop,
-      this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord,
-      timeoutCycles
-    );
+      this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord, timeoutCycles);
     uint64_t elapsed = clock64() - startCycle;
     timeoutCycles -= min(elapsed, timeoutCycles);
     // Because threads within a coop don't synchronize about the timeout condition,
@@ -120,11 +101,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclBarrierSession<Coop>::sync(
   // Outer GIN barrier (if present) - detects remote GPU/network issues
   if (this->outerGinBar.present) {
     railResult = this->outerGinBar.thing.sync(
-      this->coop,
-      this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord,
-      fence,
-      timeoutCycles
-    );
+      this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence, timeoutCycles);
   }
   return lsaResult != ncclSuccess ? lsaResult : railResult;
 }
