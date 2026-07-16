@@ -29,12 +29,6 @@
     "install_flags": ["--debug", "-t", "--amdgpu_targets", "gfx950", "--log-trace", "--enable-mpi-tests", "--no_clean"],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
   },
-  "rccl_tests_build_configuration": {
-    "enabled": false,
-    "source_dir": "${RCCL_TESTS_DIR:-$WORKDIR/rccl-tests}",
-    "install_script": "install.sh",
-    "install_flags": ["--mpi"]
-  },
 
   "test_configurations": {
 
@@ -46,7 +40,6 @@
       "num_gpus": 1,
       "timeout": 600,
       "env_variables": {
-        "NCCL_LAUNCH_MODE": "GROUP",
         "NCCL_IB_MERGE_NICS": "1",
         "NCCL_IB_MERGE_VFS": "1",
         "NCCL_DMABUF_ENABLE": "1"
@@ -327,16 +320,6 @@
       ]
     },
 
-    "b7a_pure_autodetect": {
-      "extends": "b_base",
-      "timeout": 600,
-      "description": "B7a: pure PCI autodetect. Near-duplicate of B7 because --system ainic always sets RCCL_AINIC_ROCE=1; kept enabled as an explicit PCI-ID autodetect check.",
-      "tests": [
-        { "name": "B7a_alltoall_pure_autodetect", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Pure PCI autodetect (0x1dd8:0x10); libionic.so auto-loads, over the full 1024-16G range (resolves to CAST)." },
-        { "name": "B7a_allreduce_pure_autodetect", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Pure PCI autodetect allreduce." }
-      ]
-    },
-
     "b7b_autodetect_off": {
       "extends": "b_base",
       "timeout": 600,
@@ -425,7 +408,6 @@
     { "name": "B5. ROCM-IB / CTS on",               "config": "b5_rocmib_ctson",   "enabled": true },
     { "name": "B6. CAST WRR / CTS on",               "config": "b6_cast_wrr_ctson", "enabled": true },
     { "name": "B7. Autodetect (out-of-box)",         "config": "b7_autodetect",     "enabled": true },
-    { "name": "B7a. Pure PCI autodetect",            "config": "b7a_pure_autodetect","enabled": true },
     { "name": "B7b. Autodetect off (fallback)",      "config": "b7b_autodetect_off","enabled": true },
     { "name": "B8. ROCM-IB / no CTS offload",        "config": "b8_no_cts_offload", "enabled": true },
     { "name": "B9. CTS force-override (PR#4657)",    "config": "b9_cts_force_override", "enabled": true },

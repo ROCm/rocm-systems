@@ -66,9 +66,9 @@ on:
         required: false
         default: '04:00:00'
       salloc_exclude:
-        description: 'SLURM nodes to exclude from allocation (empty = use all reservation nodes)'
+        description: 'SLURM nodes to exclude from allocation (known-broken hardware)'
         required: false
-        default: ''
+        default: 'mia1-p01-g[24-25]'
   push:
     branches:
       - users/nikitaxgusev/ainic-test-runner
@@ -108,10 +108,12 @@ env:
   DEFAULT_SALLOC_RESERVATION: rccl_dev
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
-  # No nodes excluded by default: g24-25 (previously broken inter-node RoCE) are
-  # back in service, so allocate from the full rccl_dev reservation. Set the
-  # salloc_exclude input if a node regresses.
-  DEFAULT_SALLOC_EXCLUDE: ''
+  # Exclude known-broken GPU nodes: g24 regressed (every rccl-tests perf run
+  # aborts with HIP 'out of memory' even under an --exclusive allocation, a
+  # symptom of leftover/orphaned GPU state), and g25 is its historically-flaky
+  # pair. The rccl_dev reservation still has g27/g29/g30 for the 2-node job.
+  # Clear this (or override the salloc_exclude input) once the nodes recover.
+  DEFAULT_SALLOC_EXCLUDE: 'mia1-p01-g[24-25]'
 
 jobs:
   ainic-test-runner:
@@ -135,6 +137,10 @@ jobs:
           # at runtime via LD_LIBRARY_PATH (=RCCL_BUILD_DIR), so they load the fresh lib.
           GROUP_BC_RCCL_BUILD_DIR: ${{ github.event.inputs.rccl_build_dir || format('{0}/projects/rccl/build/debug', github.workspace) }}
           GROUP_BC_RCCL_TESTS_BIN: ${{ env.DEFAULT_RCCL_TESTS_BIN }}
+          # Non-empty only when a prebuilt RCCL lib was explicitly provided for
+          # Group B/C. Phase 0 uses this to skip the (expensive) build when Group A
+          # is not selected -- Group A always needs a fresh --enable-mpi-tests build.
+          RCCL_BUILD_OVERRIDE: ${{ github.event.inputs.rccl_build_dir || '' }}
           # Group A: fresh --enable-mpi-tests build produced by Phase 0 of the
           # batch job (on the compute node, see below). librccl.so and
           # test/rccl-UnitTestsMPI both live under build/debug (see install.sh
@@ -206,6 +212,7 @@ jobs:
           # sbatch --export=ALL (default) forwards these to the batch job.
           export RUN_GROUP_A RUN_GROUP_BC GROUP_A_FILTER GROUP_BC_FILTER \
                  GROUP_A_RCCL_BUILD_DIR GROUP_BC_RCCL_BUILD_DIR GROUP_BC_RCCL_TESTS_BIN \
+                 RCCL_BUILD_OVERRIDE \
                  GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
                  WORKDIR MPI_PATH ROCM_PATH
 
@@ -226,11 +233,21 @@ jobs:
           # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
           # therefore uses ALL of the compute node's cores. WORKDIR points at this
           # run's own checkout so install.sh and the build tree resolve there (on
-          # /it-share, shared with every node in the allocation). Both groups run
-          # against this fresh build (Group A: rccl-UnitTestsMPI gtest binary;
-          # Group B/C: perf binaries loading the fresh librccl.so), so the build
-          # runs whenever either group is selected.
-          if [ "${RUN_GROUP_A}" = "1" ] || [ "${RUN_GROUP_BC}" = "1" ]; then
+          # /it-share, shared with every node in the allocation).
+          #
+          # When to build:
+          #   - Group A always needs a fresh --enable-mpi-tests build (that is
+          #     where its rccl-UnitTestsMPI gtest binary comes from).
+          #   - Group B/C needs a build only when NO prebuilt override was given
+          #     (RCCL_BUILD_OVERRIDE empty); with an override it loads that
+          #     prebuilt librccl.so and the build is skipped.
+          NEED_BUILD=0
+          if [ "${RUN_GROUP_A}" = "1" ]; then
+            NEED_BUILD=1
+          elif [ "${RUN_GROUP_BC}" = "1" ] && [ -z "${RCCL_BUILD_OVERRIDE}" ]; then
+            NEED_BUILD=1
+          fi
+          if [ "${NEED_BUILD}" = "1" ]; then
             echo "================================================================"
             echo "Phase 0: build RCCL (--enable-mpi-tests) on $(hostname) [nproc=$(nproc)]"
             echo "================================================================"
@@ -320,6 +337,20 @@ jobs:
           sleep 2
           kill "${TAIL_PID}" 2>/dev/null || true
 
+          # Collect this run's report directories. test_runner writes them to
+          # ${WORKDIR}/rccl_test_artifacts_<suffix>_<timestamp>; copy the newest
+          # per group into RUNNER_TEMP so the upload step captures the full
+          # per-test logs/reports (not just the tee'd console log) without picking
+          # up older runs that share this WORKDIR.
+          REPORTS_DIR="${RUNNER_TEMP}/reports"
+          mkdir -p "${REPORTS_DIR}"
+          for sfx in groupA groupBC; do
+            newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_${sfx}_* 2>/dev/null | head -n1)"
+            if [ -n "${newest}" ]; then
+              cp -a "${newest}" "${REPORTS_DIR}/" 2>/dev/null || true
+            fi
+          done
+
           echo "sbatch --wait exit code: ${rc}"
           exit "${rc}"
 
@@ -332,6 +363,7 @@ jobs:
             ${{ runner.temp }}/ainic_build.log
             ${{ runner.temp }}/ainic_run_groupA.log
             ${{ runner.temp }}/ainic_run_groupBC.log
+            ${{ runner.temp }}/reports
           if-no-files-found: ignore
 
       - name: Print summary

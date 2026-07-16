@@ -1220,6 +1220,18 @@ class TestExecutor:
         # to exist; shlex.quote handles any spaces.
         exe = shlex.quote(test_binary_path)
 
+        # Create the gtest JSON output file up front so the command builders
+        # below can embed it directly into the program string (rather than
+        # re-parsing the assembled command). Removed in the finally block.
+        gtest_json_path = None
+        gtest_out_arg = ""
+        if is_gtest:
+            fd, gtest_json_path = tempfile.mkstemp(
+                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
+            )
+            os.close(fd)
+            gtest_out_arg = f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
+
         # Build command based on test type
         if num_ranks == 1:
             # Non-MPI test - prepend environment variables to the command.
@@ -1246,6 +1258,7 @@ class TestExecutor:
                 cmd = f"{env_prefix}{exe}"
                 if custom_args:
                     cmd += f" {custom_args}"
+            cmd += gtest_out_arg
 
         else:
             # MPI test
@@ -1333,48 +1346,30 @@ class TestExecutor:
             if ld_preload:
                 mpi_args += " " + env_fmt.format(key="LD_PRELOAD", value=ld_preload)
 
-            # Build test command based on type
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{mpi_cmd} {mpi_args} {exe}"
-                else:
-                    cmd = f"{mpi_cmd} {mpi_args} {exe} --gtest_filter={test_filter}"
-
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (test binary + its arguments) that mpirun will
+            # launch as a single string, so the locked-memory wrapper below can be
+            # applied directly instead of re-parsing the assembled command.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{mpi_cmd} {mpi_args} {exe}"
-                if custom_args:
-                    cmd += f" {custom_args}"
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            program += gtest_out_arg
 
-        gtest_json_path = None
-        if is_gtest:
-            fd, gtest_json_path = tempfile.mkstemp(
-                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
-            )
-            os.close(fd)
-            cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
-
-        # RDMA connection setup (ibv_create_qp / ibv_create_cq) pins memory and
-        # fails with "Cannot allocate memory" when the locked-memory soft rlimit
-        # is too low. Under SLURM the soft limit is inherited from the submit
-        # host (often a couple of GB), while compute nodes allow an unlimited
-        # hard limit. Launch each MPI rank through a shell that raises the soft
-        # limit to the hard maximum first. `set -f` keeps gtest filter globs
-        # (e.g. "*Foo*") literal; harmless where the limit is already unlimited.
-        if num_ranks > 1:
-            mpi_prefix = f"{mpi_cmd} {mpi_args} "
-            if cmd.startswith(mpi_prefix):
-                program = cmd[len(mpi_prefix):]
-                inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
-                cmd = f"{mpi_prefix}bash -c {shlex.quote(inner)}"
+            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
+            # memory" under SLURM's low inherited locked-memory soft limit, so
+            # raise it per rank before exec. `set -f` keeps gtest filter globs
+            # literal; wrapping the program (not the assembled command) means it
+            # always applies for MPI launches.
+            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+            wrapped_program = f"bash -c {shlex.quote(inner)}"
+            cmd = f"{mpi_cmd} {mpi_args} {wrapped_program}"
 
         # Working directory: gtest binaries live in <build_dir>/test, but a
-        # prebuilt/custom lib dir (RCCL_BUILD_DIR / test_binary_dir) may have no
-        # "test" subdir. cwd only needs to exist (perf binaries are invoked by
-        # absolute path), so fall back gracefully to keep prebuilt runs working.
+        # prebuilt/custom lib dir (RCCL_BUILD_DIR / test_binary_dir override) may
+        # have no "test" subdir. cwd only needs to exist (perf binaries are invoked
+        # by absolute path), so fall back gracefully to keep prebuilt runs working.
         run_cwd = os.path.join(self.build_dir, "test")
         if not os.path.isdir(run_cwd):
             if os.path.isdir(self.build_dir):
