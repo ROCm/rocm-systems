@@ -115,6 +115,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", default=DEFAULT_SEED, help="recorded selection seed")
     parser.add_argument(
+        "--unique-output",
+        type=pathlib.Path,
+        help="optional canonical JSONL containing the deduplicated population",
+    )
+    parser.add_argument(
         "--metadata",
         type=pathlib.Path,
         help="metadata JSON path (default: OUTPUT.metadata.json)",
@@ -133,6 +138,13 @@ def main() -> int:
             f"population has only {len(population)} unique diagnostics; "
             f"cannot select {args.count}"
         )
+
+    if args.unique_output:
+        args.unique_output.parent.mkdir(parents=True, exist_ok=True)
+        with args.unique_output.open("w", encoding="utf-8") as stream:
+            for record in population:
+                stream.write(canonical_json(record))
+                stream.write("\n")
 
     ranked = sorted(
         (selection_priority(args.seed, record), record) for record in population
@@ -170,6 +182,10 @@ def main() -> int:
         "duplicate_count": raw_count - len(population),
         "input": str(args.input),
         "input_sha256": sha256_file(args.input),
+        "unique_output": str(args.unique_output) if args.unique_output else None,
+        "unique_output_sha256": (
+            sha256_file(args.unique_output) if args.unique_output else None
+        ),
         "output": str(args.output),
         "output_sha256": sha256_file(args.output),
         "identity_fields": list(diagnostic_identity(population[0])),
