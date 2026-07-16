@@ -69,6 +69,9 @@ jobs:
     outputs:
       gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
       gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+      gfx103x_runner: ${{ steps.runner.outputs.gfx103x_runner }}
+      gfx110x_runner: ${{ steps.runner.outputs.gfx110x_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@v6
@@ -97,6 +100,9 @@ jobs:
         env:
           GFX950_RUNNER: ${{ needs.ci_config.outputs.gfx950_runner }}
           GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
+          GFX103X_RUNNER: ${{ needs.ci_config.outputs.gfx103x_runner }}
+          GFX110X_RUNNER: ${{ needs.ci_config.outputs.gfx110x_runner }}
+          GFX120X_RUNNER: ${{ needs.ci_config.outputs.gfx120x_runner }}
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-nightly' -I=0 -o=json)
@@ -108,6 +114,9 @@ jobs:
           declare -A RUNNER_MAP=(
             ["gfx950"]="$GFX950_RUNNER"
             ["gfx94X"]="$GFX94X_RUNNER"
+            ["gfx103X"]="$GFX103X_RUNNER"
+            ["gfx110X"]="$GFX110X_RUNNER"
+            ["gfx120X"]="$GFX120X_RUNNER"
           )
           for arch in "${!RUNNER_MAP[@]}"; do
             runner="${RUNNER_MAP[$arch]}"

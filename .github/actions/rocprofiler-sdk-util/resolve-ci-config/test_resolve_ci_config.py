@@ -25,6 +25,20 @@ SAMPLE_RUNNER_CONFIG = {
                     "fetch-gfx-targets": ["gfx942"],
                 }
             },
+            "gfx110x": {
+                "linux": {
+                    "test-runs-on": "linux-gfx110X-gpu-rocm",
+                    "family": "gfx110X-all",
+                    "fetch-gfx-targets": [],
+                }
+            },
+            "gfx120x": {
+                "linux": {
+                    "test-runs-on": "linux-gfx120X-gpu-rocm",
+                    "family": "gfx120X-all",
+                    "fetch-gfx-targets": ["gfx1200", "gfx1201"],
+                }
+            },
             "gfx1151": {
                 "linux": {
                     "test-runs-on": "linux-gfx1151-gpu-rocm",
@@ -49,7 +63,14 @@ SAMPLE_RUNNER_CONFIG = {
                     "family": "gfx90a",
                     "fetch-gfx-targets": ["gfx90a"],
                 }
-            }
+            },
+            "gfx103x": {
+                "linux": {
+                    "test-runs-on": "linux-gfx1030-gpu-rocm",
+                    "family": "gfx103X-all",
+                    "fetch-gfx-targets": ["gfx1030"],
+                }
+            },
         },
     },
 }
@@ -114,6 +135,18 @@ class TestLoadGpuConfigs(unittest.TestCase):
                 "linux-gfx90a-gpu-rocm",
             )
             self.assertEqual(
+                result["gfx103x"]["test-runs-on"],
+                "linux-gfx1030-gpu-rocm",
+            )
+            self.assertEqual(
+                result["gfx110x"]["test-runs-on"],
+                "linux-gfx110X-gpu-rocm",
+            )
+            self.assertEqual(
+                result["gfx120x"]["test-runs-on"],
+                "linux-gfx120X-gpu-rocm",
+            )
+            self.assertEqual(
                 result["gfx1151"]["test-runs-on"],
                 "linux-gfx1151-gpu-rocm",
             )
@@ -142,6 +175,9 @@ class TestLoadGpuConfigs(unittest.TestCase):
             self.assertEqual(result["gfx94x"]["test-runs-on"], "some-runner")
             self.assertEqual(result["gfx950"], {})
             self.assertEqual(result["gfx90a"], {})
+            self.assertEqual(result["gfx103x"], {})
+            self.assertEqual(result["gfx110x"], {})
+            self.assertEqual(result["gfx120x"], {})
             self.assertEqual(result["gfx1151"], {})
 
     def test_returns_empty_on_import_error(self):
@@ -184,6 +220,9 @@ class TestMain(unittest.TestCase):
                 "FALLBACK_GFX94X_SANDBOX_RUNNER": "fallback-gfx94x-sandbox",
                 "FALLBACK_GFX950_RUNNER": "fallback-gfx950",
                 "FALLBACK_GFX90A_RUNNER": "fallback-gfx90a",
+                "FALLBACK_GFX103X_RUNNER": "fallback-gfx103x",
+                "FALLBACK_GFX110X_RUNNER": "fallback-gfx110x",
+                "FALLBACK_GFX120X_RUNNER": "fallback-gfx120x",
                 "FALLBACK_GFX1151_RUNNER": "fallback-gfx1151",
             }
             if env_overrides:
@@ -206,6 +245,9 @@ class TestMain(unittest.TestCase):
         )
         self.assertEqual(outputs["gfx950_runner"], "linux-gfx950-1gpu-ccs-ossci-rocm")
         self.assertEqual(outputs["gfx90a_runner"], "linux-gfx90a-gpu-rocm")
+        self.assertEqual(outputs["gfx103x_runner"], "linux-gfx1030-gpu-rocm")
+        self.assertEqual(outputs["gfx110x_runner"], "linux-gfx110X-gpu-rocm")
+        self.assertEqual(outputs["gfx120x_runner"], "linux-gfx120X-gpu-rocm")
         self.assertEqual(outputs["gfx1151_runner"], "linux-gfx1151-gpu-rocm")
         self.assertEqual(
             outputs["gfx94x_sandbox_runner"], "linux-mi325-gpu-rocm-cpu-sandbox"
@@ -217,6 +259,9 @@ class TestMain(unittest.TestCase):
         self.assertEqual(outputs["gfx94x_runner"], "fallback-gfx94x")
         self.assertEqual(outputs["gfx950_runner"], "fallback-gfx950")
         self.assertEqual(outputs["gfx90a_runner"], "fallback-gfx90a")
+        self.assertEqual(outputs["gfx103x_runner"], "fallback-gfx103x")
+        self.assertEqual(outputs["gfx110x_runner"], "fallback-gfx110x")
+        self.assertEqual(outputs["gfx120x_runner"], "fallback-gfx120x")
         self.assertEqual(outputs["gfx1151_runner"], "fallback-gfx1151")
         self.assertEqual(outputs["gfx94x_sandbox_runner"], "fallback-gfx94x-sandbox")
 
@@ -243,6 +288,9 @@ class TestMain(unittest.TestCase):
         self.assertEqual(outputs["gfx94x_sandbox_runner"], "configured-sandbox")
         self.assertEqual(outputs["gfx950_runner"], "fallback-gfx950")
         self.assertEqual(outputs["gfx90a_runner"], "fallback-gfx90a")
+        self.assertEqual(outputs["gfx103x_runner"], "fallback-gfx103x")
+        self.assertEqual(outputs["gfx110x_runner"], "fallback-gfx110x")
+        self.assertEqual(outputs["gfx120x_runner"], "fallback-gfx120x")
         self.assertEqual(outputs["gfx1151_runner"], "fallback-gfx1151")
 
     def test_all_gpu_families_have_output(self):

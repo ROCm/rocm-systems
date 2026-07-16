@@ -7,7 +7,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-GPU_FAMILIES = ["gfx94x", "gfx950", "gfx90a", "gfx1151"]
+GPU_FAMILIES = [
+    "gfx94x",
+    "gfx950",
+    "gfx90a",
+    "gfx103x",
+    "gfx110x",
+    "gfx120x",
+    "gfx1151",
+]
 TRIGGER_TYPES = ["presubmit", "postsubmit", "nightly"]
 
 
