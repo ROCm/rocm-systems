@@ -950,13 +950,8 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
-  // Host mirror of the per-rank DDA scratch base pointers. Heap-allocated once
-  // per comm and sized to the number of ranks actually served by the active DDA
-  // path (kDdaNranks for the IPC path, comm->nRanks for the fabric path), not a
-  // fixed in-struct array: the fabric path admits up to kDdaMaxNranks ranks, so
-  // a fixed kDdaNranks-element array here would overflow into endMagic and past
-  // the end of the ncclComm allocation. Allocated in the *CommInit routines and
-  // freed in the matching *CommFini; nullptr when no DDA path is active.
+  // Heap-allocated per comm (kDdaNranks for IPC, nRanks for fabric), not a fixed
+  // array -- fabric's larger nRanks used to overflow a fixed kDdaNranks array here.
   void** ddaPeerPtrsHost;
 
   uint64_t endMagic;

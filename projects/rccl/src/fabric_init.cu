@@ -42,17 +42,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  // Fabric DDA is a flat, single-shot collective: every rank exports a VMM
-  // handle for its scratch buffer and every rank imports every other rank's
-  // handle, reducing in one stage. That assumes all nRanks live in the same
-  // UALink/fabric clique. comm->clique.size (computed in ncclMnnvlCheck) counts
-  // the ranks sharing this rank's clusterUuid + cliqueId. When it is smaller
-  // than nRanks the job spans more than one clique (e.g. multiple racks), so
-  // some peers are not fabric-reachable and cuMemImportFromShareableHandle
-  // against them would fail. Multi-clique support would require a clique-scoped
-  // handle exchange plus a second cross-clique reduction stage, which is out of
-  // scope here; fall back to the normal RCCL path instead. Checked before any
-  // allocation so a multi-clique job does zero extra work before falling back.
+  // Fabric DDA assumes every rank shares one UALink clique; skip (fall back to
+  // normal RCCL) if this comm spans multiple cliques -- e.g. multiple racks.
   if (comm->clique.size != comm->nRanks) {
     INFO(NCCL_INIT,
          "ncclDdaFabricCommInit: comm spans multiple fabric cliques (nRanks %d, clique.size %d); skipping fabric DDA path",
