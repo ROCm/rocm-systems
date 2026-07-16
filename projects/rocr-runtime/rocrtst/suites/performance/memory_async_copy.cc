@@ -767,6 +767,97 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   return HSA_STATUS_SUCCESS;
 }
 
+static hsa_status_t GetSimpleGPUAgents(hsa_agent_t agent, void* data) {
+  hsa_status_t err;
+  MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
+
+  hsa_device_type_t device_type;
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+  RET_IF_HSA_ERR(err);
+
+  if (device_type != HSA_DEVICE_TYPE_GPU) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  if (ptr->gpu_local_agent1().handle == 0) {
+    ptr->set_gpu_local_agent1(agent);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  if (ptr->gpu_local_agent2().handle == 0) {
+    ptr->set_gpu_local_agent2(agent);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  if (ptr->gpu_remote_agent().handle == 0) {
+    ptr->set_gpu_remote_agent(agent);
+  }
+
+  return HSA_STATUS_INFO_BREAK;
+}
+
+static hsa_status_t FinalizeAgentTopology(MemoryAsyncCopy* ptr, void* data) {
+  hsa_status_t err;
+
+  auto add_agent = [&](hsa_agent_t ag, hsa_device_type_t dev_type, bool remote) {
+    if (ag.handle == 0) {
+      return;
+    }
+    ptr->agent_info()->push_back(
+        new AgentInfo(ag, ptr->agent_index(), dev_type, remote));
+
+    NodeInfo node;
+    node.agent = *ptr->agent_info()->back();
+    ptr->node_info()->push_back(node);
+
+    err = hsa_amd_agent_iterate_memory_pools(ag, GetPoolInfo, data);
+    ptr->set_agent_index(ptr->agent_index() + 1);
+  };
+
+  add_agent(ptr->cpu_agent(), HSA_DEVICE_TYPE_CPU, false);
+  add_agent(ptr->gpu_local_agent1(), HSA_DEVICE_TYPE_GPU, false);
+  add_agent(ptr->gpu_local_agent2(), HSA_DEVICE_TYPE_GPU, false);
+  add_agent(ptr->gpu_remote_agent(), HSA_DEVICE_TYPE_GPU, true);
+
+  return HSA_STATUS_INFO_BREAK;
+}
+
+static hsa_status_t GetSimpleAgentInfo(hsa_agent_t agent, void* data) {
+  MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
+  hsa_status_t err;
+
+  if (ptr->cpu_agent().handle != 0) {
+    return HSA_STATUS_ERROR;
+  }
+
+  hsa_device_type_t device_type;
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+  RET_IF_HSA_ERR(err);
+
+  if (device_type != HSA_DEVICE_TYPE_CPU) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  ptr->set_cpu_agent(agent);
+
+  uint32_t cpu_numa_node_id;
+  err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE,
+                           &cpu_numa_node_id);
+  RET_IF_HSA_ERR(err);
+  ptr->set_cpu_numa_node_id(cpu_numa_node_id);
+
+  err = hsa_iterate_agents(GetSimpleGPUAgents, data);
+  if (err != HSA_STATUS_INFO_BREAK && err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  if (ptr->gpu_local_agent1().handle == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return FinalizeAgentTopology(ptr, data);
+}
+
 static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
 
@@ -818,29 +909,7 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
     ptr->set_gpu_remote_agent(t);
     return HSA_STATUS_SUCCESS;
   }
-  auto add_agent = [&](hsa_agent_t ag, hsa_device_type_t dev_type,
-                                                                bool remote) {
-    if (ag.handle == 0) {
-      return;
-    }
-    ptr->agent_info()->push_back(
-            new AgentInfo(ag, ptr->agent_index(), dev_type, remote));
-
-    // Contruct a new NodeInfo structure and push back to agent_info_
-    NodeInfo node;
-    node.agent = *ptr->agent_info()->back();
-    ptr->node_info()->push_back(node);
-
-    err = hsa_amd_agent_iterate_memory_pools(ag, GetPoolInfo, data);
-    ptr->set_agent_index(ptr->agent_index() + 1);
-  };
-
-  add_agent(ptr->cpu_agent(), HSA_DEVICE_TYPE_CPU, false);
-  add_agent(ptr->gpu_local_agent1(), HSA_DEVICE_TYPE_GPU, false);
-  add_agent(ptr->gpu_local_agent2(), HSA_DEVICE_TYPE_GPU, false);
-  add_agent(ptr->gpu_remote_agent(), HSA_DEVICE_TYPE_GPU, true);
-
-  return HSA_STATUS_INFO_BREAK;
+  return FinalizeAgentTopology(ptr, data);
 }
 
 void MemoryAsyncCopy::FindTopology() {
@@ -849,9 +918,32 @@ void MemoryAsyncCopy::FindTopology() {
   err = hsa_iterate_agents(GetAgentInfo, this);
 
   if (gpu_local_agent1_.handle == 0) {
-    std::cout << "**** No GPU found in same NUMA node as a CPU ****"
-                                                                 << std::endl;
+    if (verbosity() >= VERBOSE_STANDARD) {
+      std::cout << "**** No GPU found in same NUMA node as a CPU; "
+                   "falling back to simple topology ****" << std::endl;
+    }
+
+    cpu_agent_.handle = 0;
+    gpu_local_agent1_.handle = 0;
+    gpu_local_agent2_.handle = 0;
+    gpu_remote_agent_.handle = 0;
+    cpu_numa_node_id_ = kUnknownNumaNode;
+    agent_index_ = 0;
+    pool_index_ = 0;
+
+    for (PoolInfo* p : pool_info_) {
+      delete p;
+    }
+    pool_info_.clear();
+    for (AgentInfo* a : agent_info_) {
+      delete a;
+    }
+    agent_info_.clear();
+    node_info_.clear();
+
+    err = hsa_iterate_agents(GetSimpleAgentInfo, this);
   }
+
   ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
 
   FindSystemPool();
