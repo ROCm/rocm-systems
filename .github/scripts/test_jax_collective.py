@@ -79,10 +79,8 @@ def find_lib_dirs(artifact_dir: Path) -> list[Path]:
         lib_dirs.add(so_file.parent.resolve())
     sorted_dirs = sorted(lib_dirs)
     for d in sorted_dirs:
-        so_files = [f.name for f in d.iterdir() if ".so" in f.name]
-        log.info("Found lib dir: %s (%d libs)", d, len(so_files))
-        for f in sorted(so_files):
-            log.info("  %s", f)
+        count = sum(1 for f in d.iterdir() if ".so" in f.name)
+        log.info("Found lib dir: %s (%d libs)", d, count)
     return sorted_dirs
 
 
@@ -122,6 +120,50 @@ def setup_ld_library_path(lib_dirs: list[Path]) -> str:
     os.environ["LD_LIBRARY_PATH"] = new_path
     log.info("LD_LIBRARY_PATH=%s", new_path)
     return new_path
+
+
+def diagnose_shared_libs(lib_dirs: list[Path]) -> None:
+    """Run ldd on critical libraries to surface missing transitive deps."""
+    targets = ["librocprofiler-sdk.so.1", "libamdhip64.so"]
+    for d in lib_dirs:
+        for name in targets:
+            lib = d / name
+            if lib.exists():
+                log.info("ldd %s:", lib)
+                result = subprocess.run(
+                    ["ldd", str(lib)],
+                    capture_output=True, text=True,
+                )
+                for line in result.stdout.splitlines():
+                    log.info("  %s", line)
+                if result.returncode != 0:
+                    log.warning("ldd stderr: %s", result.stderr.strip())
+
+    try:
+        import jax_plugins.xla_rocm7 as xla_mod
+        plugin_dir = Path(xla_mod.__file__).parent
+        plugin_so = plugin_dir / "xla_rocm_plugin.so"
+        if plugin_so.exists():
+            log.info("ldd %s:", plugin_so)
+            result = subprocess.run(
+                ["ldd", str(plugin_so)],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.splitlines():
+                if "not found" in line:
+                    log.warning("  MISSING: %s", line.strip())
+                else:
+                    log.info("  %s", line)
+            log.info("readelf -d %s (RPATH/RUNPATH):", plugin_so)
+            result = subprocess.run(
+                ["readelf", "-d", str(plugin_so)],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.splitlines():
+                if "RPATH" in line or "RUNPATH" in line:
+                    log.info("  %s", line.strip())
+    except ImportError:
+        log.info("xla_rocm7 plugin not installed — skipping plugin ldd")
 
 
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
@@ -464,6 +506,7 @@ def main() -> None:
     # Step 2: Set up LD_LIBRARY_PATH and verify override
     setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
+    diagnose_shared_libs(lib_dirs)
 
     # Step 3: Set XLA environment variables
     setup_xla_environment()
