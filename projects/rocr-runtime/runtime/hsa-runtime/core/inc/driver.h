@@ -471,6 +471,13 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
+
+  /// @brief Checks if the accelerator is ready to be used.
+  /// @param[in] agent Agent to check the readiness of.
+  /// @param[out] ready True if the accelerator is ready, false otherwise.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully checks the accelerator readiness.
+  virtual hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 
