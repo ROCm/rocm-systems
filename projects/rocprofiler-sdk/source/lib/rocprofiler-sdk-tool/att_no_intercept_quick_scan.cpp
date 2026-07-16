@@ -366,13 +366,14 @@ uint64_t
 send_overlapping_requests(scan_context_t&             context,
                           const uint8_t*              scan_data,
                           uint64_t                    scan_size,
-                          std::vector<trace_range_t>& ranges)
+                          std::vector<trace_range_t>& ranges,
+                          bool                        is_end)
 {
     auto  chunk_index = context.chunk_index;
     auto& state       = *context.state;
 
     // Signal next chunk to continue from an active trace
-    if(context.trace.active)
+    if(context.trace.active && !is_end)
     {
         state.pending_requests++;
         {
@@ -481,11 +482,14 @@ backend_shader_data(agent_state_t&                         state,
                 shader_data.chunk_index,
                 rocprof_trace_decoder_get_status_string(status));
             state.chunk_failed = true;
+            state.data_cv.notify_all();
             return;
         }
     }
 
-    uint64_t overlap_offset = send_overlapping_requests(context, scan_data, scan_size, completed);
+    bool     is_end = (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) != 0;
+    uint64_t overlap_offset =
+        send_overlapping_requests(context, scan_data, scan_size, completed, is_end);
 
     uint64_t avg_trace_length = 0;
     for(auto& trace : completed)
@@ -537,6 +541,7 @@ backend_shader_data(agent_state_t&                         state,
                                       it->offset_begin,
                                       it->offset_end);
             state.chunk_failed = true;
+            state.data_cv.notify_all();
             return;
         }
 
@@ -563,6 +568,14 @@ backend_shader_data(agent_state_t&                         state,
                                   shader_data.chunk_index,
                                   context.trace.offset_begin,
                                   scan_size);
+        state.chunk_failed = true;
+        state.data_cv.notify_all();
+        return;
+    }
+
+    if(is_end)
+    {
+        forward_cut(state, shader_data, standalone, shader_data_forwarder);
         return;
     }
 
