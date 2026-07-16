@@ -8,7 +8,7 @@ N nodes on a SLURM cluster via mnctl-launched ROCm containers. `run_coverage.sh`
 
 ```
 .github/scripts/
-├── coverage_configure.py     # matrix generator (target table -> build matrix)
+├── ci_configure.py           # matrix generator (CLUSTERS + TARGETS[workload] -> build matrix)
 ├── run_coverage.sh           # entry -> python run_workload.py --workload coverage
 ├── run_workload.py           # entrypoint: pick payload by --workload/$WORKLOAD
 ├── orchestrator.py           # RunConfig (dataclass) + Orchestrator (generic flow)

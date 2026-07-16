@@ -20,7 +20,8 @@ from .base import Payload
 
 class CoveragePayload(Payload):
     tag = "cov"                              # keeps the historical rccl-cov-<arch> name
-    artifact_env_var = "COVERAGE_ARTIFACT_DIR"
+    # artifact_env_var inherited from Payload (RESULT_ARTIFACT_DIR) -- standardized so
+    # the reusable workflow uploads $RESULT_ARTIFACT_DIR for every workload.
 
     def __init__(self):
         self.test_config = os.environ.get("TEST_CONFIG", "mi300x_mellanox_ib.json")

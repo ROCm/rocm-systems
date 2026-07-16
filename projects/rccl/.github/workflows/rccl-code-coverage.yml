@@ -1,7 +1,7 @@
 # RCCL code coverage on a SLURM GPU cluster.
-# A setup job turns the target table (.github/scripts/coverage_configure.py) into a
-# build matrix; each coverage job runs on a self-hosted login-node runner that owns
-# salloc/sbatch and calls .github/scripts/run_coverage.sh (also testable standalone).
+# Thin caller: triggers + PR-label gating live here; the actual setup->matrix->run flow
+# is the reusable workflow .github/workflows/mnctl-run.yml (workload: coverage). The
+# coverage matrix and payload live in .github/scripts/ (ci_configure.py, payloads/coverage.py).
 name: RCCL Code Coverage
 
 on:
@@ -66,114 +66,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
-    # Build the target matrix from the table (or from dispatch overrides). PR-gated on the label.
+  coverage:
+    # PR-gated on the label; schedule/dispatch always run.
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'ci: code-coverage')
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.cfg.outputs.matrix }}
-      has_targets: ${{ steps.cfg.outputs.has_targets }}
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - id: cfg
-        env:
-          INPUT_TARGETS: ${{ inputs.targets }}
-          INPUT_CLUSTER: ${{ inputs.cluster }}
-          INPUT_ROCM_IMAGE: ${{ inputs.rocm_image }}
-          INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
-          INPUT_GPU_ARCH: ${{ inputs.gpu_arch }}
-          INPUT_NODES: ${{ inputs.nodes }}
-          INPUT_TEST_CONFIG: ${{ inputs.test_config }}
-          INPUT_TEST_SUITE: ${{ inputs.test_suite }}
-          INPUT_TEST_NAME: ${{ inputs.test_name }}
-        run: python .github/scripts/coverage_configure.py
-
-  coverage:
-    # One job per enabled target; each allocates nodes and runs coverage via mnctl.
-    needs: setup
-    if: ${{ needs.setup.outputs.has_targets == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
-    name: coverage (${{ matrix.name }})
-    runs-on: [self-hosted, "${{ matrix.runner }}"]
-    timeout-minutes: 360
-    defaults:
-      run:
-        shell: bash
-    steps:
-      # Check out RCCL; it provides test_runner.py + install.sh that get mounted into the container.
-      - name: Checkout RCCL
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0
-
-      # Check out rccl-tests into a sibling subdir; test_runner builds the perf
-      # binaries (all_reduce_perf, ...) from it, mounted at /work/rccl-tests.
-      - name: Checkout rccl-tests
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ROCm/rccl-tests
-          ref: ${{ inputs.rccl_tests_ref || 'develop' }}
-          path: rccl-tests
-          fetch-depth: 0
-
-      # Check out rccl-utils into a sibling subdir; it provides mnctl (MultiNodeDocker),
-      # which builds/launches the multi-node containers. run_coverage.sh stages it onto
-      # shared FS if the runner workspace isn't visible on the compute nodes.
-      - name: Checkout rccl-utils
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ROCm/rccl-utils
-          ref: ${{ inputs.rccl_utils_ref || 'master' }}
-          path: rccl-utils
-          fetch-depth: 0
-
-      # Allocate nodes, launch ROCm containers with mnctl, run test_runner.py --coverage-report, tear down.
-      - name: Run code coverage
-        env:
-          ROCM_IMAGE: ${{ matrix.rocm_image }}
-          DOCKERFILE: ${{ matrix.dockerfile }}
-          # rccl-tests checkout (sibling subdir); overrides the script's ../rccl-tests default.
-          RCCL_TESTS_DIR: ${{ github.workspace }}/rccl-tests
-          # rccl-utils checkout (provides mnctl); overrides the script's ../../rccl-utils default.
-          MNCTL_DIR: ${{ github.workspace }}/rccl-utils/MultiNodeDocker
-          # Optional MPI hostfile override; empty => script uses the dynamic mnctl hostfile.
-          RCCL_TEST_MPI_HOSTFILE: ${{ vars.RCCL_TEST_MPI_HOSTFILE }}
-          # Non-interactive registry login (Harbor CLI secret / robot / faceless account).
-          # Configure REGISTRY_USER + REGISTRY_TOKEN as GitHub repo/org secrets.
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-          GPU_ARCH: ${{ matrix.gpu_arch }}
-          NODES: ${{ matrix.nodes }}
-          TEST_CONFIG: ${{ matrix.test_config }}
-          TEST_SUITE: ${{ matrix.test_suite }}
-          TEST_NAME: ${{ matrix.test_name }}
-          NIC_TYPE: ${{ matrix.nic_type }}
-          # Per-cluster SLURM settings come from the matrix (CLUSTERS table).
-          PARTITION: ${{ matrix.partition }}
-          ACCOUNT: ${{ matrix.account }}
-          RESERVATION: ${{ matrix.reservation }}
-          GPUS_PER_NODE: ${{ matrix.gpus_per_node }}
-          SHARED_FS_ROOT: ${{ matrix.shared_fs_root }}
-          TIME_LIMIT: "04:00:00"
-          ALLOC_MODE: new
-          # Recognition metadata folded into RUN_ID by the script (arch-rocm-branch[-prN]),
-          # which names the rccl_test_artifacts_<RUN_ID>_<timestamp>/ report dir.
-          RCCL_BRANCH: ${{ github.head_ref || github.ref_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: bash .github/scripts/run_coverage.sh
-
-      # Publish the HTML + text coverage report regardless of pass/fail. test_runner
-      # writes it to rccl_test_artifacts_<RUN_ID>_<timestamp>/; run_coverage.sh chowns
-      # it to the runner user and exports its exact name as COVERAGE_ARTIFACT_DIR, so we
-      # upload only THIS run's dir (never a leftover/other rccl_test_artifacts_* dir).
-      - name: Upload coverage report
-        if: always() && env.COVERAGE_ARTIFACT_DIR != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: rccl-coverage-${{ matrix.name }}
-          path: ${{ env.COVERAGE_ARTIFACT_DIR }}/
-          if-no-files-found: warn
+    uses: ./.github/workflows/mnctl-run.yml
+    with:
+      workload: coverage
+      targets: ${{ inputs.targets || 'all' }}
+      cluster: ${{ inputs.cluster || 'mi300x-rccl' }}
+      rocm_image: ${{ inputs.rocm_image || '' }}
+      dockerfile: ${{ inputs.dockerfile || 'Dockerfile.Multinode.Ubuntu' }}
+      gpu_arch: ${{ inputs.gpu_arch || 'gfx942' }}
+      nodes: ${{ inputs.nodes || '2' }}
+      test_config: ${{ inputs.test_config || 'mi300x_mellanox_ib.json' }}
+      test_suite: ${{ inputs.test_suite || '' }}
+      test_name: ${{ inputs.test_name || '' }}
+      rccl_tests_ref: ${{ inputs.rccl_tests_ref || 'develop' }}
+      rccl_utils_ref: ${{ inputs.rccl_utils_ref || 'master' }}
+      artifact_prefix: rccl-coverage
+    secrets:
+      REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}

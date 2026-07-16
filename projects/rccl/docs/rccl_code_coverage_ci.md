@@ -108,7 +108,7 @@ Plain-language definitions of the terms used throughout this doc.
 | **Run coverage on fresh nodes** | `ALLOC_MODE=new NODES=2 PARTITION=rccl ACCOUNT=rccl bash .github/scripts/run_coverage.sh` (see [§10.2](#102-test-with-a-fresh-allocation-on-reservation-rccl_415)). |
 | **Run only one test suite (fast)** | Add `TEST_SUITE=<config-key-or-display-name>`, e.g. `TEST_SUITE=ubr_multi_node`. The script translates config keys to display names for you. |
 | **Trigger it from GitHub** | Actions → *RCCL Code Coverage* → *Run workflow*; optionally set `targets` (e.g. `gfx942,alola`) or per-run overrides. On PRs, add the `ci: code-coverage` label. |
-| **Add a new OS / arch / ROCm target** | Append one row to `COVERAGE_TARGETS` in `coverage_configure.py` with `enabled: True` (see [§6](#6-deploying-for-different-os--arch--rocm-versions)). No YAML edits. |
+| **Add a new OS / arch / ROCm target** | Append one row to `TARGETS` in `ci_configure.py` with `enabled: True` (see [§6](#6-deploying-for-different-os--arch--rocm-versions)). No YAML edits. |
 | **Enable a new cluster (Alola/Ruby/TW)** | Fill a `CLUSTERS` row + register a runner (see [§10.3](#103-enable-on-alola--ruby--tw)). |
 | **Find the report** | `projects/rccl/rccl_test_artifacts_<RUN_ID>_<timestamp>/report/index.html` locally, or download the `rccl-coverage-<target>` artifact from the run. |
 | **Fix a private-image pull failure** | `docker login registry-sc-harbor.amd.com` on the nodes, or set `REGISTRY_USER`/`REGISTRY_TOKEN` (see [Pitfalls](#9-pitfalls--what-could-go-wrong)). |
@@ -193,7 +193,7 @@ sequenceDiagram
     participant CT as Containers (all nodes)
     participant TR as test_runner.py (in head container)
 
-    GH->>GH: setup job: coverage_configure.py -> matrix (per target)
+    GH->>GH: setup job: ci_configure.py -> matrix (per target)
     GH->>SH: coverage job (per target: image, arch, nodes, config)
     SH->>SL: salloc -N<nodes> -p rccl -A rccl --gres=gpu:8 (or attach existing job)
     SL-->>SH: allocation granted (SLURM_JOB_NODELIST)
@@ -275,9 +275,10 @@ All under `projects/rccl/`:
 projects/rccl/
 ├── .github/
 │   ├── workflows/
-│   │   └── rccl-code-coverage.yml      # (1) GH Actions entry point (setup -> matrix -> coverage)
+│   │   ├── rccl-code-coverage.yml      # (1a) thin caller: triggers + PR gate -> uses mnctl-run.yml (workload: coverage)
+│   │   └── mnctl-run.yml               # (1b) reusable workflow_call: setup -> matrix -> run (any workload)
 │   └── scripts/
-│       ├── coverage_configure.py       # (2) target table -> build matrix (one row per target)
+│       ├── ci_configure.py       # (2) CLUSTERS + TARGETS[workload] -> build matrix (one row per target)
 │       ├── run_coverage.sh             # (3) entry -> python run_workload.py --workload coverage
 │       ├── run_workload.py             #     entrypoint: pick payload by --workload/$WORKLOAD
 │       ├── orchestrator.py             #     RunConfig (dataclass) + Orchestrator (generic flow)
@@ -303,46 +304,74 @@ projects/rccl/
 > *(An equivalent bash implementation may exist locally as a historical fallback but
 > is not tracked in the repository.)*
 
-The workflow has two jobs: a lightweight `setup` job (on `ubuntu-24.04`) runs
-`coverage_configure.py` to emit a matrix, then a `coverage` job fans out one run
-per enabled target on the self-hosted `slurm-login` runner.
+The pipeline is split into a **thin per-workload caller** (`rccl-code-coverage.yml`)
+and a **reusable workflow** (`mnctl-run.yml`). The reusable workflow has two jobs: a
+lightweight `setup` job (on `ubuntu-24.04`) runs `ci_configure.py` to emit a matrix,
+then a `run` job fans out one run per enabled target on the self-hosted login-node
+runner. New workloads (rccl-tests, AI, ...) add a payload + `TARGETS` rows and a
+one-screen caller — no changes to the run mechanics.
 
-### (1) `rccl-code-coverage.yml`
+### (1a) `rccl-code-coverage.yml` (thin caller)
 
-Two-job entry point. Responsibilities:
+Holds only the coverage-specific triggers and gating, then delegates:
 
 - **Triggers:** daily `schedule`, manual `workflow_dispatch` (with a `targets`
   selector plus per-run overrides: image/dockerfile/arch/nodes/config/filters), and
   `pull_request` gated on the `ci: code-coverage` label (same gate as Jenkins).
-- **`setup` job** (on `ubuntu-24.04`): runs `coverage_configure.py` → emits the
-  build `matrix` and `has_targets`. Cheap; no cluster access.
-- **`coverage` job**: `strategy.matrix` fan-out (one job per enabled/selected
-  target, `fail-fast: false`), runs on a self-hosted login-node runner
-  (`[self-hosted, <matrix.runner>]`). There is **no** job `container:` — the
-  script drives Docker on compute nodes. Steps: checkout RCCL → checkout
-  rccl-tests (into a sibling `rccl-tests/` subdir; `ROCm/rccl-tests` at the
-  `rccl_tests_ref` input, default `develop`) → checkout rccl-utils (into a sibling
-  `rccl-utils/` subdir; `ROCm/rccl-utils` at the `rccl_utils_ref` input, default
-  `master`, providing `mnctl`) → run `run_coverage.sh` (matrix values +
+- **`coverage` job:** `uses: ./.github/workflows/mnctl-run.yml` with
+  `workload: coverage`, forwarding the dispatch inputs (with `|| default` fallbacks so
+  schedule/PR runs get sane values) and passing the registry secrets. The PR-label
+  `if:` gate lives on this job, so it controls whether the reusable workflow runs.
+
+### (1b) `mnctl-run.yml` (reusable, `workflow_call`)
+
+The actual mechanics, parameterized by `workload` (plus targets/overrides/refs,
+`timeout_minutes`, `time_limit`, `artifact_prefix`; registry creds via `secrets`).
+
+- **`setup` job** (on `ubuntu-24.04`): runs `ci_configure.py` with
+  `INPUT_WORKLOAD` → emits the build `matrix` (only that workload's enabled targets)
+  and `has_targets`. Cheap; no cluster access.
+- **`run` job**: `strategy.matrix` fan-out (one job per enabled/selected target,
+  `fail-fast: false`), runs on a self-hosted login-node runner
+  (`[self-hosted, <matrix.runner>]`). There is **no** job `container:` — the Python
+  orchestrator drives Docker on compute nodes. Steps: checkout RCCL → checkout
+  rccl-tests (sibling `rccl-tests/`; `ROCm/rccl-tests` at `rccl_tests_ref`, default
+  `develop`) → checkout rccl-utils (sibling `rccl-utils/`; `ROCm/rccl-utils` at
+  `rccl_utils_ref`, default `master`, providing `mnctl`) → run
+  `run_workload.py --workload <workload>` (matrix values +
   `RCCL_TESTS_DIR=$GITHUB_WORKSPACE/rccl-tests` and
   `MNCTL_DIR=$GITHUB_WORKSPACE/rccl-utils/MultiNodeDocker` passed as env) →
-  `upload-artifact` of the coverage output (`if: always()`, named per target).
-  **Everything the run needs (RCCL, rccl-tests, mnctl) is checked out by the
-  workflow — no pre-provisioned cluster checkout is required.**
+  `upload-artifact` of `$RESULT_ARTIFACT_DIR` (`if: always()`, named
+  `<artifact_prefix>-<matrix.name>`). **Everything the run needs (RCCL, rccl-tests,
+  mnctl) is checked out by the workflow — no pre-provisioned cluster checkout.**
 
-The workflow is intentionally thin; all cluster logic lives in the script so it
-is testable standalone (see [§7](#7-local-testing-on-the-current-cluster)).
+The workflows are intentionally thin; all cluster logic lives in the Python code so
+it is testable standalone (see [§7](#7-local-testing-on-the-current-cluster)).
 
-### (2) `coverage_configure.py`
+### (2) `ci_configure.py`
 
-A one-row-per-target table (`COVERAGE_TARGETS`) whose keys map directly to the env
-`run_coverage.sh` consumes: `rocm_image`, `dockerfile`, `gpu_arch`, `test_config`,
-`nic_type`, `nodes`, `runner`, plus `enabled`. It emits a GitHub Actions `matrix`
-(`{"include": [...]}`) of all enabled rows, and `has_targets` to gate the coverage
-job. The `targets` input selects a subset by target **name or gfx arch** (e.g.
-`gfx942,gfx950`; `all` = every enabled row); a `workflow_dispatch` run that sets
-`rocm_image` instead overrides the table and produces a single-entry matrix from
-the inputs. **Adding a new OS/arch/ROCm target is one row** — no YAML changes.
+Two tables. `CLUSTERS` holds one row per cluster (SLURM `partition`/`account`/
+`reservation`, `gpus_per_node`, self-hosted `runner` label, `shared_fs_root`).
+`TARGETS` holds one row per `(workload, image, arch)` target: `workload`, `name`,
+`enabled`, a `cluster` reference, `rocm_image`, `dockerfile`, `gpu_arch`, `nic_type`,
+`nodes`, and workload-specific `params` (e.g. `test_config`). Given `INPUT_WORKLOAD`,
+it keeps only that workload's enabled rows, merges in the referenced cluster's fields,
+and emits a GitHub Actions `matrix` (`{"include": [...]}`) plus `has_targets` to gate
+the run job. The `targets` input selects a subset by target **name, gfx arch, or
+cluster** (e.g. `gfx942,alola`; `all` = every enabled row); a `workflow_dispatch` run
+that sets `rocm_image` instead overrides the table and produces a single-entry matrix
+from the inputs (using `cluster` for SLURM settings). **Adding a new OS/arch/ROCm
+target is one row** — no YAML changes.
+
+> **Single source for the image.** The default ROCm image lives in exactly one place —
+> `DEFAULT_ROCM_IMAGE` in `orchestrator.py` — and `ci_configure.py` imports it for its
+> gfx942 target rows, so bumping the image (or switching to a different therock image /
+> registry) is a **one-line change** used by both CI and local runs. The registry host
+> is derived from the image string, and `docker login` is skipped automatically when
+> `REGISTRY_USER`/`REGISTRY_TOKEN` are unset — so moving to a public/anonymous image is
+> just the image change plus (optionally) dropping those secrets, with no code changes.
+> *(The untracked bash fallback keeps its own literal default; it can't import the
+> Python constant.)*
 
 ### (3) `run_coverage.sh`
 
@@ -483,8 +512,8 @@ Deployment recipe:
 | **NIC** | `--nic-type mellanox` (default) or `ainic`; `mnctl` auto-prepends the matching `post-setup/<nic>` dir. |
 | **New cluster** | Adjust `PARTITION`/`ACCOUNT`/`RESERVATION`/`GPUS_PER_NODE`. If no SLURM, provide a static `--hostfile`. |
 
-This is exactly what `coverage_configure.py` provides: append one row to
-`COVERAGE_TARGETS` (with `enabled: True`) and the nightly matrix picks it up — no
+This is exactly what `ci_configure.py` provides: append one row to
+`TARGETS` (with `enabled: True`) and the nightly matrix picks it up — no
 YAML edits. Two disabled example rows (`gfx950-ubuntu24`,
 `gfx942-almalinux9-7.1.2`) are included as templates; fill in their image tags and
 flip `enabled` to deploy.
@@ -550,7 +579,7 @@ Tips:
 
 ## 8. Optimizations
 
-**Time / cost** (implemented in `run_coverage.sh` + `coverage_configure.py`)
+**Time / cost** (implemented in `run_coverage.sh` + `ci_configure.py`)
 - **Cache the multi-node image (with rebuild fallback).** `mnctl` reuses the cached
   image when its tag exists and **rebuilds automatically only if it is missing**.
   The stable per-arch `--name` keeps the tag stable across nightly runs. Force a
@@ -559,7 +588,7 @@ Tips:
   at `$SHARED_FS_ROOT/.docker-{shared,builds}/<container>` (default `$HOME`, must be
   NFS/GPFS/Lustre) and passes `--shared-fs yes`, so the leader builds UCX/OpenMPI
   once and all nodes + future runs reuse it. Biggest single win after the first run.
-- **Parallelize + select the arch/version matrix.** `coverage_configure.py` emits a
+- **Parallelize + select the arch/version matrix.** `ci_configure.py` emits a
   matrix (one job per enabled target, `fail-fast: false`). The `targets`
   workflow_dispatch input selects a subset by target name or gfx arch (e.g.
   `gfx942,gfx950`); `all` (default) runs every enabled row. For true concurrency
@@ -714,7 +743,7 @@ releases it. To make this the CI default, set `reservation: "rccl_415"` in the
 ### 10.3 Enable on Alola / Ruby / TW
 
 Each cluster differs only in SLURM settings + runner label, captured in the
-`CLUSTERS` table in `coverage_configure.py`. Steps per cluster:
+`CLUSTERS` table in `ci_configure.py`. Steps per cluster:
 
 1. **Discover its SLURM params** on that cluster's login node:
    ```bash

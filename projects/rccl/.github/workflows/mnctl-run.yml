@@ -1,0 +1,180 @@
+# Reusable multi-node GPU workload runner (SLURM + mnctl containers).
+# A setup job turns the target table (.github/scripts/ci_configure.py) into a build
+# matrix for the requested `workload`; each run job executes on a self-hosted login-node
+# runner that owns salloc/sbatch and calls .github/scripts/run_workload.py, which
+# dispatches to the matching payload (coverage, rccl-tests, ...). Thin per-workload
+# workflows call this via `workflow_call`.
+name: mnctl workload run
+
+on:
+  workflow_call:
+    inputs:
+      workload:
+        description: "Workload/payload name (must exist in payloads/__init__.py REGISTRY)"
+        type: string
+        required: true
+      targets:
+        description: "'all', or comma-separated target names / gfx archs / cluster names"
+        type: string
+        default: "all"
+      cluster:
+        description: "Cluster for a single-image override run"
+        type: string
+        default: "mi300x-rccl"
+      rocm_image:
+        description: "Override: ROCm base image (empty = run all enabled targets for this workload)"
+        type: string
+        default: ""
+      dockerfile:
+        description: "Override: mnctl Dockerfile matching the base image OS"
+        type: string
+        default: "Dockerfile.Multinode.Ubuntu"
+      gpu_arch:
+        description: "Override: GPU architecture target"
+        type: string
+        default: "gfx942"
+      nodes:
+        description: "Override: number of nodes to allocate"
+        type: string
+        default: "2"
+      test_config:
+        description: "Override: test_runner.py config filename"
+        type: string
+        default: "mi300x_mellanox_ib.json"
+      test_suite:
+        description: "Optional gtest suite filter (empty = all)"
+        type: string
+        default: ""
+      test_name:
+        description: "Optional gtest test-name filter (empty = all)"
+        type: string
+        default: ""
+      rccl_tests_ref:
+        description: "rccl-tests branch/tag/SHA"
+        type: string
+        default: "develop"
+      rccl_utils_ref:
+        description: "rccl-utils branch/tag/SHA providing mnctl"
+        type: string
+        default: "master"
+      timeout_minutes:
+        description: "Per-run job timeout"
+        type: number
+        default: 360
+      time_limit:
+        description: "SLURM allocation time limit (HH:MM:SS)"
+        type: string
+        default: "04:00:00"
+      artifact_prefix:
+        description: "Prefix for the uploaded artifact name (suffixed with the target name)"
+        type: string
+        default: "rccl"
+    secrets:
+      REGISTRY_USER:
+        required: false
+      REGISTRY_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    # Build the matrix for this workload from the table (or from dispatch overrides).
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+      has_targets: ${{ steps.cfg.outputs.has_targets }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - id: cfg
+        env:
+          INPUT_WORKLOAD: ${{ inputs.workload }}
+          INPUT_TARGETS: ${{ inputs.targets }}
+          INPUT_CLUSTER: ${{ inputs.cluster }}
+          INPUT_ROCM_IMAGE: ${{ inputs.rocm_image }}
+          INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
+          INPUT_GPU_ARCH: ${{ inputs.gpu_arch }}
+          INPUT_NODES: ${{ inputs.nodes }}
+          INPUT_TEST_CONFIG: ${{ inputs.test_config }}
+          INPUT_TEST_SUITE: ${{ inputs.test_suite }}
+          INPUT_TEST_NAME: ${{ inputs.test_name }}
+        run: python .github/scripts/ci_configure.py
+
+  run:
+    # One job per enabled target; each allocates nodes and runs the workload via mnctl.
+    needs: setup
+    if: ${{ needs.setup.outputs.has_targets == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    name: ${{ inputs.workload }} (${{ matrix.name }})
+    runs-on: [self-hosted, "${{ matrix.runner }}"]
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # RCCL: provides test_runner.py + install.sh mounted into the container.
+      - name: Checkout RCCL
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      # rccl-tests: test_runner builds the perf binaries from it (mounted at /work/rccl-tests).
+      - name: Checkout rccl-tests
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rccl-tests
+          ref: ${{ inputs.rccl_tests_ref }}
+          path: rccl-tests
+          fetch-depth: 0
+
+      # rccl-utils: provides mnctl (MultiNodeDocker) to build/launch multi-node containers.
+      - name: Checkout rccl-utils
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rccl-utils
+          ref: ${{ inputs.rccl_utils_ref }}
+          path: rccl-utils
+          fetch-depth: 0
+
+      # Allocate nodes, launch ROCm containers with mnctl, run the payload, tear down.
+      - name: Run workload
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+          ROCM_IMAGE: ${{ matrix.rocm_image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          RCCL_TESTS_DIR: ${{ github.workspace }}/rccl-tests
+          MNCTL_DIR: ${{ github.workspace }}/rccl-utils/MultiNodeDocker
+          RCCL_TEST_MPI_HOSTFILE: ${{ vars.RCCL_TEST_MPI_HOSTFILE }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          GPU_ARCH: ${{ matrix.gpu_arch }}
+          NODES: ${{ matrix.nodes }}
+          TEST_CONFIG: ${{ matrix.test_config }}
+          TEST_SUITE: ${{ matrix.test_suite }}
+          TEST_NAME: ${{ matrix.test_name }}
+          NIC_TYPE: ${{ matrix.nic_type }}
+          # Per-cluster SLURM settings come from the matrix (CLUSTERS table).
+          PARTITION: ${{ matrix.partition }}
+          ACCOUNT: ${{ matrix.account }}
+          RESERVATION: ${{ matrix.reservation }}
+          GPUS_PER_NODE: ${{ matrix.gpus_per_node }}
+          SHARED_FS_ROOT: ${{ matrix.shared_fs_root }}
+          TIME_LIMIT: ${{ inputs.time_limit }}
+          ALLOC_MODE: new
+          # Recognition metadata folded into RUN_ID (arch-rocm-branch[-prN]).
+          RCCL_BRANCH: ${{ github.head_ref || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python .github/scripts/run_workload.py --workload "${{ inputs.workload }}"
+
+      # Publish the report dir regardless of pass/fail. The payload exports its exact
+      # name as RESULT_ARTIFACT_DIR, so we upload only THIS run's dir.
+      - name: Upload artifacts
+        if: always() && env.RESULT_ARTIFACT_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.artifact_prefix }}-${{ matrix.name }}
+          path: ${{ env.RESULT_ARTIFACT_DIR }}/
+          if-no-files-found: warn
