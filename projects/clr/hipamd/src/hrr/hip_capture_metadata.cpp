@@ -14,11 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace hip {
-class Device;
-extern std::vector<hip::Device*> g_devices;
-extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
-}  // namespace hip
+#include "../hip_internal.hpp"  // hip::g_devices, hip::ihipGetDeviceProperties
 
 namespace hrr_cap {
 namespace metadata {
