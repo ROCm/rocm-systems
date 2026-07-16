@@ -158,6 +158,14 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
+  /// @brief Return the KFD queue ID that launched this wave.
+  uint32_t queue_id() const { return queue_id_; }
+
+  /// @brief Set the KFD queue ID (called by the command processor at dispatch).
+  /// @details Used by the debugger path to correlate a stopped wave with the
+  /// queue whose context-save-restore area holds its saved state.
+  void set_queue_id(uint32_t id) { queue_id_ = id; }
+
   /// @brief Return the owning process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
 
@@ -436,6 +444,54 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  // -- KFD debugger (trap) state --
+  //
+  // These model the wave-level state the AMD trap handler maintains for
+  // rocm-dbgapi: the trap temporary registers (TTMP0-15), the trap status
+  // register (TRAPSTS), and the debug halt/single-step bits. The emulator
+  // models the trap handler's observable effect directly (it does not execute
+  // the trap-handler shader), so a wave that hits an s_trap stops here and its
+  // state can later be serialized into the queue's context-save area.
+
+  /// @brief Read a trap temporary register (TTMP0-15).
+  uint32_t ttmp(uint32_t idx) const { return idx < 16 ? ttmp_[idx] : 0; }
+
+  /// @brief Write a trap temporary register (TTMP0-15).
+  void set_ttmp(uint32_t idx, uint32_t val) {
+    if (idx < 16)
+      ttmp_[idx] = val;
+  }
+
+  /// @brief Read the trap status register (TRAPSTS / EXCP flags).
+  uint32_t trapsts() const { return trapsts_; }
+
+  /// @brief Write the trap status register.
+  void set_trapsts(uint32_t val) { trapsts_ = val; }
+
+  /// @brief Whether the debugger has stopped this wave (trapped or suspended).
+  /// @details A debug-halted wave keeps its slot and all register state; the
+  /// scheduler skips it so the CU can go quiescent without retiring the wave.
+  bool debug_halted() const { return debug_halted_; }
+  void set_debug_halted(bool v) { debug_halted_ = v; }
+
+  /// @brief Whether a future debugger resume should request single-step mode.
+  bool debug_single_step() const { return single_step_; }
+  void set_debug_single_step(bool v) { single_step_ = v; }
+
+  /// @brief The trap id recorded by the last s_trap (breakpoint = 1).
+  uint32_t trap_id() const { return trap_id_; }
+
+  /// @brief Stop this wave in the debugger (models the trap handler entry).
+  /// @param trap_id Trap id from the s_trap immediate (breakpoint = 1).
+  /// @details Records the trap id and halts the wave for debugger inspection.
+  /// The PC is advanced past the s_trap by the caller (issue_instruction), so
+  /// the saved PC points just after the trap, matching the ROCr trap handler.
+  void debug_trap(uint32_t trap_id) {
+    trap_id_ = trap_id;
+    debug_halted_ = true;
+    single_step_ = false;
+  }
+
   /// @brief Halt this wavefront and notify the CU for WG completion tracking.
   /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
   /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
@@ -489,6 +545,13 @@ public:
     wait_target_ = {};
     ready_cycle_ = 0;
     state_ = WfState::HALTED;
+    for (auto &t : ttmp_)
+      t = 0;
+    trapsts_ = 0;
+    debug_halted_ = false;
+    single_step_ = false;
+    trap_id_ = 0;
+    queue_id_ = 0;
   }
 
 protected:
@@ -509,6 +572,7 @@ protected:
   uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t queue_id_ = 0;     ///< KFD queue ID that launched this wave (debugger correlation).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
@@ -543,6 +607,12 @@ private:
   uint64_t private_aperture_limit_ = 0;
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
+
+  uint32_t ttmp_[16] = {};    ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;      ///< Trap status register (EXCP flags).
+  bool debug_halted_ = false; ///< Stopped by the debugger (skipped by scheduler).
+  bool single_step_ = false;  ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;      ///< Trap id from the last s_trap (breakpoint = 1).
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

@@ -390,6 +390,24 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
 
+  // s_trap: enter the KFD debugger trap handler. rocm-dbgapi plants an s_trap
+  // (encoded 0xBF9200xx) as a software breakpoint; the low byte is the trap id
+  // (breakpoint = 1). The ISA execute for s_trap intentionally throws (the
+  // emulator does not run the trap-handler shader), so we intercept it here and
+  // model the trap handler's observable effect: advance the PC past the trap
+  // (rocm-dbgapi applies a -4 adjust to recover the breakpoint address), notify
+  // the debug controller, and — if a debugger is attached — stop the wave for
+  // inspection. Without a debugger the s_trap is a no-op so kernels that embed
+  // traps (e.g. llvm.trap in unreached paths) do not abort the emulator.
+  if (std::string_view(inst->mnemonic()) == "s_trap") {
+    uint32_t trap_id = words[0] & 0xFFu;
+    active->pc += inst_size;
+    if (trap_handler_ && trap_handler_(*active, trap_id))
+      active->debug_trap(trap_id);
+    delete inst;
+    return;
+  }
+
   {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
@@ -459,8 +477,9 @@ bool ComputeUnitCore::step() {
   update_wf_states();
 
   for (auto &wf : wfs_) {
-    if (wf->state() == WfState::RUNNING)
+    if (wf->state() == WfState::RUNNING && !wf->debug_halted()) {
       issue_instruction(wf.get());
+    }
   }
 
   ++step_count_;
@@ -480,7 +499,7 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  return has_active_wfs();
+  return has_runnable_wfs();
 }
 
 // Explicit template instantiations for all AMDGPU ISAs and execution modes.

@@ -955,6 +955,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
+      wf->set_queue_id(entry.queue_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_flat_wg_id(global_wg_id), entry.cluster_size());
       try {
@@ -1127,7 +1128,12 @@ void CommandProcessor::on_cu_idle() {
   // dispatch continuation through the doorbell path; across the many tiny kernels
   // of an RCCL collective the engine would idle a full tick between steps, adding
   // latency the host socket layer then paid for. dispatch_workgroups() schedules
-  // the CU's own tick event, so no explicit CU nudge is needed here.
+  // the CU's own tick event in the ordinary case. Record quiesced CUs because a
+  // CU containing only debug-halted waves needs an explicit activation when a
+  // newly dispatched wave makes it runnable again.
+  std::vector<bool> was_idle(cus_.size());
+  for (size_t i = 0; i < cus_.size(); ++i)
+    was_idle[i] = cus_[i]->is_idle();
   for (auto &qs : new_queue_states_) {
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
@@ -1139,6 +1145,10 @@ void CommandProcessor::on_cu_idle() {
           ++qs.next_dispatch_idx;
       }
     }
+  }
+  for (size_t i = 0; i < cus_.size(); ++i) {
+    if (was_idle[i] && !cus_[i]->is_idle())
+      cus_[i]->schedule_work();
   }
 }
 
@@ -1873,7 +1883,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   }
 
   for (size_t i = 0; i < cus_.size(); ++i) {
-    if (cus_[i]->has_active_wfs()) {
+    if (!cus_[i]->is_idle()) {
       if (dispatch_ports_[i]->link())
         dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
       else
