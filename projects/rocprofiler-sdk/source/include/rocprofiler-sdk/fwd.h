@@ -186,7 +186,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,      ///< @see ::rocprofiler_hip_graph_operation_t
     ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,   ///< rocSHMEM API tracing
     ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,    ///< hipFILE API Tracing
-    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< Kernel replay pass control. @see
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< EXPERIMENTAL: @see
                                                  ///< ::rocprofiler_kernel_replay_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
