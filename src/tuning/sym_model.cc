@@ -264,7 +264,7 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
     smBw = isAR ? 65 * GBps : 44 * GBps;
     peakBw = k == ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC ? 480 * GBps : 320 * GBps;
   } else {
-    baseLat = isLL ? (isAG ? 8.5 : 10.5) : (isAR ? 19.5 : 13.0);
+    baseLat = isLL ? (isAG ? 8.5 : (isRS ? 10.5 : 11.0)) : (isAR ? 19.5 : 13.0);
     smBw = 55 * GBps;
     peakBw = k == ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC ? 1000 * GBps : 600 * GBps;
     if (isRS) peakBw = 650 * GBps;
