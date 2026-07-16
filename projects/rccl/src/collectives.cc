@@ -758,6 +758,41 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   if (!symEligible &&
       rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
+      const size_t rsShardBytes = recvcount * ncclTypeSize(datatype);
+      // Small-shard fast lane: LL protocol (no GPU barrier).
+      if (rcclParamDdaLL() &&
+          rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
+          ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        INFO(NCCL_COLL,
+             "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, recvcount, (int)datatype, rsShardBytes);
+        NCCLCHECK(ncclReduceScatterDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            recvcount,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+      // Mid-shard fast lane: LL128 protocol (128B lines, no GPU barrier).
+      if (rcclParamDdaLL128() &&
+          rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+          ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        INFO(NCCL_COLL,
+             "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, recvcount, (int)datatype, rsShardBytes);
+        NCCLCHECK(ncclReduceScatterDdaFabricLL128(
+            sendbuff,
+            recvbuff,
+            recvcount,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
       if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         INFO(NCCL_COLL,
              "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
