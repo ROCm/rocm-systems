@@ -21,6 +21,7 @@ ELF_MAGIC = b"\x7fELF"
 
 # ELF machine types (e_machine)
 EM_X86_64 = 62
+EM_PPC64 = 21
 
 # ELF header offsets (for direct byte access)
 E_IDENT_OFFSET = 0
@@ -102,6 +103,9 @@ R_X86_64_COPY = 5
 R_X86_64_GLOB_DAT = 6
 R_X86_64_JUMP_SLOT = 7
 R_X86_64_RELATIVE = 8  # Used for PIE/shared library pointer adjustments
+
+# Relocation types (ppc64le)
+R_PPC64_RELATIVE = 22  # Used for PIE/shared library pointer adjustments
 
 # Dynamic section tags (d_tag)
 DT_NULL = 0
@@ -577,6 +581,7 @@ class ArchConfig:
 
 _ARCH_CONFIGS: dict[int, ArchConfig] = {
     EM_X86_64: ArchConfig(page_size=0x1000, r_relative=R_X86_64_RELATIVE),
+    EM_PPC64: ArchConfig(page_size=0x10000, r_relative=R_PPC64_RELATIVE),
 }
 
 def get_arch_config(e_machine: int) -> ArchConfig:

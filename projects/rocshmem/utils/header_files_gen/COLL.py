@@ -48,7 +48,6 @@ def alltoall_api(T, TNAME):
         f"    const {T} *source, int nelems);\n\n"
     )
 
-
 def generate_alltoall_api():
     expanded_code = """
 /**
@@ -69,6 +68,36 @@ def generate_alltoall_api():
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_api(type_, tname_)
+
+    return expanded_code
+
+def alltoall_wave_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_alltoall_wave(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
+        f"    const {T} *source, int nelems);\n\n"
+    )
+
+def generate_alltoall_wave_api():
+    expanded_code = """
+/**
+ * @name ROCSHMEM_CTX_ALLTOALL_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave-level collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int: zero on success, non-zero otherwise
+ */\n"""
+    for type_, tname_ in types:
+        expanded_code += alltoall_wave_api(type_, tname_)
 
     return expanded_code
 
@@ -256,7 +285,7 @@ def generate_reduce_on_stream_api():
 /**
  * @name ROCSHMEM_REDUCE_ON_STREAM
  * @brief Performs a reduction across all PEs in a team on the specified HIP
- * stream.
+ *        stream.
  *
  * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
@@ -366,6 +395,7 @@ namespace rocshmem {
 
     expanded_code += (
         generate_alltoall_api() +
+        generate_alltoall_wave_api() +
         generate_broadcast_api() +
         generate_fcollect_api() +
         generate_reduction_api() +

@@ -622,5 +622,11 @@ hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** 
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdVirtioDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  (void)agent;
+  (void)ready;
+  return HSA_STATUS_ERROR;
+}
+
 }  // namespace AMD
 }  // namespace rocr

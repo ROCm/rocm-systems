@@ -63,8 +63,25 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
 
   while (!stop.stop_requested() && connected) {
     RpcHeader hdr{};
-    if (!rpc_recv_exact(client_fd, &hdr, sizeof(hdr)))
-      break;
+    // Capture an optional SCM_RIGHTS fd the client attaches to the message (the
+    // debugger notifier pipe on DBG_TRAP ENABLE). A received fd is owned here
+    // and must be closed if not adopted by the debug session.
+    int in_fd = -1;
+    {
+      int in_fds[1] = {-1};
+      size_t num_in_fds = 1;
+      ssize_t hdr_bytes = rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds);
+      if (num_in_fds > 0)
+        in_fd = in_fds[0];
+      // A short read means the peer truncated the header (or closed); drop the
+      // connection instead of acting on a partial header, reclaiming any fd that
+      // arrived with it. (rpc_recv_exact did this implicitly; recvmsg does not.)
+      if (hdr_bytes != static_cast<ssize_t>(sizeof(hdr))) {
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
+    }
 
     switch (hdr.opcode) {
     case RPC_HANDSHAKE: {
@@ -188,7 +205,13 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
+      cmd.in_handle = in_fd;
+      in_fd = -1; // ownership passes to cmd; execute clears it on adoption
       rj_vm_execute_as(vm, process_id, &cmd);
+      // The debug session adopts the notifier fd on success (in_handle cleared);
+      // reclaim it otherwise.
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
 
       RpcHeader resp{};
       resp.opcode = RPC_IOCTL;
@@ -215,6 +238,11 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       connected = false;
       break;
     }
+
+    // Safety net: reclaim any notifier fd attached to a non-ioctl message (the
+    // client only sends one on DBG_TRAP ENABLE).
+    if (in_fd >= 0)
+      ::close(in_fd);
   }
 
   if (process_id != 0)
