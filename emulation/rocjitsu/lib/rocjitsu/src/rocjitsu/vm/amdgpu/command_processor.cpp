@@ -302,28 +302,20 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
-  // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
-  // components via bit masks.
+  // On packed-TID targets (CDNA3/4 and GFX11+): v0[9:0]=X, v0[19:10]=Y,
+  // v0[29:20]=Z. TIDIG_COMP_CNT controls which components the SPI supplies;
+  // unused packed components are zero.
   uint32_t vbase = wf->vgpr_alloc().base;
-  uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
-  uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
-  uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
-  uint32_t wg_xy = wg_x * wg_y;
   for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
-    uint32_t flat_id = workitem_base + lane;
-    uint32_t id_x = flat_id % wg_x;
-    uint32_t id_y = (flat_id / wg_x) % wg_y;
-    uint32_t id_z = flat_id / wg_xy;
-    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
-      uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
-      cu->write_vgpr(vbase, lane, packed);
+    const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, cu->wf_size());
+    if (packed_tid_) {
+      cu->write_vgpr(vbase, lane, pack_workitem_id(id, pkt.enable_vgpr_workitem_id));
     } else {
-      cu->write_vgpr(vbase, lane, id_x);
+      cu->write_vgpr(vbase, lane, id.x);
       if (pkt.enable_vgpr_workitem_id >= 1)
-        cu->write_vgpr(vbase + 1, lane, id_y);
+        cu->write_vgpr(vbase + 1, lane, id.y);
       if (pkt.enable_vgpr_workitem_id >= 2)
-        cu->write_vgpr(vbase + 2, lane, id_z);
+        cu->write_vgpr(vbase + 2, lane, id.z);
     }
   }
 
@@ -722,7 +714,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
-      wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
+      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
@@ -1020,6 +1012,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   dp.workgroup_id_offset = workgroup_id_offset_;
+  dp.grid_size_x = pkt.grid_size_x;
+  dp.grid_size_y = (num_dims >= 2) ? pkt.grid_size_y : 1;
+  dp.grid_size_z = (num_dims >= 3) ? pkt.grid_size_z : 1;
   // For WG ID decomposition, use the dispatch dimensionality (setup field).
   // A 1D dispatch flattens the entire grid into workgroup_id_x.
   dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;

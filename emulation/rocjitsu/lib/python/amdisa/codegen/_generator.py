@@ -2120,6 +2120,51 @@ class CodeGenerator:
                 'static_cast<uint16_t>(inst_.saddr), 2});'
                 '}'
             )
+        # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial row/bank
+        # mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl) leave the old
+        # destination in place, so surface the preserved destination as a use.
+        # This matches what the executor actually restores: the non-VOPC SDWA/DPP
+        # merge only rewrites old vdst bytes/lanes via write_vgpr, so only a
+        # VGPR-class destination is preserved. SGPR destinations are fully
+        # written and never restored -- a VOP3_SDST_ENC carry (v_add_co_ci) and a
+        # VOP3 compare's SGPR mask alike -- so filter to RegClass::VGPR. The ref
+        # still comes from the decoded dst operand to get the real width.
+        #
+        # SDWA exists only on VOP1/VOP2; DPP additionally exists on VOP3/VOP3P/
+        # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
+        # VOPC/VOPCX stay omitted: their result lands in VCC/EXEC, which liveness
+        # does not track (see liveness.h).
+        enc = inst_enc.enc_name.upper()
+        has_sdwa = enc in ('ENC_VOP1', 'ENC_VOP2')
+        has_dpp = enc in ('ENC_VOP1', 'ENC_VOP2') or (
+            enc in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+            and self._supports_vop_dpp_encoding(enc)
+        )
+        if (has_sdwa or has_dpp) and 'vdst' in enc_field_names:
+            decls = ''
+            guards = []
+            if has_sdwa:
+                decls += (
+                    'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
+                    'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
+                )
+                guards.append('sdwa_preserve')
+            if has_dpp:
+                decls += (
+                    'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                    '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                    '(dpp_bound_ctrl_ == 0 && '
+                    'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+                )
+                guards.append('dpp_partial')
+            return (
+                decls + f'if ({" || ".join(guards)}) '
+                'for (int i = 0; i < num_dst_operands(); ++i) '
+                'if (const auto *dst = dst_operand(i)) '
+                'if (auto ref = dst->to_register_ref()) '
+                'if (ref->cls == RegClass::VGPR) '
+                'uses.expand(*ref);'
+            )
         return ''
 
     def _enc_field_at_bit(self, enc_name: str, bit_offset: int) -> str | None:

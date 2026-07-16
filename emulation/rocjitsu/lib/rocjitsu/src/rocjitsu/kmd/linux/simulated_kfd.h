@@ -167,6 +167,13 @@ private:
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
+  /// @brief Look up a KfdProcess by its client (Linux) pid. Used by
+  /// AMDKFD_IOC_DBG_TRAP to resolve the debug target, mirroring the kernel's
+  /// kfd_lookup_process_by_pid().
+  /// @param pid Client (Linux) pid of the target process.
+  /// @return The matching KfdProcess, or nullptr if none matches.
+  std::shared_ptr<KfdProcess> find_process_by_client_pid(pid_t pid) const;
+
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
   GpuDevice *find_gpu(uint32_t gpu_id);
   const GpuDevice *find_gpu(uint32_t gpu_id) const;
@@ -218,6 +225,7 @@ private:
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
+  int debug_trap_ioctl(KfdProcess &caller, void *arg);
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);

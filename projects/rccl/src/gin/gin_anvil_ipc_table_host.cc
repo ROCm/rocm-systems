@@ -9,8 +9,11 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include <hip/hip_runtime.h>
+#include <mutex>
 
 namespace {
+
+std::mutex ipcTableMutex;
 
 ncclGinAnvilIpcBufEntry masterEntries[NCCL_GIN_ANVIL_IPC_MAX_BUFS];
 int masterEntryCount = 0;
@@ -95,6 +98,7 @@ extern "C" void ncclGinAnvilIpcTableGetDevice(const ncclGinAnvilIpcBufEntry** ou
 extern "C" void ncclGinAnvilIpcTableTrackContext(ncclGinAnvilSdmaGPUContext* hostCtx,
                                                  ncclGinAnvilSdmaGPUContext* devCtx) {
   if (!hostCtx || !devCtx) return;
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   for (LiveGpuContext* it = liveContexts; it != nullptr; it = it->next) {
     if (it->hostCtx == hostCtx) return;
   }
@@ -107,6 +111,7 @@ extern "C" void ncclGinAnvilIpcTableTrackContext(ncclGinAnvilSdmaGPUContext* hos
 
 extern "C" void ncclGinAnvilIpcTableUntrackContext(ncclGinAnvilSdmaGPUContext* hostCtx) {
   if (!hostCtx) return;
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   LiveGpuContext** prev = &liveContexts;
   for (LiveGpuContext* it = liveContexts; it != nullptr; it = it->next) {
     if (it->hostCtx == hostCtx) {
@@ -121,6 +126,7 @@ extern "C" void ncclGinAnvilIpcTableUntrackContext(ncclGinAnvilSdmaGPUContext* h
 extern "C" int ncclGinAnvilIpcTableRegisterVmm(void* localBase, size_t length, int myRank, int nRanks,
                                                ptrdiff_t strideBytes) {
   if (!localBase || length == 0 || nRanks < 1 || nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS) return -1;
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   if (findEntryIndex(reinterpret_cast<uintptr_t>(localBase)) >= 0) return 0;
 
   ncclGinAnvilIpcBufEntry entry = {};
@@ -136,6 +142,7 @@ extern "C" int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintp
                                                     int nRanks, size_t length) {
   if (!localBase || !remoteBases || length == 0 || nRanks < 1 || nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS)
     return -1;
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   if (findEntryIndex(reinterpret_cast<uintptr_t>(localBase)) >= 0) return 0;
 
   ncclGinAnvilIpcBufEntry entry = {};
@@ -149,10 +156,12 @@ extern "C" int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintp
 
 extern "C" int ncclGinAnvilIpcTableUnregister(void* localBase) {
   if (!localBase) return -1;
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   return removeEntry(reinterpret_cast<uintptr_t>(localBase));
 }
 
 extern "C" void ncclGinAnvilIpcTableTestReset(void) {
+  std::lock_guard<std::mutex> lock(ipcTableMutex);
   while (liveContexts != nullptr) {
     LiveGpuContext* next = liveContexts->next;
     delete liveContexts;

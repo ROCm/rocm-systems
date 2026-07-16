@@ -7,6 +7,7 @@
 #ifndef _NCCL_DEVICE_GIN_ANVIL_SDMA_DEVICE_HOST_COMMON_H_
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_DEVICE_HOST_COMMON_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct ncclGinAnvilIpcBufEntry;
@@ -20,8 +21,11 @@ struct ncclGinAnvilIpcBufEntry;
  *  larger transfers use direct Anvil SDMA. */
 #define NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT 128u
 
-/** Default off: fused OSS7 copy+signal needs remote GPU signal VA; opt-in via env on MI355. */
+/** Default off until SDMA signal VA bind is stable on MI355; opt-in via NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL=1. */
 #define NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL_DEFAULT 0u
+
+/** sdmaDirty is a uint64_t bitmask; one bit per (peer, channel) slot. */
+#define NCCL_GIN_ANVIL_SDMA_DIRTY_BITS 64
 
 struct ncclGinAnvilSdmaGPUContext {
   uint32_t layoutMagic;  // NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC
@@ -38,12 +42,17 @@ struct ncclGinAnvilSdmaGPUContext {
   int numChannels;
   int sdmaChannel;
   int sdmaChannelStride;
-  const ncclGinAnvilIpcBufEntry* ipcTable;  // device pointer; peer VA lookup for IPC puts
+  const ncclGinAnvilIpcBufEntry* ipcTable;  // device pointer; fallback peer VA lookup
   int ipcTableCount;
+  uintptr_t* signal_remote_addrs;  // [nRanks] peer signal region bases (GDA signal_raddrs pattern)
+  uint32_t ipcAgentFence;          // 0=__threadfence_system on IPC (default), 1=agent-scope release
+  uint32_t ipcSignalPeer;          // 1=shader IPC atomic signalPeer, 0=SDMA ATOMIC packet (default)
 };
 
 struct ncclGinAnvilSdmaMemHandle {
-  uintptr_t baseAddr;  // Symmetric LSA flat VA; peer resolved via ginAnvilResolvePeerVa
+  uintptr_t baseAddr;     // Symmetric LSA flat VA for this rank
+  uintptr_t* remote_vas;  // [nRanks] precomputed peer VAs (GDA remote_vas pattern)
+  ptrdiff_t vmmStride;    // LSA VMM stride; O(1) peer VA when non-zero
 };
 
 #endif
