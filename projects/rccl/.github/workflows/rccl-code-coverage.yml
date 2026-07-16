@@ -17,7 +17,7 @@ on:
       cluster:
         description: "Cluster for a single-image override run (SLURM partition/account/reservation/runner)"
         type: string
-        default: "mi300x-rccl"
+        default: "alola"
       rocm_image:
         description: "Override: ROCm base image (empty = run all enabled targets in the table)"
         type: string
@@ -75,7 +75,7 @@ jobs:
     with:
       workload: coverage
       targets: ${{ inputs.targets || 'all' }}
-      cluster: ${{ inputs.cluster || 'mi300x-rccl' }}
+      cluster: ${{ inputs.cluster || 'alola' }}
       rocm_image: ${{ inputs.rocm_image || '' }}
       dockerfile: ${{ inputs.dockerfile || 'Dockerfile.Multinode.Ubuntu' }}
       gpu_arch: ${{ inputs.gpu_arch || 'gfx942' }}

@@ -8,7 +8,8 @@ N nodes on a SLURM cluster via mnctl-launched ROCm containers. `run_coverage.sh`
 
 ```
 .github/scripts/
-├── ci_configure.py           # matrix generator (CLUSTERS + TARGETS[workload] -> build matrix)
+├── ci_targets.yml            # DATA: clusters + targets (edit here; needs PyYAML)
+├── ci_configure.py           # loads/validates ci_targets.yml -> build matrix
 ├── run_coverage.sh           # entry -> python run_workload.py --workload coverage
 ├── run_workload.py           # entrypoint: pick payload by --workload/$WORKLOAD
 ├── orchestrator.py           # RunConfig (dataclass) + Orchestrator (generic flow)
@@ -39,6 +40,12 @@ Environment variables: `ROCM_IMAGE`, `NODES`, `PARTITION`, `ACCOUNT`, `GPUS_PER_
 Add `payloads/<name>.py` with a `Payload` subclass and register it in
 `payloads/__init__.py:REGISTRY`. The contract (which hooks to implement and the
 context available to them) is documented in `payloads/base.py`.
+
+## Docs
+
+- [Quick Start](../../docs/rccl_ci_quickstart.md) — run it locally or from GitHub.
+- [Architecture & trade-offs](../../docs/rccl_ci_architecture.md) — the "why".
+- [Code walkthrough](../../docs/rccl_ci_code_walkthrough.md) — file-by-file tour.
 
 ## Bash fallback (optional, not tracked)
 

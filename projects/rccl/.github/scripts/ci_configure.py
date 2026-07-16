@@ -3,99 +3,93 @@
 """Emit the RCCL multi-node CI build matrix for GitHub Actions.
 
 Generalizes the coverage-only matrix to any workload (coverage, rccl-tests, AI ...).
-Two tables:
-  * CLUSTERS  - one row per cluster (SLURM partition/account/reservation, GPUs/node,
-                self-hosted runner label, shared-FS root).
-  * TARGETS   - one row per (workload, image, arch) target; each references a cluster
-                and carries a `workload` field plus workload-specific `params`.
+The data lives in ci_targets.yml (clusters + targets); this module only loads,
+validates, and turns it into a GitHub Actions matrix — so adding a cluster or target
+is a YAML edit, no code change:
+  * clusters - one row per cluster (SLURM partition/account/reservation, GPUs/node,
+               self-hosted runner label, shared-FS root).
+  * targets  - one row per (workload, image, arch) target; references a cluster and
+               carries a `workload` field plus workload-specific `params`.
 
 The reusable workflow passes INPUT_WORKLOAD; setup runs this and fans out one job per
 enabled target for that workload. On workflow_dispatch, a non-empty rocm_image override
 produces a single-entry matrix from the inputs (using INPUT_CLUSTER for SLURM settings).
-
-Enable a cluster: fill in its CLUSTERS row and register a runner with that label.
-Add a target:     append one TARGETS row with enabled=True and the right `workload`.
 """
 
 import json
 import os
+from pathlib import Path
+from string import Template
 from typing import Mapping
 
 from orchestrator import DEFAULT_ROCM_IMAGE  # single source of truth for the image
 
-
-# --- One row per cluster ----------------------------------------------------
-# reservation: "" means none (plain partition scheduling). shared_fs_root: ""
-# lets the runner default to $HOME (must be a shared FS visible on all nodes).
-CLUSTERS = {
-    "mi300x-rccl": {
-        "partition": "rccl",
-        "account": "rccl",
-        "reservation": "",            # set to "rccl_415" to pin the shared reservation
-        "gpus_per_node": "8",
-        "runner": "slurm-login",
-        "shared_fs_root": "",
-    },
-    "alola": {
-        "partition": "CHANGEME",
-        "account": "CHANGEME",
-        "reservation": "",
-        "gpus_per_node": "8",
-        "runner": "alola-slurm-login",
-        "shared_fs_root": "",
-    },
-    "ruby": {
-        "partition": "CHANGEME",
-        "account": "CHANGEME",
-        "reservation": "",
-        "gpus_per_node": "8",
-        "runner": "ruby-slurm-login",
-        "shared_fs_root": "",
-    },
-    "tw": {
-        "partition": "CHANGEME",
-        "account": "CHANGEME",
-        "reservation": "",
-        "gpus_per_node": "8",
-        "runner": "tw-slurm-login",
-        "shared_fs_root": "",
-    },
-}
-
-# --- One row per (workload, image, arch) target -----------------------------
-# `params` holds workload-specific fields flattened into the matrix entry (so the
-# workflow can forward them as env). Coverage/rccl-tests use test_config/test_suite/
-# test_name; an AI workload might use model/script/extra_repo, etc.
-TARGETS = [
-    {
-        "name": "coverage-gfx942-ubuntu24-7.13.0rc2",
-        "workload": "coverage",
-        "enabled": True,
-        "cluster": "mi300x-rccl",
-        "rocm_image": DEFAULT_ROCM_IMAGE,
-        "dockerfile": "Dockerfile.Multinode.Ubuntu",
-        "gpu_arch": "gfx942",
-        "nic_type": "mellanox",
-        "nodes": "2",
-        "params": {"test_config": "mi300x_mellanox_ib.json"},
-    },
-    # Example rccl-tests target (enable once the payload lands in Phase 4).
-    {
-        "name": "rccl-tests-gfx942-ubuntu24-7.13.0rc2",
-        "workload": "rccl-tests",
-        "enabled": False,
-        "cluster": "mi300x-rccl",
-        "rocm_image": DEFAULT_ROCM_IMAGE,
-        "dockerfile": "Dockerfile.Multinode.Ubuntu",
-        "gpu_arch": "gfx942",
-        "nic_type": "mellanox",
-        "nodes": "2",
-        "params": {"test_config": "mi300x_mellanox_ib.json"},
-    },
-]
-
+# Data file (clusters + targets); edited far more often than this loader.
+CONFIG_FILE = Path(__file__).with_name("ci_targets.yml")
+# ${VARS} allowed in YAML string values (keeps the image single-sourced).
+_SUBSTITUTIONS = {"DEFAULT_ROCM_IMAGE": DEFAULT_ROCM_IMAGE}
 # Fields copied from the referenced cluster into each matrix entry.
 _CLUSTER_FIELDS = ("partition", "account", "reservation", "gpus_per_node", "runner", "shared_fs_root")
+_REQUIRED_TARGET_KEYS = ("name", "workload", "enabled", "cluster", "rocm_image",
+                         "dockerfile", "gpu_arch", "nic_type", "nodes")
+_DEFAULT_CLUSTER = "alola"
+
+
+def _scalar(value):
+    """Coerce a YAML scalar to the string the matrix expects (bools stay bools).
+
+    Strings get ${VAR} substitution; numbers (e.g. nodes: 2) become "2" so matrix
+    values are stringly-typed exactly as the workflow env expects.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return Template(value).safe_substitute(_SUBSTITUTIONS)
+    return str(value)
+
+
+def _load_config():
+    """Load + normalize clusters and targets from ci_targets.yml."""
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("PyYAML is required to read ci_targets.yml (pip install pyyaml).")
+    with open(CONFIG_FILE) as f:
+        data = yaml.safe_load(f) or {}
+    clusters = {
+        name: {k: _scalar(fields.get(k, "")) for k in _CLUSTER_FIELDS}
+        for name, fields in (data.get("clusters") or {}).items()
+    }
+    targets = []
+    for t in (data.get("targets") or []):
+        entry = {}
+        for k, v in t.items():
+            if k == "params":
+                entry[k] = {pk: _scalar(pv) for pk, pv in (v or {}).items()}
+            elif k == "enabled":
+                entry[k] = bool(v)
+            else:
+                entry[k] = _scalar(v)
+        targets.append(entry)
+    _validate(clusters, targets)
+    return clusters, targets
+
+
+def _validate(clusters: dict, targets: list) -> None:
+    """Fail fast on malformed data (missing keys / dangling cluster refs)."""
+    for t in targets:
+        missing = [k for k in _REQUIRED_TARGET_KEYS if k not in t]
+        if missing:
+            raise SystemExit(f"Target {t.get('name', '?')!r} missing keys: {missing}")
+        # Only enabled targets must resolve to a real cluster (disabled rows may be WIP).
+        if t["enabled"] and t["cluster"] not in clusters:
+            raise SystemExit(
+                f"Target {t['name']!r} references unknown cluster {t['cluster']!r}; "
+                f"known: {sorted(clusters)}"
+            )
+
+
+CLUSTERS, TARGETS = _load_config()
 
 
 def gha_set_output(vars: Mapping[str, str]) -> None:
@@ -124,7 +118,7 @@ def _flatten(target: dict) -> dict:
 
 def _entry_from_dispatch(env: Mapping[str, str], workload: str) -> dict:
     """Build a single matrix entry from workflow_dispatch inputs."""
-    cluster = env.get("INPUT_CLUSTER") or "mi300x-rccl"
+    cluster = env.get("INPUT_CLUSTER") or _DEFAULT_CLUSTER
     entry = {
         "name": f"{workload}-{env.get('INPUT_GPU_ARCH') or 'gfx942'}-{cluster}",
         "workload": workload,

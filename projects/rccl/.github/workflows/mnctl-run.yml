@@ -20,7 +20,7 @@ on:
       cluster:
         description: "Cluster for a single-image override run"
         type: string
-        default: "mi300x-rccl"
+        default: "alola"
       rocm_image:
         description: "Override: ROCm base image (empty = run all enabled targets for this workload)"
         type: string
@@ -87,6 +87,8 @@ jobs:
       has_targets: ${{ steps.cfg.outputs.has_targets }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Install PyYAML (ci_targets.yml loader)
+        run: python -m pip install --quiet pyyaml
       - id: cfg
         env:
           INPUT_WORKLOAD: ${{ inputs.workload }}

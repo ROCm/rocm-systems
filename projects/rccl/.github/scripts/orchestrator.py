@@ -174,8 +174,10 @@ class Orchestrator:
             return
         log(f"Allocating {c.nodes} node(s) on partition={c.partition} account={c.account} ...")
         inner = f"exec python3 {shlex.quote(self.entrypoint)}"
-        salloc = [
-            "salloc", "-N", str(c.nodes), "-p", c.partition, "-A", c.account,
+        salloc = ["salloc", "-N", str(c.nodes), "-p", c.partition]
+        if c.account:                       # some clusters (e.g. ruby) use no -A
+            salloc += ["-A", c.account]
+        salloc += [
             f"--gres=gpu:{c.gpus_per_node}", f"--ntasks-per-node={c.gpus_per_node}",
             "-t", c.time_limit,
         ]

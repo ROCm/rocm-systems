@@ -1,0 +1,97 @@
+# CI build matrix for the multi-node coverage/workload pipeline.
+#
+# Edit clusters/targets HERE — ci_configure.py only loads, validates, and emits the
+# GitHub Actions matrix from this file, so adding a cluster/target needs no code change.
+#
+# rocm_image may reference ${DEFAULT_ROCM_IMAGE} (the single-source default from
+# orchestrator.py); ci_configure.py substitutes it at load time.
+#
+# clusters: one row per cluster — SLURM partition/account/reservation, GPUs/node,
+#   self-hosted runner label, shared-FS root. Empty string ("") means none.
+# targets:  one row per (workload, image, arch) — references a cluster by key and
+#   carries workload-specific `params`. enabled:false keeps a row out of the matrix.
+
+clusters:
+  alola:
+    partition: rccl
+    account: rccl
+    reservation: rccl_92          # set to rccl_415 to pin the shared reservation
+    gpus_per_node: "8"
+    runner: slurm-login
+    shared_fs_root: ""
+
+  # Ruby (gfx950), per ROCm/rocm-systems#6985: interactive partition, no account,
+  # no reservation, 8 GPUs/node. Cache root /apps/rccl-ci is a shared FS.
+  ruby:
+    partition: interactive
+    account: ""                   # ruby uses no -A
+    reservation: ""
+    gpus_per_node: "8"
+    runner: ruby-linux-slurm-scale-runner
+    shared_fs_root: /apps/rccl-ci
+
+  # Tensorwave (gfx950, Broadcom ainic): amd-tw partition, no account, no
+  # reservation (sbatch runs on whatever the scheduler grants), 8 GPUs/node.
+  tw:
+    partition: amd-tw
+    account: ""
+    reservation: ""
+    gpus_per_node: "8"
+    runner: tw-gfx950-ainic-ROCm-scale-runner
+    shared_fs_root: /it-share/rccl-ci
+
+targets:
+  - name: coverage-gfx942-ubuntu24-7.13.0rc2
+    workload: coverage
+    enabled: true
+    cluster: alola
+    rocm_image: ${DEFAULT_ROCM_IMAGE}
+    dockerfile: Dockerfile.Multinode.Ubuntu
+    gpu_arch: gfx942
+    nic_type: mellanox
+    nodes: "2"
+    params:
+      test_config: mi300x_mellanox_ib.json
+
+  # Ruby / gfx950: ALinux9.7022 builds ROCm 7.0.2.2 from public almalinux:9 (no
+  # harbor/creds). Ruby is Thor2 RoCE; nic_type "thor2" has no mnctl recipe
+  # (skipped) — RoCE env comes from the test_config.
+  - name: coverage-gfx950-alinux9-7022
+    workload: coverage
+    enabled: true
+    cluster: ruby
+    rocm_image: almalinux:9
+    dockerfile: Dockerfile.Multinode.ALinux9.7022
+    gpu_arch: gfx950
+    nic_type: thor2
+    nodes: "2"
+    params:
+      test_config: mi355x_thor2_roce.json
+
+  # Tensorwave / gfx950 (disabled). Same self-installing ALinux9.7022 image, but
+  # ainic → mnctl auto-prepends post-setup/ainic. TODO(tw): confirm the ainic
+  # gfx950 test_config (mi455_ainic_roce.json) before enabling.
+  - name: coverage-gfx950-tw-alinux9-7022
+    workload: coverage
+    enabled: false
+    cluster: tw
+    rocm_image: almalinux:9
+    dockerfile: Dockerfile.Multinode.ALinux9.7022
+    gpu_arch: gfx950
+    nic_type: ainic
+    nodes: "2"
+    params:
+      test_config: mi455_ainic_roce.json
+
+  # Example rccl-tests target (enable once the payload lands in Phase 4).
+  - name: rccl-tests-gfx942-ubuntu24-7.13.0rc2
+    workload: rccl-tests
+    enabled: false
+    cluster: alola
+    rocm_image: ${DEFAULT_ROCM_IMAGE}
+    dockerfile: Dockerfile.Multinode.Ubuntu
+    gpu_arch: gfx942
+    nic_type: mellanox
+    nodes: "2"
+    params:
+      test_config: mi300x_mellanox_ib.json
