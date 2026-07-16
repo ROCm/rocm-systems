@@ -316,7 +316,7 @@ class TestExecutor:
 
         # Determine workspace name for logs/reports (always timestamped)
         suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
-        timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
 
         # Create workspace directory path

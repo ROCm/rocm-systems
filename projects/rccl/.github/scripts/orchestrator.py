@@ -95,8 +95,14 @@ class RunConfig:
         )
         branch = _env("RCCL_BRANCH") or self._git_branch()
         pr = _env("PR_NUMBER")
-        rocm_ver = self._rocm_version() or "rocm"
-        base = _sanitize_id(f"{self.gpu_arch}-{rocm_ver}-{branch or 'nobranch'}")
+        # ROCm version is parsed from the image tag; if it can't be derived, skip it
+        # entirely (keeps the name shorter) rather than inserting a placeholder.
+        parts = [self.gpu_arch]
+        rocm_ver = self._rocm_version()
+        if rocm_ver:
+            parts.append(rocm_ver)
+        parts.append(branch or "nobranch")
+        base = _sanitize_id("-".join(parts))
         self.run_id = _env("RUN_ID") or (base + (f"-pr{pr}" if pr else ""))
 
         self.container = _env("MNCTL_CONTAINER_NAME") or f"rccl-{workload_tag}-{self.gpu_arch}"
