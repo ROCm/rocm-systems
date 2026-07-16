@@ -2276,7 +2276,7 @@ device::Memory* Device::createMemory(
       // Pin memory for the parent object only
       (owner.parent() == nullptr) && (owner.getHostMem() != nullptr) &&
       (owner.getSvmPtr() == nullptr)) {
-    memory->pinSystemMemory(owner.getHostMem(), owner.getSize());
+    (void)memory->pinSystemMemory(owner.getHostMem(), owner.getSize());
   }
 
   if (!result) {
@@ -4547,7 +4547,7 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
 
 // ================================================================================================
 void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
-  auto HeapAllocOnly = [this, &gpu]() -> bool {
+  auto HeapAllocOnly = [this]() -> bool {
     // Allocate initial heap for device memory allocator
     static constexpr size_t HeapBufferSize = 128 * Ki;
     heap_buffer_ = createMemory(HeapBufferSize);
