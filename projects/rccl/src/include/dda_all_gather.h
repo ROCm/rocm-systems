@@ -76,4 +76,25 @@ ncclResult_t ncclAllGatherDdaFabricLL(
     ncclComm* comm,
     cudaStream_t stream);
 
+/**
+ * Check if the LL128-protocol DDA allgather is eligible for the fabric/VMM path.
+ */
+bool ncclAllGatherDdaFabricLL128Eligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t sendcount,
+    ncclDataType_t datatype);
+
+/**
+ * Execute the LL128-protocol DDA allgather using the fabric/VMM path.
+ */
+ncclResult_t ncclAllGatherDdaFabricLL128(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t sendcount,
+    ncclDataType_t datatype,
+    ncclComm* comm,
+    cudaStream_t stream);
+
 #endif

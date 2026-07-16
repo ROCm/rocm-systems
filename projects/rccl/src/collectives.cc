@@ -126,14 +126,20 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
-// LL-protocol DDA all-gather (fabric path).
-// threshold: LL is attempted only when the size (per-rank * nRanks)
-// is <= threshold, otherwise the copy-based DDA path handles the call.
-RCCL_PARAM(DdaAllGatherLL, "DDA_ALLGATHER_LL", 1);
-RCCL_PARAM(DdaAllGatherLLThreshold, "DDA_ALLGATHER_LL_THRESHOLD", (size_t)(131072));
-// LL-protocol DDA all-reduce (fabric path).
-// threshold: LL is attempted only when the full-message size is <= threshold,
-// otherwise the copy-based DDA path handles the call.
+// Common DDA protocol-tier knobs, shared by every fabric collective (no
+// per-collective variants). For a given collective's size:
+//   size <= DdaLLThreshold     -> LL    one-shot (16B lines)
+//   size <= DdaLL128Threshold  -> LL128 one-shot (128B lines)
+//   otherwise                  -> Simple (flat one-shot / tree two-shot)
+// Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
+// enable to 0 (or a threshold to 0) disables that tier and falls through to the
+// next, so each protocol can be A/B'd in isolation at runtime.
+RCCL_PARAM(DdaLL, "DDA_LL", 1);
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(131072));
+RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(524288));
+// LL-protocol DDA all-reduce (fabric path). TODO: migrate to the common
+// DdaLL/DdaLL128 knobs in the AllReduce LL128 phase.
 RCCL_PARAM(DdaAllReduceLL, "DDA_ALLREDUCE_LL", 1);
 RCCL_PARAM(DdaAllReduceLLThreshold, "DDA_ALLREDUCE_LL_THRESHOLD", (size_t)(131072));
 
@@ -257,13 +263,29 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   if (rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaAllGatherLL() &&
-          msgSize <= (size_t)rcclParamDdaAllGatherLLThreshold() &&
+      if (rcclParamDdaLL() &&
+          msgSize <= (size_t)rcclParamDdaLLThreshold() &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         INFO(NCCL_COLL,
              "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
              comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
         NCCLCHECK(ncclAllGatherDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            sendcount,
+            datatype,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+      // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
+      if (rcclParamDdaLL128() &&
+          msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
+          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        INFO(NCCL_COLL,
+             "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
+             comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
+        NCCLCHECK(ncclAllGatherDdaFabricLL128(
             sendbuff,
             recvbuff,
             sendcount,
