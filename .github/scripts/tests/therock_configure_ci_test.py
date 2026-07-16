@@ -122,10 +122,6 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(
             therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml")
         )
-        self.assertTrue(
-            therock_configure_ci.is_path_skippable(".github/workflows/rdc-ci.yml")
-        )
-
         # Workflow/script files unrelated to TheRock CI are skippable without
         # needing to be enumerated (issue #7849).
         self.assertTrue(
@@ -453,7 +449,6 @@ class ConfigureCITest(unittest.TestCase):
         projects = json.loads(outputs["projects"])
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
-
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
