@@ -473,6 +473,9 @@ typedef enum {
  * @brief Compute Partition. This enum is used to identify
  * various compute partitioning settings.
  *
+ * @deprecated This enum is slated for removal in a future ROCm release;
+ * use amdsmi_accelerator_partition_type_t instead
+ *
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 typedef enum {
@@ -493,6 +496,9 @@ typedef enum {
  * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
  * is allocated across XCPs within a memory partition.
  *
+ * @deprecated This enum is slated for removal in a future ROCm release;
+ * use amdsmi_accelerator_partition_mem_alloc_mode_t instead
+ *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
@@ -501,6 +507,19 @@ typedef enum {
   AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
                                                    //!< use the full partition memory
 } amdsmi_compute_partition_mem_alloc_mode_t;
+
+/**
+ * @brief Accelerator Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory is evenly capped per XCP
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
+                                                       //!< use the full partition memory
+} amdsmi_accelerator_partition_mem_alloc_mode_t;
 
 /**
  * @brief Memory Partitions
@@ -6910,6 +6929,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @brief Retrieves the current compute partition memory allocation mode
  *  for a desired device.
  *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() should be used instead
+ *
  *  @ingroup tagComputePartition
  *
  *  @platform{gpu_bm_linux}
@@ -6918,9 +6940,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @p mode, this function will attempt to obtain the device's current
  *  compute partition memory allocation mode. The mode controls how HBM
  *  capacity is distributed across XCPs within each memory partition:
- *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
  *    to an even share.
- *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
  *    full memory partition size (useful when only one XCP is active).
  *
  *  @param[in] processor_handle Device which to query
@@ -6940,7 +6962,43 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode);
 
 /**
+ *  @brief Retrieves the current accelerator partition memory allocation mode
+ *  for a desired device.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer
+ *  @p mode, this function will attempt to obtain the device's current
+ *  accelerator partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share.
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size (useful when only one XCP is active).
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] mode a pointer to an ::amdsmi_accelerator_partition_mem_alloc_mode_t
+ *  variable, into which the device's current memory allocation mode will
+ *  be written.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t* mode);
+
+/**
  *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() should be used instead
  *
  *  @ingroup tagComputePartition
  *
@@ -6970,6 +7028,38 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  */
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
+
+/**
+ *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a mode
+ *  @p mode, this function will attempt to update the selected device's
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share. This is the default.
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size.
+ *
+ *  @param[in] processor_handle Device which to modify
+ *
+ *  @param[in] mode using enum ::amdsmi_accelerator_partition_mem_alloc_mode_t,
+ *  define what the selected device's memory allocation mode should be
+ *  updated to.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t mode);
 
 /** @} End tagComputePartition */
 
@@ -7017,6 +7107,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
 
 /**
  *  @brief Modifies a selected device's current memory partition setting.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_memory_partition_mode() should be used instead
  *
  *  @ingroup tagMemoryPartition
  *

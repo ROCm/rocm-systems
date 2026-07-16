@@ -564,6 +564,7 @@ class AmdSmiAcceleratorPartitionType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_INVALID
 
 
+# This class is deprecated, use AmdSmiAcceleratorPartitionType instead
 class AmdSmiComputePartitionType(IntEnum):
     SPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_SPX
     DPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_DPX
@@ -573,10 +574,17 @@ class AmdSmiComputePartitionType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_INVALID
 
 
+# This class is deprecated, use AmdSmiAcceleratorPartitionMemAllocModeType instead
 class AmdSmiComputePartitionMemAllocModeType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID
     CAPPING = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING
     ALL = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL
+
+
+class AmdSmiAcceleratorPartitionMemAllocModeType(IntEnum):
+    INVALID = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID
+    CAPPING = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING
+    ALL = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL
 
 
 class AmdSmiMemoryPartitionType(IntEnum):
@@ -2459,7 +2467,6 @@ def amdsmi_get_gpu_device_bdf_bdf(
     Returns the raw amdsmi_bdf_t struct for a GPU. The same data is available as a
     formatted string from amdsmi_get_gpu_device_bdf().
     """
-    import warnings
 
     warnings.warn(
         "amdsmi_get_gpu_device_bdf_bdf() is deprecated, use amdsmi_get_gpu_device_bdf() "
@@ -4307,8 +4314,16 @@ def amdsmi_is_P2P_accessible(
 
 
 def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_accelerator_partition_profile() instead."""
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    warnings.warn(
+        "amdsmi_get_gpu_compute_partition() is deprecated, "
+        "use amdsmi_get_gpu_accelerator_partition_profile() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     length = ctypes.c_uint32()
     length.value = AMDSMI_MAX_STRING_LENGTH
@@ -4325,6 +4340,14 @@ def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
 def amdsmi_set_gpu_compute_partition(
     processor_handle: processor_handle_t, compute_partition: AmdSmiComputePartitionType
 ):
+    """Deprecated: use amdsmi_set_gpu_accelerator_partition_profile() instead."""
+
+    warnings.warn(
+        "amdsmi_set_gpu_compute_partition() is deprecated, "
+        "use amdsmi_set_gpu_accelerator_partition_profile() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -4336,29 +4359,57 @@ def amdsmi_set_gpu_compute_partition(
 
 
 def amdsmi_get_gpu_compute_partition_mem_alloc_mode(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() instead."""
+
+    warnings.warn(
+        "amdsmi_get_gpu_compute_partition_mem_alloc_mode() is deprecated, "
+        "use amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    name = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handle)
+    return name
+
+
+def amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    mode = amdsmi_wrapper.amdsmi_compute_partition_mem_alloc_mode_t()
+    mode = amdsmi_wrapper.amdsmi_accelerator_partition_mem_alloc_mode_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+        amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
             processor_handle, ctypes.byref(mode)
         )
     )
-    return AmdSmiComputePartitionMemAllocModeType(mode.value).name
+    return AmdSmiAcceleratorPartitionMemAllocModeType(mode.value).name
 
 
 def amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     processor_handle: processor_handle_t, mode: AmdSmiComputePartitionMemAllocModeType
 ):
+    """Deprecated: use amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() instead."""
+
+    warnings.warn(
+        "amdsmi_set_gpu_compute_partition_mem_alloc_mode() is deprecated, "
+        "use amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    acc_mode = AmdSmiAcceleratorPartitionMemAllocModeType(mode)
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handle, acc_mode)
+
+
+def amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+    processor_handle: processor_handle_t, mode: AmdSmiAcceleratorPartitionMemAllocModeType
+):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    if not isinstance(mode, AmdSmiComputePartitionMemAllocModeType):
-        raise AmdSmiParameterException(mode, AmdSmiComputePartitionMemAllocModeType)
+    if not isinstance(mode, AmdSmiAcceleratorPartitionMemAllocModeType):
+        raise AmdSmiParameterException(mode, AmdSmiAcceleratorPartitionMemAllocModeType)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_compute_partition_mem_alloc_mode(processor_handle, mode)
+        amdsmi_wrapper.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handle, mode)
     )
 
 
@@ -4430,13 +4481,14 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: processor_handle_t)
 def amdsmi_set_gpu_memory_partition(
     processor_handle: processor_handle_t, memory_partition: AmdSmiMemoryPartitionType
 ):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    """Deprecated: Use amdsmi_set_gpu_memory_partition_mode() instead.  Will be deprecated in future ROCM release"""
 
-    if not isinstance(memory_partition, AmdSmiMemoryPartitionType):
-        raise AmdSmiParameterException(memory_partition, AmdSmiMemoryPartitionType)
-
-    _check_res(amdsmi_wrapper.amdsmi_set_gpu_memory_partition(processor_handle, memory_partition))
+    warnings.warn(
+        "amdsmi_set_gpu_memory_partition() is deprecated, use amdsmi_set_gpu_memory_partition_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    amdsmi_set_gpu_memory_partition_mode(processor_handle, memory_partition)
 
 
 def amdsmi_set_gpu_memory_partition_mode(
@@ -4448,7 +4500,9 @@ def amdsmi_set_gpu_memory_partition_mode(
     if not isinstance(memory_partition, AmdSmiMemoryPartitionType):
         raise AmdSmiParameterException(memory_partition, AmdSmiMemoryPartitionType)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_gpu_memory_partition(processor_handle, memory_partition))
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_memory_partition_mode(processor_handle, memory_partition)
+    )
 
 
 def amdsmi_get_gpu_accelerator_partition_profile(

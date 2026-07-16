@@ -331,6 +331,13 @@ pub enum AmdsmiComputePartitionMemAllocModeT {
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiAcceleratorPartitionMemAllocModeT {
+    AmdsmiAcceleratorPartitionMemAllocInvalid = 0,
+    AmdsmiAcceleratorPartitionMemAllocCapping = 1,
+    AmdsmiAcceleratorPartitionMemAllocAll = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiMemoryPartitionTypeT {
     AmdsmiMemoryPartitionUnknown = 0,
     AmdsmiMemoryPartitionNps1 = 1,
@@ -4931,9 +4938,21 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: *mut AmdsmiAcceleratorPartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_set_gpu_compute_partition_mem_alloc_mode(
         processor_handle: AmdsmiProcessorHandle,
         mode: AmdsmiComputePartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: AmdsmiAcceleratorPartitionMemAllocModeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

@@ -370,28 +370,28 @@ static void print_apu_metrics_info(const amdsmi_gpu_metrics_t& smu) {
 }
 
 static const std::string computePartitionString(
-    amdsmi_compute_partition_type_t computeParitionType) {
+    amdsmi_accelerator_partition_type_t computeParitionType) {
   switch (computeParitionType) {
-    case AMDSMI_COMPUTE_PARTITION_SPX:
+    case AMDSMI_ACCELERATOR_PARTITION_SPX:
       return "SPX";
-    case AMDSMI_COMPUTE_PARTITION_DPX:
+    case AMDSMI_ACCELERATOR_PARTITION_DPX:
       return "DPX";
-    case AMDSMI_COMPUTE_PARTITION_TPX:
+    case AMDSMI_ACCELERATOR_PARTITION_TPX:
       return "TPX";
-    case AMDSMI_COMPUTE_PARTITION_QPX:
+    case AMDSMI_ACCELERATOR_PARTITION_QPX:
       return "QPX";
-    case AMDSMI_COMPUTE_PARTITION_CPX:
+    case AMDSMI_ACCELERATOR_PARTITION_CPX:
       return "CPX";
     default:
       return "N/A";
   }
 }
 
-static const std::map<std::string, amdsmi_compute_partition_type_t>
+static const std::map<std::string, amdsmi_accelerator_partition_type_t>
     mapStringToSMIComputePartitionTypes{
-        {"SPX", AMDSMI_COMPUTE_PARTITION_SPX}, {"DPX", AMDSMI_COMPUTE_PARTITION_DPX},
-        {"TPX", AMDSMI_COMPUTE_PARTITION_TPX}, {"QPX", AMDSMI_COMPUTE_PARTITION_QPX},
-        {"CPX", AMDSMI_COMPUTE_PARTITION_CPX}, {"N/A", AMDSMI_COMPUTE_PARTITION_INVALID}};
+        {"SPX", AMDSMI_ACCELERATOR_PARTITION_SPX}, {"DPX", AMDSMI_ACCELERATOR_PARTITION_DPX},
+        {"TPX", AMDSMI_ACCELERATOR_PARTITION_TPX}, {"QPX", AMDSMI_ACCELERATOR_PARTITION_QPX},
+        {"CPX", AMDSMI_ACCELERATOR_PARTITION_CPX}, {"N/A", AMDSMI_ACCELERATOR_PARTITION_INVALID}};
 
 static const std::string memoryPartitionString(amdsmi_memory_partition_type_t memoryParitionType) {
   switch (memoryParitionType) {
@@ -442,7 +442,7 @@ static const std::map<amdsmi_link_type_t, std::string> link_type_map = {
 
 int main() {
   amdsmi_status_t ret;
-  std::vector<amdsmi_compute_partition_type_t> orig_accelerator_partitions;
+  std::vector<amdsmi_accelerator_partition_type_t> orig_accelerator_partitions;
   std::vector<amdsmi_memory_partition_type_t> orig_memory_partitions;
   uint32_t gpu_number = 0;
 
@@ -467,16 +467,16 @@ int main() {
   std::cout << "Total Socket: " << socket_count << std::endl;
 
   // WARNING: Do not put any other settings before/inside/or between these lambda functions
-  //           Required to save/change/reset the compute/accelerator & memory partition settings
+  //           Required to save/change/reset the accelerator & memory partition settings
   // Reason: Modifies total number of gpu count, which will affect other API calls.
   //         Requires amdsmi_shut_down()/amdsmi_init(AMDSMI_INIT_AMD_GPUS) to re-enumerate
   //         total number of GPUs (AKA "processors per socket").
-  //         Changing back to original settings (compute/accelerator & memory partition)
+  //         Changing back to original settings (accelerator & memory partition)
   //         will not modify the GPU count.
   // Save all original partition settings for later
   auto save_original_partitions =
       [socket_count, &ret, sockets](
-          std::vector<amdsmi_compute_partition_type_t>& orig_partitions,
+          std::vector<amdsmi_accelerator_partition_type_t>& orig_partitions,
           std::vector<amdsmi_memory_partition_type_t>& orig_memory_partitions,
           uint32_t& gpu_number) -> void {
     std::cout << "    **Saving Original Compute/Accelerator & Memory Partition Settings**\n";
@@ -525,8 +525,8 @@ int main() {
           std::cout << "\tCompute Partition (original): " << original_compute_partition << "\n\n";
         } else {
           std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
-                    << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): " << err_str
-                    << "\n\n";
+                    << computePartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
+                    << "): " << err_str << "\n\n";
         }
 
         // Save the original compute/accelerator partition
@@ -534,7 +534,7 @@ int main() {
           orig_partitions.push_back(
               mapStringToSMIComputePartitionTypes.at(original_compute_partition));
         } else {
-          orig_partitions.push_back(AMDSMI_COMPUTE_PARTITION_INVALID);
+          orig_partitions.push_back(AMDSMI_ACCELERATOR_PARTITION_INVALID);
         }
 
         // Get the original memory partition
@@ -621,15 +621,15 @@ int main() {
           std::cout << "\tCompute Partition (original): " << original_compute_partition << "\n\n";
         } else {
           std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
-                    << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): " << err_str
-                    << "\n\n";
+                    << computePartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
+                    << "): " << err_str << "\n\n";
         }
 
         // Iterate through all compute partitions
-        for (int partition = static_cast<int>(AMDSMI_COMPUTE_PARTITION_SPX);
-             partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX); partition++) {
-          amdsmi_compute_partition_type_t updatePartition =
-              static_cast<amdsmi_compute_partition_type_t>(partition);
+        for (int partition = static_cast<int>(AMDSMI_ACCELERATOR_PARTITION_SPX);
+             partition <= static_cast<int>(AMDSMI_ACCELERATOR_PARTITION_CPX); partition++) {
+          amdsmi_accelerator_partition_type_t updatePartition =
+              static_cast<amdsmi_accelerator_partition_type_t>(partition);
           amdsmi_status_t ret_set =
               amdsmi_set_gpu_compute_partition(processor_handles[device_index], updatePartition);
           amdsmi_status_code_to_string(ret_set, &err_str);
@@ -639,21 +639,21 @@ int main() {
           std::cout << "\tamdsmi_set_gpu_compute_partition(" << gpu_number << ", "
                     << computePartitionString(updatePartition) << "): " << err_str << "\n\n";
 
-          // Get the current compute partition
+          // Get the current accelerator partition
           char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
-          ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
-                                                 current_compute_partition,
-                                                 static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+          ret = amdsmi_get_gpu_accelerator_partition(
+              processor_handles[device_index], current_compute_partition,
+              static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
           amdsmi_status_code_to_string(ret, &err_str);
           if (ret == AMDSMI_STATUS_SUCCESS) {
             PRINT_AMDSMI_RET(ret)
-            std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
-            std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+            std::cout << "    Output of amdsmi_get_gpu_accelerator_partition:\n";
+            std::cout << "\tamdsmi_get_gpu_accelerator_partition(" << gpu_number << ", "
                       << computePartitionString(updatePartition) << "): " << err_str << "\n\n";
             std::cout << "\tCompute Partition (current): " << current_compute_partition << "\n\n";
           } else {
-            std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
-                      << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID)
+            std::cout << "\tamdsmi_get_gpu_accelerator_partition(" << gpu_number << ", "
+                      << computePartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
                       << "): " << err_str << "\n\n";
           }
         }
@@ -732,14 +732,14 @@ int main() {
             }
             amdsmi_memory_partition_type_t updatePartition =
                 static_cast<amdsmi_memory_partition_type_t>(partition);
-            auto ret_set =
-                amdsmi_set_gpu_memory_partition(processor_handles[device_index], updatePartition);
+            auto ret_set = amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index],
+                                                                updatePartition);
             amdsmi_status_code_to_string(ret_set, &err_str);
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
               PRINT_AMDSMI_RET(ret_set)
-              std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+              std::cout << "    Output of amdsmi_set_gpu_memory_partition_mode:\n";
             }
-            std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+            std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                       << memoryPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
@@ -823,14 +823,14 @@ int main() {
         // Reset to original memory partition settings
         amdsmi_memory_partition_type_t orig_partition = orig_partitions[gpu_number];
         amdsmi_status_t ret_set =
-            amdsmi_set_gpu_memory_partition(processor_handles[device_index], orig_partition);
+            amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index], orig_partition);
         const char* err_str;
         amdsmi_status_code_to_string(ret_set, &err_str);
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
           PRINT_AMDSMI_RET(ret_set)
-          std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+          std::cout << "    Output of amdsmi_set_gpu_memory_partition_mode:\n";
         }
-        std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+        std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                   << memoryPartitionString(orig_partition) << "): " << err_str << "\n\n";
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
           std::cout << "\t** Memory partition staged. Run to apply:\n"
@@ -864,7 +864,7 @@ int main() {
 
   auto reset_accelerator_partitions =
       [socket_count, &ret, sockets](
-          const std::vector<amdsmi_compute_partition_type_t>& orig_partitions,
+          const std::vector<amdsmi_accelerator_partition_type_t>& orig_partitions,
           uint32_t& gpu_number) -> void {
     std::cout << "    **Version 1: Memory Partition API Examples**\n";
     std::cout << "    **Resetting Compute/Accelerator Partition Settings**\n";
@@ -897,7 +897,7 @@ int main() {
         std::cout << "\t**GPU Number: " << gpu_number << std::endl;
 
         // Reset to original compute/accelerator partition settings
-        amdsmi_compute_partition_type_t orig_partition = orig_partitions[gpu_number];
+        amdsmi_accelerator_partition_type_t orig_partition = orig_partitions[gpu_number];
         amdsmi_status_t ret_set =
             amdsmi_set_gpu_compute_partition(processor_handles[device_index], orig_partition);
         const char* err_str;
@@ -923,8 +923,8 @@ int main() {
           std::cout << "\tCompute Partition (current): " << current_compute_partition << "\n\n";
         } else {
           std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
-                    << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): " << err_str
-                    << "\n\n";
+                    << computePartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
+                    << "): " << err_str << "\n\n";
         }
         gpu_number++;
       }

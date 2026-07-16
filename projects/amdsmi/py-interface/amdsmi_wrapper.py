@@ -570,6 +570,17 @@ AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING = 1
 AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL = 2
 amdsmi_compute_partition_mem_alloc_mode_t = ctypes.c_uint32 # enum
 
+# values for enumeration 'amdsmi_accelerator_partition_mem_alloc_mode_t'
+amdsmi_accelerator_partition_mem_alloc_mode_t__enumvalues = {
+    0: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID',
+    1: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING',
+    2: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL',
+}
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID = 0
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING = 1
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL = 2
+amdsmi_accelerator_partition_mem_alloc_mode_t = ctypes.c_uint32 # enum
+
 # values for enumeration 'amdsmi_memory_partition_type_t'
 amdsmi_memory_partition_type_t__enumvalues = {
     0: 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
@@ -4109,9 +4120,21 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_accelerator_partition_mem_alloc_mode_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_set_gpu_compute_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_set_gpu_compute_partition_mem_alloc_mode
     amdsmi_set_gpu_compute_partition_mem_alloc_mode.restype = amdsmi_status_t
     amdsmi_set_gpu_compute_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, amdsmi_compute_partition_mem_alloc_mode_t]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t]
 except AttributeError:
     pass
 try:
@@ -4863,6 +4886,9 @@ __all__ = \
     'AMDSMI_ACCELERATOR_PARTITION_DPX',
     'AMDSMI_ACCELERATOR_PARTITION_INVALID',
     'AMDSMI_ACCELERATOR_PARTITION_MAX',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID',
     'AMDSMI_ACCELERATOR_PARTITION_QPX',
     'AMDSMI_ACCELERATOR_PARTITION_SPX',
     'AMDSMI_ACCELERATOR_PARTITION_TPX', 'AMDSMI_ACCELERATOR_XCC',
@@ -5190,6 +5216,7 @@ __all__ = \
     'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
+    'amdsmi_accelerator_partition_mem_alloc_mode_t',
     'amdsmi_accelerator_partition_profile_config_t',
     'amdsmi_accelerator_partition_profile_t',
     'amdsmi_accelerator_partition_resource_profile_t',
@@ -5273,6 +5300,7 @@ __all__ = \
     'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpucore_handles',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fabric_telemetry_data', 'amdsmi_get_fw_info',
+    'amdsmi_get_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_accelerator_partition_profile_config',
     'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
@@ -5399,6 +5427,7 @@ __all__ = \
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap',
     'amdsmi_set_cpu_xgmi_pstate_range', 'amdsmi_set_cpu_xgmi_width',
+    'amdsmi_set_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_set_gpu_accelerator_partition_profile',
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_compute_partition_mem_alloc_mode',
