@@ -30,6 +30,8 @@
 #include "lib/python/rocpd/source/sql_generator.hpp"
 #include "lib/python/rocpd/source/types.hpp"
 
+#include "lib/rocprofiler-sdk-rocpd/details/operators.hpp"
+
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/simple_timer.hpp"
@@ -65,6 +67,7 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -492,7 +495,37 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
-            auto  sqlgen_perf      = common::simple_timer{
+
+            auto get_db_schema_version = [](sqlite3* c) -> rocpd_version_triplet_t {
+                auto        version = rocpd_version_triplet_t{0, 0, 0};
+                const char* q =
+                    "SELECT tag, value FROM rocpd_metadata WHERE tag IN "
+                    "('schema_version_major','schema_version_minor','schema_version_patch')";
+                sqlite3_stmt* stmt = nullptr;
+                if(sqlite3_prepare_v2(c, q, -1, &stmt, nullptr) == SQLITE_OK)
+                {
+                    while(sqlite3_step(stmt) == SQLITE_ROW)
+                    {
+                        auto tag = std::string_view{
+                            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))};
+                        auto val = std::string{
+                            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))};
+                        if(tag == "schema_version_major")
+                            version.major = static_cast<uint32_t>(std::stoul(val));
+                        else if(tag == "schema_version_minor")
+                            version.minor = static_cast<uint32_t>(std::stoul(val));
+                        else if(tag == "schema_version_patch")
+                            version.patch = static_cast<uint32_t>(std::stoul(val));
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                return version;
+            };
+
+            constexpr auto graph_launch_min_version = rocpd_version_triplet_t{3, 0, 2};
+            auto           db_schema_version        = get_db_schema_version(conn);
+
+            auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
@@ -523,21 +556,50 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                pitr.pid);
                         };
 
+                        // For schemas < 3.0.2 the kernels/memory_copies views lack
+                        // graph_exec_id and graph_node_id.  Inject zero-valued aliases
+                        // so the deserializer always finds the expected column names and
+                        // we can use the single up-to-date struct types throughout.
+                        auto select_guid_nid_pid_3_0_1 = [&nitr, &pitr](std::string_view tbl) {
+                            return fmt::format(
+                                "SELECT *, 0 AS graph_exec_id, 0 AS graph_node_id FROM {} "
+                                "WHERE guid = '{}' AND nid = {} AND pid = {}",
+                                tbl,
+                                pitr.guid,
+                                nitr.id,
+                                pitr.pid);
+                        };
+
+                        const bool graph_launch_supported =
+                            (db_schema_version >= graph_launch_min_version);
+
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (total)", pitr.pid)};
 
                         auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
+                            conn,
+                            graph_launch_supported ? select_guid_nid_pid("kernels")
+                                                   : select_guid_nid_pid_3_0_1("kernels"),
+                            kernels_order_by};
 
                         auto memory_allocations =
                             rocpd::sql_generator<rocpd::types::memory_allocation>{
                                 conn, select_guid_nid_pid("memory_allocations")};
 
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies")};
+                            conn,
+                            graph_launch_supported ? select_guid_nid_pid("memory_copies")
+                                                   : select_guid_nid_pid_3_0_1("memory_copies")};
 
-                        auto graph_launches = rocpd::sql_generator<rocpd::types::graph_launch>{
-                            conn, select_guid_nid_pid("graph_launches")};
+                        auto graph_launches =
+                            graph_launch_supported
+                                ? std::optional<rocpd::sql_generator<
+                                      rocpd::types::graph_launch>>{std::in_place,
+                                                                   conn,
+                                                                   select_guid_nid_pid(
+                                                                       "graph_launches")}
+                                : std::optional<rocpd::sql_generator<rocpd::types::graph_launch>>{
+                                      std::in_place};
 
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
@@ -577,7 +639,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       samples,
                                                       kernels,
                                                       memory_copies,
-                                                      graph_launches,
+                                                      *graph_launches,
                                                       scratch_memory,
                                                       memory_allocations,
                                                       counters);
