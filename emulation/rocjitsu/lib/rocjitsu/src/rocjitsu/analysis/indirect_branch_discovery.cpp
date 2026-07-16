@@ -1152,6 +1152,26 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
+    // RDNA4 canonicalizes the high half of a getpc result before applying a
+    // signed 48-bit text-relative delta. This preserves the address within the
+    // current text image: bits 63:48 become the sign extension of bit 47, while
+    // the local byte offset represented by PcValue is unchanged. Recognize only
+    // the exact self-register form observed in compiler-emitted call builders.
+    if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 && inst.size() == sizeof(uint32_t) &&
+        inst.mnemonic() == "s_sext_i32_i16" && (word >> 23) == kSop1EncodingPrefix) {
+      const auto dst = static_cast<uint16_t>((word >> 16) & 0x7fu);
+      const auto src = static_cast<uint16_t>(word & 0xffu);
+      if (dst == pair_lo + 1 && src == pair_lo + 1) {
+        updated.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+        invalidate_written_sgprs(ctx, index, state, pair_lo);
+        state.set_builder(pair_lo, updated);
+        return true;
+      }
+      if (dst == pair_lo || dst == pair_lo + 1) {
+        state.invalidate_pair(pair_lo);
+        return true;
+      }
+    }
     if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;

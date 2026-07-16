@@ -411,6 +411,110 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
 }
 
+TEST(CfgAnalysis, RecoversRdna4CanonicalizedGetpcCall) {
+  constexpr uint16_t kPcSreg = 2;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetDelta = static_cast<uint32_t>(-20);
+
+  // Clang's RDNA4 device-call sequence canonicalizes the high 32-bit getpc
+  // half to a signed 16-bit value before adding the low/high text delta.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x48, 0, kReturnSreg),                         // 0x00: callee return.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x04: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x08: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),                // 0x0c: padding.
+      pack_sop1(0x47, kPcSreg, 0),                             // 0x10: s_getpc_b64.
+      pack_sop1(0x0f, kPcSreg + 1, kPcSreg + 1),               // 0x14: s_sext_i32_i16.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),         // 0x18: s_add_co_u32.
+      kTargetDelta,                                            // 0x1c: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kLiteralOperand), // 0x20: s_add_co_ci_u32.
+      UINT32_MAX,                                              // 0x24: high delta.
+      pack_sop1(0x49, kReturnSreg, kPcSreg),                   // 0x28: s_swappc_b64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),                // 0x2c: continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> extra_leaders{0, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4, extra_leaders);
+
+  auto *builder = block_starting_at(blocks, 16);
+  auto *caller = block_starting_at(blocks, 40);
+  auto *continuation = block_starting_at(blocks, 44);
+  auto *callee = block_starting_at(blocks, 0);
+  ASSERT_NE(builder, nullptr);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+  const std::array<std::string_view, 4> expected_mnemonics = {"s_getpc_b64", "s_sext_i32_i16",
+                                                              "s_add_co_u32", "s_add_co_ci_u32"};
+  size_t mnemonic_index = 0;
+  for (const Instruction &inst : builder->instructions()) {
+    ASSERT_LT(mnemonic_index, expected_mnemonics.size());
+    EXPECT_EQ(inst.mnemonic(), expected_mnemonics[mnemonic_index++]);
+  }
+  EXPECT_EQ(mnemonic_index, expected_mnemonics.size());
+  ASSERT_EQ(caller->num_instructions(), 1u);
+  ASSERT_NE(caller->terminator(), nullptr);
+  EXPECT_EQ(caller->terminator()->mnemonic(), "s_swappc_b64");
+  ASSERT_EQ(caller->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(caller->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  ASSERT_EQ(caller->call_edges().size(), 1u);
+  EXPECT_EQ(caller->call_edges()[0].kind, BasicBlock::CallEdgeKind::IndirectSwapPc);
+  EXPECT_EQ(caller->call_edges()[0].callee, callee);
+  EXPECT_EQ(caller->call_edges()[0].continuation, continuation);
+}
+
+TEST(CfgAnalysis, RejectsNoncanonicalRdna4GetpcSignExtensions) {
+  constexpr uint16_t kPcSreg = 2;
+  constexpr uint16_t kOtherSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetDelta = static_cast<uint32_t>(-20);
+
+  struct SignExtensionOperands {
+    uint16_t dst;
+    uint16_t src;
+  };
+  constexpr std::array<SignExtensionOperands, 2> cases{{
+      // The low half is not a valid sign-extension destination.
+      {kPcSreg, kPcSreg},
+      // The high half is overwritten from an unrelated register.
+      {kPcSreg + 1, kOtherSreg},
+  }};
+
+  for (const auto [sext_dst, sext_src] : cases) {
+    SCOPED_TRACE(testing::Message() << "sext_src=" << sext_src << " sext_dst=" << sext_dst);
+    std::vector<uint32_t> words = {
+        pack_sop1(0x48, 0, kReturnSreg),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+        pack_sop1(0x47, kPcSreg, 0),
+        pack_sop1(0x0f, sext_dst, sext_src),
+        pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),
+        kTargetDelta,
+        pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kLiteralOperand),
+        UINT32_MAX,
+        pack_sop1(0x49, kReturnSreg, kPcSreg),
+        build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+    };
+
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+    constexpr std::array<uint64_t, 2> extra_leaders{0, 16};
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4, extra_leaders);
+
+    for (const auto &block : blocks) {
+      EXPECT_TRUE(block->static_indirect_call_fixups().empty());
+      EXPECT_TRUE(block->call_edges().empty());
+    }
+  }
+}
+
 TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
   constexpr uint16_t kReturnSreg = 30;
 
