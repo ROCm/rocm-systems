@@ -5,16 +5,25 @@
  */
 
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
+#include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <contract_cleanup.hh>
 
 // Driver-style extended launch and SM-resource group-split contracts.
 //
 // hipLaunchKernelExC launches a kernel through a driver-style hipLaunchConfig_t
 // and is exercised as a functional round-trip: a single-thread kernel writes a
 // value through a device pointer and the value is read back after the launch.
+//
+// hipDrvLaunchKernelEx is the driver-API extended launch: it takes a driver
+// function handle (hipFunction_t) resolved from a loaded module plus a
+// HIP_LAUNCH_CONFIG, and is exercised as the same functional write-value
+// round-trip through an HIPRTC-compiled kernel.
 //
 // hipDevSmResourceSplit partitions a device's SM resource into caller-sized groups
 // (as opposed to the count-based hipDevSmResourceSplitByCount covered by the green
@@ -67,6 +76,55 @@ __global__ void WriteValueKernel(int* out, int value) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     out[0] = value;
   }
+}
+
+// HIPRTC module source providing a driver-launchable write_value kernel so
+// hipDrvLaunchKernelEx has a hipFunction_t to launch without an external code
+// object fixture.
+constexpr char const kModuleSource[] =
+    "extern \"C\" __global__ void write_value(int* out, int value) {\n"
+    "  if (threadIdx.x == 0 && blockIdx.x == 0) {\n"
+    "    out[0] = value;\n"
+    "  }\n"
+    "}\n";
+
+// Compiles kModuleSource with HIPRTC for the current device. Returns false only
+// when HIPRTC is unavailable (the caller then skips); a real compile failure
+// aborts through HIPRTC_CHECK.
+bool CompileModuleSource(std::vector<char>& code) {
+  hiprtcProgram program{};
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "driver_launch_ex_contract.cu", 0,
+                                   nullptr, nullptr));
+#ifdef __HIP_PLATFORM_AMD__
+  hipDeviceProp_t properties{};
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
+  const char* options[] = {offload_arch.c_str()};
+  const int num_options = 1;
+#else
+  const std::string fmad = "--fmad=false";
+  const char* options[] = {fmad.c_str()};
+  const int num_options = 1;
+#endif
+  const hiprtcResult compile_result = hiprtcCompileProgram(program, num_options, options);
+  if (compile_result != HIPRTC_SUCCESS) {
+    size_t log_size = 0;
+    HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
+    std::string log(log_size, '\0');
+    if (log_size > 0) {
+      HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
+    }
+    INFO("HIPRTC compile log:\n" << log);
+    HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+    HIPRTC_CHECK(compile_result);
+    return false;
+  }
+  size_t code_size = 0;
+  HIPRTC_CHECK(hiprtcGetCodeSize(program, &code_size));
+  code.assign(code_size, 0);
+  HIPRTC_CHECK(hiprtcGetCode(program, code.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+  return true;
 }
 }  // namespace
 
@@ -141,4 +199,56 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
 
   REQUIRE(group.sm.smCount > 0);
   REQUIRE(group.sm.smCount <= device_resource.sm.smCount);
+}
+
+// hipDrvLaunchKernelEx submits a kernel through the driver-API extended launch:
+// a driver function handle (resolved from an HIPRTC-compiled module) plus a
+// HIP_LAUNCH_CONFIG. The launched kernel must publish its argument value,
+// observable after a device synchronize.
+HIP_TEST_CASE(Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue) {
+  SkipIfIntegratedDevice();
+  hip::contract::ContractCleanup cleanup;
+
+  std::vector<char> code;
+  if (!CompileModuleSource(code)) {
+    HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
+  }
+
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  REQUIRE(module != nullptr);
+  cleanup.Add([&] { (void)hipModuleUnload(module); });
+
+  hipFunction_t function = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  REQUIRE(function != nullptr);
+
+  ScopedDeviceInt device_value(0);
+  constexpr int kExpected = 0x3C3C;
+  int value = kExpected;
+  void* params[] = {device_value.address(), &value};
+
+  HIP_LAUNCH_CONFIG config{};
+  config.gridDimX = 1;
+  config.gridDimY = 1;
+  config.gridDimZ = 1;
+  config.blockDimX = 1;
+  config.blockDimY = 1;
+  config.blockDimZ = 1;
+  config.sharedMemBytes = 0;
+  config.hStream = nullptr;
+  config.attrs = nullptr;
+  config.numAttrs = 0;
+
+  const hipError_t status = hipDrvLaunchKernelEx(&config, function, params, nullptr);
+  if (status == hipErrorNotSupported) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipDrvLaunchKernelEx is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int observed = -1;
+  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(observed == kExpected);
 }

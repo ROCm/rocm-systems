@@ -8,4 +8,5 @@ set(TEST_SRC
 
 hip_add_exe_to_target(NAME ContractDriverLaunchExTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME contract_tests)
+                      TEST_TARGET_NAME contract_tests
+                      LINKER_LIBS hiprtc::hiprtc)

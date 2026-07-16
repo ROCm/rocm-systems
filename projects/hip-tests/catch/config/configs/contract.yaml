@@ -801,6 +801,9 @@ contract:
   Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup:
     <<: *level_0
     tags: [driver_launch_ex]
+  Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue:
+    <<: *level_0
+    tags: [driver_launch_ex]
   Contract_KernelNameRef_ByPtr_NamesHostKernel:
     <<: *level_0
     tags: [kernel_name_ref]
