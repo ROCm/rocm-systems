@@ -1,4 +1,0 @@
-{
-  global: HSA_AMD_TOOL_PRIORITY; OnLoad;
-  local: *;
-};

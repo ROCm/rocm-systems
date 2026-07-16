@@ -2372,6 +2372,15 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
+  Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipFreeMipmappedArray_NoLeakAfterGetAllLevels:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipFreeMipmappedArray_NoLeakAfterDuplicateGetLevel:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipMallocArray_DiffSizes:
     <<: *level_2
     tags: [alloc, image]
