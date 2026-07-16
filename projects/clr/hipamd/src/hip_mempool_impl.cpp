@@ -312,7 +312,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
         if (hipSuccess == e->addMarker(stream, nullptr)) {
           ts.SetEvent(e);
           // Make sure runtime sends a notification
-          e->ready();
+          (void)e->ready();
         }
       } else {
         // Assume a safe release from hipFree() if stream is nullptr

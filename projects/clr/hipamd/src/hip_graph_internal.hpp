@@ -3245,7 +3245,7 @@ class GraphMemAllocNode final : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      Execute(stream_);
+      (void)Execute(stream_);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -3298,7 +3298,7 @@ class GraphMemAllocNode final : public GraphNode {
     return node_params_.dptr;
   }
 
-  void* Execute(hip::Stream* stream = nullptr) {
+  [[nodiscard]] void* Execute(hip::Stream* stream = nullptr) {
     auto graph = GetParentGraph();
     if (graph != nullptr) {
       // The node creation requires to return a valid address, however FreeNode can't
