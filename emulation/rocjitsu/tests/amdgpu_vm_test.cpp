@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
@@ -99,6 +100,25 @@ struct VmFixture {
   amdgpu::ComputeUnitCore *cu(uint32_t idx = 0) { return se()->compute_unit(idx); }
   amdgpu::CommandProcessor *cp(uint32_t idx = 0) { return xcd(idx)->command_processor(); }
 
+  /// Install a HaltSnapshotPlugin that records each wavefront's final register
+  /// state at s_endpgm (before resources are freed). Call before dispatching.
+  test::HaltSnapshotPlugin *capture_halts() {
+    plugin_group_ = test::make_halt_snapshot_group(&snapshot_plugin_);
+    soc_ptr->set_plugin_group(plugin_group_);
+    return snapshot_plugin_;
+  }
+
+  /// Place a single resident wavefront on CU 0 without running it to s_endpgm.
+  /// Used by tests that drive individual instructions and then read the register
+  /// file directly — the wave stays resident (its resources are not freed) until
+  /// the fixture is destroyed.
+  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256) {
+    return cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, num_sgprs, num_vgprs);
+  }
+
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  test::HaltSnapshotPlugin *snapshot_plugin_ = nullptr;
+
   /// Write a kernel descriptor + instructions to GPU memory per AMDHSA ABI.
   /// Returns the kernel_object address.
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
@@ -125,28 +145,25 @@ struct VmFixture {
   }
 };
 
+// Drive the engine until the listed CUs have no resident wavefronts. A wavefront
+// frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
+// kernel is complete once every listed CU reports idle. Waves that need their final
+// register state inspected should capture it via HaltSnapshotPlugin, which snapshots
+// at halt regardless of where this loop stops.
 void step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
                        uint32_t max_steps = 10000) {
-  for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
-    bool all_halted = true;
-    for (auto *cu : cus) {
-      if (!cu->has_active_wfs())
-        continue;
-      for (uint32_t w = 0; w < cu->num_wfs(); ++w) {
-        if (cu->wf(w) && !cu->wf(w)->is_halted()) {
-          all_halted = false;
-          break;
-        }
-      }
-      if (!all_halted)
-        break;
-    }
-    bool any_wf = false;
+  auto any_active = [&]() {
     for (auto *cu : cus)
-      if (cu->num_wfs() > 0)
-        any_wf = true;
-    if (any_wf && all_halted)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  };
+  bool saw_work = false;
+  for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
+    if (any_active())
+      saw_work = true;
+    else if (saw_work)
       break;
   }
 }
@@ -234,6 +251,7 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   for (const char *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch, 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
     uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, kWgpLdsBytes,
                                  /*wgp_mode=*/true);
     test::AqlQueue queue(f.mem(), f.cp());
@@ -243,20 +261,11 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     EXPECT_EQ(f.cu(0)->lds().size_bytes(), kPerCuLdsBytes);
     EXPECT_EQ(f.se()->spi().max_wgp_lds_bytes(), kWgpLdsBytes);
 
-    amdgpu::Wavefront *wf = nullptr;
-    for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
-      auto *cu = f.cu(cu_idx);
-      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
-        if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
-          wf = cu->wf(wf_idx);
-          break;
-        }
-      }
-    }
-    ASSERT_NE(wf, nullptr);
-    EXPECT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
-    wf->lds().write32(kPerCuLdsBytes + 4, 0xC001D00Du);
-    EXPECT_EQ(wf->lds().read32(kPerCuLdsBytes + 4), 0xC001D00Du);
+    // A WGP-mode wave sees the combined sibling-CU LDS capacity (wave32 splits the
+    // 64-thread workgroup into two waves; both see the same combined pool).
+    ASSERT_GE(snap->snapshots().size(), 1u);
+    for (const auto &wf : snap->snapshots())
+      EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
   }
 }
 
@@ -408,15 +417,13 @@ protected:
 TEST_P(IsaTest, RegisterAccess) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Exercise the CU register-file read/write API on a live, resident wavefront.
+  // dispatch_wf() allocates a slot without running the kernel to s_endpgm (which
+  // would free the slot), so the registers stay readable/writable here.
   auto *cu = f.cu();
+  auto *w = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(w, nullptr);
   ASSERT_GE(cu->num_wfs(), 1u);
-  auto *w = cu->wf(0);
 
   EXPECT_EQ(w->wf_size(), 64u);
   EXPECT_EQ(w->num_sgprs(), 104u);
@@ -445,6 +452,7 @@ TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
     for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
       SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
       VmFixture f(arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+      auto *snap = f.capture_halts();
       uint64_t ko =
           f.write_kernel(0x1000, code, sizeof(code), 104, 32, 2, 0, false, component_count);
 
@@ -462,18 +470,15 @@ TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
       queue.submit(pkt);
       step_until_halted(*f.engine, {f.cu()});
 
-      ASSERT_EQ(f.cu()->num_wfs(), 2u);
-      auto *wf0 = f.cu()->wf(0);
-      auto *wf1 = f.cu()->wf(1);
+      ASSERT_EQ(snap->snapshots().size(), 2u);
+      const auto *wf0 = snap->by_wf_id(0);
+      const auto *wf1 = snap->by_wf_id(1);
       ASSERT_NE(wf0, nullptr);
       ASSERT_NE(wf1, nullptr);
-      const uint32_t vbase0 = wf0->vgpr_alloc().base;
-      const uint32_t vbase1 = wf1->vgpr_alloc().base;
-      EXPECT_EQ(f.cu()->read_vgpr(vbase0, 0), amdgpu::pack_workitem_id({0, 0, 0}, component_count));
-      EXPECT_EQ(f.cu()->read_vgpr(vbase0, 9), amdgpu::pack_workitem_id({1, 1, 0}, component_count));
-      EXPECT_EQ(f.cu()->read_vgpr(vbase1, 8), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
-      EXPECT_EQ(f.cu()->read_vgpr(vbase1, 31),
-                amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+      EXPECT_EQ(wf0->vgpr(0, 0), amdgpu::pack_workitem_id({0, 0, 0}, component_count));
+      EXPECT_EQ(wf0->vgpr(0, 9), amdgpu::pack_workitem_id({1, 1, 0}, component_count));
+      EXPECT_EQ(wf1->vgpr(0, 8), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
+      EXPECT_EQ(wf1->vgpr(0, 31), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
     }
   }
 }
@@ -485,6 +490,7 @@ TEST(CdnaDispatchTest, Wave64PackedTidHonorsRequestedComponents) {
     for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
       SCOPED_TRACE(::testing::Message() << arch << " component_count=" << component_count);
       VmFixture f(arch);
+      auto *snap = f.capture_halts();
       ASSERT_TRUE(f.cp()->packed_tid());
       uint64_t ko =
           f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
@@ -503,19 +509,18 @@ TEST(CdnaDispatchTest, Wave64PackedTidHonorsRequestedComponents) {
       queue.submit(pkt);
       step_until_halted(*f.engine, {f.cu()});
 
-      ASSERT_EQ(f.cu()->num_wfs(), 1u);
-      auto *wf = f.cu()->wf(0);
-      ASSERT_NE(wf, nullptr);
-      EXPECT_EQ(wf->wf_size(), 64u);
-      const uint32_t vbase = wf->vgpr_alloc().base;
-      EXPECT_EQ(f.cu()->read_vgpr(vbase, 40), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
-      EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+      ASSERT_EQ(snap->snapshots().size(), 1u);
+      const auto *wf = &snap->snapshots().front();
+      EXPECT_EQ(wf->wf_size, 64u);
+      EXPECT_EQ(wf->vgpr(0, 40), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
+      EXPECT_EQ(wf->vgpr(0, 63), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
     }
   }
 }
 
 TEST(CdnaDispatchTest, Wave64MasksMultidimensionalGridTailAcrossLane32) {
   VmFixture f("cdna3");
+  auto *snap = f.capture_halts();
   const uint32_t code[] = {SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
 
@@ -533,14 +538,13 @@ TEST(CdnaDispatchTest, Wave64MasksMultidimensionalGridTailAcrossLane32) {
   queue.submit(pkt);
   step_until_halted(*f.engine, {f.cu()});
 
-  ASSERT_EQ(f.cu()->num_wfs(), 1u);
-  auto *wf = f.cu()->wf(0);
-  ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(wf->wf_size(), 64u);
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto *wf = &snap->snapshots().front();
+  EXPECT_EQ(wf->wf_size, 64u);
   // Five active X lanes in each of five Y rows. The final active row starts
   // at lane 32; lanes 40-47 are past grid_size_y, and lanes 48-63 map beyond
   // workgroup_size_z.
-  EXPECT_EQ(wf->exec(), 0x0000'001F'1F1F'1F1FULL);
+  EXPECT_EQ(wf->exec, 0x0000'001F'1F1F'1F1FULL);
 }
 
 TEST(CdnaDispatchTest, Cdna1UnpackedTidHonorsRequestedComponents) {
@@ -549,6 +553,7 @@ TEST(CdnaDispatchTest, Cdna1UnpackedTidHonorsRequestedComponents) {
   for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
     SCOPED_TRACE("component_count=" + std::to_string(component_count));
     VmFixture f("cdna1");
+    auto *snap = f.capture_halts();
     ASSERT_FALSE(f.cp()->packed_tid());
     uint64_t ko =
         f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
@@ -567,14 +572,12 @@ TEST(CdnaDispatchTest, Cdna1UnpackedTidHonorsRequestedComponents) {
     queue.submit(pkt);
     step_until_halted(*f.engine, {f.cu()});
 
-    ASSERT_EQ(f.cu()->num_wfs(), 1u);
-    auto *wf = f.cu()->wf(0);
-    ASSERT_NE(wf, nullptr);
-    EXPECT_EQ(wf->wf_size(), 64u);
-    const uint32_t vbase = wf->vgpr_alloc().base;
-    EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), 7u);
-    EXPECT_EQ(f.cu()->read_vgpr(vbase + 1, 63), component_count >= 1 ? 3u : 0u);
-    EXPECT_EQ(f.cu()->read_vgpr(vbase + 2, 63), component_count >= 2 ? 1u : 0u);
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    const auto *wf = &snap->snapshots().front();
+    EXPECT_EQ(wf->wf_size, 64u);
+    EXPECT_EQ(wf->vgpr(0, 63), 7u);
+    EXPECT_EQ(wf->vgpr(1, 63), component_count >= 1 ? 3u : 0u);
+    EXPECT_EQ(wf->vgpr(2, 63), component_count >= 2 ? 1u : 0u);
   }
 }
 
@@ -607,31 +610,17 @@ TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
 TEST_P(IsaTest, RegisterFileIsolation) {
   VmFixture f(arch(), 1, 2);
 
-  // Two wavefronts in one workgroup: grid=128 items, wg=64 -> 2 wfs.
-  // But that gives 2 workgroups. Use 1 workgroup with 128 items for 2 wfs.
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  {
-    test::AqlQueue queue(f.mem(), f.cp());
-    hsa_kernel_dispatch_packet_t pkt{};
-    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    pkt.setup = 1;
-    pkt.workgroup_size_x = 128; // 2 wavefronts per workgroup
-    pkt.workgroup_size_y = 1;
-    pkt.workgroup_size_z = 1;
-    pkt.grid_size_x = 128; // 1 workgroup
-    pkt.grid_size_y = 1;
-    pkt.grid_size_z = 1;
-    pkt.kernel_object = ko;
-    pkt.kernarg_address = nullptr;
-    queue.submit(pkt);
-  }
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Two concurrently-resident wavefronts must own disjoint register blocks.
+  // dispatch_wf() places both without running to s_endpgm (which would free them),
+  // so their register files stay live for the isolation checks below.
   auto *cu = f.cu();
+  auto *w0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  auto *w1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(w0, nullptr);
+  ASSERT_NE(w1, nullptr);
   ASSERT_EQ(cu->num_wfs(), 2u);
-  auto *w0 = cu->wf(0);
-  auto *w1 = cu->wf(1);
+  ASSERT_NE(w0->sgpr_alloc().base, w1->sgpr_alloc().base);
+  ASSERT_NE(w0->vgpr_alloc().base, w1->vgpr_alloc().base);
 
   cu->write_sgpr(w0->sgpr_alloc().base + 0, 42);
   cu->write_sgpr(w1->sgpr_alloc().base + 0, 99);
@@ -654,12 +643,27 @@ TEST_P(IsaTest, DispatchAndCapacity) {
   queue.dispatch(ko, 128, 64); // grid=128, wg=64 → 2 workgroups
   f.engine->run();
 
-  // Both slots were used (wavefronts have now halted and been retired).
+  // Both workgroups ran to completion; their waves freed themselves at s_endpgm.
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
+  // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
+  // The CP relies on can_accept_workgroup() gating, but the API contract must hold
+  // independently so it cannot silently drift into OOB access in release builds.
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch(), 1, kSlots);
+  auto *cu = f.cu();
+  for (uint32_t i = 0; i < kSlots; ++i)
+    ASSERT_NE(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr) << "slot " << i;
+  EXPECT_EQ(cu->num_wfs(), kSlots);
+  // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
+  EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   VmFixture f(arch(), 1, 8);
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -685,8 +689,11 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   queue.submit(raw);
   f.engine->run();
 
+  // The clustered dispatch produced one consolidated dispatch, and its cluster
+  // wavefronts ran and halted (freeing themselves at s_endpgm). Observe the waves
+  // at halt rather than as post-run residents.
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
-  EXPECT_GE(f.cu()->num_wfs(), 1u);
+  EXPECT_GE(snap->snapshots().size(), 1u);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemory) {
@@ -1058,6 +1065,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
 
 TEST_P(IsaTest, DispatchCreatesWavefronts) {
   VmFixture f(arch(), 2);
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -1065,12 +1073,14 @@ TEST_P(IsaTest, DispatchCreatesWavefronts) {
   queue.dispatch(ko, 128); // 2 workgroups of 64
   step_until_halted(*f.engine, {f.se()->compute_unit(0), f.se()->compute_unit(1)});
 
-  EXPECT_EQ(f.se()->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(f.se()->compute_unit(1)->num_wfs(), 1u);
+  // Round-robin placement puts one workgroup (one wave) on each CU.
+  EXPECT_EQ(snap->for_cu(f.se()->compute_unit(0)).size(), 1u);
+  EXPECT_EQ(snap->for_cu(f.se()->compute_unit(1)).size(), 1u);
 }
 
 TEST_P(IsaTest, MultipleWavesPerWorkgroup) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -1091,7 +1101,8 @@ TEST_P(IsaTest, MultipleWavesPerWorkgroup) {
   }
   step_until_halted(*f.engine, {f.cu()});
 
-  EXPECT_EQ(f.cu()->num_wfs(), 3u);
+  // One workgroup of 192 work-items = 3 wavefronts, all on the single CU.
+  EXPECT_EQ(snap->for_cu(f.cu()).size(), 3u);
 }
 
 TEST_P(IsaTest, RunToCompletion) {
@@ -1244,6 +1255,7 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   };
 
   VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  auto *snap = f.capture_halts();
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 128, 64, 2, kWgpLdsBytes,
                                /*wgp_mode=*/true);
   test::AqlQueue queue(f.mem(), f.cp());
@@ -1251,30 +1263,28 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
 
   ASSERT_NO_THROW(f.engine->run());
 
-  amdgpu::Wavefront *wf = nullptr;
-  amdgpu::ComputeUnitCore *active_cu = nullptr;
-  for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
-    auto *cu = f.cu(cu_idx);
-    for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
-      if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
-        active_cu = cu;
-        wf = cu->wf(wf_idx);
-        break;
-      }
-    }
-  }
-  ASSERT_NE(wf, nullptr);
-  ASSERT_NE(active_cu, nullptr);
-  ASSERT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
-  EXPECT_EQ(wf->lds().read32(kAddress), kValue);
-  EXPECT_EQ(active_cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
+  // The DS store wrote an offset in the sibling CU's half of the combined WGP LDS
+  // pool, then the DS load read it back into v2. A correct v2 proves the store and
+  // load both resolved through the combined pool (kAddress > per-CU capacity, so it
+  // only succeeds if the sibling half is addressable).
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+  EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
+  EXPECT_EQ(wf.vgpr(2, 0), kValue);
 }
 
+// Runs a self-contained scalar/vector program to s_endpgm and exposes the
+// wavefront's final architectural state. Because a wave frees its registers the
+// instant it halts, the final state is captured at halt time via HaltSnapshotPlugin
+// and served from that snapshot rather than from the (now-freed) slot.
 struct ExecFixture {
   VmFixture f;
   std::string arch_;
+  test::HaltSnapshotPlugin *snap_ = nullptr;
 
-  explicit ExecFixture(const std::string &arch) : f(arch), arch_(arch) {}
+  explicit ExecFixture(const std::string &arch) : f(arch), arch_(arch) {
+    snap_ = f.capture_halts();
+  }
 
   bool is_cdna4() const { return arch_ == "cdna4"; }
   uint32_t sopp_bytes() const { return 4u; }
@@ -1295,24 +1305,24 @@ struct ExecFixture {
     step_until_halted(*f.engine, {f.cu()});
   }
 
-  amdgpu::Wavefront *wf() { return f.cu()->wf(0); }
   amdgpu::ComputeUnitCore *cu() { return f.cu(); }
-  bool step() { return f.cu()->step(); }
 
-  uint32_t read_sgpr(uint32_t idx) { return cu()->read_sgpr(wf()->sgpr_alloc().base + idx); }
-  void write_sgpr(uint32_t idx, uint32_t val) {
-    cu()->write_sgpr(wf()->sgpr_alloc().base + idx, val);
+  /// Snapshot of the (single) halted wavefront's final state.
+  const test::WavefrontSnapshot &snap() const {
+    EXPECT_EQ(snap_->snapshots().size(), 1u);
+    return snap_->snapshots().front();
   }
-  uint32_t read_vgpr(uint32_t reg, uint32_t lane) {
-    return cu()->read_vgpr(wf()->vgpr_alloc().base + reg, lane);
-  }
-  void write_vgpr(uint32_t reg, uint32_t lane, uint32_t val) {
-    cu()->write_vgpr(wf()->vgpr_alloc().base + reg, lane, val);
-  }
+
+  bool halted() const { return !snap_->snapshots().empty(); }
+  uint32_t status_raw() const { return snap().status; }
+  uint64_t vcc() const { return snap().vcc; }
+  uint32_t read_sgpr(uint32_t idx) { return snap().sgpr(idx); }
+  uint32_t read_vgpr(uint32_t reg, uint32_t lane) { return snap().vgpr(reg, lane); }
 };
 
 TEST_P(IsaTest, StepExecutesAndHalts) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   auto prog = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_NOP}, {SOPP_S_ENDPGM}});
   uint64_t ko = f.write_kernel(0x0, prog.data(), prog.size() * sizeof(uint32_t));
@@ -1320,9 +1330,9 @@ TEST_P(IsaTest, StepExecutesAndHalts) {
   queue.dispatch(ko, 64);
   step_until_halted(*f.engine, {f.cu()});
 
-  auto *cu = f.cu();
-  ASSERT_GE(cu->num_wfs(), 1u);
-  EXPECT_TRUE(cu->wf(0)->is_halted());
+  // The wave executed and halted (freeing itself at s_endpgm).
+  EXPECT_EQ(snap->snapshots().size(), 1u);
+  EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
 TEST_P(IsaTest, RoundRobinScheduling) {
@@ -1346,6 +1356,7 @@ TEST_P(IsaTest, RoundRobinScheduling) {
 
 TEST_P(IsaTest, EngineRunsToCompletion) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   auto prog = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_ENDPGM}});
   uint64_t ko = f.write_kernel(0x0, prog.data(), prog.size() * sizeof(uint32_t));
@@ -1353,8 +1364,8 @@ TEST_P(IsaTest, EngineRunsToCompletion) {
   queue.dispatch(ko, 64);
   step_until_halted(*f.engine, {f.cu()});
 
-  ASSERT_GE(f.cu()->num_wfs(), 1u);
-  EXPECT_TRUE(f.cu()->wf(0)->is_halted());
+  EXPECT_EQ(snap->snapshots().size(), 1u);
+  EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
 TEST_P(IsaTest, SMovB32_InlineConst) {
@@ -1418,7 +1429,7 @@ TEST_P(IsaTest, SCmpEqI32_Equal) {
   fx.load_program({enc::s_mov_b32(0, enc::INLINE_CONST(42)),
                    enc::s_mov_b32(1, enc::INLINE_CONST(42)),
                    enc::s_cmp_eq_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 1u); // SCC=1
+  EXPECT_EQ(fx.status_raw() & 1u, 1u); // SCC=1
 }
 
 TEST_P(IsaTest, SCmpEqI32_NotEqual) {
@@ -1426,7 +1437,7 @@ TEST_P(IsaTest, SCmpEqI32_NotEqual) {
   fx.load_program({enc::s_mov_b32(0, enc::INLINE_CONST(42)),
                    enc::s_mov_b32(1, enc::INLINE_CONST(43)),
                    enc::s_cmp_eq_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 0u); // SCC=0
+  EXPECT_EQ(fx.status_raw() & 1u, 0u); // SCC=0
 }
 
 TEST_P(IsaTest, SCmpGtI32) {
@@ -1436,7 +1447,7 @@ TEST_P(IsaTest, SCmpGtI32) {
   fx.load_program({enc::s_mov_b32(0, NEG_5),  // s0 = -5
                    enc::s_mov_b32(1, NEG_10), // s1 = -10
                    enc::s_cmp_gt_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 1u); // -5 > -10, SCC=1
+  EXPECT_EQ(fx.status_raw() & 1u, 1u); // -5 > -10, SCC=1
 }
 
 TEST_P(IsaTest, SBranch_Forward) {
@@ -1449,8 +1460,7 @@ TEST_P(IsaTest, SBranch_Forward) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  ASSERT_GE(fx.cu()->num_wfs(), 1u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc0_Taken) {
@@ -1470,7 +1480,7 @@ TEST_P(IsaTest, SCbranchScc0_Taken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc0_NotTaken) {
@@ -1488,7 +1498,7 @@ TEST_P(IsaTest, SCbranchScc0_NotTaken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc1_Taken) {
@@ -1506,13 +1516,13 @@ TEST_P(IsaTest, SCbranchScc1_Taken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SEndpgm_Halts) {
   ExecFixture fx(arch());
   fx.load_program({SOPP_S_ENDPGM});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, VMovB32_PerLane) {
@@ -1566,7 +1576,7 @@ TEST_P(IsaTest, VCmpEqF32_SetsVCC) {
   // Lane 0: v0=0, compared with 0 -> equal -> VCC[0]=1.
   // Lane 1: v0=1, compared with 0 -> not equal -> VCC[1]=0.
   fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
-  uint64_t vcc = fx.wf()->vcc();
+  uint64_t vcc = fx.vcc();
   EXPECT_TRUE(vcc & (1ULL << 0));  // lane 0: 0.0 == 0.0
   EXPECT_FALSE(vcc & (1ULL << 1)); // lane 1: int 1 as float != 0.0
 }
@@ -1592,7 +1602,7 @@ TEST_P(IsaTest, ExecMask_PreservesInactiveLanes) {
   // We can't set EXEC before run. Instead, verify that the engine runs to completion.
   // This test is simplified to just verify halting behavior.
   fx.load_program({enc::v_mov_b32(2, enc::VGPR_SRC(0)), SOPP_S_ENDPGM});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
   EXPECT_EQ(fx.read_vgpr(2, 0), 0u);
   EXPECT_EQ(fx.read_vgpr(2, 1), 1u);
 }
@@ -1608,7 +1618,7 @@ TEST_P(IsaTest, MultiInstructionProgram) {
   EXPECT_EQ(fx.read_sgpr(3), 10u);
   EXPECT_EQ(fx.read_sgpr(4), 20u);
   EXPECT_EQ(fx.read_sgpr(5), 30u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, BranchLoop) {
@@ -1629,7 +1639,7 @@ TEST_P(IsaTest, BranchLoop) {
   step_until_halted(*fx.f.engine, {fx.cu()});
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
@@ -1642,14 +1652,11 @@ INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
 TEST_P(IsaTest, MfmaF16Accumulation) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave: this test drives MFMA directly and reads the VGPR file,
+  // so the wave must stay allocated (not run to s_endpgm, which would free it).
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
   // Test v_mfma_f32_16x16x32_f16: M=16, N=16, K=32, B=1, in_bits=16
@@ -1703,14 +1710,10 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
 TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
   // Test with patterned data: A[i][k] = (i+1) as FP16, B[k][j] = 1.0h
@@ -1793,14 +1796,10 @@ void expect_mfma_f64_outputs(amdgpu::ComputeUnitCore *cu, uint32_t dst, double e
 void expect_mfma_f64_neg_modifier(const std::string &arch) {
   VmFixture f(arch);
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
   uint32_t s0 = vb + 10;
@@ -1829,14 +1828,10 @@ TEST(MfmaF64Cdna4Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna4"); }
 TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
   VmFixture f("cdna4");
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kSrc0 = 10;
   constexpr uint32_t kSrc1 = 20;
@@ -2040,6 +2035,7 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
 // not to VGPR (vb+vdst).
 TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
 
   constexpr uint32_t VDST = 4;
   constexpr uint32_t ADDR_REG = 0;
@@ -2074,16 +2070,15 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   queue.dispatch(ko, 64);
   f.engine->run();
 
-  auto *wf = cu->wf(0);
-  ASSERT_NE(wf, nullptr);
-  uint32_t vb = wf->vgpr_alloc().base;
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
 
   // VGPR v4 should still hold the sentinel (42), not overwritten by ds_read.
-  uint32_t vgpr_val = cu->read_vgpr(vb + VDST, 0);
+  uint32_t vgpr_val = wf.vgpr(VDST, 0);
   EXPECT_EQ(vgpr_val, 42u) << "VGPR v" << VDST << " should NOT have been written when acc=1";
 
   // AccVGPR a4 should have been written with LDS data (not 42, not 0).
-  uint32_t acc_val = cu->read_vgpr(vb + 256 + VDST, 0);
+  uint32_t acc_val = wf.vgpr(256 + VDST, 0);
   EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
   EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
                           << " should contain LDS data, not the VGPR sentinel";

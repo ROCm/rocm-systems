@@ -56,8 +56,10 @@ class CommandProcessor;
 /// back to this CU and its slot index (wf_id).
 ///
 /// dispatch_wf() finds the first idle slot, allocates registers, and
-/// activates it. retire_halted_wfs() frees register allocations and calls
-/// clear() so the slot can be reused.
+/// activates it. When a wavefront reaches s_endpgm it halts: free_wavefront_resources()
+/// frees its register allocations and resets the slot for reuse, mirroring how real
+/// hardware reclaims a wave's resources at termination (there is no separate lazy
+/// retirement pass).
 ///
 /// Each step() call picks the next active wavefront (round-robin) and executes
 /// one instruction using the ISA-specific decoder.
@@ -110,11 +112,17 @@ public:
   /// @retval false No active wavefronts remain.
   bool step() override;
 
-  /// @brief Clear all halted wavefront slots and free their register allocations.
-  void retire_halted_wfs();
+  /// @brief Free a halted wavefront's register allocations and reset its slot.
+  /// @details Called from Wavefront::halt() at s_endpgm so a terminated wave
+  /// releases its SGPR/VGPR blocks immediately, exactly as hardware reclaims
+  /// resources at wave termination. LDS is per-workgroup and reclaimed separately
+  /// via maybe_reset_lds_alloc() once the whole workgroup completes.
+  void free_wavefront_resources(Wavefront &wf);
 
-  /// @brief Like retire_halted_wfs but without resetting the LDS allocator.
-  void retire_halted_wfs_no_lds_reset();
+  /// @brief Reset the per-WG LDS bump allocator once the CU has fully drained.
+  /// @details No-op while any wavefront is resident or a cluster pin is held (peer
+  /// cluster workgroups may still multicast into LDS after the source wave halts).
+  void maybe_reset_lds_alloc();
 
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
@@ -173,7 +181,7 @@ public:
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
-  /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
+  /// Initializes the refcount so release_wf() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
@@ -191,8 +199,10 @@ public:
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
-  /// @brief Return the number of dispatched (active or halted) wavefront slots.
-  /// @returns Count of non-idle wavefront slots.
+  /// @brief Return the number of resident (not-yet-halted) wavefront slots.
+  /// @details A wave frees its resources and its slot at s_endpgm, so halted
+  /// waves are not counted. Equivalent to the number of active wavefronts.
+  /// @returns Count of resident wavefront slots.
   size_t num_wfs() const;
 
   /// @brief Return the total number of wavefront slots.
@@ -499,13 +509,6 @@ public:
   /// @param wf The wavefront executing the instruction.
   virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
 
-  /// @brief Reset all wavefront slots to halted state.
-  ///
-  /// Frees all register allocations and resets every slot.  Used by the
-  /// instruction execution test harness between instructions.
-  /// @warning NOT thread-safe.  Must not be called while step() is running.
-  void reset_all_wf();
-
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
@@ -597,6 +600,9 @@ inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;
 }
+inline uint32_t InstructionComputeUnitView::vgpr_allocation_block_size() const {
+  return raw_cu().vgpr_allocation_block_size();
+}
 inline std::string InstructionComputeUnitView::full_path() const { return raw_cu().full_path(); }
 inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
@@ -651,7 +657,12 @@ public:
   }
 
   void schedule_work() override {
-    if (executing_ || !this->engine())
+    // Never wake an idle CU. The CP nudges the CU through the cp->cu.cpl port,
+    // gated on has_active_wfs() when sent, but that port carries link latency, so a
+    // nudge can arrive a tick after the last wavefront has halted and freed itself.
+    // Waking the CU then would run an empty tick with no wave to issue — pure waste.
+    // Work is scheduled only when there is work to do.
+    if (executing_ || !this->engine() || !this->has_active_wfs())
       return;
     executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();

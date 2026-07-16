@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
@@ -711,6 +712,10 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   loaded.wire_links(engine.topology());
   engine.create();
 
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
+  soc->set_plugin_group(plugin_group);
+
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};
@@ -732,12 +737,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   engine.step();
 
-  // After one step, the doorbell event dispatched wavefronts to CUs
-  // (allocated but not yet executed). Verify round-robin distribution.
+  // After one step, the doorbell event dispatched wavefronts to CUs. Count them
+  // via the dispatch hook (fired at placement) so the check is independent of when
+  // waves execute and free themselves. Verify round-robin distribution.
   EXPECT_EQ(xcd->command_processor()->dispatched_count(), 1u);
   auto *se = soc->xcd(0)->shader_engine(0);
-  EXPECT_EQ(se->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(se->compute_unit(1)->num_wfs(), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {

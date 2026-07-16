@@ -120,7 +120,6 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
     for (size_t attempt = 0; attempt < cus.size(); ++attempt) {
       size_t cu_idx = (next_cu + rank + attempt) % cus.size();
       auto *cu = cus[cu_idx];
-      cu->retire_halted_wfs();
 
       uint32_t reserved_wgs = planned_per_cu[cu_idx] + 1;
       uint64_t reserved_wfs = static_cast<uint64_t>(entry.wfs_per_workgroup) * reserved_wgs;
@@ -645,8 +644,12 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
 
   for (uint32_t peer_wg_id : peer_wg_ids) {
     auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu)
+    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu) {
       peer_it->second.cu->unpin_lds_for_cluster(cluster_key);
+      // The waves halted (and freed) before the pin was released, so reclaim each
+      // peer CU's LDS now that the whole cluster is done.
+      peer_it->second.cu->maybe_reset_lds_alloc();
+    }
   }
   for (uint32_t peer_wg_id : peer_wg_ids)
     cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
@@ -656,8 +659,10 @@ void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
     if ((it->first >> 32) == dispatch_id) {
-      if (it->second.cu)
+      if (it->second.cu) {
         it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
+        it->second.cu->maybe_reset_lds_alloc();
+      }
       it = cluster_wg_placements_.erase(it);
     } else {
       ++it;
@@ -710,8 +715,14 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
   // Query the complete placement before dispatching for all-or-nothing setup.
   uint32_t dispatched = 0;
-  auto dispatch_to_placement = [&](uint32_t local_wg_id, uint32_t global_wg_id,
-                                   const ShaderProcessorInput::WorkgroupPlacement &placement) {
+  // Places one workgroup's waves on the chosen CU. Returns false only on an
+  // internal invariant violation: dispatch_wf() returning null after placement was
+  // gated on can_accept_workgroup(). The caller turns that into a hard error rather
+  // than silently dereferencing a null wave in a release build (where the callee's
+  // assert is compiled out).
+  auto dispatch_to_placement =
+      [&](uint32_t local_wg_id, uint32_t global_wg_id,
+          const ShaderProcessorInput::WorkgroupPlacement &placement) -> bool {
     // Fire the dispatch-execution-begin hook exactly once, on the first workgroup
     // actually placed on a CU, guarded by the per-dispatch flag.
     if (!entry.execution_begun) {
@@ -720,15 +731,34 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
     ComputeUnitCore *cu = placement.cu;
     uint32_t lds_base = placement.lds_base;
-    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
-    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
-
+    // Reserve all waves BEFORE committing WG-completion bookkeeping. begin_workgroup()
+    // installs the WG refcount and register_cluster_workgroup() installs the LDS pin;
+    // both are released only via release_wf() when the waves halt. Committing them
+    // first and then failing mid-workgroup (a dispatch_wf null) would orphan the
+    // refcount and pin, permanently blocking maybe_reset_lds_alloc() on this CU.
+    // Placement is already gated on can_accept_workgroup()/cluster planning, so this
+    // dry allocation cannot actually fail — but doing it up front makes the commit
+    // below all-or-nothing.
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
                                       entry.vgprs_per_wf);
-      assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
+      if (!wf) {
+        // Unreachable given the placement gating; free any waves already claimed for
+        // this WG and fail without having touched the WG refcount / cluster pin.
+        assert(false && "dispatch_wf failed after placement was reserved");
+        for (auto *claimed : wg_wavefronts)
+          claimed->halt();
+        return false;
+      }
+      wg_wavefronts.push_back(wf);
+    }
+    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
+    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
+
+    for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
+      Wavefront *wf = wg_wavefronts[w];
       wf->set_lds_base(lds_base);
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
@@ -736,7 +766,6 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
-      wg_wavefronts.push_back(wf);
     }
     plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
                                                cu->vgpr_allocation_block_size(), entry.sgprs_per_wf,
@@ -746,6 +775,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 
     ++entry.dispatched_wgs;
     ++dispatched;
+    return true;
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
@@ -778,7 +808,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       for (const auto &wg : plan) {
         ShaderProcessorInput::WorkgroupPlacement placement{
             wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
-        dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement);
+        if (!dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement))
+          throw std::runtime_error("dispatch_wf failed after cluster placement was reserved");
       }
       continue;
     }
@@ -795,7 +826,6 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
-        cus_[cu_idx]->retire_halted_wfs();
         if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
                                                entry.group_segment_fixed_size)) {
           auto *cu = cus_[cu_idx];
@@ -817,7 +847,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       break;
     }
 
-    dispatch_to_placement(local_wg_id, global_wg_id, *placement);
+    if (!dispatch_to_placement(local_wg_id, global_wg_id, *placement))
+      throw std::runtime_error("dispatch_wf failed after workgroup placement was reserved");
   }
   return dispatched;
 }
@@ -1306,9 +1337,14 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
 
         if (!condition_satisfied) {
           // The packet stalls this queue, but other queues (notably SDMA) must
-          // keep running so they can satisfy the dependency.
+          // keep running so they can satisfy the dependency. fetch_from_queue runs
+          // on the engine thread (via handle_doorbell), so reschedule with
+          // schedule_event(now + 1) — advancing the tick per re-check — like the
+          // sibling barrier/vendor-dep retries. schedule_event_now() is only for the
+          // external doorbell poll thread; using it here would collapse re-checks
+          // onto one tick and take the async queue's lock needlessly.
           process_limit = read_idx;
-          engine()->schedule_event_now(&doorbell_event_);
+          schedule_event(&doorbell_event_, now + 1);
           break;
         }
 
@@ -1396,7 +1432,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick now) {
-  invalid_pending_.store(false, std::memory_order_relaxed);
+  // Release so the doorbell poll thread's acquire-load (invalid_retry) cannot
+  // observe a stale "pending" after this handler has re-fetched; pairs with the
+  // release-store at the INVALID-packet site.
+  invalid_pending_.store(false, std::memory_order_release);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 

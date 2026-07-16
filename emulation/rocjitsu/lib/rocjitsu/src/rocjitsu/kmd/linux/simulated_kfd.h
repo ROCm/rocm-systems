@@ -167,9 +167,14 @@ public:
   void gem_va_unmap(uint64_t gpu_va, size_t size);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
-  /// @details Public so the interposer can read a local allocation's flags when
-  /// synthesizing GEM bookkeeping at EXPORT_DMABUF time.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
+  /// @brief KFD allocation flags for a local-process allocation @p handle, or 0.
+  /// @details Locks the process alloc mutex internally, keeping lock discipline for
+  /// per-process allocation state inside the driver. Used by the interposer to
+  /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
+  /// may be freed).
+  uint32_t alloc_flags_for_handle(uint64_t handle) const;
 
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {

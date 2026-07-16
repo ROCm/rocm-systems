@@ -99,6 +99,15 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_local_process() const {
   return find_process(local_process_id_);
 }
 
+uint32_t SimulatedKfd::alloc_flags_for_handle(uint64_t handle) const {
+  auto proc = find_process(local_process_id_);
+  if (!proc)
+    return 0;
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+  auto it = proc->allocations_.find(handle);
+  return it != proc->allocations_.end() ? it->second.flags : 0;
+}
+
 void SimulatedKfd::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
                               amdgpu::Mtype mtype) {
   util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
@@ -1049,18 +1058,24 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       }
     }
     if (is_doorbell) {
+      // Clear the CP's doorbell base for this process BEFORE munmapping the page.
+      // The doorbell poll thread reads and dereferences doorbell_base under the CP's
+      // hw_queue_mutex_ (scan_doorbells); if we munmapped first, the poll thread
+      // could deref the freed page in the window before the base is cleared and
+      // SIGSEGV. update_cp_doorbell_base takes hw_queue_mutex_, so once it returns
+      // no poll-thread reader can still observe the stale base, and the munmap below
+      // is safe.
+      //
+      // Both steps run AFTER releasing alloc_mutex_: the CP engine thread takes
+      // alloc_mutex_ under hw_queue_mutex_ (allocate_scratch_backing), so holding
+      // alloc_mutex_ across update_cp_doorbell_base (hw_queue_mutex_) would be an
+      // alloc_mutex_->hw_queue_mutex_ inversion that can deadlock.
+      update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
       // Unmap the exact page we mapped: use the recorded doorbell page size, not
       // the caller-provided length. A length that differs from the tracked mapping
-      // would otherwise partially unmap the CPU page and leave it inconsistent
-      // with the GPU page-table unmap above. Both the munmap syscall and the CP
-      // notification run AFTER releasing alloc_mutex_: update_cp_doorbell_base
-      // takes the CP's hw_queue_mutex_, and the CP engine thread takes alloc_mutex_
-      // under hw_queue_mutex_ (allocate_scratch_backing), so holding alloc_mutex_
-      // here would be an alloc_mutex_->hw_queue_mutex_ inversion that can deadlock.
+      // would otherwise partially unmap the CPU page and leave it inconsistent with
+      // the GPU page-table unmap above.
       libc_passthrough().munmap(addr, doorbell_page_size ? doorbell_page_size : length);
-      // Clear the CP's doorbell base for this process: the page it pointed at is
-      // gone, so a stale base must not be dereferenced by the CP.
-      update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
       return 0;
     }
   }

@@ -90,12 +90,30 @@ using rocjitsu::Sysfs;
 namespace {
 
 /// @brief Attempt to connect @p sock to the AF_UNIX socket at @p path.
-/// @returns 0 on success; -1 with errno set on failure (socket left open).
-int try_connect(int sock, const std::string &path) {
+/// @returns A connected socket fd on success; -1 with errno set on failure.
+/// @details Creates a FRESH socket for each attempt: POSIX leaves a stream
+/// socket's state unspecified after a failed connect(), so a socket must not be
+/// reused for a second connect(). Fails with ENAMETOOLONG rather than silently
+/// truncating a path that does not fit sun_path, so a too-long runtime dir cannot
+/// connect to an unintended (truncated) socket endpoint.
+int try_connect(const std::string &path) {
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
-  path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-  return connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+  if (path.size() >= sizeof(addr.sun_path)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  std::memcpy(addr.sun_path, path.c_str(), path.size());
+  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (sock < 0)
+    return -1;
+  if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    int saved = errno;
+    rocjitsu::libc_passthrough().close(sock);
+    errno = saved;
+    return -1;
+  }
+  return sock;
 }
 
 /// @brief Connect to the daemon for this invocation's per-PID runtime directory.
@@ -106,21 +124,21 @@ int try_connect(int sock, const std::string &path) {
 /// app is never silently cross-connected to an unrelated daemon at the shared
 /// well-known socket if its own daemon's socket is transiently unavailable.
 int connect_to_daemon(const std::string &runtime_dir) {
-  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (sock < 0)
-    return -1;
-
-  if (try_connect(sock, runtime_dir + "/daemon.sock") == 0)
+  int sock = try_connect(runtime_dir + "/daemon.sock");
+  if (sock >= 0)
     return sock;
 
   // Fall back to the well-known socket only for invocations that never created a
   // per-PID directory (attach / daemon-only). access() goes through the real libc
-  // so it does not re-enter this interposer's own path hooks.
-  if (rocjitsu::libc_passthrough().access(runtime_dir.c_str(), F_OK) != 0 &&
-      try_connect(sock, rocjitsu::rpc_default_socket_path()) == 0)
-    return sock;
-
-  rocjitsu::libc_passthrough().close(sock);
+  // so it does not re-enter this interposer's own path hooks. Gate strictly on the
+  // dir genuinely not existing (ENOENT / a non-directory component, ENOTDIR): any
+  // other error (EACCES/EPERM, transient IO) must NOT trigger the fallback, or a
+  // daemon-mode client whose own dir is momentarily inaccessible could be silently
+  // cross-connected to an unrelated daemon at the shared socket.
+  const bool dir_absent = rocjitsu::libc_passthrough().access(runtime_dir.c_str(), F_OK) != 0 &&
+                          (errno == ENOENT || errno == ENOTDIR);
+  if (dir_absent)
+    return try_connect(rocjitsu::rpc_default_socket_path());
   return -1;
 }
 
@@ -263,11 +281,18 @@ public:
     sysfs_fds_.clear();
     drm_fds_.clear();
     kfd_dup_fds_.clear();
+    // Drop GEM bookkeeping WITHOUT munmapping cpu_ptr or unmapping PTEs: those host
+    // pages and the parent's page table belong to the parent process and the child
+    // must not touch them. The child re-initializes a fresh driver; any GEM mappings
+    // it needs are re-created via EXPORT/PRIME/GEM_VA. (Deliberate, like the remote_
+    // and mutex handling above — not an oversight.)
     gem_entries_.clear();
     in_construction = false;
   }
 
   LinuxKfd *driver() { return active_driver_.load(std::memory_order_acquire); }
+  /// @brief True if the active driver is the local SimulatedKfd (not remote/guest).
+  bool driver_is_simulated() { return dynamic_cast<SimulatedKfd *>(driver()) != nullptr; }
   int driver_fd() {
     auto *d = driver();
     return d ? d->fd() : -1;
@@ -838,59 +863,99 @@ public:
   /// @brief A GEM buffer object synthesized from a prime (dmabuf) fd.
   /// @details The native DRM emulation has no real GEM objects. EXPORT_DMABUF
   /// hands userspace a dmabuf fd whose KFD allocation flags determine the GPU
-  /// PTE MTYPE; PRIME_FD_TO_HANDLE later mints handle = dmabuf_fd + 1. Because
-  /// handle and fd are a fixed bijection, a single map keyed by the dmabuf fd
-  /// carries the flags from export through to GEM_VA, where it also records the
-  /// size and a lazily created host mapping used to install the pages into the
-  /// GPU page table. installed_vas holds the GPU VA ranges mapped from this BO so
-  /// close() can tear down the page-table entries before munmapping cpu_ptr.
+  /// PTE MTYPE; PRIME_FD_TO_HANDLE later mints handle = dmabuf_fd + 1. The entry
+  /// is keyed by that GEM handle, which owns the mapping's lifetime: it carries
+  /// the flags from export through to GEM_VA (where it records the size and a
+  /// lazily created host mapping used to install pages into the GPU page table)
+  /// and lives until DRM_IOCTL_GEM_CLOSE. It deliberately does NOT die when the
+  /// transient dmabuf export fd is closed — ROCr closes that fd immediately after
+  /// GEM_VA returns, while the GPU mapping must stay live for the caller.
+  /// installed_vas holds the GPU VA ranges mapped from this BO so GEM_CLOSE can
+  /// tear down the page-table entries before munmapping cpu_ptr.
+  ///
+  /// `owner` records the SimulatedKfd whose page table actually holds these PTEs,
+  /// captured at map time. The local driver may be absent when GEM_CLOSE arrives
+  /// (e.g. a remote/DBT-guest backend is active, or — in a forked child — before the
+  /// driver is recreated), so teardown unmaps through `owner` only while it is still
+  /// the active driver, and skips the unmap otherwise (that page table is gone).
+  /// The local driver is a process-lifetime singleton (see get_or_create), so
+  /// `owner` never points at a freed-and-replaced driver.
+  struct GemMapping {
+    uint64_t va_address = 0;
+    uint64_t map_size = 0;
+    bool operator==(const GemMapping &) const = default;
+  };
+
   struct GemEntry {
     uint64_t size = 0;
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
-    std::vector<std::pair<uint64_t, uint64_t>> installed_vas;
-  };
-
-  /// @brief A GPU VA range still installed in the page table at close time.
-  struct GemMapping {
-    uint64_t va_address = 0;
-    uint64_t map_size = 0;
+    SimulatedKfd *owner = nullptr;
+    std::vector<GemMapping> installed_vas;
   };
 
   /// @brief GEM handle for a dmabuf fd (PRIME_FD_TO_HANDLE convention).
+  /// @details Valid domain: @p dmabuf_fd >= 0, yielding a handle >= 1. Handle 0 is
+  /// never minted, so it can be treated as "no handle" by the ioctl handlers.
   static constexpr uint32_t gem_handle_for_fd(int dmabuf_fd) {
     return static_cast<uint32_t>(dmabuf_fd) + 1u;
   }
 
   /// @brief dmabuf fd backing a GEM handle (inverse of gem_handle_for_fd).
+  /// @details Defined for handle >= 1 (the only values gem_handle_for_fd mints).
   static constexpr int gem_fd_for_handle(uint32_t handle) { return static_cast<int>(handle) - 1; }
 
   /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
   /// @details The flags must be captured at export time because the underlying
-  /// allocation may be freed before the fd is mapped via GEM_VA.
+  /// allocation may be freed before the fd is mapped via GEM_VA. Keyed by the GEM
+  /// handle the fd will resolve to (handle = fd + 1). A GEM entry lives until
+  /// DRM_IOCTL_GEM_CLOSE, but dmabuf fd integers are recycled, so a re-exported fd
+  /// can resolve to a handle whose previous owner never issued GEM_CLOSE. Tear down
+  /// any such stale predecessor before reusing the slot so its host mapping and GPU
+  /// PTEs cannot bleed into the new BO.
   void track_gem_flags(int dmabuf_fd, uint32_t alloc_flags) {
     std::lock_guard lock(fd_mutex_);
-    gem_entries_[dmabuf_fd].alloc_flags = alloc_flags;
+    GemEntry &gem = fresh_gem_entry_locked(gem_handle_for_fd(dmabuf_fd));
+    gem.alloc_flags = alloc_flags;
   }
 
   /// @brief Record the BO size for a dmabuf fd (at PRIME_FD_TO_HANDLE).
+  /// @details PRIME_FD_TO_HANDLE follows EXPORT_DMABUF on the same fd, so an entry
+  /// with the correct flags already exists; only refresh the size. If PRIME arrives
+  /// without a preceding EXPORT (or on a recycled handle), start a clean entry.
   void track_gem_size(int dmabuf_fd, uint64_t size) {
     std::lock_guard lock(fd_mutex_);
-    gem_entries_[dmabuf_fd].size = size;
+    uint32_t handle = gem_handle_for_fd(dmabuf_fd);
+    auto it = gem_entries_.find(handle);
+    if (it != gem_entries_.end() && it->second.cpu_ptr == nullptr &&
+        it->second.installed_vas.empty()) {
+      // Live entry from the matching EXPORT with no mapping yet — just set the size.
+      it->second.size = size;
+      return;
+    }
+    // No entry, or a stale predecessor with a live mapping from a recycled fd.
+    fresh_gem_entry_locked(handle).size = size;
   }
 
-  /// @brief Resolve a GEM_VA MAP into a host pointer to install in the page table.
-  /// @details Runs entirely under fd_mutex_: it lazily mmaps the dmabuf fd's
-  /// backing pages the first time (publishing cpu_ptr while locked, so racing
-  /// maps cannot double-mmap or observe a torn write), bounds-checks the request
-  /// against the BO size, records the VA range for teardown, and returns the host
-  /// pointer + PTE MTYPE flags by value so no GemEntry pointer escapes the lock.
-  /// @retval true @p host_out / @p flags_out are set; the caller installs them.
-  /// @retval false unknown fd, out-of-bounds request, or the lazy mmap failed.
-  [[nodiscard]] bool gem_prepare_map(int dmabuf_fd, uint64_t va_address, uint64_t offset_in_bo,
-                                     uint64_t map_size, void **host_out, uint32_t *flags_out) {
+  /// @brief Install a GEM_VA MAP range into the GPU page table for @p handle.
+  /// @details Runs entirely under fd_mutex_ and performs BOTH the bookkeeping AND
+  /// the page-table install (drv->gem_va_map) atomically, so a concurrent GEM_CLOSE
+  /// (untrack_gem, also under fd_mutex_) can never interleave between recording the
+  /// range and installing the PTEs — which would otherwise leave PTEs pointing into
+  /// a munmapped cpu_ptr with no entry left to tear them down. It lazily mmaps the
+  /// dmabuf fd's backing pages the first time (the fd is still open at GEM_VA time),
+  /// bounds-checks the request against the BO size, records the range, and installs
+  /// the PTEs. The lock order fd_mutex_ -> driver page-table lock matches
+  /// teardown_gem_entry_locked, so there is no inversion.
+  /// @retval true the range was installed.
+  /// @retval false unknown handle, out-of-bounds request, failed mmap, or no driver.
+  [[nodiscard]] bool gem_map(uint32_t handle, uint64_t va_address, uint64_t offset_in_bo,
+                             uint64_t map_size) {
     std::lock_guard lock(fd_mutex_);
-    auto it = gem_entries_.find(dmabuf_fd);
+    auto *drv = dynamic_cast<SimulatedKfd *>(driver());
+    if (!drv)
+      return false;
+    auto it = gem_entries_.find(handle);
     if (it == gem_entries_.end())
       return false;
     GemEntry &gem = it->second;
@@ -903,51 +968,60 @@ public:
       return false;
     if (!gem.cpu_ptr) {
       void *p = InterposerContext::real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE,
-                                               MAP_SHARED, dmabuf_fd, 0);
+                                               MAP_SHARED, gem_fd_for_handle(handle), 0);
       if (p == MAP_FAILED)
         return false;
       gem.cpu_ptr = p;
     }
-    gem.installed_vas.emplace_back(va_address, map_size);
-    *host_out = static_cast<uint8_t *>(gem.cpu_ptr) + offset_in_bo;
-    *flags_out = gem.alloc_flags;
+    // Record which SimulatedKfd's page table receives these PTEs so GEM_CLOSE (or a
+    // stale-predecessor teardown) unmaps through the driver that installed them,
+    // never a replacement one. Set the owner on the first mapping and keep it: all
+    // ranges of one BO install into the same driver's page table. The local driver
+    // is a process-lifetime singleton (created once, never destroyed except in the
+    // fork child, which also clears gem_entries_), so the owner never dangles and
+    // every subsequent map observes the same driver.
+    if (gem.installed_vas.empty())
+      gem.owner = drv;
+    else
+      assert(gem.owner == drv && "GEM ranges of one BO must share one owning driver");
+    void *host = static_cast<uint8_t *>(gem.cpu_ptr) + offset_in_bo;
+    // Install the PTEs while still holding fd_mutex_ so the range record and the
+    // page-table state stay consistent against a concurrent teardown.
+    drv->gem_va_map(va_address, host, map_size, gem.alloc_flags);
+    gem.installed_vas.push_back({va_address, map_size});
     return true;
   }
 
-  /// @brief Forget a GPU VA range previously recorded for a dmabuf fd.
-  /// @details Called after a GEM_VA UNMAP tears the range down, so close() does
-  /// not redundantly unmap an already-removed range.
-  void gem_forget_map(int dmabuf_fd, uint64_t va_address, uint64_t map_size) {
+  /// @brief Remove a GEM_VA range from the GPU page table for @p handle.
+  /// @details Performs the page-table unmap AND the bookkeeping erase atomically
+  /// under fd_mutex_ (same rationale as gem_map). @p handle unknown or no driver is
+  /// a no-op returning false.
+  [[nodiscard]] bool gem_unmap(uint32_t handle, uint64_t va_address, uint64_t map_size) {
     std::lock_guard lock(fd_mutex_);
-    auto it = gem_entries_.find(dmabuf_fd);
+    auto *drv = dynamic_cast<SimulatedKfd *>(driver());
+    if (!drv)
+      return false;
+    auto it = gem_entries_.find(handle);
     if (it == gem_entries_.end())
-      return;
-    auto &vas = it->second.installed_vas;
-    std::erase(vas, std::pair<uint64_t, uint64_t>{va_address, map_size});
+      return false;
+    drv->gem_va_unmap(va_address, map_size);
+    std::erase(it->second.installed_vas, GemMapping{va_address, map_size});
+    return true;
   }
 
-  /// @brief Drop the GEM entry for a closing dmabuf fd.
-  /// @details Called from close() so a closed dmabuf fd cannot leave a stale
-  /// entry behind: fd integers are reused, and a later EXPORT_DMABUF on the same
-  /// value must start clean. Returns (under the lock) any GPU VA ranges still
-  /// installed from this BO so the caller can tear them out of the page table
-  /// BEFORE munmapping cpu_ptr — otherwise the page table would hold pointers
-  /// into freed host memory. @p cpu_ptr_out / @p size_out receive the lazy host
-  /// mapping to munmap (nullptr if none). Returns the still-installed VA ranges.
-  std::vector<GemMapping> untrack_gem(int dmabuf_fd, void **cpu_ptr_out, uint64_t *size_out) {
-    std::vector<GemMapping> ranges;
-    *cpu_ptr_out = nullptr;
-    *size_out = 0;
+  /// @brief Drop the GEM entry for a closing GEM handle (at DRM_IOCTL_GEM_CLOSE).
+  /// @details The handle owns the mapping lifetime, so this is the point where the
+  /// BO is truly gone. Tears down the page-table entries (through the owning driver)
+  /// and munmaps the host mapping entirely under fd_mutex_, so no GemEntry pointer
+  /// or driver pointer escapes the lock and a concurrent GEM_VA cannot race the
+  /// teardown.
+  void untrack_gem(uint32_t handle) {
     std::lock_guard lock(fd_mutex_);
-    auto it = gem_entries_.find(dmabuf_fd);
+    auto it = gem_entries_.find(handle);
     if (it == gem_entries_.end())
-      return ranges;
-    for (auto &[va, sz] : it->second.installed_vas)
-      ranges.push_back({va, sz});
-    *cpu_ptr_out = it->second.cpu_ptr;
-    *size_out = it->second.size;
+      return;
+    teardown_gem_entry_locked(it->second);
     gem_entries_.erase(it);
-    return ranges;
   }
 
   LinuxKfd *get_or_create() {
@@ -1067,7 +1141,43 @@ private:
   /// recorded only if a reference was actually acquired, so track/untrack stay
   /// balanced and can never over-release or resurrect the wrong connection.
   std::unordered_map<int, DupBackend> kfd_dup_fds_;
-  std::unordered_map<int, GemEntry> gem_entries_;
+  /// @brief Imported GEM buffer objects, keyed by GEM handle (not dmabuf fd).
+  /// @details The handle owns the mapping lifetime; entries live from
+  /// PRIME_FD_TO_HANDLE / EXPORT_DMABUF until DRM_IOCTL_GEM_CLOSE.
+  std::unordered_map<uint32_t, GemEntry> gem_entries_;
+
+  /// @brief Tear down a GEM entry's GPU PTEs and host mapping. Caller holds
+  /// fd_mutex_. Removes page-table ranges through the driver that installed them
+  /// (owner), BEFORE munmapping cpu_ptr, so the page table never holds pointers
+  /// into freed host memory. If that driver is no longer the active one, its page
+  /// table is already gone with it, so the PTE removal is skipped (never applied to
+  /// a different, replacement driver).
+  void teardown_gem_entry_locked(GemEntry &gem) {
+    if (gem.owner && gem.owner == dynamic_cast<SimulatedKfd *>(driver())) {
+      for (const auto &r : gem.installed_vas)
+        gem.owner->gem_va_unmap(r.va_address, r.map_size);
+    }
+    if (gem.cpu_ptr && gem.size)
+      InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
+    gem.cpu_ptr = nullptr;
+    gem.installed_vas.clear();
+  }
+
+  /// @brief Return a clean GEM entry for @p handle, reaping any stale predecessor.
+  /// @details Caller holds fd_mutex_. dmabuf fd integers are recycled, so a
+  /// re-exported fd can resolve to a handle whose previous BO was never GEM_CLOSE'd
+  /// (e.g. the app exited, or the BO was freed by a path other than GEM_CLOSE). If
+  /// the predecessor had a live mapping, fully tear it down (PTEs + host mmap) so it
+  /// cannot bleed into the new BO. A flags-only predecessor (no mapping yet) carries
+  /// nothing to tear down and is simply overwritten — the intended reset.
+  GemEntry &fresh_gem_entry_locked(uint32_t handle) {
+    GemEntry &gem = gem_entries_[handle];
+    if (gem.cpu_ptr || !gem.installed_vas.empty())
+      teardown_gem_entry_locked(gem);
+    gem = {};
+    return gem;
+  }
+
   std::string invocation_runtime_dir_;
 
   alignas(16) static uint8_t storage_[];
@@ -1318,23 +1428,11 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     return 0;
   }
   InterposerContext::ctx.untrack_sysfs(fd);
-  {
-    // Tear down any GPU page-table ranges still installed from this dmabuf BO
-    // BEFORE munmapping its lazy host mapping: the page table holds host
-    // pointers into cpu_ptr, so unmapping the pages without clearing the PTEs
-    // would leave the simulated GPU dereferencing freed memory. gem_va_unmap
-    // needs the local simulated driver; if none, the ranges are moot (the page
-    // table went away with the driver).
-    void *gem_cpu_ptr = nullptr;
-    uint64_t gem_size = 0;
-    auto gem_ranges = InterposerContext::ctx.untrack_gem(fd, &gem_cpu_ptr, &gem_size);
-    if (auto *sim = dynamic_cast<SimulatedKfd *>(InterposerContext::ctx.driver())) {
-      for (const auto &r : gem_ranges)
-        sim->gem_va_unmap(r.va_address, r.map_size);
-    }
-    if (gem_cpu_ptr && gem_size)
-      InterposerContext::real().munmap(gem_cpu_ptr, gem_size);
-  }
+  // NOTE: a GEM/dmabuf mapping is NOT torn down here. ROCr closes the temporary
+  // dmabuf export fd immediately after VMemorySetAccessPerHandle() returns, while
+  // the GPU mapping must stay live for the caller. GEM state is keyed by the GEM
+  // handle and released on DRM_IOCTL_GEM_CLOSE (see the ioctl handler), not when
+  // this transient fd closes.
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real().close(fd);
     return 0;
@@ -1363,9 +1461,10 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
 
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
+  constexpr unsigned kDrmIoctlNrGemClose = _IOC_NR(DRM_IOCTL_GEM_CLOSE);
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
   constexpr unsigned kDrmIoctlNrGemVa = DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA;
-  constexpr unsigned kDrmIoctlNrPrimeFdToHandle = 0x2e;
+  constexpr unsigned kDrmIoctlNrPrimeFdToHandle = _IOC_NR(DRM_IOCTL_PRIME_FD_TO_HANDLE);
 
   if (InterposerContext::ctx.is_drm(fd)) {
     unsigned nr = _IOC_NR(request);
@@ -1397,11 +1496,6 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       return 0;
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
-      struct drm_prime_handle {
-        uint32_t handle;
-        uint32_t flags;
-        int32_t fd;
-      };
       auto *prime = static_cast<drm_prime_handle *>(arg);
       if (prime->fd < 0) {
         errno = EINVAL;
@@ -1412,10 +1506,19 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // Record the BO size so GEM_VA can map the dmabuf into the GPU page table.
       // The dmabuf fd is mmap-able (it dups the allocation's backing memfd); its
       // KFD alloc flags were captured on the same entry at EXPORT_DMABUF time.
+      // Use the real fstat (not the interposed one) so we don't re-enter our own hook.
       uint64_t sz = 0;
       struct stat st {};
-      if (fstat(prime->fd, &st) == 0 && st.st_size > 0)
+      if (InterposerContext::real().fstat_fn(prime->fd, &st) == 0 && st.st_size > 0) {
         sz = static_cast<uint64_t>(st.st_size);
+      } else {
+        // No size means a later GEM_VA MAP on this handle will fail (EINVAL);
+        // log here so that EINVAL is traceable to its real cause rather than
+        // looking like a bad map request.
+        util::Logger::warn("PRIME_FD_TO_HANDLE: dmabuf fd=", prime->fd,
+                           " has no usable size (fstat st_size<=0); GEM_VA maps for handle ",
+                           prime->handle, " will fail");
+      }
       InterposerContext::ctx.track_gem_size(prime->fd, sz);
       return 0;
     }
@@ -1512,32 +1615,49 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return 0;
       }
     }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrGemClose && arg) {
+      // GEM_CLOSE releases a GEM handle — the true end of the imported BO's
+      // lifetime (the transient dmabuf export fd was closed long ago). untrack_gem
+      // removes the GPU page-table ranges (through the driver that installed them)
+      // BEFORE munmapping the host pages, entirely under fd_mutex_ so no state
+      // escapes the lock.
+      auto *gc = static_cast<drm_gem_close *>(arg);
+      InterposerContext::ctx.untrack_gem(gc->handle);
+      return 0;
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrGemVa && arg) {
       // GEM_VA installs (or tears down) a GPU virtual mapping for a prime-
       // imported buffer. HSA's vmem path (hsa_amd_vmem_map) lowers to this via
       // amdgpu_bo_va_op; IREE's ring allocator triple-maps one BO at adjacent
-      // VAs. We resolve the GEM handle back to its dmabuf fd, lazily mmap the
-      // fd's backing pages, and install/remove them in the GPU page table.
+      // VAs. We map by GEM handle, lazily mmap the backing pages, and
+      // install/remove them in the GPU page table.
       auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
-      // GEM_VA page-table installation only applies to the local simulated
-      // driver; there is no such path for a remote (daemon) or DBT-guest backend.
-      auto *drv = dynamic_cast<SimulatedKfd *>(InterposerContext::ctx.driver());
-      if (!drv)
-        return 0;
-
-      int dmabuf_fd = InterposerContext::ctx.gem_fd_for_handle(va->handle);
+      // GEM_VA page-table installation only applies to the local simulated driver;
+      // there is no such path for a remote (daemon) or DBT-guest backend. Report
+      // failure rather than a phantom success so userspace does not record a mapping
+      // that was never installed and later fault on the GPU page table. gem_map/
+      // gem_unmap do the bookkeeping AND the page-table mutation atomically under
+      // fd_mutex_ (so a concurrent GEM_CLOSE cannot leave dangling PTEs); they
+      // return false on no-driver / unknown handle / out-of-bounds / failed mmap.
+      if (!InterposerContext::ctx.driver_is_simulated()) {
+        errno = ENODEV;
+        return -1;
+      }
       if (va->operation == AMDGPU_VA_OP_MAP || va->operation == AMDGPU_VA_OP_REPLACE) {
-        void *host = nullptr;
-        uint32_t alloc_flags = 0;
-        // gem_prepare_map does the lazy mmap, bounds check, and VA-range tracking
-        // under fd_mutex_, returning the host pointer by value so no GEM entry
-        // pointer escapes the lock (avoids a race/UAF against a concurrent close).
-        if (InterposerContext::ctx.gem_prepare_map(dmabuf_fd, va->va_address, va->offset_in_bo,
-                                                   va->map_size, &host, &alloc_flags))
-          drv->gem_va_map(va->va_address, host, va->map_size, alloc_flags);
+        if (!InterposerContext::ctx.gem_map(va->handle, va->va_address, va->offset_in_bo,
+                                            va->map_size)) {
+          errno = EINVAL;
+          return -1;
+        }
       } else if (va->operation == AMDGPU_VA_OP_UNMAP || va->operation == AMDGPU_VA_OP_CLEAR) {
-        drv->gem_va_unmap(va->va_address, va->map_size);
-        InterposerContext::ctx.gem_forget_map(dmabuf_fd, va->va_address, va->map_size);
+        if (!InterposerContext::ctx.gem_unmap(va->handle, va->va_address, va->map_size)) {
+          errno = EINVAL;
+          return -1;
+        }
+      } else {
+        // Unknown GEM_VA operation — do not claim it succeeded.
+        errno = EINVAL;
+        return -1;
       }
       return 0;
     }
@@ -1571,15 +1691,10 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       if (rc == 0 && request == AMDKFD_IOC_EXPORT_DMABUF && arg) {
         if (auto *sim = dynamic_cast<SimulatedKfd *>(drv)) {
           auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-          uint32_t alloc_flags = 0;
-          if (auto proc = sim->find_process(sim->local_process_id())) {
-            std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-            auto it = proc->allocations_.find(export_args->handle);
-            if (it != proc->allocations_.end())
-              alloc_flags = it->second.flags;
-          }
+          // alloc_flags_for_handle locks the process alloc mutex internally, so the
+          // interposer does not reach into driver-private per-process state.
           InterposerContext::ctx.track_gem_flags(static_cast<int>(export_args->dmabuf_fd),
-                                                 alloc_flags);
+                                                 sim->alloc_flags_for_handle(export_args->handle));
         }
       }
       return kfd_ioctl_ret(rc);

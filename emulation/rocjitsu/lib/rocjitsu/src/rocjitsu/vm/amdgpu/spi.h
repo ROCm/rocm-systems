@@ -148,7 +148,6 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
-      cu->retire_halted_wfs();
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
@@ -180,8 +179,6 @@ public:
     for (size_t attempt = 0; attempt < wgps_.size(); ++attempt) {
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
-      wgp.cu0->retire_halted_wfs();
-      wgp.cu1->retire_halted_wfs();
 
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.

@@ -67,7 +67,13 @@ void reap_stale_sysfs_dirs() {
   const fs::directory_iterator end;
   for (; !ec && it != end; it.increment(ec)) {
     const auto &entry = *it;
-    if (!entry.is_directory(ec))
+    // Only reap a real directory, never chase a symlink out of the runtime root:
+    // symlink_status() does NOT follow the link, whereas is_directory() would let a
+    // symlink-to-directory pass and have remove_all() delete its target. Matches the
+    // hardened launcher reaper (main.cpp reap_stale_runtime_dirs).
+    std::error_code st_ec;
+    auto st = fs::symlink_status(entry.path(), st_ec);
+    if (st_ec || st.type() != fs::file_type::directory)
       continue;
     std::string name = entry.path().filename().string();
     if (name.rfind("rocjitsu_drm_", 0) != 0 && name.rfind("rocjitsu_topology_", 0) != 0)
