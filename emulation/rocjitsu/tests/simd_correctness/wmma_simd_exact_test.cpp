@@ -165,7 +165,7 @@ TEST(WmmaSimdExact, F8SpecDense) {
   SKIP_IF_NO_SIMD();
   auto spec_f32 = [](auto fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F32, [fn](WmmaFixture &fx, uint32_t ca) {
-      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
+      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca, 0);
     });
   };
   auto spec_f16 = [](auto fn, Fmt fmt, const char *label) {
