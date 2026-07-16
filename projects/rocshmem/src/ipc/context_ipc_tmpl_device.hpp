@@ -79,15 +79,24 @@ __device__ void IPCContext::amo_add(void *dest, T value, int pe) {
   ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
+template <typename T, OrderingMode Mode>
+__device__ void IPCContext::amo_set_impl(void *dest, T value, int pe) {
+  if constexpr (is_targeted(Mode)) {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+    ipcImpl_.ipcAMOSet_av(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+  } else {
+    ipcImpl_.ipcAMOSet(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
+  }
+}
+
 template <typename T>
 __device__ void IPCContext::amo_set(void *dest, T value, int pe) {
-  ipcImpl_.ipcAMOSet(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
+  amo_set_impl<T, OrderingMode::Standard>(dest, value, pe);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_set_av(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcAMOSet_av(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+  amo_set_impl<T, OrderingMode::Targeted>(dest, value, pe);
 }
 
 template <typename T>

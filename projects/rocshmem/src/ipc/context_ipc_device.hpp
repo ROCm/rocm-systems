@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_IPC_CONTEXT_DEVICE_HPP_
 
 #include "context.hpp"
+#include "util.hpp"
 #include "atomic.hpp"
 #include "team.hpp"
 
@@ -47,12 +48,12 @@ class IPCContext : public Context {
   __device__ void getmem_nbi(void *dest, const void *source, size_t size,
                              int pe);
 
+  template <OrderingMode Mode> __device__ void fence_impl();
+  template <OrderingMode Mode> __device__ void fence_impl(int pe);
+
   __device__ void fence();
-
   __device__ void fence(int pe);
-
   __device__ void fence_av();
-
   __device__ void fence_av(int pe);
 
   __device__ void putmem_nbi_wave_av(void *dest, const void *source,
@@ -112,6 +113,9 @@ class IPCContext : public Context {
   // Atomic operations
   template <typename T>
   __device__ void amo_add(void *dst, T value, int pe);
+
+  template <typename T, OrderingMode Mode = OrderingMode::Standard>
+  __device__ void amo_set_impl(void *dst, T value, int pe);
 
   template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
@@ -188,9 +192,11 @@ class IPCContext : public Context {
 
 
   // Block/wave functions
+  template <OrderingMode Mode>
+  __device__ void putmem_wg_impl(void *dest, const void *source, size_t nelems,
+                                 int pe);
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
-
   __device__ void putmem_wg_av(void *dest, const void *source, size_t nelems,
                                int pe);
 

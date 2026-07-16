@@ -25,7 +25,8 @@
 #ifndef LIBRARY_SRC_CONTEXT_TMPL_DEVICE_HPP_
 #define LIBRARY_SRC_CONTEXT_TMPL_DEVICE_HPP_
 
-#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "rocshmem/rocshmem_config.h"
+#include "util.hpp"  // NOLINT(build/include_subdir)
 #include "backend_type.hpp"
 #if defined(USE_GDA)
 #include "gda/context_gda_device.hpp"
@@ -232,21 +233,27 @@ __device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
                         pe_size, p_sync));
 }
 
-template <typename T>
-__device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
-                                                    T val) {
+template <typename T, OrderingMode Mode>
+__device__ __forceinline__ void Context::wait_until_impl(T *ivars, int cmp,
+                                                         T val) {
   while (!test(ivars, cmp, val)) {
   }
-  detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                               detail::atomic::memory_order_acquire>();
+  if constexpr (is_targeted(Mode)) {
+    wait_on_vmem(0);
+  } else {
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acquire>();
+  }
 }
 
 template <typename T>
-__device__ __forceinline__ void Context::wait_until_av(T *ivars, int cmp,
-                                                       T val) {
-  while (!test(ivars, cmp, val)) {
-  }
-  wait_on_vmem(0);
+__device__ __forceinline__ void Context::wait_until(T *ivars, int cmp, T val) {
+  wait_until_impl<T, OrderingMode::Standard>(ivars, cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ void Context::wait_until_av(T *ivars, int cmp, T val) {
+  wait_until_impl<T, OrderingMode::Targeted>(ivars, cmp, val);
 }
 
 __device__ __forceinline__ size_t status_entry(size_t nelems,
@@ -609,18 +616,21 @@ __device__ void Context::amo_add(void *dst, T value, int pe) {
   DISPATCH(amo_add(dst, value, pe));
 }
 
-template <typename T>
-__device__ void Context::amo_set(void *dst, T value, int pe) {
+template <typename T, OrderingMode Mode>
+__device__ void Context::amo_set_impl(void *dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_SET);
 
-  DISPATCH(amo_set(dst, value, pe));
+  DISPATCH(amo_set_impl<PAIR(T, Mode)>(dst, value, pe));
+}
+
+template <typename T>
+__device__ void Context::amo_set(void *dst, T value, int pe) {
+  amo_set_impl<T, OrderingMode::Standard>(dst, value, pe);
 }
 
 template <typename T>
 __device__ void Context::amo_set_av(void *dst, T value, int pe) {
-  ctxStats.incStat(NUM_ATOMIC_SET);
-
-  DISPATCH(amo_set_av(dst, value, pe));
+  amo_set_impl<T, OrderingMode::Targeted>(dst, value, pe);
 }
 
 template <typename T>

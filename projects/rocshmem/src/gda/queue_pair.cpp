@@ -141,24 +141,27 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
-__device__ void QueuePair::post_wqe_rma(
+template <OrderingMode Mode>
+__device__ void QueuePair::post_wqe_rma_impl(
     int32_t length, uintptr_t raddr, uint32_t rkey,
     uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   switch (constmem.gda_provider) {
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5_post_wqe_rma_impl<Mode>(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    return;
+#endif
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
+    // IONIC does not implement targeted ordering; Standard semantics are used.
     ionic_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
+    // BNXT does not implement targeted ordering; Standard semantics are used.
     bnxt_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
-    return;
-#endif
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    mlx5_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
     return;
 #endif
   default:
@@ -167,22 +170,18 @@ __device__ void QueuePair::post_wqe_rma(
   }
 }
 
+__device__ void QueuePair::post_wqe_rma(
+    int32_t length, uintptr_t raddr, uint32_t rkey,
+    uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  post_wqe_rma_impl<OrderingMode::Standard>(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+}
+
 __device__ void QueuePair::post_wqe_rma_av(
     int32_t length, uintptr_t raddr, uint32_t rkey,
     uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
-  switch (constmem.gda_provider) {
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_av(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
-    return;
-#endif
-  default:
-    // _av optimisation not implemented for this provider; fall back to
-    // standard semantics which are always correct.
-    post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
-    return;
-  }
+  post_wqe_rma_impl<OrderingMode::Targeted>(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
 }
 
 __device__ void QueuePair::post_wqe_rma_single(int32_t length,
@@ -309,12 +308,21 @@ __device__ void QueuePair::quiet_single() {
 /******************************************************************************
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
-__device__ void QueuePair::put_nbi(void *dest, const void *source,
+template <OrderingMode Mode>
+__device__ void QueuePair::put_nbi_impl(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
   uint32_t dst_rkey = rkey;
   uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
       ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
-  put_nbi(dest, dst_rkey, source, src_lkey, length, wf_info);
+  uintptr_t l = reinterpret_cast<uintptr_t>(source);
+  uintptr_t r = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma_impl<Mode>(static_cast<int32_t>(length), r, dst_rkey, l, src_lkey,
+                          gda_op_rdma_write, wf_info, /*ring_db=*/true);
+}
+
+__device__ void QueuePair::put_nbi(void *dest, const void *source,
+    size_t length, ActiveWFInfo &wf_info) {
+  put_nbi_impl<OrderingMode::Standard>(dest, source, length, wf_info);
 }
 
 __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,
@@ -322,20 +330,13 @@ __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,
     size_t length, ActiveWFInfo &wf_info, bool ring_db) {
   uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_rma(static_cast<int32_t>(length), r, rkey, l, lkey,
-               gda_op_rdma_write, wf_info, ring_db);
+  post_wqe_rma_impl<OrderingMode::Standard>(static_cast<int32_t>(length), r, rkey, l, lkey,
+                                            gda_op_rdma_write, wf_info, ring_db);
 }
 
-// Used in all to all
 __device__ void QueuePair::put_nbi_av(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  uint32_t dst_rkey = rkey;
-  uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
-      ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
-  uintptr_t l = reinterpret_cast<uintptr_t>(source);
-  uintptr_t r = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_av(static_cast<int32_t>(length), r, dst_rkey, l, src_lkey,
-                  gda_op_rdma_write, wf_info, /*ring_db=*/true);
+  put_nbi_impl<OrderingMode::Targeted>(dest, source, length, wf_info);
 }
 
 __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
@@ -512,6 +513,12 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
   LOGD_ERROR_ABORT("Valid lkey buffer not found");
   return 0;
 }
+
+// Explicit device template instantiations (required with -fgpu-rdc)
+template __device__ void QueuePair::post_wqe_rma_impl<OrderingMode::Standard>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, ActiveWFInfo&, bool);
+template __device__ void QueuePair::post_wqe_rma_impl<OrderingMode::Targeted>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, ActiveWFInfo&, bool);
+template __device__ void QueuePair::put_nbi_impl<OrderingMode::Standard>(void*, const void*, size_t, ActiveWFInfo&);
+template __device__ void QueuePair::put_nbi_impl<OrderingMode::Targeted>(void*, const void*, size_t, ActiveWFInfo&);
 
 }  // namespace rocshmem
 

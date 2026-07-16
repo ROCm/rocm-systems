@@ -401,6 +401,26 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+/**
+ * @brief Selects the cache-coherence overhead associated with a rocshmem
+ * fence or synchronisation operation.
+ *
+ * Standard ordering follows the full AMD GPU LLVM memory model: fences emit
+ * system-scope cache actions (L2 writeback / invalidate) in addition to the
+ * hardware completion wait, and atomic operations use SEQ_CST scope.
+ *
+ * Targeted ordering drops the cache actions.  It relies on prior stores
+ * having used cache-bypassing (sc0 sc1 / CachePolicy::SystemScope) access so
+ * that data is already in HBM; a simple wait_on_vmem(0) is then sufficient
+ * to establish ordering.  This corresponds to the "availability/visibility"
+ * (av) relaxation in the AMDGPU memory model documentation.
+ */
+enum class OrderingMode { Standard, Targeted };
+
+constexpr bool is_targeted(OrderingMode m) noexcept {
+  return m == OrderingMode::Targeted;
+}
+
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __forceinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {

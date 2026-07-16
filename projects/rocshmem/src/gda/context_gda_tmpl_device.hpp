@@ -110,17 +110,22 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   }
 }
 
-template <typename T>
-__device__ void GDAContext::amo_set(void *dst, T value, int pe) {
+template <typename T, OrderingMode Mode>
+__device__ void GDAContext::amo_set_impl(void *dst, T value, int pe) {
+  // GDA AMO set goes through the NIC; targeted-ordering relaxation applies
+  // only to IPC peers (handled inside amo_set). For RDMA targets both modes
+  // share the same NIC-routed CAS path.
   amo_swap(dst, value, pe);
 }
 
 template <typename T>
+__device__ void GDAContext::amo_set(void *dst, T value, int pe) {
+  amo_set_impl<T, OrderingMode::Standard>(dst, value, pe);
+}
+
+template <typename T>
 __device__ void GDAContext::amo_set_av(void *dst, T value, int pe) {
-  // GDA AMO set goes through the NIC; the relaxation is an IPC-specific
-  // optimisation. Fall back to the standard path for RDMA targets; IPC
-  // targets are handled by the IPC fast-path check inside amo_set.
-  amo_set(dst, value, pe);
+  amo_set_impl<T, OrderingMode::Targeted>(dst, value, pe);
 }
 
 template <typename T>

@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_CONTEXT_DEVICE_HPP_
 
 #include "context.hpp"
+#include "util.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
 
@@ -41,9 +42,15 @@ class GDAContext : public Context {
 
   __device__ GDAContext(Backend *b, unsigned int ctx_id); //TODO is this used?
 
+  template <OrderingMode Mode = OrderingMode::Standard>
+  __device__ void putmem_impl(void *dest, const void *source, size_t nelems, int pe);
+
   __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);
+
+  template <OrderingMode Mode = OrderingMode::Standard>
+  __device__ void putmem_nbi_impl(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
@@ -57,17 +64,12 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_av(void *dest, const void *source, size_t nelems,
                                 int pe);
 
+  template <OrderingMode Mode> __device__ void fence_impl();
+  template <OrderingMode Mode> __device__ void fence_impl(int pe);
+
   __device__ void fence();
-
   __device__ void fence(int pe);
-
-  /**
-   * @brief Targeted-ordering fence: uses wait_on_vmem(0)
-   * in place of the expensive per-QP quiet + system-scope L2 writeback.
-   * Correct when prior puts used cache-bypassing stores (sc0 sc1).
-   */
   __device__ void fence_av();
-
   __device__ void fence_av(int pe);
 
   __device__ void quiet();
@@ -121,6 +123,9 @@ class GDAContext : public Context {
   // Atomic operations
   template <typename T>
   __device__ void amo_add(void *dst, T value, int pe);
+
+  template <typename T, OrderingMode Mode = OrderingMode::Standard>
+  __device__ void amo_set_impl(void *dst, T value, int pe);
 
   template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
@@ -211,6 +216,9 @@ class GDAContext : public Context {
 
 
   // Block/wave functions
+  template <OrderingMode Mode = OrderingMode::Standard>
+  __device__ void putmem_wg_impl(void *dest, const void *source, size_t nelems, int pe);
+
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
 

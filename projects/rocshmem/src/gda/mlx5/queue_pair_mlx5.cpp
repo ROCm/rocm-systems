@@ -78,54 +78,45 @@ __device__ static inline uint16_t mlx5_sq_idx(const gda_mlx5_device_sq& sq, uint
   return wqe_idx & sq.depth_mask;
 }
 
-__device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
-  // sq_wqebb_counter is the least significant bits of the post counter
+/**
+ * @brief Ring the MLX5 SQ doorbell.
+ *
+ * OrderingMode::Standard  — system-scope release stores for dbrec and the
+ *   BlueFlame register; the implicit buffer_wbl2 ensures prior WQE stores
+ *   (which may be cached) are visible to the NIC before the doorbell.
+ *
+ * OrderingMode::Targeted  — prior WQE stores used cache-bypassing sc0 sc1
+ *   access (CachePolicy::SystemScope) and are already in HBM.  A
+ *   wait_on_vmem(0) drain before each relaxed system-scope store is
+ *   sufficient; no L2 writeback is needed.
+ */
+template <OrderingMode Mode>
+__device__ void QueuePair::mlx5_ring_doorbell_impl(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
   uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
-  // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
   gda_mlx5_db_register db_val{wqe};
   __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
-
-  // get BlueFlame buffer from SQ
   gda_mlx5_bf_buffer* bf = mlx5_sq.bf_buffer();
 
-  // store sq_wqebb_counter to doorbell record
-  __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-  // ring doorbell by storing first 8B of WQE to the doorbell register
-  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-
-  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
-             mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
-             &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+  if constexpr (is_targeted(Mode)) {
+    wait_on_vmem(0);
+    __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    wait_on_vmem(0);
+    __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  } else {
+    __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
+               mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
+               &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+  }
 }
 
-/**
- * @brief Targeted-ordering variant of mlx5_ring_doorbell.
- *
- * Replaces system-scope release stores with wait_on_vmem(0) +
- * relaxed system-scope stores:
- *   - wait_on_vmem(0) before dbrec: drains all in-flight VMEM ops (including
- *     cache-bypassing WQE stores) so they are committed to HBM before the
- *     NIC reads the doorbell record.  Portable across GFX9/GFX10/GFX12.
- *   - Relaxed system-scope store for dbrec (sc0 sc1, no L2 writeback needed
- *     because preceding WQE stores used cache bypass).
- *   - wait_on_vmem(0) between dbrec and doorbell register: ensures the dbrec
- *     store is complete before the NIC is notified via the BlueFlame write.
- *   - Relaxed system-scope store for the doorbell register (MMIO, uncacheable).
- */
+__device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
+  mlx5_ring_doorbell_impl<OrderingMode::Standard>(sq_post, wqe);
+}
+
 __device__ void QueuePair::mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
-  uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
-  gda_mlx5_db_register db_val{wqe};
-  __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
-
-  gda_mlx5_bf_buffer* bf = mlx5_sq.bf_buffer();
-
-  // Drain all outstanding VMEM ops (including WQE cache-bypassing stores)
-  // before making the doorbell record visible to the NIC.
-  wait_on_vmem(0);
-  __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  // Order dbrec store before the doorbell register write.
-  wait_on_vmem(0);
-  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  mlx5_ring_doorbell_impl<OrderingMode::Targeted>(sq_post, wqe);
 }
 
 [[maybe_unused]] __attribute__((noinline))
@@ -291,53 +282,26 @@ __device__ void QueuePair::mlx5_quiet_single() {
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
     uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
-  if (wf_info.is_pe_group_last) {
-    // get SQ lock
-    acquire_lock(&mlx5_sq.lock);
-    // poll until we have enough WQEBB for all lanes using this QP
-    mlx5_poll_cq_until(wf_info.num_pe_group_lanes);
-  }
-
-  // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
-  uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
-
-  // can we inline the data into the WQE?
-  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
-
-  // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
-                   static_cast<uint32_t>(length), send_inline};
-
-  // copy to SQ
-  mlx5_sq.buf[sq_idx] = wqe;
-
-  if (wf_info.is_pe_group_last) {
-    // increment post counter
-    mlx5_sq.post += wf_info.num_pe_group_lanes;
-    // we are the last thread in the wavefront, so we have the last WQE posted
-    if (ring_db) {
-      mlx5_ring_doorbell(mlx5_sq.post, wqe);
-    }
-    // release SQ lock
-    release_lock(&mlx5_sq.lock);
-  }
+  mlx5_post_wqe_rma_impl<OrderingMode::Standard>(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
 }
 
 /**
- * @brief Targeted-ordering variant of mlx5_post_wqe_rma.
+ * @brief Post an RMA WQE to the MLX5 SQ and optionally ring the doorbell.
  *
- * Uses cache-bypassing stores (sc0 sc1) for the WQE copy so data is
- * written directly to HBM without populating the GPU's L1/L2 cache.
- * This is required so that wait_on_vmem(0) is
- * sufficient to guarantee NIC visibility before the doorbell is rung.
+ * OrderingMode::Standard  — the WQE is copied to the SQ buffer using the
+ *   default (cached) store path; the subsequent system-scope release doorbell
+ *   (mlx5_ring_doorbell_impl<Standard>) emits buffer_wbl2 to flush those
+ *   lines before the NIC reads them.
  *
- * Variables used only for GPU thread synchronisation (lock, sq.post,
- * sq.depth_mask) retain their existing store semantics — they are not
- * read by the NIC and do not require cache bypassing.
+ * OrderingMode::Targeted  — the WQE is copied using cache-bypassing
+ *   (CachePolicy::SystemScope / sc0 sc1) stores so HBM receives the data
+ *   directly.  mlx5_ring_doorbell_impl<Targeted> then uses wait_on_vmem(0)
+ *   instead of a full release fence to order the doorbell, since no L2
+ *   writeback is needed.  GPU-side bookkeeping fields (lock, sq.post) retain
+ *   their existing store semantics.
  */
-__device__ void QueuePair::mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
+template <OrderingMode Mode>
+__device__ void QueuePair::mlx5_post_wqe_rma_impl(int32_t length, uintptr_t raddr,
     uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_last) {
@@ -346,41 +310,40 @@ __device__ void QueuePair::mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
   }
 
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
-
+  uint16_t sq_idx  = mlx5_sq_idx(mlx5_sq, wqe_idx);
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
 
-  // construct WQE on the stack (unchanged)
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
                    raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
                    static_cast<uint32_t>(length), send_inline};
 
-  // Copy WQE to SQ using cache-bypassing (SystemScope) stores so HBM
-  // receives the data directly.  The NIC will DMA-read from HBM, and
-  // wait_on_vmem(0) in mlx5_ring_doorbell_av() ensures these stores are
-  // complete before the doorbell is visible to the NIC.
-  //
-  // The WQE is a stack-local value; load each 16-byte chunk with standard
-  // (cached) policy, then store to the SQ buffer with SystemScope (sc0 sc1)
-  // to bypass L1/L2 and write directly to HBM.
-  static_assert(sizeof(gda_mlx5_wqe) == 64, "WQE must be 64 bytes");
-  using Chunk = typename AsmAccess<16>::type;
-  auto* dst = reinterpret_cast<uint8_t*>(&mlx5_sq.buf[sq_idx]);
-  auto* src = reinterpret_cast<const uint8_t*>(&wqe);
-  for (int i = 0; i < 4; ++i) {
-    Chunk val = *reinterpret_cast<const Chunk*>(src + i * 16);
-    AsmAccess<16, CachePolicy::Standard,
-              CachePolicy::SystemScope>::store(dst + i * 16, val);
+  if constexpr (is_targeted(Mode)) {
+    // Store each 16-byte WQE chunk directly to HBM via cache-bypassing stores.
+    static_assert(sizeof(gda_mlx5_wqe) == 64, "WQE must be 64 bytes");
+    using Chunk = typename AsmAccess<16>::type;
+    auto* dst = reinterpret_cast<uint8_t*>(&mlx5_sq.buf[sq_idx]);
+    auto* src = reinterpret_cast<const uint8_t*>(&wqe);
+    for (int i = 0; i < 4; ++i) {
+      Chunk val = *reinterpret_cast<const Chunk*>(src + i * 16);
+      AsmAccess<16, CachePolicy::Standard, CachePolicy::SystemScope>::store(dst + i * 16, val);
+    }
+  } else {
+    mlx5_sq.buf[sq_idx] = wqe;
   }
 
   if (wf_info.is_pe_group_last) {
-    // sq.post is GPU-side bookkeeping only — plain store is fine.
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     if (ring_db) {
-      mlx5_ring_doorbell_av(mlx5_sq.post, wqe);
+      mlx5_ring_doorbell_impl<Mode>(mlx5_sq.post, wqe);
     }
     release_lock(&mlx5_sq.lock);
   }
+}
+
+__device__ void QueuePair::mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  mlx5_post_wqe_rma_impl<OrderingMode::Targeted>(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
 }
 
 // precondition: called with all active lanes using different QPs
@@ -525,5 +488,11 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
 
   return fetching ? *atomic_laddr : 0;
 }
+
+// Explicit device template instantiations (required with -fgpu-rdc)
+template __device__ void QueuePair::mlx5_ring_doorbell_impl<OrderingMode::Standard>(uint64_t, const gda_mlx5_wqe&);
+template __device__ void QueuePair::mlx5_ring_doorbell_impl<OrderingMode::Targeted>(uint64_t, const gda_mlx5_wqe&);
+template __device__ void QueuePair::mlx5_post_wqe_rma_impl<OrderingMode::Standard>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, ActiveWFInfo&, bool);
+template __device__ void QueuePair::mlx5_post_wqe_rma_impl<OrderingMode::Targeted>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, ActiveWFInfo&, bool);
 
 }  // namespace rocshmem

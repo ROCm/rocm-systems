@@ -168,6 +168,10 @@ class QueuePair {
    * @param[in] length Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
+  template <OrderingMode Mode = OrderingMode::Standard>
+  __device__ void put_nbi_impl(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
+
   __device__ void put_nbi(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 
@@ -348,12 +352,17 @@ class QueuePair {
    * @param[in] wf_info Wavefront information.
    * @param[in] ring_db Ring doorbell after posting.
    */
+  template <OrderingMode Mode>
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_impl(int32_t length, uintptr_t raddr, uint32_t rkey,
+      uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int32_t length, uintptr_t raddr, uint32_t rkey,
       uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
-  /** Targeted-ordering variant: dispatches to mlx5_post_wqe_rma_av on MLX5. */
   __device__ __attribute__((noinline)) void
   post_wqe_rma_av(int32_t length, uintptr_t raddr, uint32_t rkey,
       uintptr_t laddr, uint32_t lkey,
@@ -419,8 +428,15 @@ class QueuePair {
    * @param[in] db_val Doorbell value is written by method.
    */
 #if defined(GDA_MLX5)
+  template <OrderingMode Mode>
+  __device__ void mlx5_ring_doorbell_impl(uint64_t sq_post, const gda_mlx5_wqe& wqe);
   __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
   __device__ void mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx5_wqe& wqe);
+
+  template <OrderingMode Mode>
+  __device__ void mlx5_post_wqe_rma_impl(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);

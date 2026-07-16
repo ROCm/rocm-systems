@@ -74,14 +74,29 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
   ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
-__device__ void IPCContext::fence() {
-  ipcImpl_.ipcFence();
+template <OrderingMode Mode>
+__device__ void IPCContext::fence_impl() {
+  if constexpr (is_targeted(Mode)) {
+    wait_on_vmem(0);
+  } else {
+    ipcImpl_.ipcFence();
+  }
 }
 
-__device__ void IPCContext::fence(int pe) {
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_release>(pe);
+template <OrderingMode Mode>
+__device__ void IPCContext::fence_impl(int pe) {
+  if constexpr (is_targeted(Mode)) {
+    wait_on_vmem(0);
+  } else {
+    ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+                      detail::atomic::memory_order_release>(pe);
+  }
 }
+
+__device__ void IPCContext::fence()          { fence_impl<OrderingMode::Standard>(); }
+__device__ void IPCContext::fence(int pe)    { fence_impl<OrderingMode::Standard>(pe); }
+__device__ void IPCContext::fence_av()       { fence_impl<OrderingMode::Targeted>(); }
+__device__ void IPCContext::fence_av(int pe) { fence_impl<OrderingMode::Targeted>(pe); }
 
 __device__ void IPCContext::putmem_nbi_wave_av(void *dest, const void *source,
                                               size_t nelems, int pe) {
@@ -90,13 +105,6 @@ __device__ void IPCContext::putmem_nbi_wave_av(void *dest, const void *source,
   putmem_nbi_wave(dest, source, nelems, pe);
 }
 
-__device__ void IPCContext::fence_av() {
-  wait_on_vmem(0);
-}
-
-__device__ void IPCContext::fence_av(int pe) {
-  wait_on_vmem(0);
-}
 
 __device__ void IPCContext::quiet() {
   ipcImpl_.ipcQuiet();
@@ -110,30 +118,41 @@ __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
   return ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
 }
 
+/**
+ * @brief Blocking WG put to an IPC-local peer.
+ *
+ * OrderingMode::Standard  — ipcCopy_wg<PutBlocking> which issues a full
+ *   system-scope release fence after the copy.
+ *
+ * OrderingMode::Targeted  — ipcCopy_wg<Put> (cache-bypassing sc0 sc1 stores,
+ *   non-blocking) followed by s_barrier + wait_on_vmem(0); no L2 writeback
+ *   needed since data went directly to HBM.
+ */
+template <OrderingMode Mode>
+__device__ void IPCContext::putmem_wg_impl(void *dest, const void *source,
+                                           size_t nelems, int pe) {
+  if constexpr (is_targeted(Mode)) {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+    ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(
+        ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
+    __builtin_amdgcn_s_barrier();
+    wait_on_vmem(0);
+  } else {
+    char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+    ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
+        remote, const_cast<void *>(source), nelems, pe);
+    __builtin_amdgcn_s_barrier();
+  }
+}
+
 __device__ void IPCContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
-  ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
-      remote, const_cast<void *>(source), nelems, pe);
-  __builtin_amdgcn_s_barrier();
+  putmem_wg_impl<OrderingMode::Standard>(dest, source, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_wg_av(void *dest, const void *source,
-                                        size_t nelems, int pe) {
-  /**
-   * Targeted-ordering blocking WG put.
-   *
-   * Uses ipcCopy_wg<Put> (non-blocking, sc0 sc1 stores) + s_barrier +
-   * wait_on_vmem(0) in place of ipcCopy_wg<PutBlocking> which internally
-   * issues a full system-scope release fence.  wait_on_vmem(0) =
-   * s_waitcnt vmcnt(0) is sufficient because the sc0 sc1 stores write
-   * directly to HBM without populating the L2 cache.
-   */
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(
-      ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
-  __builtin_amdgcn_s_barrier();
-  wait_on_vmem(0);
+                                         size_t nelems, int pe) {
+  putmem_wg_impl<OrderingMode::Targeted>(dest, source, nelems, pe);
 }
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,
@@ -334,5 +353,13 @@ __device__ int IPCContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t
   LOGD_WARN("Tile API not implemented for IPC backend");
   return ROCSHMEM_ERROR;
 }
+
+// Explicit device template instantiations (required with -fgpu-rdc)
+template __device__ void IPCContext::fence_impl<OrderingMode::Standard>();
+template __device__ void IPCContext::fence_impl<OrderingMode::Targeted>();
+template __device__ void IPCContext::fence_impl<OrderingMode::Standard>(int);
+template __device__ void IPCContext::fence_impl<OrderingMode::Targeted>(int);
+template __device__ void IPCContext::putmem_wg_impl<OrderingMode::Standard>(void*, const void*, size_t, int);
+template __device__ void IPCContext::putmem_wg_impl<OrderingMode::Targeted>(void*, const void*, size_t, int);
 
 }  // namespace rocshmem

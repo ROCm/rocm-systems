@@ -75,6 +75,9 @@ class Context {
   /**************************************************************************
    ***************************** DEVICE METHODS *****************************
    *************************************************************************/
+  template <typename T, OrderingMode Mode = OrderingMode::Standard>
+  __device__ void wait_until_impl(T *ivars, int cmp, T val);
+
   template <typename T>
   __device__ void wait_until(T *ivars, int cmp, T val);
 
@@ -177,6 +180,9 @@ class Context {
 
   template <typename T>
   __device__ void amo_add(void* dst, T value, int pe);
+
+  template <typename T, OrderingMode Mode = OrderingMode::Standard>
+  __device__ void amo_set_impl(void* dst, T value, int pe);
 
   template <typename T>
   __device__ void amo_set(void* dst, T value, int pe);

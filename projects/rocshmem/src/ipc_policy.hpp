@@ -328,22 +328,23 @@ class IpcOnImpl {
     return cond;
   }
 
-  template <typename T>
-  __device__ void ipcAMOSet(T *val, T value) {
-    __hip_atomic_store(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  template <typename T, OrderingMode Mode = OrderingMode::Standard>
+  __device__ void ipcAMOSet_impl(T *val, T value) {
+    if constexpr (is_targeted(Mode)) {
+      __hip_atomic_store(val, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    } else {
+      __hip_atomic_store(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    }
   }
 
-  /**
-   * @brief Targeted-ordering variant of ipcAMOSet.
-   *
-   * Uses __ATOMIC_RELAXED instead of __ATOMIC_SEQ_CST, omitting the
-   * implicit buffer_wbl2 + buffer_inv that SEQ_CST implies on gfx942.
-   * Safe to use after a preceding fence_av() / wait_on_vmem(0) that
-   * has already ensured all prior writes are visible to system scope.
-   */
+  template <typename T>
+  __device__ void ipcAMOSet(T *val, T value) {
+    ipcAMOSet_impl<T, OrderingMode::Standard>(val, value);
+  }
+
   template <typename T>
   __device__ void ipcAMOSet_av(T *val, T value) {
-    __hip_atomic_store(val, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    ipcAMOSet_impl<T, OrderingMode::Targeted>(val, value);
   }
 
   template <typename T>
