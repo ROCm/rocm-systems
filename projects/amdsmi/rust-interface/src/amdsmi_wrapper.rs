@@ -137,6 +137,15 @@ pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
 pub const AMDSMI_LIB_VERSION_MINOR: u32 = 5;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
+pub const AMDSMI_MAX_VF_COUNT: u32 = 32;
+pub const AMDSMI_MAX_DRIVER_NUM: u32 = 2;
+pub const AMDSMI_DFC_FW_NUMBER_OF_ENTRIES: u32 = 9;
+pub const AMDSMI_MAX_WHITE_LIST_ELEMENTS: u32 = 16;
+pub const AMDSMI_MAX_BLACK_LIST_ELEMENTS: u32 = 64;
+pub const AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS: u32 = 8;
+pub const AMDSMI_MAX_ERR_RECORDS: u32 = 10;
+pub const AMDSMI_MAX_PROFILE_COUNT: u32 = 16;
+pub const AMDSMI_PF_INDEX: u32 = 31;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
@@ -2247,11 +2256,17 @@ pub enum AmdsmiGpuBlockT {
     AmdsmiGpuBlockMpio = 262144,
     AmdsmiGpuBlockReserved = 9223372036854775808,
 }
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMin: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMin;
+}
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMax: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMax;
+}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiClkLimitTypeT {
-    ClkLimitMin = 0,
-    ClkLimitMax = 1,
+    AmdsmiClkLimitMin = 0,
+    AmdsmiClkLimitMax = 1,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

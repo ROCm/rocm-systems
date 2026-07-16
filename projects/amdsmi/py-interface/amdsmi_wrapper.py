@@ -1874,9 +1874,13 @@ amdsmi_gpu_block_t = ctypes.c_uint64 # enum
 
 # values for enumeration 'amdsmi_clk_limit_type_t'
 amdsmi_clk_limit_type_t__enumvalues = {
+    0: 'AMDSMI_CLK_LIMIT_MIN',
+    1: 'AMDSMI_CLK_LIMIT_MAX',
     0: 'CLK_LIMIT_MIN',
     1: 'CLK_LIMIT_MAX',
 }
+AMDSMI_CLK_LIMIT_MIN = 0
+AMDSMI_CLK_LIMIT_MAX = 1
 CLK_LIMIT_MIN = 0
 CLK_LIMIT_MAX = 1
 amdsmi_clk_limit_type_t = ctypes.c_uint32 # enum
@@ -2626,10 +2630,16 @@ amdsmi_dimm_thermal_t = struct_amdsmi_dimm_thermal_t
 
 # values for enumeration 'amdsmi_io_bw_encoding_t'
 amdsmi_io_bw_encoding_t__enumvalues = {
+    1: 'AMDSMI_AGG_BW0',
+    2: 'AMDSMI_RD_BW0',
+    4: 'AMDSMI_WR_BW0',
     1: 'AGG_BW0',
     2: 'RD_BW0',
     4: 'WR_BW0',
 }
+AMDSMI_AGG_BW0 = 1
+AMDSMI_RD_BW0 = 2
+AMDSMI_WR_BW0 = 4
 AGG_BW0 = 1
 RD_BW0 = 2
 WR_BW0 = 4
@@ -4706,13 +4716,14 @@ __all__ = \
     'AMDSMI_ACCELERATOR_PARTITION_SPX',
     'AMDSMI_ACCELERATOR_PARTITION_TPX', 'AMDSMI_ACCELERATOR_XCC',
     'AMDSMI_AFFINITY_SCOPE_NODE', 'AMDSMI_AFFINITY_SCOPE_SOCKET',
-    'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
+    'AMDSMI_AGG_BW0', 'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
     'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
     'AMDSMI_CACHE_PROPERTY_ENABLED',
     'AMDSMI_CACHE_PROPERTY_INST_CACHE',
     'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_CEM',
     'AMDSMI_CARD_FORM_FACTOR_OAM', 'AMDSMI_CARD_FORM_FACTOR_PCIE',
-    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CLK_TYPE_DCEF',
+    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CLK_LIMIT_MAX',
+    'AMDSMI_CLK_LIMIT_MIN', 'AMDSMI_CLK_TYPE_DCEF',
     'AMDSMI_CLK_TYPE_DCLK0', 'AMDSMI_CLK_TYPE_DCLK1',
     'AMDSMI_CLK_TYPE_DF', 'AMDSMI_CLK_TYPE_FIRST',
     'AMDSMI_CLK_TYPE_GFX', 'AMDSMI_CLK_TYPE_MEM',
@@ -4899,7 +4910,7 @@ __all__ = \
     'AMDSMI_RAS_ERR_STATE_INVALID', 'AMDSMI_RAS_ERR_STATE_LAST',
     'AMDSMI_RAS_ERR_STATE_MULT_UC', 'AMDSMI_RAS_ERR_STATE_NONE',
     'AMDSMI_RAS_ERR_STATE_PARITY', 'AMDSMI_RAS_ERR_STATE_POISON',
-    'AMDSMI_RAS_ERR_STATE_SING_C', 'AMDSMI_REG_PCIE',
+    'AMDSMI_RAS_ERR_STATE_SING_C', 'AMDSMI_RD_BW0', 'AMDSMI_REG_PCIE',
     'AMDSMI_REG_USR', 'AMDSMI_REG_USR1', 'AMDSMI_REG_WAFL',
     'AMDSMI_REG_XGMI', 'AMDSMI_STATUS_ADDRESS_FAULT',
     'AMDSMI_STATUS_AMDGPU_RESTART_ERR', 'AMDSMI_STATUS_API_FAILED',
@@ -5025,9 +5036,10 @@ __all__ = \
     'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
     'AMDSMI_VRAM_TYPE_HBM3E', 'AMDSMI_VRAM_TYPE_LPDDR4',
     'AMDSMI_VRAM_TYPE_LPDDR5', 'AMDSMI_VRAM_TYPE_UNKNOWN',
-    'AMDSMI_VRAM_TYPE__MAX', 'AMDSMI_XGMI_LINK_DISABLE',
-    'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
-    'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
+    'AMDSMI_VRAM_TYPE__MAX', 'AMDSMI_WR_BW0',
+    'AMDSMI_XGMI_LINK_DISABLE', 'AMDSMI_XGMI_LINK_DOWN',
+    'AMDSMI_XGMI_LINK_UP', 'AMDSMI_XGMI_STATUS_ERROR',
+    'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_accelerator_partition_profile_config_t',
@@ -5040,13 +5052,14 @@ __all__ = \
     'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
-    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
-    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
-    'amdsmi_counter_value_t', 'amdsmi_cper_guid_t',
-    'amdsmi_cper_hdr_t', 'amdsmi_cper_notify_type_t',
-    'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
-    'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
-    'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
+    'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
+    'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
+    'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
+    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
+    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
