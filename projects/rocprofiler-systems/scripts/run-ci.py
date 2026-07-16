@@ -76,14 +76,6 @@ def log_group_end():
         print("::endgroup::", flush=True)
 
 
-def log_step(title):
-    """Lightweight visual separator used between sub-steps within a group."""
-    if IS_GITHUB_ACTIONS:
-        print(f"--- {title}", flush=True)
-    else:
-        print(_color(f"\n  >> {title}", "magenta"), flush=True)
-
-
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------

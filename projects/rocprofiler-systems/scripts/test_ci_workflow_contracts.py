@@ -154,11 +154,6 @@ def step_uses(step: Mapping[str, Any], action_prefix: str) -> bool:
     return isinstance(uses, str) and uses.startswith(action_prefix)
 
 
-def step_run_contains(step: Mapping[str, Any], needle: str) -> bool:
-    run = step.get("run")
-    return isinstance(run, str) and needle in run
-
-
 def step_with_name(
     steps: Iterable[Mapping[str, Any]], name: str
 ) -> Optional[Mapping[str, Any]]:
