@@ -436,7 +436,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     int gran_sgprs = std::max(0, (int(asic_shader->num_sgprs) - 1) / 8);
     int gran_vgprs;
     if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
-      // gfx1250 (MI450) changed the VGPR granularity: the field is now
+      // gfx1250 changed the VGPR granularity: the field is now
       // max(0, ceil(vgprs_used / 16) - 1). See SWDEV-512636 / SWDEV-510239.
       gran_vgprs = std::max(0, (int(asic_shader->num_vgprs) + 15) / 16 - 1);
     } else {
