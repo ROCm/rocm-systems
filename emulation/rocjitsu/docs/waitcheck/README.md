@@ -79,10 +79,11 @@ kernels. When standard error is an interactive terminal, exhaustive mode first
 counts the selected code objects and kernel descriptors and then displays
 progress as `kernels C/D code-objects C/D`. Redirected and procedural runs are
 silent by default; use `--progress` to force the display or `--no-progress` to
-disable it. Kernels are independent analysis units, so `-j N` dynamically
-schedules up to `N` kernels concurrently, including kernels from the same
-massive code object. A worker fetches the next kernel as soon as it finishes;
-one pathological kernel does not pin the other workers. Descriptor-less code
+disable it. Kernels are scheduled in round-robin batches of up to eight, so
+`-j N` dynamically runs up to `N` kernel analyses concurrently, including work
+from the same massive code object. A batch reuses one analyzer and decoder, and
+a worker fetches the next available batch as soon as it finishes; one
+pathological kernel does not pin the other workers. Descriptor-less code
 objects remain single analysis units. The default is `-j1`, and the maximum is
 `-j16` to bound memory use. `--slowest-kernels N` prints a bounded top-N list
 with each kernel's wall time, input, target, code-object index, name, and entry

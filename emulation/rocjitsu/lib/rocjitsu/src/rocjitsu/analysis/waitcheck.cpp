@@ -3170,8 +3170,8 @@ namespace {
 
 WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_t arch,
                                     std::optional<uint64_t> selected_kernel_entry,
-                                    const WaitcheckKernelInfo *known_kernel,
-                                    WaitcheckOptions options) {
+                                    std::span<const WaitcheckKernelInfo> known_kernels,
+                                    bool kernels_known, WaitcheckOptions options) {
   WaitcheckReport report;
   report.arch = arch;
   if (!is_supported_waitcheck_arch(arch)) {
@@ -3202,11 +3202,17 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
                                     ? code_object.text_sections().front()->sectionOffset()
                                     : 0;
   try {
-    const auto kernels = known_kernel ? std::vector<WaitcheckKernelInfo>{*known_kernel}
-                                      : find_waitcheck_kernels(code_object);
+    std::vector<WaitcheckKernelInfo> discovered_kernels;
+    if (!kernels_known)
+      discovered_kernels = find_waitcheck_kernels(code_object);
+    const std::span<const WaitcheckKernelInfo> kernels =
+        kernels_known ? known_kernels : std::span<const WaitcheckKernelInfo>{discovered_kernels};
     report.kernels_discovered = kernels.size();
-    const auto function_entries =
-        kernels.empty() ? find_waitcheck_function_entries(code_object) : std::vector<uint64_t>{};
+    const auto function_entries = !kernels_known && kernels.empty()
+                                      ? find_waitcheck_function_entries(code_object)
+                                      : std::vector<uint64_t>{};
+    if (kernels_known && kernels.empty())
+      return report;
     if (selected_kernel_entry) {
       const auto kernel_it =
           std::ranges::find(kernels, *selected_kernel_entry, &WaitcheckKernelInfo::entry_offset);
@@ -3218,6 +3224,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         return report;
       }
       const std::array<uint64_t, 1> entry{*selected_kernel_entry};
+      const auto start = std::chrono::steady_clock::now();
       std::vector<std::unique_ptr<BasicBlock>> blocks =
           BasicBlock::build_reachable(code_object, *decoder, arch, entry);
       const uint32_t wavefront_size =
@@ -3227,6 +3234,10 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         ++report.kernels_analyzed;
         if (options.kernel_analyzed_callback)
           options.kernel_analyzed_callback();
+        if (options.kernel_timing_callback)
+          options.kernel_timing_callback(*kernel_it,
+                                         std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                             std::chrono::steady_clock::now() - start));
       }
     } else if (kernels.empty() && function_entries.empty()) {
       std::vector<std::unique_ptr<BasicBlock>> blocks =
@@ -3236,26 +3247,31 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
       // at once; generated Tensile libraries can contain hundreds of kernels.
-      const auto analyze_entry = [&](uint64_t entry_offset, bool is_kernel,
+      const auto analyze_entry = [&](uint64_t entry_offset, const WaitcheckKernelInfo *kernel,
                                      uint32_t wavefront_size) {
         const std::array<uint64_t, 1> entry{entry_offset};
+        const auto start = std::chrono::steady_clock::now();
         std::vector<std::unique_ptr<BasicBlock>> blocks =
             BasicBlock::build_reachable(code_object, *decoder, arch, entry);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size);
-        if (is_kernel && report.supported && !report.stopped_early) {
+        if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)
             options.kernel_analyzed_callback();
+          if (options.kernel_timing_callback)
+            options.kernel_timing_callback(*kernel,
+                                           std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - start));
         }
       };
       for (const WaitcheckKernelInfo &kernel : kernels) {
-        analyze_entry(kernel.entry_offset, true, kernel.wavefront_size);
+        analyze_entry(kernel.entry_offset, &kernel, kernel.wavefront_size);
         if (!report.supported || report.stopped_early)
           break;
       }
       if (report.supported && !report.stopped_early) {
         for (uint64_t entry_offset : function_entries) {
-          analyze_entry(entry_offset, false, default_wavefront_size(arch));
+          analyze_entry(entry_offset, nullptr, default_wavefront_size(arch));
           if (!report.supported || report.stopped_early)
             break;
         }
@@ -3270,7 +3286,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     return report;
   if (report.stopped_early)
     return report;
-  if (selected_kernel_entry)
+  if (selected_kernel_entry || kernels_known)
     return report;
 
   for (const auto &owned_section : code_object.all_sections()) {
@@ -3292,19 +3308,26 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
 
 WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                  WaitcheckOptions options) {
-  return analyze_code_object(code_object, arch, std::nullopt, nullptr, options);
+  return analyze_code_object(code_object, arch, std::nullopt, {}, false, options);
 }
 
 WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
                                             uint64_t kernel_entry_offset,
                                             WaitcheckOptions options) {
-  return analyze_code_object(code_object, arch, kernel_entry_offset, nullptr, options);
+  return analyze_code_object(code_object, arch, kernel_entry_offset, {}, false, options);
 }
 
 WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
                                             const WaitcheckKernelInfo &kernel,
                                             WaitcheckOptions options) {
-  return analyze_code_object(code_object, arch, kernel.entry_offset, &kernel, options);
+  return analyze_code_object(code_object, arch, kernel.entry_offset,
+                             std::span<const WaitcheckKernelInfo>{&kernel, 1}, true, options);
+}
+
+WaitcheckReport analyze_waitcnts_for_kernels(const CodeObject &code_object, rj_code_arch_t arch,
+                                             std::span<const WaitcheckKernelInfo> kernels,
+                                             WaitcheckOptions options) {
+  return analyze_code_object(code_object, arch, std::nullopt, kernels, true, options);
 }
 
 } // namespace rocjitsu

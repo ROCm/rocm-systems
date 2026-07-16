@@ -3785,6 +3785,41 @@ TEST(WaitcheckTest, SharedKernelEntryDiagnosticsAreReportedOnce) {
   EXPECT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, KnownKernelBatchReportsPerKernelCompletion) {
+  std::vector<uint32_t> hazardous;
+  rocjitsu::waitcheck_test::append_inst(hazardous, rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(hazardous, rocjitsu::waitcheck_test::v_mov_b32(1, 0));
+  hazardous.push_back(0xBFB00000U); // s_endpgm
+  const std::vector<uint32_t> clean{0xBFB00000U};
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"hazardous", hazardous}, {"clean", clean}}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  const auto kernels = waitcheck_kernels(code_object);
+  ASSERT_EQ(kernels.size(), 2u);
+
+  std::vector<std::string> completed;
+  WaitcheckOptions options;
+  size_t completion_count = 0;
+  options.kernel_analyzed_callback = [&] { ++completion_count; };
+  options.kernel_timing_callback = [&](const WaitcheckKernelInfo &kernel,
+                                       std::chrono::nanoseconds elapsed) {
+    EXPECT_GE(elapsed.count(), 0);
+    completed.push_back(kernel.name);
+  };
+  const auto report =
+      analyze_waitcnts_for_kernels(code_object, ROCJITSU_CODE_ARCH_RDNA4, kernels, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_EQ(report.kernels_discovered, 2u);
+  EXPECT_EQ(report.kernels_analyzed, 2u);
+  EXPECT_EQ(completion_count, 2u);
+  EXPECT_EQ(completed.size(), 2u);
+  EXPECT_EQ(completed[0], kernels[0].name);
+  EXPECT_EQ(completed[1], kernels[1].name);
+  EXPECT_EQ(report.diagnostics_observed, 1u) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, Gfx950ResolvedSwappcHelperWaitAppliesBeforeContinuation) {
   constexpr uint16_t kTargetSreg = 8;
   constexpr uint16_t kReturnSreg = 30;
