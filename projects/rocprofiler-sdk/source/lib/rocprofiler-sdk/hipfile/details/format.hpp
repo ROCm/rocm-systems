@@ -347,7 +347,7 @@ struct formatter<hipFileDescr_t> : rocprofiler::hipfile::details::base_formatter
 
 ROCP_SDK_HIPFILE_FORMATTER(
     hipFileDriverProps_t,
-    "{}nvfs={}major_version={}, minor_version={}, poll_thresh_size={}, "
+    "{}nvfs={}, major_version={}, minor_version={}, poll_thresh_size={}, "
     "max_direct_io_size={}, driver_status_flags={}, driver_control_flags={}{}"
     ", feature_flags={}, max_device_cache_size={}, per_buffer_cache_size={}, "
     "max_device_pinned_mem_size={}, max_batch_io_count={}, "

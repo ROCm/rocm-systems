@@ -186,6 +186,7 @@ write_perfetto(
         for(auto ditr : rocjpeg_api_gen)
             for(auto itr : rocjpeg_api_gen.get(ditr))
                 tids.emplace(itr.thread_id);
+
         for(auto ditr : memory_copy_gen)
             for(auto itr : memory_copy_gen.get(ditr))
             {

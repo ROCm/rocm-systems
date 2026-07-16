@@ -424,6 +424,7 @@ write_otf2(const output_config&                                          cfg,
             tids.emplace(itr.thread_id);
         for(auto itr : *rocjpeg_api_data)
             tids.emplace(itr.thread_id);
+
         for(auto itr : *memory_copy_data)
         {
             tids.emplace(itr.thread_id);
@@ -576,14 +577,11 @@ write_otf2(const output_config&                                          cfg,
             if(!_inp) return;
             for(auto itr : *_inp)
             {
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+                   itr.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
+                    continue;
+
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
-                if constexpr(std::is_same<value_type,
-                                          rocprofiler_buffer_tracing_marker_api_record_t>::value)
-                {
-                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
-                       itr.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
-                        continue;
-                }
 
                 auto name     = buffer_names.at(itr.kind, itr.operation);
                 auto paradigm = OTF2_PARADIGM_HIP;

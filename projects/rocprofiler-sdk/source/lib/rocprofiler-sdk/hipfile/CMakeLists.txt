@@ -21,7 +21,9 @@
 # SOFTWARE.
 
 set(ROCPROFILER_LIB_HIPFILE_SOURCES abi.cpp hipfile.cpp)
-set(ROCPROFILER_LIB_HIPFILE_HEADERS defines.hpp details/format.hpp hipfile.hpp utils.hpp)
+set(ROCPROFILER_LIB_HIPFILE_HEADERS defines.hpp hipfile.hpp utils.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HIPFILE_SOURCES}
                                                       ${ROCPROFILER_LIB_HIPFILE_HEADERS})
+
+add_subdirectory(details)

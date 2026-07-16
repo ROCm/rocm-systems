@@ -460,26 +460,25 @@ excluding traces for HSA runtime API and HIP compiler API.
 The HSA runtime API is excluded because it is a lower-level API upon which HIP and OpenMP target are built and
 thus, tends to be an implementation detail irrelevant to most users. Similarly, the HIP compiler API is also excluded for being an implementation detail as these functions are automatically inserted during HIP compilation.
 
-``--runtime-trace`` traces the HIP runtime API, marker API, RCCL API, rocDecode API,
-rocJPEG API, hipFILE API, kernel dispatches, and memory operations (copies,
-allocations, and scratch).
+``--runtime-trace`` traces the HIP runtime API, marker API, kernel dispatches, and
+memory operations (copies, allocations, and scratch).
 
 .. code-block:: shell
 
     rocprofv3 –-runtime-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
 
-This is an all-inclusive option to collect HIP, HSA, RCCL, rocDecode, rocJPEG, hipFILE, kernel, memory copy, memory allocation, and marker trace (if ``ROCTx`` APIs are specified in the application).
+This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory allocation, and marker trace (if ``ROCTx`` APIs are specified in the application).
 
 .. code-block:: shell
 
     rocprofv3 –-sys-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
+Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
 Scratch memory trace
 ++++++++++++++++++++++
