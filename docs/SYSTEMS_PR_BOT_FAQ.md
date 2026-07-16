@@ -336,9 +336,13 @@ The `synchronize` event triggers a fresh policy check automatically.
 
 ______________________________________________________________________
 
-## 🙋 Wish to Override the Policy Process?
+## 🙋 Wish to Override the Policy Process and get unblocked?
 
-If you have a genuine need to bypass or override one or more policy checks,
+Contact gardeners on supporters channel - (DevOps - Support or Help)
+
+
+## 🙋 For any policy related feedback?
+
 please reach out to the **ROCm Policy Council**.
 
 📧 **Drop a mail to:** `rocm-repo-policy@amd.com` (ROCm Policy Council DLL)
