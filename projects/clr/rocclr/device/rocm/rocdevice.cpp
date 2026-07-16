@@ -238,6 +238,7 @@ Device::~Device() {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
+      EraseRingTurnstile(queue);
       Hsa::queue_destroy(queue);
     }
   }
@@ -3621,9 +3622,32 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
     } else {
       ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
               queue->base_address);
+      EraseRingTurnstile(queue);
       Hsa::queue_destroy(queue);
     }
   }
+}
+
+std::shared_ptr<RingTurnstile> Device::GetOrCreateRingTurnstile(hsa_queue_t* queue) {
+  if (queue == nullptr) {
+    return nullptr;
+  }
+  amd::ScopedLock l(ringTurnstilesLock_);
+  auto it = ringTurnstiles_.find(queue);
+  if (it != ringTurnstiles_.end()) {
+    return it->second;
+  }
+  auto turnstile = std::make_shared<RingTurnstile>();
+  ringTurnstiles_.emplace(queue, turnstile);
+  return turnstile;
+}
+
+void Device::EraseRingTurnstile(hsa_queue_t* queue) {
+  if (queue == nullptr) {
+    return;
+  }
+  amd::ScopedLock l(ringTurnstilesLock_);
+  ringTurnstiles_.erase(queue);
 }
 
 size_t Device::DeferredQueueCount() {
@@ -3641,6 +3665,7 @@ void Device::DrainDeferredQueueDestroys() {
   }
   for (hsa_queue_t* queue : pending) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
+    EraseRingTurnstile(queue);
     Hsa::queue_destroy(queue);
   }
 }

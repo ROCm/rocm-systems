@@ -604,6 +604,15 @@ class Device : public NullDevice {
                                    void** metadata_ring_buffer = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
 
+  //! Return the shared FIFO turnstile for \p queue, creating it on first use.
+  //! Two VirtualGPUs on the same HW ring get the SAME turnstile. Never returns
+  //! nullptr for a non-null queue (keyed on the queue pointer, so it covers
+  //! pooled, dedicated, cooperative and CU-masked queues alike).
+  std::shared_ptr<RingTurnstile> GetOrCreateRingTurnstile(hsa_queue_t* queue);
+
+  //! Drop the turnstile for a ring once it is truly destroyed (refCount 0).
+  void EraseRingTurnstile(hsa_queue_t* queue);
+
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
@@ -783,6 +792,14 @@ class Device : public NullDevice {
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;
   amd::Monitor active_queue_access_;            //!< Lock to serialise virtual gpu list access
+
+  //! One FIFO turnstile per physical HW ring, keyed on the hsa_queue_t*. Shared
+  //! (shared_ptr) so a VirtualGPU can cache it and keep it alive across a submit
+  //! even if the ring is released from the pool concurrently. The map itself is
+  //! guarded by ringTurnstilesLock_ (only for lookup/insert; the turnstile's own
+  //! atomics carry the per-submit ordering, held no map lock during submission).
+  std::map<hsa_queue_t*, std::shared_ptr<RingTurnstile>> ringTurnstiles_;
+  amd::Monitor ringTurnstilesLock_;            //!< Protects ringTurnstiles_ lookups/inserts
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
 
   //! Use dynamic queues mode to get a queue from pool

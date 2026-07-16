@@ -32,6 +32,33 @@ class Timestamp;
 //! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
 bool InAsyncSignalHandler();
 
+//! Fair FIFO turnstile that serializes the reserve->write->publish->doorbell
+//! sequence of every VirtualGPU mapped to one physical HW ring. A producer draws
+//! a ticket, cooperatively yields until it is being served, submits, then hands
+//! the turn to the next ticket. This guarantees the GPU never observes a
+//! published frontier with an unpublished slot below it, without a blocking mutex
+//! (waiters yield instead of sleeping). Defined here (included early, before
+//! rocdevice.hpp completes Device) so both rocdevice and rocvirtual can use it.
+struct RingTurnstile {
+  std::atomic<uint64_t> next_ticket_{0};  //!< Next ticket handed out (drawn with fetch_add)
+  std::atomic<uint64_t> now_serving_{0};  //!< Ticket currently allowed to submit
+
+  //! Draw a ticket and wait (yield-spin) until it is our turn. Returns the
+  //! ticket, which must be passed to leave().
+  uint64_t enter() {
+    const uint64_t ticket = next_ticket_.fetch_add(1, std::memory_order_relaxed);
+    while (now_serving_.load(std::memory_order_acquire) != ticket) {
+      amd::Os::yield();
+    }
+    return ticket;
+  }
+
+  //! Hand the turn to the next ticket. Must be called exactly once per enter().
+  void leave(uint64_t ticket) {
+    now_serving_.store(ticket + 1, std::memory_order_release);
+  }
+};
+
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 
@@ -826,6 +853,12 @@ class VirtualGPU : public device::VirtualDevice {
   void* last_barrier_hw_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
+  //! FIFO turnstile for gpu_queue_'s ring, shared across every VirtualGPU mapped
+  //! to the same HW ring. Cached in SetGpuQueue so it always tracks gpu_queue_.
+  //! Producers serialize their reserve->write->publish->doorbell span through it
+  //! (yield-spin, not a blocking lock) so the GPU never sees a published frontier
+  //! with an unpublished slot below it. nullptr only while gpu_queue_ is nullptr.
+  std::shared_ptr<RingTurnstile> ring_turnstile_;
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 

@@ -1233,6 +1233,12 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   gpu_queue_ = queue;
+  // Bind the per-ring FIFO turnstile so submissions on a multiplexed HW ring
+  // serialize against other VirtualGPUs sharing it. This is the ONLY site that
+  // assigns gpu_queue_ a non-null value, so ring_turnstile_ always tracks the
+  // current ring. GetOrCreateRingTurnstile never returns null for a non-null
+  // queue, so the guard can never silently degrade to a no-op on a real ring.
+  ring_turnstile_ = roc_device_.GetOrCreateRingTurnstile(queue);
   cached_read_dispatch_id_ = 0;
   // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
   // queue changes (released back to / reacquired from the shared dynamic-queue pool), that state
@@ -1377,6 +1383,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
 
+  // Serialize reserve->write->publish->doorbell against other VirtualGPUs sharing
+  // this ring. Enter the FIFO turnstile BEFORE the write-index reservation so the
+  // reservation order equals the publish/doorbell order: the GPU can never be
+  // advanced past a slot whose header is not yet published. Left before the
+  // blocking wait below. No-op only when the ring is unbound.
+  RingTurnstile* ring = ring_turnstile_.get();
+  uint64_t ticket = 0;
+  if (ring != nullptr) ticket = ring->enter();
+
   // Check for queue full and wait if needed.
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   adjustHeader(header);
@@ -1447,6 +1462,11 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   } else {
     ++skippedDispatches_;
   }
+
+  // Publication + doorbell are complete and contiguous; hand the turn to the next
+  // producer before any blocking wait so a peer VirtualGPU on this ring can make
+  // progress (and so we never hold the turn across a GPU-completion wait).
+  if (ring != nullptr) ring->leave(ticket);
 
   // Mark the flag indicating if a dispatch is outstanding.
   // We are not waiting after every dispatch.
@@ -1605,6 +1625,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   }
 
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
+
+  // Serialize reserve->write->publish->doorbell against other VirtualGPUs sharing
+  // this ring. Entered after dispatchBlockingWait above (which may recursively
+  // dispatch barrier packets through the same turnstile) and before the
+  // write-index reservation, so the whole batch publishes contiguously and the
+  // GPU is never advanced past an unpublished slot. Left after the chunk loop and
+  // before any blocking wait.
+  RingTurnstile* ring = ring_turnstile_.get();
+  uint64_t ticket = 0;
+  if (ring != nullptr) ticket = ring->enter();
 
   // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
   // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
@@ -1818,6 +1848,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
 
   TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
 
+  // All chunks published and doorbelled contiguously; hand the turn to the next
+  // producer before any blocking wait so peers on this ring can proceed.
+  if (ring != nullptr) ring->leave(ticket);
+
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
@@ -1878,6 +1912,14 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     }
   }
 
+  // Serialize reserve->write->publish->doorbell against other VirtualGPUs sharing
+  // this ring. Entered AFTER the recursive barrier flush above (each nested call
+  // enters/leaves the turnstile on its own, so there is no re-entrancy held here)
+  // and before the reservation, so publication stays contiguous.
+  RingTurnstile* ring = ring_turnstile_.get();
+  uint64_t ticket = 0;
+  if (ring != nullptr) ticket = ring->enter();
+
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
   setFenceDirty(true);
@@ -1910,6 +1952,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  if (ring != nullptr) ring->leave(ticket);
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierPacket(roc_device_, gpu_queue_, packetHeader, &barrier_packet_, index, priority_);
   }
@@ -1979,6 +2022,13 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     setFenceDirty(false);
   }
 
+  // Serialize reserve->write->publish->doorbell against other VirtualGPUs sharing
+  // this ring. Entered AFTER any recursive barrier flush above and before the
+  // reservation, so publication stays contiguous.
+  RingTurnstile* ring = ring_turnstile_.get();
+  uint64_t ticket = 0;
+  if (ring != nullptr) ticket = ring->enter();
+
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
@@ -1990,6 +2040,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   metadata_preloader_.Set(&barrier_value_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  if (ring != nullptr) ring->leave(ticket);
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierValuePacket(roc_device_, gpu_queue_, packetHeader, &barrier_value_packet_, index,
