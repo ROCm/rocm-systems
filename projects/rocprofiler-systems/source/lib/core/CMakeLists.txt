@@ -18,7 +18,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
@@ -88,21 +88,21 @@ target_link_libraries(
 target_link_libraries(
     rocprofiler-systems-core-library
     PRIVATE
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-profiler-hub>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-profiler-hub>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
+    $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
+    $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
 
 # Preserve frame pointers so that libunwind can reliably unwind through

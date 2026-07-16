@@ -5,6 +5,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:sdk-core-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
