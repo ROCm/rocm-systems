@@ -285,8 +285,7 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
       result.checked = true;
       rocjitsu::WaitcheckOptions options;
       options.max_diagnostics = 32;
-      auto report =
-          rocjitsu::analyze_waitcnts_for_kernel(code_object, arch, kernel.entry_offset, options);
+      auto report = rocjitsu::analyze_waitcnts_for_kernel(code_object, arch, kernel, options);
       if (!report.supported) {
         print_analysis_failure(code_object, report, kernel.name);
         result.passed = false;

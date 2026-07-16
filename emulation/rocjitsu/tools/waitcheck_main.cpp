@@ -794,8 +794,7 @@ run_kernel_analysis(const CliOptions &options, const std::string &input_path,
 
   const auto start = std::chrono::steady_clock::now();
   try {
-    result.report =
-        analyze_waitcnts_for_kernel(code_object, arch, kernel.entry_offset, analysis_options);
+    result.report = analyze_waitcnts_for_kernel(code_object, arch, kernel, analysis_options);
   } catch (const std::exception &ex) {
     result.report.supported = false;
     result.report.analysis_error = std::string("unexpected analysis failure: ") + ex.what();
