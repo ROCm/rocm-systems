@@ -214,6 +214,20 @@ def build_agent_to_gpu_map_from_json(
     return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
 
 
+def discover_pc_sampling_result_files(
+    workload_path: Path,
+) -> tuple[Path, ...]:
+    """Discover direct-child PC sampling result files for a workload."""
+    if not workload_path.is_dir():
+        direct_child_files: tuple[Path, ...] = ()
+    else:
+        direct_child_files = tuple(
+            child_path for child_path in workload_path.iterdir() if child_path.is_file()
+        )
+
+    return _select_pc_sampling_result_files(direct_child_files)
+
+
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
     """
@@ -376,3 +390,34 @@ def is_single_panel_config(
         console_warning(
             "Found multiple panel config sets but incomplete for all archs."
         )
+
+
+def _select_pc_sampling_result_files(
+    direct_child_files: tuple[Path, ...],
+) -> tuple[Path, ...]:
+    legacy_results_filename = "ps_file_results.json"
+    results_filename_suffix = "_ps_file_results.json"
+    pid_result_candidates: list[Path] = []
+
+    for candidate_path in direct_child_files:
+        if not candidate_path.name.endswith(results_filename_suffix):
+            continue
+
+        process_identifier_prefix = candidate_path.name[: -len(results_filename_suffix)]
+        if re.fullmatch(r"[0-9]+", process_identifier_prefix) is None:
+            continue
+
+        pid_result_candidates.append(candidate_path)
+
+    if pid_result_candidates:
+        return tuple(pid_result_candidates)
+
+    legacy_result_file = next(
+        (
+            candidate_path
+            for candidate_path in direct_child_files
+            if candidate_path.name == legacy_results_filename
+        ),
+        None,
+    )
+    return (legacy_result_file,) if legacy_result_file is not None else ()
