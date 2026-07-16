@@ -55,6 +55,20 @@ inline GfxGen getGfxGen(const llvm::Function& F)
     return GfxGen::Unknown;
 }
 
+// gfx1200 and gfx1201 use HW_REG_SHADER_CYCLES_LO through s_getreg; gfx1250
+// and subsequent targets have a dedicated shader-cycle instruction.
+inline bool hasShaderCyclesU64(const llvm::Function& F)
+{
+    llvm::Attribute A = F.getFnAttribute("target-cpu");
+    if (!A.isValid()) return false;
+    llvm::StringRef CPU = A.getValueAsString();
+    if (!CPU.consume_front("gfx")) return false;
+    size_t digits = 0;
+    while (digits < CPU.size() && CPU[digits] >= '0' && CPU[digits] <= '9') ++digits;
+    unsigned target = 0;
+    return digits != 0 && !CPU.take_front(digits).getAsInteger(10, target) && target > 1201;
+}
+
 // Does this GfxGen support s_ttracedata_imm?
 inline bool supportsImmTrace(GfxGen gen)
 {
@@ -82,8 +96,8 @@ inline HwRegEncodings getHwRegEncodings(GfxGen gen)
 
 inline unsigned getShaderClockBits(const SQTTConfig& config, GfxGen gen)
 {
-    if (config.ShaderClockBits != SQTTConfig::AutoShaderClockBits) return config.ShaderClockBits;
-    return gen == GfxGen::GFX12 ? 12 : 0;
+    (void) gen;
+    return config.ShaderClockBits;
 }
 
 inline bool usesShaderClockPacking(const SQTTConfig& config, GfxGen gen)

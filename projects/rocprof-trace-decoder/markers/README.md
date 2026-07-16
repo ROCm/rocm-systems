@@ -16,7 +16,7 @@ cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build build
 ```
 
-This produces `build/lib/SQTTInstrumentPass.so`.
+This produces `build/lib/libsqttinstrumentpass.so`.
 
 Use `CMAKE_PREFIX_PATH` to select a specific ROCm installation:
 
@@ -46,7 +46,7 @@ __global__ void my_kernel(float *data, int n) {
 ```
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -67,7 +67,7 @@ waves on matching CUs/SIMDs/WGs emit markers:
 # Only CU 0, SIMD 0, all workgroups
 SQTT_SCOPE_CU=0x1 SQTT_SCOPE_SIMD=0x1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -82,7 +82,7 @@ SQTT already generates wave start/end markers for them.
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -91,7 +91,7 @@ Use weighted cost instead of instruction count:
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=cost:50 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -102,7 +102,7 @@ Insert point markers around `s_barrier_signal` and `s_barrier_wait`:
 ```bash
 SQTT_INSTRUMENT_BARRIERS=1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -114,7 +114,7 @@ Insert point markers around groups of global/buffer/flat memory operations
 ```bash
 SQTT_INSTRUMENT_MEMORY=2:5 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -134,7 +134,7 @@ cache line utilization analysis, stride detection, and coalescing analysis:
 ```bash
 SQTT_TRACE_ADDRESSES=memory \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -143,7 +143,7 @@ Trace LDS addresses only:
 ```bash
 SQTT_TRACE_ADDRESSES=lds \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -152,7 +152,7 @@ Trace both global and LDS:
 ```bash
 SQTT_TRACE_ADDRESSES=memory,lds \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -177,9 +177,9 @@ to report only active lanes. The parser demultiplexes interleaved records from
 concurrent waves by grouping on `(cu, simd, wave_id)` before parsing each
 wave's address block.
 
-Address blocks always have `extra_payload_count > 1`, so automatic gfx12
-shader-clock packing is disabled for the whole module when one is emitted. An
-explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an error in that configuration.
+Address blocks always have `extra_payload_count > 1`. Shader-clock packing is
+disabled by default, and an explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an
+error when an address block is emitted.
 This does not apply to `sqtt_marker_data()`, whose single raw payload remains
 eligible for clock packing.
 
@@ -195,7 +195,7 @@ SQTT_INSTRUMENT_MEMORY=2:5 \
 SQTT_SCOPE_CU=0x1 \
 SQTT_SCOPE_SIMD=0x1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -238,7 +238,7 @@ __global__ void my_kernel(float *data, int n) {
 }
 ```
 
-Named markers require the pass plugin (`-fpass-plugin=build/lib/SQTTInstrumentPass.so`).
+Named markers require the pass plugin (`-fpass-plugin=build/lib/libsqttinstrumentpass.so`).
 The pass:
 
 1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`, and
@@ -288,8 +288,8 @@ directly via `getenv()`.
 | `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
 | `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = flat/global (AS=0/1) and buffer, `lds` = LDS (AS=3). Expensive. |
 | `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
-| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | auto (`12` on gfx12 unless an address block is emitted, then `0`) | Number of gfx12 marker header high bits reserved for shader clock. `0` disables clock packing; a nonzero explicit value is invalid with address blocks. |
-| `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for the packed shader clock field. |
+| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | `0` | Number of gfx12 marker header high bits reserved for shader clock. Set a nonzero value to enable packing; it is invalid with address blocks. |
+| `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in the shader-clock low word for the packed field. |
 
 ## Examples
 
@@ -345,7 +345,7 @@ sqtt_marker_exit("Consumer Thread");
 Build with the pass plugin and capture a trace:
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/heavy.cpp -o heavy
 
 rocprofv3 --att -d trace -- ./heavy
@@ -387,7 +387,7 @@ Build with automatic function instrumentation and capture a trace:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/auto.cpp -o auto
 
 rocprofv3 --att -d trace -- ./auto
@@ -473,11 +473,13 @@ The pass plugin automatically selects `s_ttracedata_imm` when the encoded value
 fits in 8 bits, the target supports it, and shader-clock packing is inactive.
 IDs 1-63 use the fast path on RDNA. Exit markers use the same selection rule.
 
-On gfx12+, the default is to pack 12 shader-clock bits from
-`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, 4, 12)` into marker bits 31-20,
-leaving 18 marker ID bits plus the two low flags. Configure this with
-`SQTT_SHADER_CLOCK_BITS` and `SQTT_SHADER_CLOCK_SHIFT`; set
-`SQTT_SHADER_CLOCK_BITS=0` to use the no-clock full-ID layout on gfx12. The funcmap emits
+On gfx1200, gfx1201, and gfx1250, a nonzero `SQTT_SHADER_CLOCK_BITS` enables
+clock packing. With the usual 12-bit setting, it occupies marker bits 31-20
+and leaves 18 marker ID bits plus the two low flags. gfx1250 uses
+`s_get_shader_cycles_u64`; gfx1200 and gfx1201 use
+`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, 4, 12)`. Configure this with
+`SQTT_SHADER_CLOCK_BITS` and `SQTT_SHADER_CLOCK_SHIFT`; it defaults to `0`,
+which uses the no-clock full-ID layout. The funcmap emits
 `M:shader_clock_bits=N;shader_clock_shift=S` whenever clock packing is active.
 Numeric point and enter markers keep their legacy values; bare exits use the
 packed form because their value is indistinguishable from a generated exit.
@@ -540,7 +542,7 @@ Check that markers appear in the IR:
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=5 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ -S -emit-llvm my_kernel.hip -o - \
       | grep ttracedata
 ```

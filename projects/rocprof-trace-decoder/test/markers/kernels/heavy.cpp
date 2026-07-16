@@ -99,29 +99,11 @@ using Vec16   = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using Vec8     = __attribute__((__vector_size__(8 * sizeof(float)))) float;
 using float8x8 = __attribute__((__vector_size__(8 * sizeof(uint8_t)))) uint8_t;
 using IVec2 = __attribute__((__vector_size__(2 * sizeof(int)))) int;
+using IVec8 = __attribute__((__vector_size__(8 * sizeof(int)))) int;
 
 static_assert(sizeof(float8) == sizeof(uint8_t));
 
-#if defined(__gfx1200__) || defined(__gfx1201__)
-
-inline __device__ IVec2 castfrom8x8(const float8x8& f)
-{
-    return *reinterpret_cast<const IVec2*>(&f);
-}
-
-inline __device__ Vec8 mfma(const float8x8& a, const float8x8& b, const Vec8& initial = Vec8{})
-{
-    return __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(castfrom8x8(a), castfrom8x8(b), initial);
-}
-
-inline __device__ Vec4 mfma(const float8x8& a0, const float8x8& a1, const float8x8& b0, const float8x8& b1)
-{
-    Vec8 ret = mfma(castfrom8x8(a0), castfrom8x8(b0));
-    ret = mfma(castfrom8x8(a1), castfrom8x8(b1), ret);
-    return {ret[0], ret[1], ret[2], ret[3]};
-}
-
-#else
+#if defined(__gfx942__) || defined(__gfx950__)
 
 inline __device__ uint64_t castfrom8x8(const float8x8& f)
 {
@@ -137,6 +119,35 @@ inline __device__ Vec4 mfma(const float8x8& a0, const float8x8& a1, const float8
 {
     Vec4 ret = mfma(a0, b0);
     return mfma(a1, b1, ret);
+}
+
+#else
+
+#if defined(__gfx1200__) || defined(__gfx1201__)
+inline __device__ IVec2 castfrom8x8(const float8x8& f)
+{
+    return *reinterpret_cast<const IVec2*>(&f);
+}
+inline __device__ Vec8 mfma(const float8x8& a, const float8x8& b, const Vec8& initial = Vec8{})
+{
+    return __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(castfrom8x8(a), castfrom8x8(b), initial);
+}
+#else
+inline __device__ IVec8 castfrom8x8(const float8x8& f)
+{
+    return *reinterpret_cast<const IVec8*>(&f);
+}
+inline __device__ Vec8 mfma(const IVec8& a, const IVec8& b, const Vec8& initial = Vec8{})
+{
+    return __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(a, b, 0, initial, 0, 0);
+}
+#endif
+
+inline __device__ Vec4 mfma(const float8x8& a0, const float8x8& a1, const float8x8& b0, const float8x8& b1)
+{
+    Vec8 ret = mfma(castfrom8x8(a0), castfrom8x8(b0));
+    ret = mfma(castfrom8x8(a1), castfrom8x8(b1), ret);
+    return {ret[0], ret[1], ret[2], ret[3]};
 }
 
 #endif
@@ -361,9 +372,14 @@ int main()
 
     if (devProp.major > 9 && devProp.minor == 0)
     {
-        M /= 4;
-        K /= 4;
-        N /= 4;
+        M /= 3;
+        K /= 3;
+        N /= 3;
+    }
+    else if (devProp.major > 9 && devProp.minor == 5)
+    {
+        M /= 2;
+        K /= 2;
     }
 
     Matrix<float8> a(K, M);

@@ -10,7 +10,7 @@ function entry/exit, barrier synchronization, and user-defined annotations.
 
 The system consists of:
 
-- **`SQTTInstrumentPass.so`** -- LLVM pass plugin loaded via `-fpass-plugin=`
+- **`libsqttinstrumentpass.so`** -- LLVM pass plugin loaded via `-fpass-plugin=`
 - **`markers.hpp`** -- Device-side header for user markers
 - **`sqtt_flamegraph.py`** -- Post-processing tool: reads SQTT traces and
   `.sqtt_funcmap` sections to generate flamegraphs
@@ -33,13 +33,13 @@ it gets symbols from the host compiler process.
 ```bash
 # Minimal (barriers + user markers only)
 SQTT_INSTRUMENT_BARRIERS=1 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 
 # Full (function entry/exit with threshold, barriers, scope filtering)
 SQTT_INSTRUMENT_FUNCTIONS=10 SQTT_INSTRUMENT_BARRIERS=1 \
 SQTT_SCOPE_CU=0x3 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
       -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
@@ -96,9 +96,10 @@ SQTT hardware only captures the low 8 bits from `s_ttracedata_imm`, so the
 
 ### GFX12 Shader Clock Packing
 
-On gfx12+, marker headers include a truncated shader clock from
-`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, shift, bits)`. The default window
-is source bits 4-15 (`SQTT_SHADER_CLOCK_SHIFT=4`, `SQTT_SHADER_CLOCK_BITS=12`),
+For the supported gfx12 targets, marker headers include a truncated shader clock.
+gfx1250 uses `s_get_shader_cycles_u64`; gfx1200 and gfx1201 use
+`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, shift, bits)`. When enabled, the
+default window is source bits 4-15 (`SQTT_SHADER_CLOCK_SHIFT=4`, `SQTT_SHADER_CLOCK_BITS=12`),
 stored in marker bits 31-20, leaving 18 marker ID bits plus the two low flags:
 
 ```python
@@ -116,16 +117,16 @@ value is intrinsically indistinguishable from a pass-generated exit.
 `att_tool.py` restores packed headers to the legacy form by default;
 `--no-decode-markers` preserves the raw value.
 
-The clock field is the shader clock sampled with `s_getreg`, not the realtime
+The clock field is the target-specific shader-clock sample, not the realtime
 clock associated with `s_sendmsg`. The funcmap records the active layout with
 `M:shader_clock_bits=N;shader_clock_shift=S`. When `SQTT_SHADER_CLOCK_BITS=0`,
 gfx12 uses the no-clock full-ID layout and may use `s_ttracedata_imm`.
 A nonzero `shader_clock_bits` value requires `shader_clock_shift`; a malformed
 packed row uses the no-clock full-ID layout.
 
-Address trace blocks have `R:extra_payload_count > 1`. If a module emits any
-such block, the automatic gfx12 clock width is `0`; an explicit nonzero
-`SQTT_SHADER_CLOCK_BITS` is an error. A named `sqtt_marker_data()` record has
+Address trace blocks have `R:extra_payload_count > 1`. Clock packing is
+disabled by default; an explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an error
+when a module emits such a block. A named `sqtt_marker_data()` record has
 exactly one payload (`R:...=1`) and remains eligible for clock packing.
 
 The sampled window lets a decoder compensate for the variable delay between
@@ -212,8 +213,8 @@ if (encoding.has_shader_clock() && encoding.is_valid())
 ```
 
 `marker_id_mask()` and `packed_shader_clock_mask()` apply to the raw 32-bit
-shaderdata value. `shader_clock_source_mask()` describes the matching low-word
-window in `HW_REG_SHADER_CYCLES_LO` for timestamp comparison.
+shaderdata value. `shader_clock_source_mask()` describes the matching source
+low-word window for timestamp comparison (`HW_REG_SHADER_CYCLES_LO` on gfx1200/1201).
 `decode_shader_clock()` is meaningful only after the record has been identified
 as a packed header.
 
@@ -337,8 +338,8 @@ All variables are read at **compile time** by the pass plugin.
 | `SQTT_INSTRUMENT_FUNCTIONS`| `0`     | Function entry/exit threshold (0=disabled)     |
 | `SQTT_INSTRUMENT_MEMORY`   | off     | Memory op markers. Format: `N:M` (N=ops per marker, M=max gap) |
 | `SQTT_MEM_BARRIER`         | `fence` | Reordering boundary around markers (`none`/`asm`/`fence` or `0`/`1`/`2`) |
-| `SQTT_SHADER_CLOCK_BITS`   | auto    | Gfx12 shader clock bits (`12` on gfx12 unless an address block is emitted, then `0`; `0` disables). A nonzero explicit value is invalid with address blocks. |
-| `SQTT_SHADER_CLOCK_SHIFT`  | `4`     | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for shader clock packing |
+| `SQTT_SHADER_CLOCK_BITS`   | `0`     | Gfx12 shader clock bits. Set a nonzero value to enable packing; it is invalid with address blocks. |
+| `SQTT_SHADER_CLOCK_SHIFT`  | `4`     | Source bit offset in the shader-clock low word for packing |
 
 ### Marker reorder boundary (`SQTT_MEM_BARRIER`)
 
@@ -578,9 +579,9 @@ The section is added to `llvm.used` to prevent linker stripping.
 
 ### `code.json` marker metadata
 
-For a packed code object, `att_tool.py` adds `sqtt_funcmap` data to
-`code.json` using the established six-column row shape. Two additive top-level
-tables carry metadata that cannot be represented in those rows:
+`att_tool.py` adds embedded `sqtt_funcmap` data to `code.json` using the
+established six-column row shape. Two additive top-level tables carry metadata
+that cannot be represented in those rows:
 
 ```json
 "sqtt_funcmap_layout": [[codeobj_id, shader_clock_bits, shader_clock_shift]],
@@ -588,10 +589,9 @@ tables carry metadata that cannot be represented in those rows:
 ```
 
 `sqtt_funcmap_layout` contains rows only for code objects with shader-clock
-packing; `sqtt_funcmap_payloads` contains their nonzero payload counts. Readers
-that do not know these optional tables can continue using the unchanged
-`sqtt_funcmap` rows. For a packed row, an absent payload count means zero;
-legacy `code.json` output is unchanged.
+packing; `sqtt_funcmap_payloads` contains nonzero payload counts. Readers that
+do not know these optional tables can continue using the unchanged
+`sqtt_funcmap` rows. For a packed row, an absent payload count means zero.
 
 ### Extracting the funcmap
 

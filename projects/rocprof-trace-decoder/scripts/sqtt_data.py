@@ -464,7 +464,9 @@ def find_wave_span_at(spans: list[WaveSpan], time: int) -> Optional[WaveSpan]:
     Trace data records can arrive after a dispatch retires (the wave is
     still draining), so we match to the most recent span whose
     launch_time <= time rather than requiring strict [launch, retire]
-    containment.
+    containment. Clock-corrected startup markers can also land just before
+    the first occupancy launch; with no earlier wave in that slot, they
+    belong to that first span.
     """
     lo, hi = 0, len(spans) - 1
     result = None
@@ -476,7 +478,7 @@ def find_wave_span_at(spans: list[WaveSpan], time: int) -> Optional[WaveSpan]:
             lo = mid + 1
         else:
             hi = mid - 1
-    return result
+    return result if result is not None or not spans else spans[0]
 
 
 def make_funcmap_resolver(

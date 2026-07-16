@@ -25,7 +25,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/InlineAsm.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 #if __has_include("llvm/Plugins/PassPlugin.h")
@@ -182,15 +181,10 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
 
     // Address records have R:extra_payload_count > 1. Do not create a packed
     // header layout whose JSON timestamp correction could split those blocks.
-    if (!AddrTraceEntries.empty())
-    {
-        if (Config.ShaderClockBits == SQTTConfig::AutoShaderClockBits)
-            Config.ShaderClockBits = 0;
-        else if (Config.ShaderClockBits != 0)
-            report_fatal_error(
-                "SQTT_TRACE_ADDRESSES emits multi-payload records; set SQTT_SHADER_CLOCK_BITS=0"
-            );
-    }
+    if (!AddrTraceEntries.empty() && Config.ShaderClockBits != 0)
+        report_fatal_error(
+            "SQTT_TRACE_ADDRESSES emits multi-payload records; set SQTT_SHADER_CLOCK_BITS=0"
+        );
 
     // Packing must happen after the address decision for the entire module.
     for (auto& F : M)

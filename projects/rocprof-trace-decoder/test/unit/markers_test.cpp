@@ -491,7 +491,7 @@ TEST(MarkerConfig, ParsesEnvironmentAndRejectsConflictingModes)
     EXPECT_EQ(config.MemoryMaxGap, 7u);
     EXPECT_FALSE(config.TraceMemoryAddrs);
     EXPECT_FALSE(config.TraceLDSAddrs);
-    EXPECT_EQ(config.ShaderClockBits, SQTTConfig::AutoShaderClockBits);
+    EXPECT_EQ(config.ShaderClockBits, 0u);
     EXPECT_EQ(config.ShaderClockShift, 8u);
     EXPECT_EQ(config.WaveMask, 0xFFFFFFFFu);
     EXPECT_EQ(config.SimdMask, 0x5u);
@@ -518,6 +518,10 @@ TEST(MarkerTarget, ClassifiesArchitecturesAndInstructionCosts)
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "gfx11_func", "gfx1100")), GfxGen::RDNA);
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "gfx12_func", "gfx1200")), GfxGen::GFX12);
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "unknown_func", "notgfx")), GfxGen::Unknown);
+    EXPECT_FALSE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1200_cycles", "gfx1200")));
+    EXPECT_FALSE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1201_cycles", "gfx1201")));
+    EXPECT_TRUE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1250_cycles", "gfx1250")));
+    EXPECT_TRUE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1250_features", "gfx1250:xnack+")));
 
     EXPECT_EQ(getWaveSize(GfxGen::GFX9), 64u);
     EXPECT_EQ(getWaveSize(GfxGen::RDNA), 32u);
@@ -525,10 +529,12 @@ TEST(MarkerTarget, ClassifiesArchitecturesAndInstructionCosts)
     EXPECT_TRUE(supportsImmTrace(GfxGen::GFX12));
 
     SQTTConfig config;
-    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 12u);
+    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 0u);
     EXPECT_EQ(getShaderClockBits(config, GfxGen::RDNA), 0u);
+    EXPECT_FALSE(usesShaderClockPacking(config, GfxGen::GFX12));
     config.ShaderClockBits = 5;
     EXPECT_EQ(getShaderClockBits(config, GfxGen::RDNA), 5u);
+    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 5u);
     EXPECT_TRUE(usesShaderClockPacking(config, GfxGen::GFX12));
     EXPECT_FALSE(usesShaderClockPacking(config, GfxGen::RDNA));
 
@@ -705,7 +711,7 @@ TEST(MarkerPass, AddressTracingSkipsBufferLoadLds)
     expectNotContains(funcMap, "W:");
 }
 
-TEST(MarkerPass, AddressTraceBlocksDisableAutomaticGfx12ClockPackingAndUseBlockBoundaries)
+TEST(MarkerPass, AddressTraceBlocksKeepDefaultGfx12ClockPackingDisabledAndUseBlockBoundaries)
 {
     LLVMContext ctx;
     auto module = makeModule(ctx);
@@ -791,6 +797,7 @@ TEST(MarkerPass, OnePayloadNamedDataRemainsEligibleForGfx12ClockPacking)
 
     SQTTConfig config;
     useFullScopeMasks(config);
+    config.ShaderClockBits = 12;
 
     ModuleAnalysisManager analysisManager;
     SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
@@ -906,6 +913,7 @@ TEST(MarkerPass, Gfx12PacksOnlyPassGeneratedHeaders)
     SQTTConfig config;
     useFullScopeMasks(config);
     config.FunctionThreshold = 1;
+    config.ShaderClockBits = 12;
 
     ModuleAnalysisManager analysisManager;
     SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);

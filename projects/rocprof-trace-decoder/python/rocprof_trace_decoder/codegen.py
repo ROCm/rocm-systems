@@ -726,13 +726,14 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
         kernels, debug_labels = read_symbol_labels(elf_path)
         funcmap = _read_sqtt_funcmap(elf_path)
 
-        if funcmap is not None and funcmap.shader_clock_bits:
+        if funcmap is not None:
             # Keep the existing sqtt_funcmap row shape used by rocprofv3
             # consumers. The two new side tables below are additive, so older
             # readers can ignore them without losing their original schema.
-            sqtt_funcmap_layouts.append(
-                [codeobj_id, funcmap.shader_clock_bits, funcmap.shader_clock_shift]
-            )
+            if funcmap.shader_clock_bits:
+                sqtt_funcmap_layouts.append(
+                    [codeobj_id, funcmap.shader_clock_bits, funcmap.shader_clock_shift]
+                )
             symbol_vaddrs: dict[str, int] = {}
             for address, (name, _demangled) in sorted(kernels.items()):
                 symbol_vaddrs.setdefault(name, address)

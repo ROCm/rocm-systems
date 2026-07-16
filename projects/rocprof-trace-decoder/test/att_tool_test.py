@@ -55,7 +55,7 @@ class _Writer:
 class MarkerTimestampCorrectionTest(unittest.TestCase):
     def test_corrects_headers_and_moves_declared_payloads_with_their_header(self):
         first_value = (0x100 << 20) | (3 << 2)
-        second_value = (0x100 << 20) | (4 << 2)
+        second_value = (0x101 << 20) | (4 << 2)
         first = _shaderdata(0x1010, first_value)
         second = _shaderdata(0x1080, second_value)
         payload = _shaderdata(0x1090, first_value)
@@ -71,7 +71,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
 
         _correct_marker_timestamps([(0, records)], document)
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x101F, 0x102F])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x102F, 0x103F])
         self.assertIs(records.shaderdata[0], first)
         self.assertIs(records.shaderdata[1], second)
         self.assertIs(records.shaderdata[2], payload)
@@ -139,10 +139,11 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual(records.shaderdata, original)
 
     def test_correction_is_default(self):
-        value = (0x100 << 20) | (3 << 2)
+        early_value = (0x100 << 20) | (3 << 2)
+        late_value = (0x101 << 20) | (3 << 2)
         records = TraceRecords(
             occupancy=[_occupancy(1, 0)],
-            shaderdata=[_shaderdata(0x1080, value), _shaderdata(0x1010, value)],
+            shaderdata=[_shaderdata(0x1080, late_value), _shaderdata(0x1010, early_value)],
         )
         code_index = CodeIndex.from_document(
             {
@@ -162,8 +163,26 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
                     formats="json",
                 )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x101F])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1010, 0x102F])
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
+
+    def test_constant_clock_samples_are_normalized_without_correction(self):
+        late = _shaderdata(0x1080, 3 << 2)
+        early = _shaderdata(0x1010, 4 << 2)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0)], shaderdata=[late, early]
+        )
+
+        _correct_marker_timestamps(
+            [(0, records)],
+            {
+                "sqtt_funcmap": [[7, 3, "P", "first", "", 0], [7, 4, "P", "second", "", 0]],
+                "sqtt_funcmap_layout": [[7, 12, 4]],
+            },
+        )
+
+        self.assertEqual([late.time, early.time], [0x1080, 0x1010])
+        self.assertEqual([late.value, early.value], [12, 16])
 
     def test_correction_does_not_share_the_reference_between_simds(self):
         value = (0x100 << 20) | (3 << 2)
@@ -206,10 +225,32 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         self.assertEqual([record.time for record in records.shaderdata], [0xFE0B, 0x10DFC])
         self.assertEqual([record.value for record in records.shaderdata], [marker_id, marker_id])
 
+    def test_large_delay_warns_and_is_corrected(self):
+        marker_id = 3 << 2
+        base = 0x20000
+        first = _shaderdata(base, marker_id)
+        later = _shaderdata(base + 30000, marker_id)
+        final = _shaderdata(base + 60000, (0x5F9 << 20) | marker_id)
+        records = TraceRecords(
+            occupancy=[_occupancy(1, 0)], shaderdata=[first, later, final]
+        )
+
+        with self.assertWarnsRegex(RuntimeWarning, "delay range exceeds half"):
+            _correct_marker_timestamps(
+                [(0, records)],
+                {
+                    "sqtt_funcmap": [[7, 3, "P", "marker", "", 0]],
+                    "sqtt_funcmap_layout": [[7, 12, 4]],
+                },
+            )
+
+        self.assertEqual(first.time, base - 30000 + 15)
+        self.assertEqual(later.time, base - 30000 + 15)
+        self.assertEqual(final.time, base + 60000)
+
     def test_late_header_after_retirement_is_normalized_and_corrected(self):
-        value = (0x100 << 20) | (3 << 2)
-        before_retirement = _shaderdata(0x1010, value)
-        after_retirement = _shaderdata(0x1080, value)
+        before_retirement = _shaderdata(0x1010, (0x100 << 20) | (3 << 2))
+        after_retirement = _shaderdata(0x1080, (0x101 << 20) | (3 << 2))
         records = TraceRecords(
             occupancy=[_occupancy(1, 0), _occupancy(0, 0x1020)],
             shaderdata=[before_retirement, after_retirement],
@@ -224,7 +265,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
         )
 
         self.assertEqual(before_retirement.time, 0x1010)
-        self.assertEqual(after_retirement.time, 0x101F)
+        self.assertEqual(after_retirement.time, 0x102F)
         self.assertEqual([record.value for record in records.shaderdata], [12, 12])
 
     def test_later_launch_supersedes_a_retired_wave_slot(self):
@@ -248,7 +289,7 @@ class MarkerTimestampCorrectionTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x103F])
+        self.assertEqual([record.time for record in records.shaderdata], [0x1020, 0x1080])
         self.assertEqual([record.value for record in records.shaderdata], [16, 16])
 
     def test_multi_payload_headers_are_normalized_without_clock_correction(self):

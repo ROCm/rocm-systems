@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -229,6 +230,9 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         window_mask = window_size - 1
         half_window = window_size // 2
         bucket_size = 1 << shift
+        # A constant field cannot establish a relative issue-time delta.
+        if len({sampled for _record, _time, sampled, _payloads in domain_headers}) == 1:
+            continue
         # This is an arbitrary coordinate origin, not a time/minimum anchor.
         # Comparing deltas cancels the fixed phase between the two clocks.
         _origin, origin_time, origin_clock, _payloads = domain_headers[0]
@@ -237,6 +241,11 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             for _record, time, clock, _payloads in domain_headers
         ]
         minimum = min(delays)
+        if max(delays) - minimum > half_window:
+            warnings.warn(
+                f"SQTT marker correction for {clock_domain}: delay range exceeds half the window",
+                RuntimeWarning,
+            )
         for (record, _time, _clock, header_payloads), delay in zip(domain_headers, delays):
             correction = max(0, delay - minimum - (bucket_size - 1))
             if correction:

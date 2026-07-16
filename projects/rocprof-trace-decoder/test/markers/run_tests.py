@@ -51,7 +51,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 BUILD_DIR = os.environ.get("SQTT_BUILD_DIR", os.path.join(PROJECT_ROOT, "build"))
 PASS_PLUGIN = os.environ.get(
-    "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "lib", "SQTTInstrumentPass.so"))
+    "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "lib", "libsqttinstrumentpass.so"))
 INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include", "rocprof_trace_decoder", "cxx")
 TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.cpp")
 ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.cpp")
@@ -478,7 +478,7 @@ TESTS = [
     {
         "name": "gfx12_func_instrumentation",
         "desc": "Function instrumentation on gfx12",
-        "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10"},
+        "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10", "SQTT_SHADER_CLOCK_BITS": "12"},
         "mode": "obj",
         "flags": ["--offload-arch=gfx1200"],
         "expect_ir": [],
@@ -536,7 +536,7 @@ TESTS = [
     {
         "name": "gfx12_asm_shader_clock",
         "desc": "gfx12 packs shader clock bits into full s_ttracedata markers",
-        "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10"},
+        "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10", "SQTT_SHADER_CLOCK_BITS": "12"},
         "mode": "asm",
         "flags": ["--offload-arch=gfx1200"],
         "expect_ir": [
@@ -548,9 +548,27 @@ TESTS = [
         "reject_funcmap": [],
     },
     {
-        "name": "gfx12_shader_clock_disabled_asm",
-        "desc": "gfx12: disabled clock packing keeps immediate headers and dynamic payload traces",
-        "env": {"SQTT_SHADER_CLOCK_BITS": "0"},
+        "name": "gfx1250_asm_shader_clock",
+        "desc": "gfx1250 uses s_get_shader_cycles_u64 for packed shader clocks",
+        "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10", "SQTT_SHADER_CLOCK_BITS": "12"},
+        "mode": "asm",
+        "flags": ["--offload-arch=gfx1250"],
+        "expect_ir": [
+            r"s_get_shader_cycles_u64\b",
+            r"s_ttracedata\b",
+        ],
+        "reject_ir": [
+            r"HW_REG_SHADER_CYCLES_LO",
+            r"s_ttracedata_imm\b",
+        ],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+        "custom_asm_check": "m0_nop_before_ttracedata",
+    },
+    {
+        "name": "gfx12_default_no_clock_asm",
+        "desc": "gfx12: default layout keeps immediate headers and dynamic payload traces",
+        "env": {},
         "mode": "asm",
         "source": "marker",
         "flags": ["--offload-arch=gfx1200"],
@@ -564,9 +582,9 @@ TESTS = [
         "custom_asm_check": "m0_nop_before_ttracedata",
     },
     {
-        "name": "gfx12_shader_clock_disabled_funcmap",
-        "desc": "gfx12: disabled clock packing emits no funcmap layout row",
-        "env": {"SQTT_SHADER_CLOCK_BITS": "0"},
+        "name": "gfx12_default_no_clock_funcmap",
+        "desc": "gfx12: default layout emits no funcmap layout row",
+        "env": {},
         "mode": "obj",
         "source": "marker",
         "flags": ["--offload-arch=gfx1200"],

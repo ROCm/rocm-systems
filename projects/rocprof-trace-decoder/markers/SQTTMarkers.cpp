@@ -511,7 +511,6 @@ bool SQTTInstrumentPass::lowerFullTracesWithM0Nop(Function& F)
         "s_mov_b32 m0, $1\n"
         "s_nop 0\n"
         "s_ttracedata";
-
     // Constants can be encoded directly in the M0 move. Non-constant values
     // reaching this helper are required to be scalar.
     InlineAsm* ImmediateTrace =
@@ -586,7 +585,19 @@ bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
     Module* M = F.getParent();
     LLVMContext& Ctx = M->getContext();
     Type* I32 = Type::getInt32Ty(Ctx);
-    Function* SGetReg = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_getreg);
+    const bool useShaderCyclesU64 = hasShaderCyclesU64(F);
+    Function* SGetReg =
+        useShaderCyclesU64 ? nullptr : Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_getreg);
+    InlineAsm* GetShaderCycles = nullptr;
+    if (useShaderCyclesU64)
+    {
+        GetShaderCycles = InlineAsm::get(
+            FunctionType::get(Type::getInt64Ty(Ctx), false),
+            "s_get_shader_cycles_u64 $0",
+            "=s",
+            /*hasSideEffects=*/true
+        );
+    }
     Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
     uint32_t hwreg = GETREG_IMMED(clockBits - 1, Config.ShaderClockShift, GFX12_SHADER_CYCLES_LO);
     uint32_t clockDestShift = 32 - clockBits;
@@ -597,7 +608,16 @@ bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
         Value* markerAndFlags = encoded;
         if (markerAndFlags->getType() != I32) markerAndFlags = B.CreateZExtOrTrunc(markerAndFlags, I32);
         markerAndFlags = B.CreateAnd(markerAndFlags, ConstantInt::get(I32, markerAndFlagMask));
-        Value* clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
+        Value* clock;
+        if (GetShaderCycles)
+        {
+            Value* cyclesLo = B.CreateTrunc(B.CreateCall(GetShaderCycles), I32);
+            // The final shift below discards all but clockBits, matching the
+            // right-aligned field returned by s_getreg on gfx1200 and gfx1201.
+            clock = B.CreateLShr(cyclesLo, ConstantInt::get(I32, Config.ShaderClockShift));
+        }
+        else
+            clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
         Value* shiftedClock = B.CreateShl(clock, ConstantInt::get(I32, clockDestShift));
         Value* packed = B.CreateOr(shiftedClock, markerAndFlags);
         CallInst* packedTrace = B.CreateCall(TTD, {packed});

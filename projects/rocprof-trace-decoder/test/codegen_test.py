@@ -48,19 +48,19 @@ class CodegenFuncmapTest(unittest.TestCase):
         self.assertEqual(doc["sqtt_funcmap_layout"], [[10, 12, 4]])
         self.assertEqual(doc["sqtt_funcmap_payloads"], [[10, 8, 1]])
 
-    def test_legacy_funcmap_leaves_code_json_unchanged(self):
+    def test_legacy_funcmap_exports_rows_without_a_packed_layout(self):
         doc = self.generate(
             [codegen._parse_sqtt_funcmap(b"F:7:scope\nR:7:extra_payload_count=1\n")]
         )
 
-        self.assertNotIn("sqtt_funcmap", doc)
+        self.assertEqual(doc["sqtt_funcmap"], [[10, 7, "F", "scope", "", 0]])
         self.assertNotIn("sqtt_funcmap_layout", doc)
-        self.assertNotIn("sqtt_funcmap_payloads", doc)
+        self.assertEqual(doc["sqtt_funcmap_payloads"], [[10, 7, 1]])
 
     def test_incomplete_packed_layout_is_ignored(self):
         doc = self.generate([codegen._parse_sqtt_funcmap(b"M:shader_clock_bits=12\nF:7:scope\n")])
 
-        self.assertNotIn("sqtt_funcmap", doc)
+        self.assertEqual(doc["sqtt_funcmap"], [[10, 7, "F", "scope", "", 0]])
         self.assertNotIn("sqtt_funcmap_layout", doc)
 
     def test_packed_layout_does_not_require_named_entries(self):

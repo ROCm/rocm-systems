@@ -129,7 +129,7 @@ TEST(MarkerEncoding, ExposesRawAndSourceClockMasks)
     EXPECT_EQ(enc.marker_id_mask(), 0x000FFFFCu);
     EXPECT_EQ(enc.packed_shader_clock_mask(), 0xFFF00000u);
 
-    // The sampled clock was HW_REG_SHADER_CYCLES_LO bits [15:4].
+    // The sampled source-clock low word uses bits [15:4].
     EXPECT_EQ(enc.shader_clock_source_mask(), 0x0000FFF0u);
 
     uint32_t raw = (0xABCu << 20) | (42u << 2) | 0b10u;

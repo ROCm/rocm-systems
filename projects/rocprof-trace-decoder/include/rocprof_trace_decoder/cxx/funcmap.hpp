@@ -159,7 +159,7 @@ struct MarkerEncoding
                                                     : detail::bit_mask(shader_clock_bits) << (32u - shader_clock_bits);
     }
 
-    /// Corresponding bit window in HW_REG_SHADER_CYCLES_LO.
+    /// Corresponding bit window in the producer's low shader-clock word.
     constexpr uint32_t shader_clock_source_mask() const noexcept
     {
         return (!has_shader_clock() || !is_valid()) ? 0u
