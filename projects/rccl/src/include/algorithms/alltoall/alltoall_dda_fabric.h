@@ -32,6 +32,10 @@ __global__ void ddaAllToAllFabric(
     int selfRank,
     int nRanks,
     FabricGpuBarrier barrier) {
+   barrier.syncOnSameBlockIdx<
+      false /* hasPreviousMemAccess */,
+      true /* hasSubsequentMemAccess */>();
+
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume
   // that count % countPerThread == 0, enforced before kernel launch.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
@@ -44,17 +48,7 @@ __global__ void ddaAllToAllFabric(
 
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
-  const size_t copyCount = count * nRanksEff;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  // It is expensive to launch hipMemcpyAsync on ROCm: each block copies part
-  // of sendbuff into this rank's scratch buffer.
-  copyFromSrcToDest<T>(
-      sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
-
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll kUnroll

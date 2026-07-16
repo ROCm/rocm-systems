@@ -65,6 +65,13 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(
        nRanks, count, grid.x, block.x,
        (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  CUDACHECK(cudaMemcpyAsync(
+        comm->ddaScratch,
+        sendbuff,
+        totalCount * sizeof(T),
+        cudaMemcpyDeviceToDevice,
+        stream));
+
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
