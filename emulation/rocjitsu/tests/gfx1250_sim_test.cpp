@@ -3635,7 +3635,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args[2]);
 }
 
-TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
+TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -3643,7 +3643,8 @@ TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
   constexpr uint32_t kExpected = 0x12345678u;
 
   std::vector<uint32_t> code;
-  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 1));
+  // s_load_b32 s4, s[0:1], 0x4 scale_offset
+  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 4));
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, S_ENDPGM_GFX12);
 
