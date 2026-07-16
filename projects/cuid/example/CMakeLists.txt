@@ -18,9 +18,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(amdcuid_example)
+message(
+    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
+)
+message(
+    "                          Cmake amdcuid_example                           "
+)
+message(
+    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
+)
 
-set(CMAKE_CXX_STANDARD 14)
+message("")
+message("Build Configuration:")
+message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
+message("------------Compiler: " ${CMAKE_CXX_COMPILER})
+message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
+message("-CMake inst. Bindir : " ${CMAKE_INSTALL_BINDIR})
+message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
+message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
+message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
+message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
+message("")
 
 set(AMDCUID_EXAMPLE_EXECUTABLE amdcuid_example)
 set(SRC_LIST main.cc)

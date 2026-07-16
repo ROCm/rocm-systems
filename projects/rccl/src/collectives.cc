@@ -13,11 +13,12 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_ag_shuffle.h"
-#include "dda_all_reduce_ipc.h"
-#include "dda_reduce_scatter_ipc.h"
-#include "dda_all_gather_ipc.h"
-#include "dda_alltoall_ipc.h"
+#include "dda_all_reduce.h"
+#include "dda_reduce_scatter.h"
+#include "dda_all_gather.h"
+#include "dda_alltoall.h"
 #include "sym_kernels.h"
+#include "dev_runtime.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -129,19 +130,43 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942; gfx950 uses the user-configurable rcclParamDdaThreshold();
-// all other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8 || comm->symmetricSupport) return false;
+// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
+// gfx950 uses the user-configurable rcclParamDdaThreshold().
+// gfx1250 uses the user-configurable rcclParamDdaThreshold().
+// All other architectures return false (threshold 0).
+static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
   size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx942")) {
-    threshold = gfx942Default;
-  } else if (IsArchMatch(comm->archName, "gfx950")) {
+  if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = (size_t)rcclParamDdaThreshold();
+  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nRanks < 8 || comm->symmetricSupport) return false;
+    if (IsArchMatch(comm->archName, "gfx942")) {
+      threshold = gfx942Default;
+    } else {
+      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
+    }
   } else {
     return false;
   }
   return threshold > 0 && totalBytes <= threshold;
+}
+
+// Check if symmteric kernels is requested for this collective
+static bool isSymmetricKernelRequested(
+    ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+    size_t nElts, const void* sendbuff, void* recvbuff) {
+  if (comm == nullptr || !comm->symmetricSupport) return false;
+  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
+  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  return sendWin != nullptr && recvWin != nullptr &&
+         (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
 }
 
 enum rcclAllGatherAlgo {
@@ -243,16 +268,38 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  if (rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608) &&
-      ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-    NCCLCHECK(ncclAllGatherDdaIpc(
-        sendbuff,
-        recvbuff,
-        sendcount,
-        datatype,
-        comm,
-        stream));
-    return ncclSuccess;
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible = isSymmetricKernelRequested(
+      comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount,
+      sendbuff, recvbuff);
+
+  if (!symEligible &&
+      rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        INFO(NCCL_COLL,
+             "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllGatherDdaFabric(
+            sendbuff,
+            recvbuff,
+            sendcount,
+            datatype,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      NCCLCHECK(ncclAllGatherDdaIpc(
+          sendbuff,
+          recvbuff,
+          sendcount,
+          datatype,
+          comm,
+          stream));
+      return ncclSuccess;
+    }
   }
   rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
   switch (algo) {
@@ -306,16 +353,31 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       }
       #endif // ENABLE_ROCSHMEM
 
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304) &&
-        ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
-      NCCLCHECK(ncclAllToAllDdaIpc(
-        sendbuff,
-        recvbuff,
-        count,
-        datatype,
-        comm,
-        stream));
-      return ncclSuccess;
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304)) {
+      if (IsArchMatch(comm->archName, "gfx1250")) {
+        if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL,
+               "AllToAll: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+          NCCLCHECK(ncclAllToAllDdaFabric(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            comm,
+            stream));
+          return ncclSuccess;
+        }
+      } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        NCCLCHECK(ncclAllToAllDdaIpc(
+          sendbuff,
+          recvbuff,
+          count,
+          datatype,
+          comm,
+          stream));
+        return ncclSuccess;
+      }
     }
 
     info = { ncclFuncAlltoAll, "AlltoAll",
@@ -437,19 +499,43 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
-      ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    NCCLCHECK(ncclAllReduceDdaIpc(
-        sendbuff,
-        recvbuff,
-        count,
-        datatype,
-        op,
-        comm,
-        stream));
-    return ncclSuccess;
-  }
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible = (op == ncclSum) &&
+      isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
+                           count, sendbuff, recvbuff);
 
+  if (!symEligible &&
+      rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        INFO(NCCL_COLL,
+             "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllReduceDdaFabric(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    } else {
+      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        NCCLCHECK(ncclAllReduceDdaIpc(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    }
+  }
   return ncclEnqueueCheck(&info);
 }
 
@@ -565,25 +651,40 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
   // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
-  bool symEligible = false;
-  if (comm->symmetricSupport && (op == ncclSum || op == ncclAvg)) {
-    NCCLCHECK(ncclSymkInitOnce(comm));
-    int symkOp = (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum;
-    symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, symkOp, datatype, recvcount);
-  }
+  bool symEligible = (op == ncclSum || op == ncclAvg) &&
+      isSymmetricKernelRequested(
+          comm, ncclFuncReduceScatter,
+          (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
+          datatype, recvcount, sendbuff, recvbuff);
 
   if (!symEligible &&
-      rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608) &&
-      ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-    NCCLCHECK(ncclReduceScatterDdaIpc(
-        sendbuff,
-        recvbuff,
-        recvcount,
-        datatype,
-        op,
-        comm,
-        stream));
-    return ncclSuccess;
+      rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        INFO(NCCL_COLL,
+             "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+        NCCLCHECK(ncclReduceScatterDdaFabric(
+            sendbuff,
+            recvbuff,
+            recvcount,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+      NCCLCHECK(ncclReduceScatterDdaIpc(
+          sendbuff,
+          recvbuff,
+          recvcount,
+          datatype,
+          op,
+          comm,
+          stream));
+      return ncclSuccess;
+    }
   }
 
   if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
