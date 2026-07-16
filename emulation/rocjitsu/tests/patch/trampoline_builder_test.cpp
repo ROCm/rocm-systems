@@ -313,6 +313,201 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
             build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
 }
 
+TEST(DbiPatchPlacementPlanner, ReservesSequentialAppendedCavesWithExplicitMappings) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/256);
+  DbiPatchPlacementRequest first;
+  first.anchor_offset = 16;
+  first.original_size = 8;
+  first.body_size = 40;
+  first.inline_capacity = 8;
+  DbiPatchPlacementRequest second = first;
+  second.anchor_offset = 32;
+  second.body_size = 24;
+
+  const auto first_placement = planner.plan(first);
+  const auto second_placement = planner.plan(second);
+
+  ASSERT_TRUE(first_placement);
+  ASSERT_TRUE(second_placement);
+  EXPECT_EQ(first_placement->kind, DbiPatchPlacementKind::AppendedCave);
+  EXPECT_EQ(first_placement->body_offset, 256u);
+  EXPECT_EQ(first_placement->return_branch_offset, 296u);
+  EXPECT_EQ(first_placement->return_target, 24u);
+  EXPECT_EQ(second_placement->body_offset, 300u);
+  EXPECT_EQ(second_placement->return_branch_offset, 324u);
+  EXPECT_EQ(second_placement->return_target, 40u);
+  EXPECT_EQ(planner.appended_end(), 328u);
+}
+
+TEST(DbiPatchPlacementPlanner, PrefersInlineThenLocalAndRejectsOverlapTransactionally) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/512);
+  DbiPatchPlacementRequest inline_request;
+  inline_request.anchor_offset = 32;
+  inline_request.original_size = 8;
+  inline_request.body_size = 32;
+  inline_request.inline_capacity = 40;
+  inline_request.local_cave = DbiPatchLocalCave{256, 64};
+  ASSERT_EQ(planner.plan(inline_request)->kind, DbiPatchPlacementKind::Inline);
+
+  DbiPatchPlacementRequest local_request;
+  local_request.anchor_offset = 96;
+  local_request.original_size = 8;
+  local_request.body_size = 40;
+  local_request.inline_capacity = 8;
+  local_request.local_cave = DbiPatchLocalCave{256, 64};
+  const auto local = planner.plan(local_request);
+  ASSERT_TRUE(local);
+  EXPECT_EQ(local->kind, DbiPatchPlacementKind::LocalCave);
+  EXPECT_EQ(local->body_offset, 256u);
+
+  const uint64_t appended_before_failure = planner.appended_end();
+  std::string error;
+  DbiPatchPlacementRequest overlap = local_request;
+  overlap.allow_appended_cave = false;
+  EXPECT_FALSE(planner.plan(overlap, &error));
+  EXPECT_NE(error.find("no nonoverlapping"), std::string::npos);
+  EXPECT_EQ(planner.appended_end(), appended_before_failure);
+}
+
+TEST(DbiPatchPlacementPlanner, SeedsComposedRangesBeforeLaterFamilySelection) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/512);
+  EXPECT_TRUE(planner.reserve_existing_range(/*begin=*/32, /*size=*/48));
+  EXPECT_TRUE(planner.reserve_existing_range(/*begin=*/256, /*size=*/64));
+  std::string error;
+  EXPECT_FALSE(planner.reserve_existing_range(/*begin=*/64, /*size=*/8, &error));
+  EXPECT_NE(error.find("overlapping"), std::string::npos);
+
+  DbiPatchPlacementRequest request;
+  request.anchor_offset = 96;
+  request.original_size = 4;
+  request.body_size = 8;
+  request.inline_capacity = 0;
+  request.local_cave = DbiPatchLocalCave{/*offset=*/256, /*capacity=*/128};
+  const auto placement = planner.plan(request);
+  ASSERT_TRUE(placement);
+  EXPECT_EQ(placement->kind, DbiPatchPlacementKind::AppendedCave);
+  EXPECT_EQ(placement->body_offset, 512u);
+}
+
+TEST(DbiPatchPlacementPlanner, FailsBeforeReservingUnreachableAppendedMapping) {
+  constexpr uint64_t kTextSize = 1u << 20u;
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, kTextSize);
+  DbiPatchPlacementRequest request;
+  request.anchor_offset = 0;
+  request.original_size = 4;
+  request.body_size = 16;
+  request.inline_capacity = 4;
+  std::string error;
+
+  EXPECT_FALSE(planner.plan(request, &error));
+  EXPECT_NE(error.find("no nonoverlapping"), std::string::npos);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+  EXPECT_EQ(planner.appended_end(), kTextSize);
+}
+
+TEST(DbiPatchPlacementPlanner, ReservesIndirectAppendedBodiesWithoutSoppReachability) {
+  constexpr uint64_t kTextSize = 1u << 20u;
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, kTextSize);
+
+  const auto first = planner.plan_indirect_appended(
+      /*anchor_offset=*/0, /*original_size=*/4, /*body_size=*/28);
+  const auto second = planner.plan_indirect_appended(
+      /*anchor_offset=*/16, /*original_size=*/4, /*body_size=*/12);
+
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(first->body_offset, kTextSize);
+  EXPECT_EQ(first->body_size, 28u);
+  EXPECT_EQ(second->body_offset, kTextSize + 28u);
+  EXPECT_EQ(planner.appended_end(), kTextSize + 40u);
+  EXPECT_FALSE(planner.plan_indirect_appended(
+      /*anchor_offset=*/0, /*original_size=*/4, /*body_size=*/4));
+}
+
+TEST(DbiPatchPlacementPlanner, ReservesStableAppendedPrefixBeforeIndirectBodies) {
+  constexpr uint64_t kTextSize = 4096u;
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, kTextSize);
+
+  EXPECT_TRUE(planner.reserve_appended_prefix(/*size=*/56));
+  EXPECT_EQ(planner.appended_end(), kTextSize + 56u);
+  const auto body = planner.plan_indirect_appended(
+      /*anchor_offset=*/16, /*original_size=*/8, /*body_size=*/80);
+
+  ASSERT_TRUE(body);
+  EXPECT_EQ(body->body_offset, kTextSize + 56u);
+  EXPECT_EQ(planner.appended_end(), kTextSize + 136u);
+}
+
+TEST(SoppBranchRelayPlanner, AssignsInterchangeableIslandsAtMaximumCardinality) {
+  const std::vector<uint64_t> sources = {16, 0, 32};
+  const std::vector<uint64_t> islands = {96, 80};
+  const auto plan = plan_forward_sopp_branch_relays(sources, {}, islands);
+
+  ASSERT_TRUE(plan);
+  ASSERT_EQ(plan->routes.size(), 2u);
+  EXPECT_EQ(plan->routes[0].source_index, 0u);
+  EXPECT_EQ(plan->routes[0].island_offset, 96u);
+  EXPECT_TRUE(plan->routes[0].relay_offsets.empty());
+  EXPECT_EQ(plan->routes[1].source_index, 1u);
+  EXPECT_EQ(plan->routes[1].island_offset, 80u);
+  EXPECT_EQ(plan->rejected_source_indices, std::vector<size_t>({2}));
+}
+
+TEST(SoppBranchRelayPlanner, ReachesLongTextThroughCapacityOneRelayWords) {
+  constexpr uint64_t kMaximumForwardHop = 4u + 32767u * 4u;
+  const std::vector<uint64_t> sources = {0, 16};
+  const std::vector<uint64_t> relays = {kMaximumForwardHop, kMaximumForwardHop + 16};
+  const std::vector<uint64_t> islands = {2 * kMaximumForwardHop, 2 * kMaximumForwardHop + 16};
+  const auto plan = plan_forward_sopp_branch_relays(sources, relays, islands);
+
+  ASSERT_TRUE(plan);
+  ASSERT_EQ(plan->routes.size(), 2u);
+  EXPECT_TRUE(plan->rejected_source_indices.empty());
+  for (const SoppBranchRelayRoute &route : plan->routes) {
+    ASSERT_EQ(route.relay_offsets.size(), 1u);
+    ASSERT_TRUE(compute_sopp_branch_simm16(sources[route.source_index], route.relay_offsets[0]));
+    EXPECT_TRUE(compute_sopp_branch_simm16(route.relay_offsets[0], route.island_offset));
+  }
+  EXPECT_NE(plan->routes[0].relay_offsets[0], plan->routes[1].relay_offsets[0]);
+  EXPECT_NE(plan->routes[0].island_offset, plan->routes[1].island_offset);
+}
+
+TEST(SoppBranchRelayPlanner, UsesDistinctRelaysToAdmitAllFeasibleSources) {
+  constexpr uint64_t kHop = 4u + 32767u * 4u;
+  const std::vector<uint64_t> sources = {0, 8};
+  const std::vector<uint64_t> relays = {kHop, kHop + 8};
+  const std::vector<uint64_t> islands = {2 * kHop, 2 * kHop + 8};
+  const auto plan = plan_forward_sopp_branch_relays(sources, relays, islands);
+
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->routes.size(), 2u);
+  EXPECT_TRUE(plan->rejected_source_indices.empty());
+}
+
+TEST(SoppBranchRelayPlanner, SharesNeitherRelayNorIslandAcrossRoutes) {
+  constexpr uint64_t kHop = 4u + 32767u * 4u;
+  const std::vector<uint64_t> sources = {0, 8};
+  const std::vector<uint64_t> relays = {kHop};
+  const std::vector<uint64_t> islands = {2 * kHop, 2 * kHop + 4};
+  const auto plan = plan_forward_sopp_branch_relays(sources, relays, islands);
+
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->routes.size(), 1u);
+  EXPECT_EQ(plan->rejected_source_indices.size(), 1u);
+}
+
+TEST(SoppBranchRelayPlanner, RejectsUnalignedOrAliasedCoordinates) {
+  std::string error;
+  EXPECT_FALSE(plan_forward_sopp_branch_relays(std::vector<uint64_t>{2}, {},
+                                               std::vector<uint64_t>{16}, &error));
+  EXPECT_NE(error.find("aligned"), std::string::npos);
+
+  error.clear();
+  EXPECT_FALSE(plan_forward_sopp_branch_relays(std::vector<uint64_t>{0}, std::vector<uint64_t>{16},
+                                               std::vector<uint64_t>{16}, &error));
+  EXPECT_NE(error.find("unique"), std::string::npos);
+}
+
 // NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was
 // tested here. It has been moved to the orchestrator boundary as
 // validate_inline_nop_plan() in instrumentor.h, and the test moved with it

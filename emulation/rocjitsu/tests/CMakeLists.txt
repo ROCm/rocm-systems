@@ -345,6 +345,7 @@ add_executable(
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/instruction_builder_test.cpp
+    patch/rdna4_instrumentation_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
     patch/probe_symbol_test.cpp

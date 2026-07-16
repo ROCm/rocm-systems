@@ -21,7 +21,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -140,6 +142,120 @@ public:
   /// branch-range failure.
   [[nodiscard]] static std::optional<TrampolineBytes>
   emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr);
+};
+
+/// @brief One source admitted by the forward SOPP relay planner.
+///
+/// `relay_offsets` excludes the source and assigned island. Every adjacent
+/// pair in source -> relays -> island is a valid forward s_branch hop.
+struct SoppBranchRelayRoute {
+  size_t source_index = 0;
+  uint64_t island_offset = 0;
+  std::vector<uint64_t> relay_offsets;
+};
+
+/// @brief Maximum-cardinality assignment of sources to interchangeable
+///        islands through capacity-one relay slots.
+struct SoppBranchRelayPlan {
+  std::vector<SoppBranchRelayRoute> routes;
+  std::vector<size_t> rejected_source_indices;
+  /// Saturated residual min-cut hops, expressed as original text coordinates.
+  /// These identify address bands where another relay vertex can increase
+  /// maximum route cardinality.
+  std::vector<std::pair<uint64_t, uint64_t>> min_cut_hops;
+  std::vector<uint64_t> min_cut_relay_offsets;
+};
+
+/// @brief Plan forward-only s_branch routes through one-word relay slots.
+///
+/// Sources and islands are interchangeable only on the island side: every
+/// admitted source is assigned exactly one island, while every relay slot and
+/// island may appear in at most one route. Coordinates are byte offsets and
+/// must be distinct, dword-aligned instruction addresses. An edge exists only
+/// when `compute_sopp_branch_simm16(from, to)` accepts the hop and `to > from`.
+///
+/// The result has maximum possible route cardinality. Ties are deterministic:
+/// coordinates are considered in ascending order, then original input order.
+/// Invalid coordinate sets return std::nullopt without a partial plan.
+[[nodiscard]] std::optional<SoppBranchRelayPlan> plan_forward_sopp_branch_relays(
+    std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
+    std::span<const uint64_t> island_offsets, std::string *error_out = nullptr);
+
+/// @brief Physical placement selected for one DBI patch body.
+enum class DbiPatchPlacementKind : uint8_t {
+  Inline,
+  LocalCave,
+  AppendedCave,
+};
+
+struct DbiPatchLocalCave {
+  uint64_t offset = 0;
+  uint64_t capacity = 0;
+};
+
+struct DbiPatchPlacementRequest {
+  uint64_t anchor_offset = 0;
+  uint32_t original_size = 0;
+  uint64_t body_size = 0;
+  uint64_t inline_capacity = 0;
+  std::optional<DbiPatchLocalCave> local_cave;
+  bool allow_appended_cave = true;
+};
+
+struct DbiPatchPlacement {
+  DbiPatchPlacementKind kind = DbiPatchPlacementKind::Inline;
+  uint64_t anchor_offset = 0;
+  uint32_t original_size = 0;
+  uint64_t body_offset = 0;
+  uint64_t body_size = 0;
+  uint64_t return_branch_offset = 0;
+  uint64_t return_target = 0;
+};
+
+/// @brief Transactional placement allocator shared by DBI probe families.
+///
+/// The planner owns overlap accounting and appended-cave cursor movement. A
+/// successful trampoline reservation includes its four-byte return branch, so
+/// later placements and final emitters use the same coordinates. Failed
+/// requests do not mutate the planner.
+class DbiPatchPlacementPlanner {
+public:
+  DbiPatchPlacementPlanner(rj_code_arch_t arch, uint64_t original_text_size);
+
+  [[nodiscard]] std::optional<DbiPatchPlacement> plan(const DbiPatchPlacementRequest &request,
+                                                      std::string *error_out = nullptr);
+
+  /// Reserve an appended body whose entry and return are implemented by
+  /// caller-supplied indirect control flow. This retains the planner's overlap
+  /// and cursor guarantees without imposing SOPP reachability.
+  [[nodiscard]] std::optional<DbiPatchPlacement>
+  plan_indirect_appended(uint64_t anchor_offset, uint32_t original_size, uint64_t body_size,
+                         std::string *error_out = nullptr);
+
+  /// Seed a range already owned by an earlier probe family in a composed
+  /// transaction. The range must fit the current text image and not overlap a
+  /// prior reservation.
+  [[nodiscard]] bool reserve_existing_range(uint64_t begin, uint64_t size,
+                                            std::string *error_out = nullptr);
+
+  /// Reserve a generated prefix at the current appended cursor. This is used
+  /// for fixed-size veneer banks whose stable addresses must be known before
+  /// any variable-size bodies are placed.
+  [[nodiscard]] bool reserve_appended_prefix(uint64_t size, std::string *error_out = nullptr);
+
+  [[nodiscard]] uint64_t appended_end() const { return appended_cursor_; }
+  [[nodiscard]] std::span<const std::pair<uint64_t, uint64_t>> occupied_ranges() const {
+    return occupied_ranges_;
+  }
+
+private:
+  [[nodiscard]] bool range_is_free(uint64_t begin, uint64_t end) const;
+  void reserve_range(uint64_t begin, uint64_t end);
+
+  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  uint64_t original_text_size_ = 0;
+  uint64_t appended_cursor_ = 0;
+  std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges_;
 };
 
 } // namespace rocjitsu

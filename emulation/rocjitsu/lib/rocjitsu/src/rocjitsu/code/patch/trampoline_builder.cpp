@@ -6,7 +6,11 @@
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 
+#include <algorithm>
 #include <cstring>
+#include <limits>
+#include <numeric>
+#include <queue>
 
 namespace rocjitsu {
 
@@ -267,6 +271,401 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   emit_plan.after_items.clear();
   emit_plan.emit_original = true;
   return build(emit_plan, error_out);
+}
+
+std::optional<SoppBranchRelayPlan>
+plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
+                                std::span<const uint64_t> relay_offsets,
+                                std::span<const uint64_t> island_offsets, std::string *error_out) {
+  struct Coordinate {
+    uint64_t offset = 0;
+    uint8_t kind = 0; // 0 = source, 1 = relay, 2 = island.
+    size_t input_index = 0;
+  };
+  std::vector<Coordinate> coordinates;
+  coordinates.reserve(source_offsets.size() + relay_offsets.size() + island_offsets.size());
+  const auto append_coordinates = [&](std::span<const uint64_t> offsets, uint8_t kind) {
+    for (size_t i = 0; i < offsets.size(); ++i)
+      coordinates.push_back({offsets[i], kind, i});
+  };
+  append_coordinates(source_offsets, 0);
+  append_coordinates(relay_offsets, 1);
+  append_coordinates(island_offsets, 2);
+  std::ranges::sort(coordinates, [](const Coordinate &lhs, const Coordinate &rhs) {
+    if (lhs.offset != rhs.offset)
+      return lhs.offset < rhs.offset;
+    if (lhs.kind != rhs.kind)
+      return lhs.kind < rhs.kind;
+    return lhs.input_index < rhs.input_index;
+  });
+  for (size_t i = 0; i < coordinates.size(); ++i) {
+    if (coordinates[i].offset % sizeof(uint32_t) != 0) {
+      report(error_out, "SOPP relay planner: coordinates must be dword aligned");
+      return std::nullopt;
+    }
+    if (i != 0 && coordinates[i - 1].offset == coordinates[i].offset) {
+      report(error_out, "SOPP relay planner: coordinates must be globally unique");
+      return std::nullopt;
+    }
+  }
+
+  struct Edge {
+    size_t to = 0;
+    size_t reverse = 0;
+    uint8_t capacity = 0;
+    bool original = false;
+  };
+  // A relay is split into in/out nodes so its instruction word has capacity
+  // one. Sources and islands already have capacity-one boundary edges.
+  const size_t super_source = 0;
+  const size_t source_base = 1;
+  const size_t relay_in_base = source_base + source_offsets.size();
+  const size_t relay_out_base = relay_in_base + relay_offsets.size();
+  const size_t island_base = relay_out_base + relay_offsets.size();
+  const size_t super_sink = island_base + island_offsets.size();
+  std::vector<std::vector<Edge>> graph(super_sink + 1);
+  const auto add_edge = [&](size_t from, size_t to) {
+    const size_t forward_index = graph[from].size();
+    const size_t reverse_index = graph[to].size();
+    graph[from].push_back({to, reverse_index, 1, true});
+    graph[to].push_back({from, forward_index, 0, false});
+  };
+  const auto can_hop = [](uint64_t from, uint64_t to) {
+    return to > from && compute_sopp_branch_simm16(from, to).has_value();
+  };
+
+  std::vector<size_t> source_order(source_offsets.size());
+  std::iota(source_order.begin(), source_order.end(), 0);
+  std::ranges::sort(source_order, [&](size_t lhs, size_t rhs) {
+    if (source_offsets[lhs] != source_offsets[rhs])
+      return source_offsets[lhs] < source_offsets[rhs];
+    return lhs < rhs;
+  });
+  std::vector<size_t> relay_order(relay_offsets.size());
+  std::iota(relay_order.begin(), relay_order.end(), 0);
+  std::ranges::sort(relay_order, [&](size_t lhs, size_t rhs) {
+    if (relay_offsets[lhs] != relay_offsets[rhs])
+      return relay_offsets[lhs] < relay_offsets[rhs];
+    return lhs < rhs;
+  });
+  std::vector<size_t> island_order(island_offsets.size());
+  std::iota(island_order.begin(), island_order.end(), 0);
+  std::ranges::sort(island_order, [&](size_t lhs, size_t rhs) {
+    if (island_offsets[lhs] != island_offsets[rhs])
+      return island_offsets[lhs] < island_offsets[rhs];
+    return lhs < rhs;
+  });
+
+  for (size_t source : source_order)
+    add_edge(super_source, source_base + source);
+  for (size_t relay : relay_order)
+    add_edge(relay_in_base + relay, relay_out_base + relay);
+  for (size_t island : island_order)
+    add_edge(island_base + island, super_sink);
+  for (size_t source : source_order) {
+    for (size_t relay : relay_order) {
+      if (can_hop(source_offsets[source], relay_offsets[relay]))
+        add_edge(source_base + source, relay_in_base + relay);
+    }
+    for (size_t island : island_order) {
+      if (can_hop(source_offsets[source], island_offsets[island]))
+        add_edge(source_base + source, island_base + island);
+    }
+  }
+  for (size_t relay : relay_order) {
+    for (size_t next : relay_order) {
+      if (can_hop(relay_offsets[relay], relay_offsets[next]))
+        add_edge(relay_out_base + relay, relay_in_base + next);
+    }
+    for (size_t island : island_order) {
+      if (can_hop(relay_offsets[relay], island_offsets[island]))
+        add_edge(relay_out_base + relay, island_base + island);
+    }
+  }
+
+  // Unit-capacity Edmonds-Karp is exact here and bounded by the number of
+  // sources: at most one breadth-first augmentation per admitted route.
+  for (;;) {
+    constexpr size_t kNoNode = std::numeric_limits<size_t>::max();
+    std::vector<size_t> parent_node(graph.size(), kNoNode);
+    std::vector<size_t> parent_edge(graph.size(), kNoNode);
+    std::queue<size_t> queue;
+    parent_node[super_source] = super_source;
+    queue.push(super_source);
+    while (!queue.empty() && parent_node[super_sink] == kNoNode) {
+      const size_t from = queue.front();
+      queue.pop();
+      for (size_t edge_index = 0; edge_index < graph[from].size(); ++edge_index) {
+        const Edge &edge = graph[from][edge_index];
+        if (edge.capacity == 0 || parent_node[edge.to] != kNoNode)
+          continue;
+        parent_node[edge.to] = from;
+        parent_edge[edge.to] = edge_index;
+        queue.push(edge.to);
+      }
+    }
+    if (parent_node[super_sink] == kNoNode)
+      break;
+    for (size_t node = super_sink; node != super_source; node = parent_node[node]) {
+      Edge &edge = graph[parent_node[node]][parent_edge[node]];
+      --edge.capacity;
+      ++graph[node][edge.reverse].capacity;
+    }
+  }
+
+  const auto used_original_edge_to = [&](size_t from) -> std::optional<size_t> {
+    for (const Edge &edge : graph[from]) {
+      if (edge.original && edge.capacity == 0)
+        return edge.to;
+    }
+    return std::nullopt;
+  };
+  SoppBranchRelayPlan plan;
+  {
+    std::vector<bool> reachable(graph.size(), false);
+    std::queue<size_t> queue;
+    reachable[super_source] = true;
+    queue.push(super_source);
+    while (!queue.empty()) {
+      const size_t from = queue.front();
+      queue.pop();
+      for (const Edge &edge : graph[from]) {
+        if (edge.capacity == 0 || reachable[edge.to])
+          continue;
+        reachable[edge.to] = true;
+        queue.push(edge.to);
+      }
+    }
+    const auto node_offset = [&](size_t node) -> std::optional<uint64_t> {
+      if (node >= source_base && node < relay_in_base)
+        return source_offsets[node - source_base];
+      if (node >= relay_in_base && node < relay_out_base)
+        return relay_offsets[node - relay_in_base];
+      if (node >= relay_out_base && node < island_base)
+        return relay_offsets[node - relay_out_base];
+      if (node >= island_base && node < super_sink)
+        return island_offsets[node - island_base];
+      return std::nullopt;
+    };
+    for (size_t relay = 0; relay < relay_offsets.size(); ++relay) {
+      if (reachable[relay_in_base + relay] && !reachable[relay_out_base + relay])
+        plan.min_cut_relay_offsets.push_back(relay_offsets[relay]);
+    }
+    std::ranges::sort(plan.min_cut_relay_offsets);
+    for (size_t from = 0; from < graph.size(); ++from) {
+      if (!reachable[from])
+        continue;
+      for (const Edge &edge : graph[from]) {
+        if (!edge.original || edge.capacity != 0 || reachable[edge.to])
+          continue;
+        const auto from_offset = node_offset(from);
+        const auto to_offset = node_offset(edge.to);
+        if (from_offset && to_offset && *from_offset != *to_offset)
+          plan.min_cut_hops.emplace_back(*from_offset, *to_offset);
+      }
+    }
+    std::ranges::sort(plan.min_cut_hops);
+    plan.min_cut_hops.erase(std::ranges::unique(plan.min_cut_hops).begin(),
+                            plan.min_cut_hops.end());
+  }
+  plan.routes.reserve(std::min(source_offsets.size(), island_offsets.size()));
+  for (size_t source_index = 0; source_index < source_offsets.size(); ++source_index) {
+    bool admitted = false;
+    for (const Edge &edge : graph[super_source]) {
+      if (edge.to != source_base + source_index || edge.capacity != 0)
+        continue;
+      SoppBranchRelayRoute route;
+      route.source_index = source_index;
+      size_t node = source_base + source_index;
+      for (;;) {
+        const auto next = used_original_edge_to(node);
+        if (!next) {
+          report(error_out, "SOPP relay planner: internal flow decomposition failure");
+          return std::nullopt;
+        }
+        node = *next;
+        if (node >= relay_in_base && node < relay_out_base) {
+          const size_t relay = node - relay_in_base;
+          route.relay_offsets.push_back(relay_offsets[relay]);
+          node = relay_out_base + relay;
+          continue;
+        }
+        if (node >= island_base && node < super_sink) {
+          route.island_offset = island_offsets[node - island_base];
+          break;
+        }
+        report(error_out, "SOPP relay planner: internal flow path has an invalid node");
+        return std::nullopt;
+      }
+      plan.routes.push_back(std::move(route));
+      admitted = true;
+      break;
+    }
+    if (!admitted)
+      plan.rejected_source_indices.push_back(source_index);
+  }
+  return plan;
+}
+
+DbiPatchPlacementPlanner::DbiPatchPlacementPlanner(rj_code_arch_t arch, uint64_t original_text_size)
+    : arch_(arch), original_text_size_(original_text_size), appended_cursor_(original_text_size) {}
+
+bool DbiPatchPlacementPlanner::range_is_free(uint64_t begin, uint64_t end) const {
+  if (begin >= end)
+    return false;
+  for (const auto &[occupied_begin, occupied_end] : occupied_ranges_) {
+    if (begin < occupied_end && occupied_begin < end)
+      return false;
+  }
+  return true;
+}
+
+void DbiPatchPlacementPlanner::reserve_range(uint64_t begin, uint64_t end) {
+  occupied_ranges_.emplace_back(begin, end);
+}
+
+bool DbiPatchPlacementPlanner::reserve_existing_range(uint64_t begin, uint64_t size,
+                                                      std::string *error_out) {
+  if (size == 0 || begin > original_text_size_ || size > original_text_size_ - begin ||
+      !range_is_free(begin, begin + size)) {
+    report(error_out,
+           "DBI patch placement: existing range is empty, out of bounds, or overlapping");
+    return false;
+  }
+  reserve_range(begin, begin + size);
+  return true;
+}
+
+bool DbiPatchPlacementPlanner::reserve_appended_prefix(uint64_t size, std::string *error_out) {
+  if (size == 0)
+    return true;
+  if (size > std::numeric_limits<uint64_t>::max() - appended_cursor_) {
+    report(error_out, "DBI patch placement: appended prefix overflows text coordinates");
+    return false;
+  }
+  const uint64_t end = appended_cursor_ + size;
+  if (!range_is_free(appended_cursor_, end)) {
+    report(error_out, "DBI patch placement: appended prefix overlaps an existing reservation");
+    return false;
+  }
+  reserve_range(appended_cursor_, end);
+  appended_cursor_ = end;
+  return true;
+}
+
+std::optional<DbiPatchPlacement>
+DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::string *error_out) {
+  const auto checked_end = [](uint64_t begin, uint64_t size) -> std::optional<uint64_t> {
+    if (size > std::numeric_limits<uint64_t>::max() - begin)
+      return std::nullopt;
+    return begin + size;
+  };
+  if (arch_ == ROCJITSU_CODE_ARCH_INVALID) {
+    report(error_out, "DBI patch placement: architecture was not set");
+    return std::nullopt;
+  }
+  if (request.original_size < sizeof(uint32_t) || request.original_size % sizeof(uint32_t) != 0 ||
+      request.body_size == 0 || request.body_size % sizeof(uint32_t) != 0) {
+    report(error_out, "DBI patch placement: sizes must be nonzero instruction multiples");
+    return std::nullopt;
+  }
+  const auto anchor_end = checked_end(request.anchor_offset, request.original_size);
+  if (!anchor_end || *anchor_end > original_text_size_) {
+    report(error_out, "DBI patch placement: anchor exceeds original .text");
+    return std::nullopt;
+  }
+
+  if (request.body_size <= request.inline_capacity) {
+    const auto body_end = checked_end(request.anchor_offset, request.body_size);
+    if (body_end && *body_end <= original_text_size_ &&
+        range_is_free(request.anchor_offset, *body_end)) {
+      reserve_range(request.anchor_offset, *body_end);
+      return DbiPatchPlacement{
+          .kind = DbiPatchPlacementKind::Inline,
+          .anchor_offset = request.anchor_offset,
+          .original_size = request.original_size,
+          .body_offset = request.anchor_offset,
+          .body_size = request.body_size,
+          .return_branch_offset = 0,
+          .return_target = *anchor_end,
+      };
+    }
+  }
+
+  const auto try_trampoline = [&](DbiPatchPlacementKind kind, uint64_t body_offset,
+                                  uint64_t capacity) -> std::optional<DbiPatchPlacement> {
+    const auto body_end = checked_end(body_offset, request.body_size);
+    const auto reservation_end = body_end ? checked_end(*body_end, sizeof(uint32_t)) : std::nullopt;
+    if (!body_end || !reservation_end || request.body_size + sizeof(uint32_t) > capacity ||
+        !range_is_free(request.anchor_offset, *anchor_end) ||
+        (kind == DbiPatchPlacementKind::LocalCave &&
+         (!range_is_free(body_offset, *reservation_end) ||
+          *reservation_end > original_text_size_)) ||
+        !compute_sopp_branch_simm16(request.anchor_offset, body_offset) ||
+        !compute_sopp_branch_simm16(*body_end, *anchor_end)) {
+      return std::nullopt;
+    }
+    return DbiPatchPlacement{
+        .kind = kind,
+        .anchor_offset = request.anchor_offset,
+        .original_size = request.original_size,
+        .body_offset = body_offset,
+        .body_size = request.body_size,
+        .return_branch_offset = *body_end,
+        .return_target = *anchor_end,
+    };
+  };
+
+  if (request.local_cave) {
+    if (auto placement = try_trampoline(DbiPatchPlacementKind::LocalCave,
+                                        request.local_cave->offset, request.local_cave->capacity)) {
+      reserve_range(request.anchor_offset, *anchor_end);
+      reserve_range(placement->body_offset, placement->return_branch_offset + sizeof(uint32_t));
+      return placement;
+    }
+  }
+
+  if (request.allow_appended_cave) {
+    if (auto placement = try_trampoline(DbiPatchPlacementKind::AppendedCave, appended_cursor_,
+                                        std::numeric_limits<uint64_t>::max())) {
+      reserve_range(request.anchor_offset, *anchor_end);
+      appended_cursor_ = placement->return_branch_offset + sizeof(uint32_t);
+      return placement;
+    }
+  }
+
+  report(error_out,
+         "DBI patch placement: no nonoverlapping reachable inline, local, or appended placement");
+  return std::nullopt;
+}
+
+std::optional<DbiPatchPlacement>
+DbiPatchPlacementPlanner::plan_indirect_appended(uint64_t anchor_offset, uint32_t original_size,
+                                                 uint64_t body_size, std::string *error_out) {
+  if (arch_ == ROCJITSU_CODE_ARCH_INVALID || original_size < sizeof(uint32_t) ||
+      original_size % sizeof(uint32_t) != 0 || body_size == 0 ||
+      body_size % sizeof(uint32_t) != 0 || anchor_offset > original_text_size_ ||
+      original_size > original_text_size_ - anchor_offset ||
+      body_size > std::numeric_limits<uint64_t>::max() - appended_cursor_ ||
+      !range_is_free(anchor_offset, anchor_offset + original_size)) {
+    report(error_out, "DBI patch placement: invalid or overlapping indirect appended reservation");
+    return std::nullopt;
+  }
+
+  const uint64_t body_offset = appended_cursor_;
+  const uint64_t body_end = body_offset + body_size;
+  reserve_range(anchor_offset, anchor_offset + original_size);
+  reserve_range(body_offset, body_end);
+  appended_cursor_ = body_end;
+  return DbiPatchPlacement{
+      .kind = DbiPatchPlacementKind::AppendedCave,
+      .anchor_offset = anchor_offset,
+      .original_size = original_size,
+      .body_offset = body_offset,
+      .body_size = body_size,
+      .return_branch_offset = 0u,
+      .return_target = anchor_offset + original_size,
+  };
 }
 
 } // namespace rocjitsu
