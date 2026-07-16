@@ -1303,16 +1303,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
           break;
         }
 
-        DispatchEntry dp{};
-        dp.dispatch_id = next_dispatch_id_++;
-        dp.queue_id = queue.queue_id;
-        dp.process_id = queue.process_id;
-        dp.total_wgs = 0;
-        dp.completed_wgs = 0;
-        dp.dispatched_wgs = 0;
-        dp.completion_signal = barrier.completion_signal.handle;
-        dp.host_signal = false;
-        dp.barrier_bit = (barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1;
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = barrier.completion_signal.handle,
+            .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
 
         qs.entries.push_back(std::move(dp));
       } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
