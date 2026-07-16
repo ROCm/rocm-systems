@@ -9,6 +9,8 @@ Covers:
 - mem_chart_gfx9.py  - CDNA (plotille-based) memory architecture visualization
 """
 
+import re
+
 import common
 
 from utils import mem_chart_gfx9, mem_chart_gfx11
@@ -355,19 +357,42 @@ class TestPlotMemChartGfx11:
             result
         )
 
-    def test_contains_architecture_elements(self):
-        """Test that output contains RDNA3.5 architecture elements."""
+    def test_contains_complete_rdna35_architecture(self):
+        """RDNA3.5 output contains every rendered memory component."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
+        )
+        expected_components = (
+            "Kernel",
+            "LDS",
+            "GL0 (TCP Cache)",
+            "SQC",
+            "GL1 Cache",
+            "GL2 Cache",
+            "GCEA",
+            "DRAM",
+        )
 
-        # Check for key components
-        assert "TCP" in result or "L0" in result  # L0 cache
-        assert "GL1 Cache" in result  # L1 cache
-        assert "GL2 Cache" in result  # L2 cache
-        assert (
-            "GCEA" in result
-        )  # Graphics Core Efficiency Arbiter (block label in diagram)
-        assert "DRAM" in result  # System memory
+        for component in expected_components:
+            assert component in output, f"Missing RDNA3.5 component: {component}"
+
+    def test_contains_heading_scope_and_directional_connectors(self):
+        """RDNA3.5 output exposes chart scope and connector directions."""
+        metrics = mem_chart_gfx11.get_sample_metrics()
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
+        )
+
+        assert "3. Memory Chart (Normalization: per_kernel)" in output
+        assert "GPU" in output
+        assert "System Memory" in output
+        assert "Read BW" in output
+        assert "Write BW" in output
+        assert "Atomic" in output
+        assert re.search(r"<(?!-+>)-{3,}", output)
+        assert re.search(r"(?<![<-])-{3,}>", output)
+        assert re.search(r"<-{3,}>", output)
 
     def test_contains_bandwidth_values(self):
         """Test that output contains formatted bandwidth values."""
@@ -620,3 +645,47 @@ class TestPlotMemChartGfx9:
         result = mem_chart_gfx9.plot_mem_chart("per_kernel", partial)
         assert isinstance(result, str)
         assert len(result) > 0
+
+    def test_contains_complete_cdna_architecture(self):
+        """CDNA output contains every component enabled by the renderer."""
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                "per_kernel",
+                dict(GFX9_SAMPLE_METRICS),
+            )
+        )
+        expected_components = (
+            "Instr Buff",
+            "Instr Dispatch",
+            "Exec",
+            "LDS",
+            "Vector L1 Cache",
+            "Scalar L1D Cache",
+            "Instr L1 Cache",
+            "L2 Cache",
+            "xGMI/PCIe",
+            "Fabric",
+            "HBM",
+        )
+
+        for component in expected_components:
+            assert component in output, f"Missing CDNA component: {component}"
+
+        assert re.search(r"(?<!x)GMI(?!/PCIe)", output)
+
+    def test_contains_normalization_and_directional_connectors(self):
+        """CDNA output exposes normalization and connector directions."""
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                "per_kernel",
+                dict(GFX9_SAMPLE_METRICS),
+            )
+        )
+
+        assert "(Normalization: per_kernel)" in output
+        for connector_label in ("Req", "Fetch", "Rd", "Wr", "Atomic"):
+            assert connector_label in output
+
+        assert re.search(r"<(?!-+>)-{3,}", output)
+        assert re.search(r"(?<![<-])-{3,}>", output)
+        assert re.search(r"<-{3,}>", output)
