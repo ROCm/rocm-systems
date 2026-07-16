@@ -7,7 +7,8 @@ rocprofiler_activate_clang_tidy()
 set(TOOL_HEADERS att_no_intercept.hpp att_no_intercept_impl.hpp config.hpp
                  execution_profile.hpp graph_stack.hpp helper.hpp stream_stack.hpp)
 
-set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp stream_stack.cpp)
+set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp
+                 stream_stack.cpp)
 
 if(NOT ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
     find_package(rocprof-trace-decoder REQUIRED)
