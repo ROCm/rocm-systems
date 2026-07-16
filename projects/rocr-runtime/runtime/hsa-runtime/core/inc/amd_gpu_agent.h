@@ -573,6 +573,10 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
 
+  /// @brief Check if the accelerator is ready to be used.
+  /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
+  hsa_status_t CheckAcceleratorReadiness();
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -1080,6 +1084,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  std::atomic<bool> accelerator_ready_{false};
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };

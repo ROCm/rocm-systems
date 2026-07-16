@@ -5028,5 +5028,25 @@ hsa_status_t GpuAgent::Preload(uint64_t flags) {
   return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace amd
+hsa_status_t GpuAgent::CheckAcceleratorReadiness() {
+  /*
+   * Confirm the accelerator has reached a ready state before exporting cross-domain
+   * fabric handles. Cache a positive result only; a not-ready state may transition
+   * later, so re-check until ready. If the accelerator never becomes ready, or faults
+   * after cross-domain imports are used, accesses can VM-fault the process.
+   */
+  if (accelerator_ready_.load(std::memory_order_relaxed)) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  bool ready = false;
+  if (driver().CheckAcceleratorReadiness(*this, &ready) != HSA_STATUS_SUCCESS || !ready) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY);
+  }
+
+  accelerator_ready_.store(true, std::memory_order_relaxed);
+  return HSA_STATUS_SUCCESS;
+}
+
+}  // namespace AMD
 }  // namespace rocr
