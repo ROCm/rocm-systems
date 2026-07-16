@@ -7,7 +7,7 @@
 #pragma once
 
 #ifdef MPI_TESTS_ENABLED
-#ifdef RCCL_HAS_GIN_IB_PROXY
+#ifdef RCCL_HAS_RMA_IB_PROXY
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -34,12 +34,15 @@
 #include "rccl/rccl.h"
 
 #include "nccl_net.h"
-#include "nccl_gin.h"
+#include "nccl_rma.h"
 
-extern ncclGin_t IbCastGinIbProxy;
-extern ncclGin_t ncclGinIbProxy;
+// The 2.30.7 sync split the old combined GIN v13 plugin into device-initiated
+// GIN v14 and host-initiated RMA v14. The host-side one-sided data path
+// (iput/iget/iputSignal/iflush/test) that these tests exercise now lives on the
+// internal RMA IB proxy plugin (declared in src/include/rma.h).
+extern ncclRma_t ncclRmaIbProxy;
 
-namespace RCCLGinTests
+namespace RCCLRmaTests
 {
 
 using ::MPITestConstants::kMinProcessesForMPI;
@@ -47,38 +50,36 @@ using ::MPITestConstants::kNoProcessLimit;
 using ::MPITestConstants::kNoPowerOfTwoRequired;
 using ::MPITestConstants::kNoNodeLimit;
 
-inline ncclGin_t* GetGinPlugin()
+inline ncclRma_t* GetRmaPlugin()
 {
     const char* envNet = std::getenv("NCCL_NET");
     if (envNet == nullptr) return nullptr;
 
-    if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastGinIbProxy;
-    if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
+    // Both IB and IB-CAST route the host-side data path through the single
+    // internal RMA IB proxy (the GIN split consolidated the two proxies).
+    if (strcasecmp(envNet, "IB-CAST") == 0) return &ncclRmaIbProxy;
+    if (strcasecmp(envNet, "IB") == 0) return &ncclRmaIbProxy;
 
     return nullptr;
 }
 
-class GinMPITestBase : public MPITestBase
+class RmaMPITestBase : public MPITestBase
 {
 protected:
     int defaultDevice_  = 0;
-    int defaultSignals_ = 8;
-    int defaultCounters_ = 8;
-    int defaultQueueDepth_ = 0;
 
     // Polling
     static constexpr int kDefaultPollTimeoutMs = 5000;
     static constexpr int kPollSleepUs          = 100;
 
     // Plugin handle table under test (resolved in SetUp from env var).
-    ncclGin_t* gin_ = nullptr;
+    ncclRma_t* rma_ = nullptr;
 
     // Plugin / connection state (populated by SetUpFixture).
     void* pluginCtx_  = nullptr;
     void* listenComm_ = nullptr;
     void* collComm_   = nullptr;
-    void* ginCtx_     = nullptr;
-    ncclNetDeviceHandle_v11_t* devHandle_ = nullptr;
+    void* rmaCtx_     = nullptr;
 
     int nDevices_  = 0;
     int worldRank_ = -1;
@@ -96,37 +97,37 @@ protected:
     void SetUp() override
     {
         MPITestBase::SetUp();
-        gin_ = GetGinPlugin();
-        if (gin_ == nullptr)
+        rma_ = GetRmaPlugin();
+        if (rma_ == nullptr)
         {
-            // GetGinPlugin() returned null -> NCCL_NET selects a transport
-            // with no GIN backend ported to this RCCL build (or is unset).
+            // GetRmaPlugin() returned null -> NCCL_NET selects a transport
+            // with no RMA backend ported to this RCCL build (or is unset).
             static bool warned = false;
             if (!warned)
             {
                 const char* envNet = std::getenv("NCCL_NET");
                 std::fprintf(stderr,
-                             "[GinMPITest] WARN: NCCL_NET=%s has no GIN "
+                             "[RmaMPITest] WARN: NCCL_NET=%s has no RMA "
                              "backend in this RCCL build. Currently only "
-                             "NCCL_NET=ib-cast is supported. Skipping all "
-                             "GIN tests.\n",
+                             "NCCL_NET=ib / ib-cast is supported. Skipping all "
+                             "RMA tests.\n",
                              envNet ? envNet : "<unset>");
                 warned = true;
             }
-            GTEST_SKIP() << "No GIN backend available for current NCCL_NET";
+            GTEST_SKIP() << "No RMA backend available for current NCCL_NET";
             return;
         }
     }
 
     void TearDown() override
     {
-        if(gin_ != nullptr)
+        if(rma_ != nullptr)
         {
-            if(collComm_ != nullptr && gin_->deregMrSym)
+            if(collComm_ != nullptr && rma_->deregMrSym)
             {
                 for(void* mh : registeredMhandles_)
                 {
-                    if(mh != nullptr) (void)gin_->deregMrSym(collComm_, mh);
+                    if(mh != nullptr) (void)rma_->deregMrSym(collComm_, mh);
                 }
             }
             registeredMhandles_.clear();
@@ -138,24 +139,23 @@ protected:
         }
         allocatedDeviceBuffers_.clear();
 
-        if(gin_ != nullptr)
+        if(rma_ != nullptr)
         {
-            if(ginCtx_ != nullptr && gin_->destroyContext) {
-                (void)gin_->destroyContext(ginCtx_);
+            if(rmaCtx_ != nullptr && rma_->destroyContext) {
+                (void)rma_->destroyContext(rmaCtx_);
             }
-            if(collComm_ != nullptr && gin_->closeColl) {
-                (void)gin_->closeColl(collComm_);
+            if(collComm_ != nullptr && rma_->closeColl) {
+                (void)rma_->closeColl(collComm_);
             }
-            if(listenComm_ != nullptr && gin_->closeListen) {
-                (void)gin_->closeListen(listenComm_);
+            if(listenComm_ != nullptr && rma_->closeListen) {
+                (void)rma_->closeListen(listenComm_);
             }
-            if(pluginCtx_ != nullptr && gin_->finalize) {
-                (void)gin_->finalize(pluginCtx_);
+            if(pluginCtx_ != nullptr && rma_->finalize) {
+                (void)rma_->finalize(pluginCtx_);
             }
         }
-        ginCtx_ = nullptr;
+        rmaCtx_ = nullptr;
         collComm_ = nullptr;
-        devHandle_ = nullptr;
         pluginCtx_ = nullptr;
         listenComm_ = nullptr;
 
@@ -167,9 +167,9 @@ protected:
                       int minNodes = 1)
     {
         // SetUp() already recorded the skip + warning when NCCL_NET wasn't
-        // ib-cast. Short-circuit so the per-test body doesn't proceed to
-        // dereference gin_->init() etc.
-        if (gin_ == nullptr) return false;
+        // ib / ib-cast. Short-circuit so the per-test body doesn't proceed to
+        // dereference rma_->init() etc.
+        if (rma_ == nullptr) return false;
 
         if(!validateTestPrerequisites(minProcesses, maxProcesses,
                                       kNoPowerOfTwoRequired,
@@ -182,7 +182,7 @@ protected:
         int nGpus = 0;
         if(hipGetDeviceCount(&nGpus) != hipSuccess || nGpus <= 0)
         {
-            ADD_FAILURE() << "No HIP devices visible; GIN tests require GPU";
+            ADD_FAILURE() << "No HIP devices visible; RMA tests require GPU";
             return false;
         }
 
@@ -190,34 +190,34 @@ protected:
         worldSize_ = MPIEnvironment::world_size;
 
         // 1. init
-        ncclResult_t r = gin_->init(&pluginCtx_, /*commId=*/0, nullptr);
+        ncclResult_t r = rma_->init(&pluginCtx_, /*commId=*/0, nullptr);
         if(r != ncclSuccess)
         {
-            ADD_FAILURE() << "gin->init failed: " << r;
+            ADD_FAILURE() << "rma->init failed: " << r;
             return false;
         }
 
         // 2. devices — skip if no IB hardware
-        r = gin_->devices(&nDevices_);
+        r = rma_->devices(&nDevices_);
         if(r != ncclSuccess)
         {
-            ADD_FAILURE() << "gin->devices failed: " << r;
+            ADD_FAILURE() << "rma->devices failed: " << r;
             return false;
         }
         if(nDevices_ <= 0)
         {
             // See comment above on the bool-vs-void GTEST_SKIP wrapping.
-            [&]() { GTEST_SKIP() << "No IB GIN-capable devices on this host"; }();
+            [&]() { GTEST_SKIP() << "No IB RMA-capable devices on this host"; }();
             return false;
         }
 
         // 3. listen — produce this rank's listen handle
         std::vector<char> localHandle(NCCL_NET_HANDLE_MAXSIZE, 0);
-        r = gin_->listen(pluginCtx_, defaultDevice_,
+        r = rma_->listen(pluginCtx_, defaultDevice_,
                          localHandle.data(), &listenComm_);
         if(r != ncclSuccess)
         {
-            ADD_FAILURE() << "gin->listen failed: " << r;
+            ADD_FAILURE() << "rma->listen failed: " << r;
             return false;
         }
 
@@ -239,46 +239,51 @@ protected:
         }
 
         // 5. connect (N-way collective)
-        r = gin_->connect(pluginCtx_, handlePtrs.data(),
+        r = rma_->connect(pluginCtx_, handlePtrs.data(),
                           worldSize_, worldRank_,
                           listenComm_, &collComm_);
         if(r != ncclSuccess)
         {
-            ADD_FAILURE() << "gin->connect failed: " << r;
+            ADD_FAILURE() << "rma->connect failed: " << r;
             return false;
         }
 
-        // 6. createContext — number of contexts driven by the parameter
-        ncclGinConfig_t cfg = {};
-        cfg.nSignals = defaultSignals_;
-        cfg.nCounters = defaultCounters_;
-        cfg.nContexts = GetNumContexts();
-        cfg.queueDepth = defaultQueueDepth_;
+        // 6. createContext — number of contexts driven by the parameter.
+        // The RMA v14 config is host-only: no signal/counter pools or device
+        // handle (those belong to the device-initiated GIN v14 surface).
+        ncclRmaConfig_t cfg = {};
+        cfg.nContexts    = GetNumContexts();
         cfg.trafficClass = -1;
+        cfg.rankStride   = 0;
 
-        r = gin_->createContext(collComm_, &cfg, &ginCtx_, &devHandle_);
+        r = rma_->createContext(collComm_, &cfg, &rmaCtx_);
         if(r != ncclSuccess)
         {
-            ADD_FAILURE() << "gin->createContext failed: " << r;
+            ADD_FAILURE() << "rma->createContext failed: " << r;
             return false;
         }
 
-        TEST_INFO("GinMPI fixture ready: rank=%d/%d nDevices=%d nContexts=%d regMethod=%s",
+        TEST_INFO("RmaMPI fixture ready: rank=%d/%d nDevices=%d nContexts=%d regMethod=%s",
                   worldRank_, worldSize_, nDevices_, GetNumContexts(),
                   UseDmaBuf() ? "DmaBuf" : "RegMr");
         return true;
     }
 
+    // The RMA v14 regMrSym returns a single opaque mhandle (the old GIN v13
+    // second `ginHandle` out-param was dropped). The wrapper keeps the
+    // two-argument shape used by the tests for source compatibility; when a
+    // caller passes a ginHandle slot it is simply cleared.
     ncclResult_t RegMr(void* data, size_t size,
-                       void** mhandle, void** ginHandle)
+                       void** mhandle, void** ginHandle = nullptr)
     {
+        if(ginHandle != nullptr) *ginHandle = nullptr;
         if(UseDmaBuf())
         {
             return RegMrDmaBuf(data, size, mhandle, ginHandle);
         }
-        ncclResult_t r = gin_->regMrSym(collComm_, data, size,
+        ncclResult_t r = rma_->regMrSym(collComm_, data, size,
                                         NCCL_PTR_CUDA, /*mrFlags=*/0,
-                                        mhandle, ginHandle);
+                                        mhandle);
         if(r == ncclSuccess && mhandle != nullptr && *mhandle != nullptr)
         {
             registeredMhandles_.push_back(*mhandle);
@@ -287,9 +292,10 @@ protected:
     }
 
     ncclResult_t RegMrDmaBuf(void* data, size_t size,
-                             void** mhandle, void** ginHandle)
+                             void** mhandle, void** ginHandle = nullptr)
     {
-        if(gin_->regMrSymDmaBuf == nullptr)
+        if(ginHandle != nullptr) *ginHandle = nullptr;
+        if(rma_->regMrSymDmaBuf == nullptr)
         {
             ADD_FAILURE() << "regMrSymDmaBuf is NULL (SetUpFixture should have skipped)";
             return ncclInternalError;
@@ -311,11 +317,11 @@ protected:
             return ncclSystemError;
         }
 
-        ncclResult_t r = gin_->regMrSymDmaBuf(collComm_, data, size,
+        ncclResult_t r = rma_->regMrSymDmaBuf(collComm_, data, size,
                                                NCCL_PTR_CUDA,
                                                exportOffset + offset, fd,
                                                /*mrFlags=*/0,
-                                               mhandle, ginHandle);
+                                               mhandle);
         (void)close(fd);
 
         if(r == ncclSuccess && mhandle != nullptr && *mhandle != nullptr)
@@ -323,6 +329,20 @@ protected:
             registeredMhandles_.push_back(*mhandle);
         }
         return r;
+    }
+
+    // Compatibility wrapper for the host-side signalled put. RMA v14 added a
+    // `bool isStrongSignal` argument (absent in the old GIN v13 API) just before
+    // the request out-param; these functional tests always use the default
+    // (non-strong) ordering semantics, so it is fixed to false here.
+    ncclResult_t IPutSignal(int context, uint64_t srcOff, void* srcMhandle, size_t size,
+                            uint64_t dstOff, void* dstMhandle, uint32_t rank,
+                            uint64_t signalOff, void* signalMhandle, uint64_t signalValue,
+                            uint32_t signalOp, void** request)
+    {
+        return rma_->iputSignal(rmaCtx_, context, srcOff, srcMhandle, size, dstOff,
+                                dstMhandle, rank, signalOff, signalMhandle, signalValue,
+                                signalOp, /*isStrongSignal=*/false, request);
     }
 
     bool PollUntilDone(void* request, int timeoutMs = kDefaultPollTimeoutMs)
@@ -340,10 +360,10 @@ protected:
         for(;;)
         {
             int done = 0;
-            ncclResult_t r = gin_->test(collComm_, request, &done);
+            ncclResult_t r = rma_->test(collComm_, request, &done);
             if(r != ncclSuccess)
             {
-                ADD_FAILURE() << "gin->test failed: " << r;
+                ADD_FAILURE() << "rma->test failed: " << r;
                 return false;
             }
             if(done) return true;
@@ -450,10 +470,10 @@ protected:
 //
 // Used by the 8 tests where both axes are meaningful. The 2 tests
 // where the size is fixed by the test point itself (zero-size) or
-// irrelevant (invalid-op) use GinMPIFixedSizeTest instead so they
+// irrelevant (invalid-op) use RmaMPIFixedSizeTest instead so they
 // don't produce redundant size variants.
 // ---------------------------------------------------------------------------
-class GinMPITest : public GinMPITestBase,
+class RmaMPITest : public RmaMPITestBase,
                    public ::testing::WithParamInterface<std::tuple<int, size_t, bool>>
 {
 protected:
@@ -470,7 +490,7 @@ protected:
 // Used by IPutSignalZeroSize (size IS the test point) and
 // IPutSignalInvalidSignalOp (size is irrelevant to the assertion).
 // ---------------------------------------------------------------------------
-class GinMPIFixedSizeTest : public GinMPITestBase,
+class RmaMPIFixedSizeTest : public RmaMPITestBase,
                             public ::testing::WithParamInterface<std::tuple<int, bool>>
 {
 protected:
@@ -486,13 +506,13 @@ protected:
 // Single context, fixed config; the iteration count IS the stress axis.
 // Filterable as a group via `--gtest_filter='*Stress*'`.
 // ---------------------------------------------------------------------------
-class GinMPIStressTest : public GinMPITestBase
+class RmaMPIStressTest : public RmaMPITestBase
 {
 protected:
     int GetNumContexts() const override { return 1; }
 };
 
-} // namespace RCCLGinTests
+} // namespace RCCLRmaTests
 
-#endif // RCCL_HAS_GIN_IB_PROXY
+#endif // RCCL_HAS_RMA_IB_PROXY
 #endif // MPI_TESTS_ENABLED

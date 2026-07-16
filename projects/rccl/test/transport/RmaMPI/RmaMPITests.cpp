@@ -6,15 +6,15 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#ifdef RCCL_HAS_GIN_IB_PROXY
+#ifdef RCCL_HAS_RMA_IB_PROXY
 
-#include "GinMPITestBase.hpp"
+#include "RmaMPITestBase.hpp"
 
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
-namespace RCCLGinTests
+namespace RCCLRmaTests
 {
 
 namespace
@@ -26,7 +26,7 @@ constexpr int    kInflightN  = 16;
 
 } // namespace
 
-TEST_P(GinMPITest, IPutBasic)
+TEST_P(RmaMPITest, IPutBasic)
 {
     if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
     {
@@ -56,7 +56,7 @@ TEST_P(GinMPITest, IPutBasic)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iput(ginCtx_, /*context=*/0,
+                  rma_->iput(rmaCtx_, /*context=*/0,
                              /*srcOff=*/0, sendMh, kSize,
                              /*dstOff=*/0, recvMh,
                              /*peerRank=*/1, &req));
@@ -70,7 +70,7 @@ TEST_P(GinMPITest, IPutBasic)
     }
 }
 
-TEST_P(GinMPITest, IGetBasic)
+TEST_P(RmaMPITest, IGetBasic)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -94,7 +94,7 @@ TEST_P(GinMPITest, IGetBasic)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iget(ginCtx_, /*context=*/0,
+                  rma_->iget(rmaCtx_, /*context=*/0,
                              /*remoteOff=*/0, mh, kSize,
                              /*localOff=*/0,  mh,
                              /*peerRank=*/1, &req));
@@ -104,7 +104,7 @@ TEST_P(GinMPITest, IGetBasic)
     Barrier();
 }
 
-TEST_P(GinMPITest, IPutSignalInc)
+TEST_P(RmaMPITest, IPutSignalInc)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -135,7 +135,7 @@ TEST_P(GinMPITest, IPutSignalInc)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iputSignal(ginCtx_, /*context=*/0,
+                  IPutSignal( /*context=*/0,
                                    /*srcOff=*/0, sendMh, kSize,
                                    /*dstOff=*/0, recvMh,
                                    /*peerRank=*/1,
@@ -154,7 +154,7 @@ TEST_P(GinMPITest, IPutSignalInc)
     }
 }
 
-TEST_P(GinMPITest, IPutSignalAdd)
+TEST_P(RmaMPITest, IPutSignalAdd)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -186,7 +186,7 @@ TEST_P(GinMPITest, IPutSignalAdd)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iputSignal(ginCtx_, 0,
+                  IPutSignal( 0,
                                    0, sendMh, kSize,
                                    0, recvMh, 1,
                                    /*signalOff=*/0, sigMh,
@@ -204,7 +204,7 @@ TEST_P(GinMPITest, IPutSignalAdd)
     }
 }
 
-TEST_P(GinMPITest, IPutSignalAtOffset)
+TEST_P(RmaMPITest, IPutSignalAtOffset)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -246,7 +246,7 @@ TEST_P(GinMPITest, IPutSignalAtOffset)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iputSignal(ginCtx_, /*context=*/0,
+                  IPutSignal( /*context=*/0,
                                    /*srcOff=*/kSrcOff, sendMh, kSize,
                                    /*dstOff=*/kDstOff, recvMh,
                                    /*peerRank=*/1,
@@ -289,7 +289,7 @@ TEST_P(GinMPITest, IPutSignalAtOffset)
     }
 }
 
-TEST_P(GinMPITest, IFlushAfterIGet)
+TEST_P(RmaMPITest, IFlushAfterIGet)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -313,14 +313,14 @@ TEST_P(GinMPITest, IFlushAfterIGet)
     {
         void* getReq = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iget(ginCtx_, 0, 0, mh, kSize, 0, mh, 1, &getReq));
+                  rma_->iget(rmaCtx_, 0, 0, mh, kSize, 0, mh, 1, &getReq));
         ASSERT_TRUE(PollUntilDone(getReq));
 
         // iflush is the actual unit under test here: post a flush request
         // for the remote MR and verify it completes.
         void* flushReq = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iflush(ginCtx_, /*context=*/0,
+                  rma_->iflush(rmaCtx_, /*context=*/0,
                                /*mhandle=*/mh, /*peerRank=*/1, &flushReq));
         EXPECT_TRUE(PollUntilDone(flushReq));
 
@@ -329,7 +329,7 @@ TEST_P(GinMPITest, IFlushAfterIGet)
     Barrier();
 }
 
-TEST_P(GinMPITest, MultipleInflightIPuts)
+TEST_P(RmaMPITest, MultipleInflightIPuts)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -365,7 +365,7 @@ TEST_P(GinMPITest, MultipleInflightIPuts)
         {
             const int ctx = i % nCtx;
             ASSERT_EQ(ncclSuccess,
-                      gin_->iput(ginCtx_, /*context=*/ctx,
+                      rma_->iput(rmaCtx_, /*context=*/ctx,
                                  /*srcOff=*/i * kBlock, sendMh, kBlock,
                                  /*dstOff=*/i * kBlock, recvMh,
                                  /*peerRank=*/1, &reqs[i]));
@@ -389,7 +389,7 @@ TEST_P(GinMPITest, MultipleInflightIPuts)
     }
 }
 
-TEST_P(GinMPITest, MultipleInflightIGets)
+TEST_P(RmaMPITest, MultipleInflightIGets)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -421,7 +421,7 @@ TEST_P(GinMPITest, MultipleInflightIGets)
         {
             const int ctx = i % nCtx;
             ASSERT_EQ(ncclSuccess,
-                      gin_->iget(ginCtx_, /*context=*/ctx,
+                      rma_->iget(rmaCtx_, /*context=*/ctx,
                                  /*remoteOff=*/i * kBlock, mh, kBlock,
                                  /*localOff=*/ i * kBlock, mh,
                                  /*peerRank=*/1, &reqs[i]));
@@ -441,7 +441,7 @@ TEST_P(GinMPITest, MultipleInflightIGets)
     Barrier();
 }
 
-TEST_P(GinMPITest, MixedIPutIGetIPutSignal)
+TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -492,13 +492,13 @@ TEST_P(GinMPITest, MixedIPutIGetIPutSignal)
         void *putReq = nullptr, *getReq = nullptr, *psReq = nullptr;
 
         ASSERT_EQ(ncclSuccess,
-                  gin_->iput(ginCtx_, /*context=*/0 % nCtx,
+                  rma_->iput(rmaCtx_, /*context=*/0 % nCtx,
                              0, putSendMh, kSize, 0, putRecvMh, 1, &putReq));
         ASSERT_EQ(ncclSuccess,
-                  gin_->iget(ginCtx_, /*context=*/1 % nCtx,
+                  rma_->iget(rmaCtx_, /*context=*/1 % nCtx,
                              0, getMh, kSize, 0, getMh, 1, &getReq));
         ASSERT_EQ(ncclSuccess,
-                  gin_->iputSignal(ginCtx_, /*context=*/2 % nCtx,
+                  IPutSignal( /*context=*/2 % nCtx,
                                    0, psSendMh, kSize,
                                    0, psRecvMh, 1,
                                    0, sigMh, /*signalValue=*/0,
@@ -521,7 +521,7 @@ TEST_P(GinMPITest, MixedIPutIGetIPutSignal)
     }
 }
 
-TEST_P(GinMPIFixedSizeTest, IPutSignalZeroSize)
+TEST_P(RmaMPIFixedSizeTest, IPutSignalZeroSize)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -550,7 +550,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalZeroSize)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iputSignal(ginCtx_, /*context=*/0,
+                  IPutSignal( /*context=*/0,
                                    0, sendMh, /*size=*/0,
                                    0, recvMh, /*peerRank=*/1,
                                    /*signalOff=*/0, sigMh,
@@ -569,7 +569,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalZeroSize)
     }
 }
 
-TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
+TEST_P(RmaMPIFixedSizeTest, IPutSignalInvalidSignalOp)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -595,7 +595,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
     {
         void*              req      = nullptr;
         constexpr uint32_t kBogusOp = 0x99;
-        ncclResult_t       r        = gin_->iputSignal(ginCtx_, /*context=*/0,
+        ncclResult_t       r        = IPutSignal( /*context=*/0,
                                                        0, sendMh, kPayload,
                                                        0, recvMh, 1,
                                                        0, sigMh, /*signalValue=*/1,
@@ -607,7 +607,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
 }
 
 // ===========================================================================
-// GinMPIStressTest — non-parameterized stress fixture
+// RmaMPIStressTest — non-parameterized stress fixture
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
@@ -627,7 +627,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
 //   ops/sec — we are stressing the post/complete machinery, not bandwidth.
 //   Expected runtime: well under 1 s on production hardware.
 // ---------------------------------------------------------------------------
-TEST_F(GinMPIStressTest, IPutSignalStress10k)
+TEST_F(RmaMPIStressTest, IPutSignalStress10k)
 {
     if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
 
@@ -676,7 +676,7 @@ TEST_F(GinMPIStressTest, IPutSignalStress10k)
             }
 
             ASSERT_EQ(ncclSuccess,
-                      gin_->iputSignal(ginCtx_, /*context=*/0,
+                      IPutSignal( /*context=*/0,
                                        /*srcOff=*/0, sendMh, kPayload,
                                        /*dstOff=*/0, recvMh,
                                        /*peerRank=*/1,
@@ -755,7 +755,7 @@ inline std::string CtxOnlyName(const ::testing::TestParamInfo<std::tuple<int, bo
 
 INSTANTIATE_TEST_SUITE_P(
     CtxAndSize,
-    GinMPITest,
+    RmaMPITest,
     ::testing::Combine(
         ::testing::Values(1, 2),
         ::testing::Values(static_cast<size_t>(4 * 1024),
@@ -766,23 +766,23 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(
     CtxOnly,
-    GinMPIFixedSizeTest,
+    RmaMPIFixedSizeTest,
     ::testing::Combine(
         ::testing::Values(1, 2),
         ::testing::Bool()),
     CtxOnlyName);
 
-} // namespace RCCLGinTests
+} // namespace RCCLRmaTests
 
-#else // !RCCL_HAS_GIN_IB_PROXY
+#else // !RCCL_HAS_RMA_IB_PROXY
 
 #include <gtest/gtest.h>
 
-TEST(GinMPITest, BuildSkipped)
+TEST(RmaMPITest, BuildSkipped)
 {
-    GTEST_SKIP() << "IB Proxy GIN backend not built into this binary. Skipping GIN tests...";
+    GTEST_SKIP() << "IB Proxy RMA backend not built into this binary. Skipping RMA tests...";
 }
 
-#endif // RCCL_HAS_GIN_IB_PROXY
+#endif // RCCL_HAS_RMA_IB_PROXY
 
 #endif // MPI_TESTS_ENABLED

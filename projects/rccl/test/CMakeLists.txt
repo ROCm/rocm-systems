@@ -8,7 +8,7 @@ if(BUILD_TESTS)
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
   #Automatically enabled when MPI-based tests available
-  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" ON)
+  option(RCCL_HAS_RMA_IB_PROXY "Build the IB Proxy RMA transport-level tests" ON)
   option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
 
@@ -130,8 +130,8 @@ if(BUILD_TESTS)
   endif()
   if(ENABLE_MPI_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS MPI_TESTS_ENABLED)
-    if(RCCL_HAS_GIN_IB_PROXY)
-      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
+    if(RCCL_HAS_RMA_IB_PROXY)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_RMA_IB_PROXY)
     endif()
     if(ENABLE_HOST_API_TESTS)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
@@ -339,7 +339,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
-      transport/GinMPI/GinMPITests.cpp
+      transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
       WarpSpeedMPITests.cpp
