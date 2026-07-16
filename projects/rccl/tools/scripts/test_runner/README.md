@@ -110,6 +110,7 @@ The test runner supports the following environment variables to customize behavi
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests. | `~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to capture stdout/stderr from every MPI rank into `rccl_test_rank_<N>.log` in the working directory (rank 0 is tee'd to console + file; ranks 1-N go to file only). Useful for debugging failures on non-zero ranks. | `RCCL_MPI_LOG_ALL_RANKS=1` |
 | `RCCL_TEST_GPUS_PER_NODE` | Override the detected number of GPUs per node (used for `"auto"` sizing and GPU-count skipping). See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). | `4` |
+| `RCCL_ARTIFACTS_DIR_FILE` | If set, the absolute path of the workspace dir created for this run (`rccl_test_artifacts[_<suffix>]_<timestamp>`) is written to this file. Lets a wrapper/CI locate artifacts without parsing output or globbing. Unset = not written (no behavior change). For a shared writer/reader (e.g. containerized CI), point it at a path both sides see. | `/tmp/rccl_artifacts_path.txt` |
 
 ### Configuration Path Variables
 

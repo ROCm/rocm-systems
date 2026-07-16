@@ -357,6 +357,19 @@ class TestExecutor:
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.report_dir, exist_ok=True)
 
+        # Opt-in export of the created workspace path so external orchestrators
+        # (e.g. the CI coverage runner) can locate artifacts without globbing.
+        # No-op unless RCCL_ARTIFACTS_DIR_FILE is set.
+        pointer_file = os.environ.get("RCCL_ARTIFACTS_DIR_FILE")
+        if pointer_file:
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(pointer_file)), exist_ok=True)
+                with open(pointer_file, "w") as f:
+                    f.write(os.path.abspath(self.workspace_dir) + "\n")
+            except OSError as e:
+                print(f"Warning: could not write artifacts pointer file "
+                      f"'{pointer_file}': {e}")
+
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
             print(f"Workspace directory: {self.workspace_dir}")
