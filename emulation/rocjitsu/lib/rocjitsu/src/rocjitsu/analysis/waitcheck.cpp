@@ -905,6 +905,7 @@ private:
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
+    reachability_cache_bytes_ = 0;
 
     cfg_views_.reserve(blocks.size());
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
@@ -927,6 +928,7 @@ private:
     feasible_path_cache_.clear();
     reverse_reachability_cache_.clear();
     forward_reachability_cache_.clear();
+    reachability_cache_bytes_ = 0;
   }
 
   void record_diagnostic(WaitcheckDiagnostic diag) {
@@ -2204,12 +2206,28 @@ private:
     });
   }
 
-  [[nodiscard]] const std::vector<uint8_t> &blocks_reaching(size_t target_block_index) {
+  using Reachability = std::vector<uint8_t>;
+  using SharedReachability = std::shared_ptr<const Reachability>;
+
+  template <typename Cache>
+  [[nodiscard]] SharedReachability cache_reachability(Cache &cache, size_t block_index,
+                                                      Reachability reachable) {
+    const size_t bytes = reachable.size() * sizeof(Reachability::value_type);
+    auto result = std::make_shared<const Reachability>(std::move(reachable));
+    if (bytes <= options_.max_reachability_cache_bytes -
+                     std::min(reachability_cache_bytes_, options_.max_reachability_cache_bytes)) {
+      reachability_cache_bytes_ += bytes;
+      cache.emplace(block_index, result);
+    }
+    return result;
+  }
+
+  [[nodiscard]] SharedReachability blocks_reaching(size_t target_block_index) {
     if (auto cached = reverse_reachability_cache_.find(target_block_index);
         cached != reverse_reachability_cache_.end())
       return cached->second;
 
-    std::vector<uint8_t> reachable(cfg_views_.size());
+    Reachability reachable(cfg_views_.size());
     std::vector<size_t> worklist{target_block_index};
     while (!worklist.empty()) {
       const size_t block_index = worklist.back();
@@ -2220,16 +2238,16 @@ private:
       for (size_t predecessor : cfg_views_[block_index].predecessors)
         worklist.push_back(predecessor);
     }
-    return reverse_reachability_cache_.emplace(target_block_index, std::move(reachable))
-        .first->second;
+    return cache_reachability(reverse_reachability_cache_, target_block_index,
+                              std::move(reachable));
   }
 
-  [[nodiscard]] const std::vector<uint8_t> &blocks_reachable_from(size_t source_block_index) {
+  [[nodiscard]] SharedReachability blocks_reachable_from(size_t source_block_index) {
     if (auto cached = forward_reachability_cache_.find(source_block_index);
         cached != forward_reachability_cache_.end())
       return cached->second;
 
-    std::vector<uint8_t> reachable(cfg_views_.size());
+    Reachability reachable(cfg_views_.size());
     std::vector<size_t> worklist{source_block_index};
     while (!worklist.empty()) {
       const size_t block_index = worklist.back();
@@ -2240,8 +2258,8 @@ private:
       for (size_t successor : cfg_views_[block_index].successors)
         worklist.push_back(successor);
     }
-    return forward_reachability_cache_.emplace(source_block_index, std::move(reachable))
-        .first->second;
+    return cache_reachability(forward_reachability_cache_, source_block_index,
+                              std::move(reachable));
   }
 
   [[nodiscard]] std::vector<size_t> cfg_block_indices_containing(uint64_t section_offset) const {
@@ -2451,19 +2469,19 @@ private:
 
     std::vector<uint8_t> can_reach_consumer(cfg_views_.size());
     for (size_t consumer_block_index : consumer_block_indices) {
-      const auto &reachable = blocks_reaching(consumer_block_index);
-      for (size_t i = 0; i < reachable.size(); ++i)
-        can_reach_consumer[i] = static_cast<uint8_t>(can_reach_consumer[i] | reachable[i]);
+      const SharedReachability reachable = blocks_reaching(consumer_block_index);
+      for (size_t i = 0; i < reachable->size(); ++i)
+        can_reach_consumer[i] = static_cast<uint8_t>(can_reach_consumer[i] | (*reachable)[i]);
     }
     std::vector<uint8_t> can_reach_producer(cfg_views_.size());
     std::vector<uint8_t> reachable_from_producer(cfg_views_.size());
     for (size_t producer_block_index : producer_block_indices) {
-      const auto &reaching = blocks_reaching(producer_block_index);
-      const auto &reachable = blocks_reachable_from(producer_block_index);
+      const SharedReachability reaching = blocks_reaching(producer_block_index);
+      const SharedReachability reachable = blocks_reachable_from(producer_block_index);
       for (size_t i = 0; i < cfg_views_.size(); ++i) {
-        can_reach_producer[i] = static_cast<uint8_t>(can_reach_producer[i] | reaching[i]);
+        can_reach_producer[i] = static_cast<uint8_t>(can_reach_producer[i] | (*reaching)[i]);
         reachable_from_producer[i] =
-            static_cast<uint8_t>(reachable_from_producer[i] | reachable[i]);
+            static_cast<uint8_t>(reachable_from_producer[i] | (*reachable)[i]);
       }
     }
     const bool producer_can_reach_consumer =
@@ -3139,8 +3157,9 @@ private:
       diagnostic_keys_;
   std::vector<CfgBlockView> cfg_views_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind>, bool> feasible_path_cache_;
-  std::map<size_t, std::vector<uint8_t>> reverse_reachability_cache_;
-  std::map<size_t, std::vector<uint8_t>> forward_reachability_cache_;
+  std::map<size_t, SharedReachability> reverse_reachability_cache_;
+  std::map<size_t, SharedReachability> forward_reachability_cache_;
+  size_t reachability_cache_bytes_ = 0;
 };
 
 } // namespace

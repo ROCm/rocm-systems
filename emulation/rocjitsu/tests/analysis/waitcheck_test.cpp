@@ -3595,6 +3595,44 @@ TEST(WaitcheckTest, ObjectAnalysisIgnoresBranchInfeasibleSkippedWaitPath) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, ObjectAnalysisPreservesInfeasiblePathWithReachabilityCacheDisabled) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_cmp_eq_u32(0, 129)); // s0 == 1
+  append_inst(program, sopp(34, 2));          // s_cbranch_scc1 over the load
+  append_inst(program, global_load_b32(0));   // load executes only when s0 != 1
+  append_inst(program, s_cmp_eq_u32(0, 129)); // s0 == 1
+  append_inst(program, sopp(34, 1));          // s_cbranch_scc1 over the wait
+  append_inst(program, sopp(64, 0));          // s_wait_loadcnt 0
+  append_inst(program, v_mov_b32(1, 0));
+
+  TestCodeObject code_object(program);
+  WaitcheckOptions options;
+  options.max_reachability_cache_bytes = 0;
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, ObjectAnalysisPreservesFeasiblePathWithReachabilityCacheDisabled) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, sopp(33, 1)); // s_cbranch_scc0 over the wait
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0 on fallthrough only
+  append_inst(program, v_mov_b32(1, 0));
+
+  TestCodeObject code_object(program);
+  WaitcheckOptions options;
+  options.max_reachability_cache_bytes = 0;
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
 TEST(WaitcheckTest, ObjectAnalysisCorrelatesUnsignedRangeChecksAroundWait) {
   std::vector<uint32_t> program;
   append_inst(program, s_cmp_ge_u32(0, 129)); // s0 >= 1
