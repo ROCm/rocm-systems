@@ -2730,7 +2730,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   // (CPU-accessible VRAM); gfx1200 has it.
   // NOTE(UKI): umr shows the descriptor still resolves to system memory even with
   // these flags set — the CPF descriptor fault is gone, but the intended VRAM
-  // placement is unconfirmed. Workaround pending KFD/DRM VM unification.
+  // placement is unconfirmed. Tracked in AILIKGD-549; pending KFD/DRM VM unification.
   if (core::Runtime::runtime_singleton_->flag().enable_drm() && LargeBarEnabled()) {
     flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR |
              HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;

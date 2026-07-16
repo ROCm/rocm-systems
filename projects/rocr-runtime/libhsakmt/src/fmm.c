@@ -4910,10 +4910,16 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 		if (offset + MemorySizeInBytes <= obj->size) {
 			/* DRM-allocated BOs have no valid KFD handle for the KFD
 			 * export ioctl; export them through libdrm instead so the
-			 * unified interface (hsakmt_enable_drm) works.
+			 * unified interface (hsakmt_enable_drm) works. Guard on a
+			 * non-NULL DRM handle: some VRAM-domain BOs fall back to the
+			 * KFD alloc path (e.g. contiguous VRAM, which the kernel
+			 * rejects from userspace DRM BOs) and thus have no DRM handle;
+			 * those must use the KFD export ioctl below to avoid passing
+			 * NULL to amdgpu_bo_export().
 			 */
 			if (hsakmt_enable_drm &&
-			    is_supported_on_drm(obj->alloc_flags)) {
+			    is_supported_on_drm(obj->alloc_flags) &&
+			    obj->handles[0].drm) {
 				export_use_drm = true;
 				export_drm_bo = obj->handles[0].drm;
 			} else {
