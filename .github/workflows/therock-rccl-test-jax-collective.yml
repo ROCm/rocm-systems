@@ -120,5 +120,6 @@ jobs:
           name: jax-collective-results-${{ inputs.amdgpu_families }}
           path: |
             ${{ env.JAX_SRC }}/jax_collective_results.log
+            ${{ env.JAX_SRC }}/jax_collective_results.xml
             ${{ env.JAX_SRC }}/jax_collective_summary.txt
           retention-days: 14
