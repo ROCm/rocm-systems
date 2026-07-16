@@ -31,6 +31,12 @@ std::string canonical_existing_path(const std::filesystem::path &candidate) {
   std::filesystem::path canonical = std::filesystem::canonical(candidate, ec);
   return ec ? std::string{} : canonical.string();
 }
+
+std::string current_executable_path() {
+  std::error_code ec;
+  std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  return ec ? std::string{} : canonical_existing_path(exe);
+}
 #endif
 
 void prepend_env_path(const char *name, const std::string &value) {
@@ -53,7 +59,11 @@ std::string find_loaded_asan_runtime() {
   const std::filesystem::path runtime_path(info.dli_fname);
   if (runtime_path.filename().string().find("asan") == std::string::npos)
     return {};
-  return canonical_existing_path(runtime_path);
+
+  std::string runtime = canonical_existing_path(runtime_path);
+  if (runtime.empty() || runtime == current_executable_path())
+    return {};
+  return runtime;
 #else
   return {};
 #endif
