@@ -309,350 +309,347 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
         {
             val = rocprofiler::hip::graph::name_by_id(operation);
-            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-            {
-                val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
-                    operation);
-                break;
-            }
-        };
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
+            break;
+        }
+    }
 
-            if(!val)
-            {
-                if(name) *name = nullptr;
-                if(name_len) *name_len = 0;
+    if(!val)
+    {
+        if(name) *name = nullptr;
+        if(name_len) *name_len = 0;
 
-                return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
-            }
+        return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
+    }
 
-            if(name) *name = val;
-            if(name_len) *name_len = strnlen(val, 4096);
+    if(name) *name = val;
+    if(name_len) *name_len = strnlen(val, 4096);
 
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_t callback,
+                                           void*                                  data)
+{
+    for(uint32_t i = 0; i < ROCPROFILER_CALLBACK_TRACING_LAST; ++i)
+    {
+        auto _success = callback(static_cast<rocprofiler_callback_tracing_kind_t>(i), data);
+        if(_success != 0) break;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_callback_tracing_kind_operations(
+    rocprofiler_callback_tracing_kind_t              kind,
+    rocprofiler_callback_tracing_kind_operation_cb_t callback,
+    void*                                            data)
+{
+    auto ops = std::vector<uint32_t>{};
+
+    switch(kind)
+    {
+        case ROCPROFILER_CALLBACK_TRACING_NONE:
+        case ROCPROFILER_CALLBACK_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_AmdExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_ImageExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+        {
+            ops = rocprofiler::hsa::scratch_memory::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxName>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+        {
+            ops = rocprofiler::rccl::get_ids<ROCPROFILER_RCCL_TABLE_ID>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
+        {
+            ops = rocprofiler::code_object::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        {
+            ops = rocprofiler::kernel_dispatch::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+        {
+            ops = rocprofiler::hsa::async_copy::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_OMPT:
+        {
+            ops = rocprofiler::ompt::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
+        {
+            ops = rocprofiler::hsa::memory_allocation::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+        {
+            ops = rocprofiler::runtime_init::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+        {
+            ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+        {
+            ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        {
+            ops = rocprofiler::hip::stream::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            ops = rocprofiler::hip::graph::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
+            break;
+        }
+    }
+
+    for(const auto& itr : ops)
+    {
+        auto _success = callback(kind, itr, data);
+        if(_success != 0) break;
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_callback_tracing_kind_operation_args(
+    rocprofiler_callback_tracing_record_t            record,
+    rocprofiler_callback_tracing_operation_args_cb_t callback,
+    int32_t                                          max_deref,
+    void*                                            user_data)
+{
+    if(max_deref > 1 && record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        const char* name = "(unknown)";
+        rocprofiler_query_callback_tracing_kind_operation_name(
+            record.kind, record.operation, &name, nullptr);
+        ROCP_WARNING << __FUNCTION__
+                     << " invoked with a max dereference count > 1 when the record.phase == "
+                     << "ROCPROFILER_CALLBACK_PHASE_ENTER for '" << name
+                     << "' record. This may result in a segmentation fault";
+    }
+
+    switch(record.kind)
+    {
+        case ROCPROFILER_CALLBACK_TRACING_NONE:
+        case ROCPROFILER_CALLBACK_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_Core>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
             return ROCPROFILER_STATUS_SUCCESS;
-    }
-
-    rocprofiler_status_t rocprofiler_iterate_callback_tracing_kinds(
-        rocprofiler_callback_tracing_kind_cb_t callback, void* data)
-    {
-        for(uint32_t i = 0; i < ROCPROFILER_CALLBACK_TRACING_LAST; ++i)
-        {
-            auto _success = callback(static_cast<rocprofiler_callback_tracing_kind_t>(i), data);
-            if(_success != 0) break;
         }
-
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-
-    rocprofiler_status_t rocprofiler_iterate_callback_tracing_kind_operations(
-        rocprofiler_callback_tracing_kind_t              kind,
-        rocprofiler_callback_tracing_kind_operation_cb_t callback,
-        void*                                            data)
-    {
-        auto ops = std::vector<uint32_t>{};
-
-        switch(kind)
+        case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
         {
-            case ROCPROFILER_CALLBACK_TRACING_NONE:
-            case ROCPROFILER_CALLBACK_TRACING_LAST:
-            {
-                return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            {
-                ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            {
-                ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_AmdExt>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            {
-                ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_ImageExt>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            {
-                ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-            {
-                ops = rocprofiler::hsa::scratch_memory::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-            {
-                ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-            {
-                ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-            {
-                ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxName>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
-            {
-                ops = rocprofiler::rccl::get_ids<ROCPROFILER_RCCL_TABLE_ID>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            {
-                ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            {
-                ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            {
-                ops = rocprofiler::code_object::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-            {
-                ops = rocprofiler::kernel_dispatch::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-            {
-                ops = rocprofiler::hsa::async_copy::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
-            {
-                ops = rocprofiler::ompt::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-            {
-                ops = rocprofiler::hsa::memory_allocation::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
-            {
-                ops = rocprofiler::runtime_init::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            {
-                ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-            {
-                ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
-            {
-                ops = rocprofiler::hip::stream::get_ids();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
-            {
-                ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
-            {
-                ops = rocprofiler::hip::graph::get_ids();
-                case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-                {
-                    ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
-                    break;
-                }
-            };
-
-                for(const auto& itr : ops)
-                {
-                    auto _success = callback(kind, itr, data);
-                    if(_success != 0) break;
-                }
-                return ROCPROFILER_STATUS_SUCCESS;
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
         }
-
-        rocprofiler_status_t rocprofiler_iterate_callback_tracing_kind_operation_args(
-            rocprofiler_callback_tracing_record_t            record,
-            rocprofiler_callback_tracing_operation_args_cb_t callback,
-            int32_t                                          max_deref,
-            void*                                            user_data)
+        case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
         {
-            if(max_deref > 1 && record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-            {
-                const char* name = "(unknown)";
-                rocprofiler_query_callback_tracing_kind_operation_name(
-                    record.kind, record.operation, &name, nullptr);
-                ROCP_WARNING
-                    << __FUNCTION__
-                    << " invoked with a max dereference count > 1 when the record.phase == "
-                    << "ROCPROFILER_CALLBACK_PHASE_ENTER for '" << name
-                    << "' record. This may result in a segmentation fault";
-            }
-
-            switch(record.kind)
-            {
-                case ROCPROFILER_CALLBACK_TRACING_NONE:
-                case ROCPROFILER_CALLBACK_TRACING_LAST:
-                {
-                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-                {
-                    rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_Core>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-                {
-                    rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-                {
-                    rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_ImageExt>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-                {
-                    rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
-                case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-                {
-                    rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(
-                            record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-                {
-                    rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(
-                            record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-                {
-                    rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(
-                            record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-                {
-                    rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
-                        record.operation,
-                        static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)
-                            ->args,
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-                {
-                    rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
-                        record.operation,
-                        static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)
-                            ->args,
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_OMPT:
-                {
-                    rocprofiler::ompt::iterate_args(
-                        record.operation,
-                        *static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload),
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-                {
-                    rocprofiler::rocdecode::iterate_args<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(
-                        record.operation,
-                        static_cast<rocprofiler_callback_tracing_rocdecode_api_data_t*>(
-                            record.payload)
-                            ->args,
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-                {
-                    rocprofiler::rocshmem::iterate_args<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
-                        record.operation,
-                        static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(
-                            record.payload)
-                            ->args,
-                        callback,
-                        max_deref,
-                        user_data);
-                    return ROCPROFILER_STATUS_SUCCESS;
-                }
-                case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-                case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-                case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-                case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-                case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-                case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
-                case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
-                case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-                case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
-                case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
-                case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-                {
-                    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-                }
-            }
-
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_ImageExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        {
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+        {
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_OMPT:
+        {
+            rocprofiler::ompt::iterate_args(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+        {
+            rocprofiler::rocdecode::iterate_args<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_rocdecode_api_data_t*>(record.payload)
+                    ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            rocprofiler::rocshmem::iterate_args<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload)
+                    ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+        case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
+        case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+        case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+        case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
     }
+
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+}
 
 #undef RETURN_STATUS_ON_FAIL
