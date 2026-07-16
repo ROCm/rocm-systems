@@ -1579,7 +1579,11 @@ static vm_object_t *fmm_allocate_memory_object(HsaKFDContext *ctx,
 {
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
-	if (hsakmt_enable_drm && is_supported_on_drm(alloc_flags)) {
+	/* AMDGPU_GEM_CREATE_VRAM_CONTIGUOUS is not in SETTABLE_MASK so the kernel
+	 * rejects it from userspace DRM BOs. Fall back to the KFD path which has
+	 * its own KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS_BEST_EFFORT mechanism. */
+	if (hsakmt_enable_drm && is_supported_on_drm(alloc_flags) &&
+	    !alloc_flags.mflags.ui32.Contiguous) {
 		return fmm_allocate_memory_object_drm(fmm_ctx, gpu_id, mem,
 						MemorySizeInBytes, aperture, mmap_offset, alloc_flags);
 	} else {
