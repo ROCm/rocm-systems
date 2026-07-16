@@ -236,9 +236,6 @@ static void divisionErrorHandler(int sig, siginfo_t* info, void* ptr) {
   ::abort();
 }
 
-typedef int (*pthread_setaffinity_fn)(pthread_t, size_t, const cpu_set_t*);
-static pthread_setaffinity_fn pthread_setaffinity_fptr;
-
 static void init() __attribute__((constructor(101)));
 static void init() { Os::init(); }
 static cpu_set_t nativeMask_;
@@ -272,7 +269,6 @@ bool Os::init() {
   processorCount_ = ::sysconf(_SC_NPROCESSORS_CONF);
 
   pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &nativeMask_);
-  pthread_setaffinity_fptr = (pthread_setaffinity_fn)dlsym(RTLD_NEXT, "pthread_setaffinity_np");
 
   return Thread::init();
 }
