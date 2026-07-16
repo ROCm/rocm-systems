@@ -196,7 +196,8 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }} \
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=ON
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
