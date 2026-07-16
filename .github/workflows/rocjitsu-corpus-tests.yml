@@ -182,6 +182,7 @@ jobs:
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
 
+          # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
@@ -221,8 +222,11 @@ jobs:
 
           corpus_test_status=0
 
+          # Limit pytest to 8 workers to avoid oversubscription.
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          PYTEST_WORKERS="$(( WORKERS < 8 ? WORKERS : 8 ))"
           corpus_test_flags=(
-            --workers 8 \
+            --workers "${PYTEST_WORKERS}" \
             --soft-timeout 15 \
             --hard-timeout 30 \
             --rerun-failed \

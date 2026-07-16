@@ -49,7 +49,7 @@ done
 corpus_test_status=1
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
-  echo "::group::pytest (${name})"
+  echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
@@ -65,7 +65,7 @@ for target in "${targets[@]}"; do
     --durations=0
     -vv
     -o "cache_dir=${cache_dir}"
-    --tb=no
+    --tb=short
     -n "${worker_count}"
     -o "timeout_func_only=true"
   )
@@ -77,18 +77,20 @@ for target in "${targets[@]}"; do
     continue
   fi
 
-  if [[ "${rerun_failed}" == true ]] && "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}"; then
-    corpus_test_status=0
-    echo "::endgroup::"
-    echo "Retried (${name}) tests passed."
-    continue
-  fi
-
   echo "::endgroup::"
-  echo "::warning::Some (${name}) tests failed."
-  echo "::group::pytest last-failed summary (${name})"
+  echo "::error::Some (${name}) tests failed."
+  echo "::group::(${name}) pytest last-failed summary"
   pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
   echo "::endgroup::"
+
+  if [[ "${rerun_failed}" == false ]]
+  continue
+
+  echo "::group::(${name}) pytest rerun failed tests"
+  if "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}";
+  echo "::endgroup::"
+  echo "::warning::Retried (${name}) tests passed."
+  continue
 done
 
 exit "${corpus_test_status}"
