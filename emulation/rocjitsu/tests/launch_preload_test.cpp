@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <optional>
 #include <string>
 #include <system_error>
 
@@ -15,28 +14,9 @@
 
 namespace {
 
-class ScopedEnvVar {
-public:
-  explicit ScopedEnvVar(const char *name) : name_(name) {
-    if (const char *value = std::getenv(name_))
-      old_value_ = value;
-  }
-
-  ~ScopedEnvVar() {
-    if (old_value_) {
-      setenv(name_, old_value_->c_str(), 1);
-      return;
-    }
-    unsetenv(name_);
-  }
-
-private:
-  const char *name_;
-  std::optional<std::string> old_value_;
-};
-
-void expect_ld_preload_eq(const std::string &expected) {
-  const char *ld_preload = std::getenv("LD_PRELOAD");
+void expect_ld_preload_eq(const rocjitsu::cli::LaunchEnvironment &environment,
+                          const std::string &expected) {
+  const char *ld_preload = environment.get("LD_PRELOAD");
   ASSERT_NE(nullptr, ld_preload);
   EXPECT_EQ(expected, ld_preload);
 }
@@ -51,17 +31,17 @@ std::string canonical_existing_path(const std::filesystem::path &path) {
 
 #if !defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) && !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
 void expect_no_sanitizer_preload_order() {
-  ScopedEnvVar restore_ld_preload("LD_PRELOAD");
   const std::string interposer = "/tmp/librocjitsu.so";
   const std::string existing = "/tmp/libexisting.so";
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("LD_PRELOAD", existing);
 
   ASSERT_TRUE(rocjitsu::cli::find_loaded_asan_runtime().empty());
   ASSERT_TRUE(rocjitsu::cli::find_loaded_tsan_runtime().empty());
-  ASSERT_EQ(0, setenv("LD_PRELOAD", existing.c_str(), 1));
 
-  rocjitsu::cli::prepend_launch_preloads(interposer);
+  rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(interposer + ":" + existing);
+  expect_ld_preload_eq(environment, interposer + ":" + existing);
 }
 #endif
 
@@ -129,18 +109,18 @@ TEST(LaunchPreloadTest, SharedAsanPrependsAsanBeforeInterposerAndExistingPreload
 #if !defined(RJ_EXPECT_SHARED_ASAN_RUNTIME)
   GTEST_SKIP() << "requires a shared-ASan build";
 #else
-  ScopedEnvVar restore_ld_preload("LD_PRELOAD");
   const std::string interposer = "/tmp/librocjitsu.so";
   const std::string existing = "/tmp/libexisting.so";
   const std::string expected_asan = canonical_existing_path(RJ_EXPECTED_SHARED_ASAN_RUNTIME);
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("LD_PRELOAD", existing);
 
   ASSERT_FALSE(expected_asan.empty()) << RJ_EXPECTED_SHARED_ASAN_RUNTIME;
   EXPECT_EQ(expected_asan, rocjitsu::cli::find_loaded_asan_runtime());
-  ASSERT_EQ(0, setenv("LD_PRELOAD", existing.c_str(), 1));
 
-  rocjitsu::cli::prepend_launch_preloads(interposer);
+  rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(expected_asan + ":" + interposer + ":" + existing);
+  expect_ld_preload_eq(environment, expected_asan + ":" + interposer + ":" + existing);
 #endif
 }
 
@@ -148,17 +128,17 @@ TEST(LaunchPreloadTest, SharedTsanPrependsTsanBeforeInterposerAndExistingPreload
 #if !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
   GTEST_SKIP() << "requires a shared-TSan build";
 #else
-  ScopedEnvVar restore_ld_preload("LD_PRELOAD");
   const std::string interposer = "/tmp/librocjitsu.so";
   const std::string existing = "/tmp/libexisting.so";
   const std::string expected_tsan = canonical_existing_path(RJ_EXPECTED_SHARED_TSAN_RUNTIME);
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("LD_PRELOAD", existing);
 
   ASSERT_FALSE(expected_tsan.empty()) << RJ_EXPECTED_SHARED_TSAN_RUNTIME;
   EXPECT_EQ(expected_tsan, rocjitsu::cli::find_loaded_tsan_runtime());
-  ASSERT_EQ(0, setenv("LD_PRELOAD", existing.c_str(), 1));
 
-  rocjitsu::cli::prepend_launch_preloads(interposer);
+  rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(expected_tsan + ":" + interposer + ":" + existing);
+  expect_ld_preload_eq(environment, expected_tsan + ":" + interposer + ":" + existing);
 #endif
 }

@@ -366,14 +366,15 @@ std::string join_comma(const std::vector<std::string> &tokens) {
   return result;
 }
 
-void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+std::optional<std::string>
+expanded_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
   const char *visible = std::getenv("ROCR_VISIBLE_DEVICES");
   if (visible == nullptr || *visible == '\0')
-    return;
+    return std::nullopt;
 
   std::vector<KfdGpuOrdinal> gpus = real_kfd_gpu_ordinals();
   if (gpus.empty())
-    return;
+    return std::nullopt;
 
   uint32_t host_ordinal = 0;
   if (dbt_guest.host.gpu_id != 0) {
@@ -381,19 +382,19 @@ void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &d
       return gpu.gpu_id == dbt_guest.host.gpu_id;
     });
     if (match == gpus.end())
-      return;
+      return std::nullopt;
     host_ordinal = match->ordinal;
   } else {
     std::optional<uint32_t> target_version =
         rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
     if (!target_version)
-      return;
+      return std::nullopt;
 
     auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
       return gpu.gfx_target_version == *target_version;
     });
     if (match == gpus.end())
-      return;
+      return std::nullopt;
     host_ordinal = match->ordinal;
   }
 
@@ -425,9 +426,9 @@ void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &d
   }
 
   std::string rewritten = join_comma(expanded);
-  if (!rewritten.empty() && rewritten != visible) {
-    setenv("ROCR_VISIBLE_DEVICES", rewritten.c_str(), 1);
-  }
+  if (!rewritten.empty() && rewritten != visible)
+    return rewritten;
+  return std::nullopt;
 }
 
 void print_usage() {
@@ -611,21 +612,24 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  rocjitsu::cli::prepend_launch_preloads(lib_path);
+  rocjitsu::cli::LaunchEnvironment launch_environment =
+      rocjitsu::cli::make_launch_environment(lib_path);
   if (dbt_guest_mode) {
-    maybe_expand_rocr_visible_devices(dbt_guest_config);
+    if (std::optional<std::string> rocr_visible_devices =
+            expanded_rocr_visible_devices(dbt_guest_config))
+      launch_environment.set("ROCR_VISIBLE_DEVICES", *rocr_visible_devices);
     // The HSA hook still uses the legacy tools callback path. Disable only the
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers.
-    setenv("HSA_TOOLS_DISABLE_REGISTER", "1", 1);
-    setenv("HSA_TOOLS_LIB", hooks_path.c_str(), 1);
+    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
+    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
   // holding config_path/daemon.sock. Attach mode creates no such dir.
   if (!attach_mode)
-    setenv(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid).c_str(), 1);
-  execvp(app_argv[0], app_argv);
+    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
   cleanup_runtime_files(my_pid);

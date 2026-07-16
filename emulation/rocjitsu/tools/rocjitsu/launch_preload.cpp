@@ -3,7 +3,14 @@
 
 #include "launch_preload.h"
 
+#include <algorithm>
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
+#include <string_view>
+#include <unistd.h>
+#include <utility>
+#include <vector>
 
 #ifndef __has_feature
 #define __has_feature(x) 0
@@ -20,7 +27,6 @@
 #if defined(RJ_BUILT_WITH_ASAN) || defined(RJ_BUILT_WITH_TSAN)
 #include <dlfcn.h>
 #include <filesystem>
-#include <string_view>
 #include <system_error>
 #endif
 
@@ -32,8 +38,27 @@ extern "C" void __asan_init();
 extern "C" void __tsan_init();
 #endif
 
+extern "C" char **environ;
+
 namespace rocjitsu::cli {
 namespace {
+
+bool env_name_matches(std::string_view entry, const std::string &name) {
+  return entry.size() > name.size() && entry[name.size()] == '=' &&
+         entry.substr(0, name.size()) == name;
+}
+
+std::vector<std::string>::iterator find_env_entry(std::vector<std::string> &entries,
+                                                  const std::string &name) {
+  return std::find_if(entries.begin(), entries.end(),
+                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+}
+
+std::vector<std::string>::const_iterator find_env_entry(const std::vector<std::string> &entries,
+                                                        const std::string &name) {
+  return std::find_if(entries.begin(), entries.end(),
+                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+}
 
 #if defined(RJ_BUILT_WITH_ASAN) || defined(RJ_BUILT_WITH_TSAN)
 std::string canonical_existing_path(const std::filesystem::path &candidate) {
@@ -67,16 +92,68 @@ std::string find_loaded_sanitizer_runtime(void *init_symbol, std::string_view ru
 }
 #endif
 
-void prepend_env_path(const char *name, const std::string &value) {
-  if (const char *old_value = std::getenv(name); old_value && *old_value) {
-    std::string combined = value + ":" + old_value;
-    setenv(name, combined.c_str(), 1);
-    return;
-  }
-  setenv(name, value.c_str(), 1);
+int exec_shell(const char *file, char *const argv[], char *const envp[]) {
+  std::vector<char *> shell_argv;
+  shell_argv.push_back(const_cast<char *>("/bin/sh"));
+  shell_argv.push_back(const_cast<char *>(file));
+  for (char *const *arg = argv + 1; *arg; ++arg)
+    shell_argv.push_back(*arg);
+  shell_argv.push_back(nullptr);
+  execve("/bin/sh", shell_argv.data(), envp);
+  return -1;
+}
+
+int exec_path_candidate(const std::string &file, char *const argv[], char *const envp[]) {
+  execve(file.c_str(), argv, envp);
+  if (errno == ENOEXEC)
+    return exec_shell(file.c_str(), argv, envp);
+  return -1;
 }
 
 } // namespace
+
+LaunchEnvironment::LaunchEnvironment() {
+  for (char **entry = environ; entry && *entry; ++entry)
+    entries_.emplace_back(*entry);
+}
+
+const char *LaunchEnvironment::get(const std::string &name) const {
+  auto it = find_env_entry(entries_, name);
+  if (it == entries_.end())
+    return nullptr;
+  return it->c_str() + name.size() + 1;
+}
+
+void LaunchEnvironment::set(const std::string &name, const std::string &value) {
+  std::string entry = name + "=" + value;
+  auto it = find_env_entry(entries_, name);
+  if (it == entries_.end()) {
+    entries_.push_back(std::move(entry));
+  } else {
+    *it = std::move(entry);
+  }
+  envp_dirty_ = true;
+}
+
+void LaunchEnvironment::prepend_path(const std::string &name, const std::string &value) {
+  if (const char *old_value = get(name); old_value && *old_value) {
+    set(name, value + ":" + old_value);
+    return;
+  }
+  set(name, value);
+}
+
+char *const *LaunchEnvironment::envp() {
+  if (envp_dirty_) {
+    envp_.clear();
+    envp_.reserve(entries_.size() + 1);
+    for (std::string &entry : entries_)
+      envp_.push_back(entry.data());
+    envp_.push_back(nullptr);
+    envp_dirty_ = false;
+  }
+  return envp_.data();
+}
 
 std::string find_loaded_asan_runtime() {
 #if defined(RJ_BUILT_WITH_ASAN)
@@ -94,12 +171,53 @@ std::string find_loaded_tsan_runtime() {
 #endif
 }
 
-void prepend_launch_preloads(const std::string &interposer_path) {
-  prepend_env_path("LD_PRELOAD", interposer_path);
+void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path) {
+  environment.prepend_path("LD_PRELOAD", interposer_path);
   if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
-    prepend_env_path("LD_PRELOAD", asan_runtime);
+    environment.prepend_path("LD_PRELOAD", asan_runtime);
   if (std::string tsan_runtime = find_loaded_tsan_runtime(); !tsan_runtime.empty())
-    prepend_env_path("LD_PRELOAD", tsan_runtime);
+    environment.prepend_path("LD_PRELOAD", tsan_runtime);
+}
+
+LaunchEnvironment make_launch_environment(const std::string &interposer_path) {
+  LaunchEnvironment environment;
+  prepend_launch_preloads(environment, interposer_path);
+  return environment;
+}
+
+int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
+  if (!file || !*file) {
+    errno = ENOENT;
+    return -1;
+  }
+
+  char *const *envp = environment.envp();
+  if (std::strchr(file, '/'))
+    return exec_path_candidate(file, argv, envp);
+
+  const char *path = environment.get("PATH");
+  std::string_view remaining = path ? std::string_view(path) : std::string_view("/bin:/usr/bin");
+  bool saw_eacces = false;
+
+  while (true) {
+    size_t colon = remaining.find(':');
+    std::string_view dir = colon == std::string_view::npos ? remaining : remaining.substr(0, colon);
+    std::string candidate = dir.empty() ? std::string(file) : std::string(dir) + "/" + file;
+
+    exec_path_candidate(candidate, argv, envp);
+    if (errno == EACCES) {
+      saw_eacces = true;
+    } else if (errno != ENOENT && errno != ENOTDIR) {
+      return -1;
+    }
+
+    if (colon == std::string_view::npos)
+      break;
+    remaining.remove_prefix(colon + 1);
+  }
+
+  errno = saw_eacces ? EACCES : ENOENT;
+  return -1;
 }
 
 } // namespace rocjitsu::cli
