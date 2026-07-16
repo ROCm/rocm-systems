@@ -1,6 +1,6 @@
 # Systems PR Bot — Policy FAQ Doc
 
-**Systems PR Bot** is an automated Pull Request (PR) gatekeeper.
+**TheRock PR Bot** is an automated Pull Request (PR) gatekeeper.
 On every Pull Request, it runs a set of policy checks — branch naming,
 title/description, forbidden files, unit tests, and required CI checks —
 then posts a single results table comment summarising what passed or failed.
@@ -197,15 +197,22 @@ PRs that change real source code must include at least one accompanying unit tes
 
 **What counts as a test file?**
 
-- Basename matches one of: `test_*`, `*_test.*`, or `Test*`
-  - ✅ `test_parser.py`, `parser_test.cpp`, `TestUtils.cpp`
+- Basename matches one of: `test_*`, `testing_*`, `*_test.*`, `*_tests.*`, or `Test*`
+  - ✅ `test_parser.py`, `testing_parser.py`, `parser_test.cpp`, `parser_tests.cpp`, `TestUtils.cpp`
   - ❌ `test.py` (does NOT have the `test_` prefix)
 
-| Pattern    | Example           |
-| ---------- | ----------------- |
-| `test_*`   | `test_parser.py`  |
-| `*_test.*` | `parser_test.cpp` |
-| `Test*`    | `TestUtils.cpp`   |
+| Pattern     | Example             |
+| ----------- | ------------------- |
+| `test_*`    | `test_parser.py`    |
+| `testing_*` | `testing_parser.py` |
+| `*_test.*`  | `parser_test.cpp`   |
+| `*_tests.*` | `parser_tests.cpp`  |
+| `Test*`     | `TestUtils.cpp`     |
+
+**Path-based recognition**
+Any file located under a `test/gtest/` directory is also treated as a unit
+test, regardless of its filename — e.g.
+`projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp`.
 
 **How to fix**
 Add a unit test for the code you changed, named `test_<something>`:
@@ -326,5 +333,17 @@ git push
 
 Push any commit (including `--allow-empty`) to the PR branch.
 The `synchronize` event triggers a fresh policy check automatically.
+
+______________________________________________________________________
+
+## 🙋 Wish to Override the Policy Process?
+
+If you have a genuine need to bypass or override one or more policy checks,
+please reach out to the **ROCm Policy Council**.
+
+📧 **Drop a mail to:** `rocm-repo-policy@amd.com` (ROCm Policy Council DLL)
+
+Include your PR link, the check(s) you want overridden, and a short
+justification so the council can review your request.
 
 ______________________________________________________________________
