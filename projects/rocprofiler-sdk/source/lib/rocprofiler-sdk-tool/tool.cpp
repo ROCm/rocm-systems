@@ -216,7 +216,7 @@ struct buffer_ids
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 16>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
