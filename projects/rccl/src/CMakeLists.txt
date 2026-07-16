@@ -70,6 +70,7 @@ set(SRC_FILES
   device/network/unpack/unpack.h
   device/tdm/tdm.h
   device/tdm/asyncCopy.h
+  device/tdm/tdmCopy.h
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh

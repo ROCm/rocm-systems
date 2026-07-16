@@ -241,6 +241,7 @@ if(BUILD_TESTS)
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestTDM.cpp
+      device/TestTdmCopy.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -254,6 +255,26 @@ if(BUILD_TESTS)
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
     )
+
+    # device/TestTdmCopy.cpp exercises tdm/tdmCopy.h, which detects TDM toolchain
+    # support via __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). Some ROCm SDKs
+    # do not ship that descriptor header, in which case every tdm:: entry point
+    # would compile to a deleted stub and the tests could not link. The repo
+    # vendors an equivalent descriptor at src/device/tdm/tdm.h, so when the SDK is
+    # missing the header we stage a copy at its canonical include path and add
+    # that directory to the fixtures include search path only.
+    find_path(RCCL_GFX1250_TDM_HEADER
+      NAMES hip/amd_detail/amd_gfx1250_TDM.h
+      PATHS ${RCCL_COMMON_INCLUDE_DIRS} "${ROCM_PATH}/include")
+    if(NOT RCCL_GFX1250_TDM_HEADER)
+      set(_rccl_tdm_fallback_dir "${PROJECT_BINARY_DIR}/tdm_fallback")
+      configure_file(
+        "${PROJECT_SOURCE_DIR}/src/device/tdm/tdm.h"
+        "${_rccl_tdm_fallback_dir}/hip/amd_detail/amd_gfx1250_TDM.h"
+        COPYONLY)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE "${_rccl_tdm_fallback_dir}")
+      message(STATUS "rccl-UnitTestsFixtures: SDK lacks amd_gfx1250_TDM.h; using vendored fallback from src/device/tdm/tdm.h")
+    endif()
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
