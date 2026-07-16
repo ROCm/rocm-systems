@@ -1117,7 +1117,8 @@ if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
     target_link_libraries(rccl PRIVATE rocm-core)
   else()
     find_library(ROCM_CORE_LIB NAMES rocm-core
-      HINTS "${ROCMCORE_PATH}/lib" "${ROCM_PATH}/lib")
+      HINTS "${ROCMCORE_PATH}" "${ROCM_PATH}"
+      PATH_SUFFIXES lib lib64)
     if(NOT ROCM_CORE_LIB)
       message(FATAL_ERROR "Could not find librocm-core")
     endif()
