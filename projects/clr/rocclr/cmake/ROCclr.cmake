@@ -107,6 +107,16 @@ if(WIN32)
   target_compile_definitions(rocclr PUBLIC ATI_OS_WIN)
 else()
   target_compile_definitions(rocclr PUBLIC ATI_OS_LINUX)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_options(rocclr PRIVATE -Wall -Werror)
+    # GCC <= 11 ignores [[maybe_unused]] on non-static data members and emits
+    # -Wattributes ("attribute ignored"), which -Werror promotes to an error. The
+    # attribute is still required for Clang's -Wunused-private-field, so silence the
+    # spurious GCC diagnostic. (GCC 12+ handles the attribute correctly.)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(rocclr PRIVATE -Wno-attributes)
+    endif()
+  endif()
 endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)

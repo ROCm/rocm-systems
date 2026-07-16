@@ -24,7 +24,7 @@ int VmmOwnerDeviceIndex(const hipMemAllocationProp& prop);
 
 class GenericAllocation : public amd::RuntimeObject {
   amd::Memory& phys_mem_ref_;        //<! Physical memory object
-  size_t size_;                      //<! Allocated size
+  [[maybe_unused]] size_t size_;     //<! Allocated size
   hipMemAllocationProp properties_;  //<! Allocation Properties
 
  public:
