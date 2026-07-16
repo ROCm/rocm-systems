@@ -60,7 +60,7 @@ FatBinaryInfo::FatBinaryInfo(KpackParams kpack_params)
 
 FatBinaryInfo::~FatBinaryInfo() {
   // Release per device fat bin info.
-  for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
+  for (size_t dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
       dev_programs_[dev_id]->release();
       dev_programs_[dev_id] = nullptr;

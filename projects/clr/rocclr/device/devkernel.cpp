@@ -81,7 +81,6 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
   std::string buf;
 
   // get the key of the argument field
-  size_t size = 0;
   status = amd::Comgr::get_metadata_kind(key, &kind);
   if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
     status = getMetaBuf(key, &buf);
@@ -320,16 +319,16 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
       kernel->workGroupInfo()->size_ = atoi(buf.c_str());
       break;
     case CodePropField::IsDynamicCallStack: {
-      size_t mIsDynamicCallStack = (buf.compare("true") == 0);
+      [[maybe_unused]] size_t mIsDynamicCallStack = (buf.compare("true") == 0);
     } break;
     case CodePropField::IsXNACKEnabled: {
-      size_t mIsXNACKEnabled = (buf.compare("true") == 0);
+      [[maybe_unused]] size_t mIsXNACKEnabled = (buf.compare("true") == 0);
     } break;
     case CodePropField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledSGPRs = atoi(buf.c_str());
     } break;
     case CodePropField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledVGPRs = atoi(buf.c_str());
     } break;
     default:
       return AMD_COMGR_STATUS_ERROR;
@@ -344,7 +343,6 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
   std::string buf;
 
   // get the key of the argument field
-  size_t size = 0;
   status = amd::Comgr::get_metadata_kind(key, &kind);
   if (kind == AMD_COMGR_METADATA_KIND_STRING && status == AMD_COMGR_STATUS_SUCCESS) {
     status = getMetaBuf(key, &buf);
@@ -564,10 +562,10 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
       kernel->workGroupInfo()->size_ = atoi(buf.c_str());
       break;
     case KernelField::NumSpilledSGPRs: {
-      size_t mNumSpilledSGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledSGPRs = atoi(buf.c_str());
     } break;
     case KernelField::NumSpilledVGPRs: {
-      size_t mNumSpilledVGPRs = atoi(buf.c_str());
+      [[maybe_unused]] size_t mNumSpilledVGPRs = atoi(buf.c_str());
     } break;
     case KernelField::SymbolName:
       kernel->SetSymbolName(buf);
