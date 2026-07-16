@@ -562,7 +562,7 @@ class Device : public NullDevice {
   bool addMapTarget(amd::Memory* memory) const;
 
   //! Returns a ROC memory object from AMD memory object
-  roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
+  [[nodiscard]] roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
   //! Create internal blit program
