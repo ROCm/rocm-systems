@@ -98,13 +98,11 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
 // When running inside a container with PID namespace isolation, KFD sysfs
 // reports host PIDs that are not visible in the container's /proc. We detect
 // this by checking numeric entries under kKFDProcPathRoot against /proc.
-// For each KFD PID we check these cases:
-//   1. PID exists in /proc AND has /dev/kfd open → same namespace (not namespaced).
-//   2. PID exists in /proc but does NOT have /dev/kfd open → different namespace.
-//   3. PID does NOT exist in /proc → inconclusive (process may have exited);
-//      skip to the next entry to avoid a false positive from a short-lived process.
-//   4. PID's /proc/<pid>/fd is unreadable (owned by another user) → inconclusive;
-//      permission denial is not evidence of a different namespace, so skip it.
+// For each numeric KFD PID: if it exists in /proc and has /dev/kfd open we
+// share its namespace; if it exists but lacks /dev/kfd, a container-local PID
+// reused the number (namespaced). A PID that is gone (exited) or whose fd dir
+// is unreadable (another user's process) is inconclusive and skipped, so a
+// permission error is never mistaken for namespace isolation.
 // If all KFD entries are inconclusive, we conservatively assume we are not
 // namespaced (the KFD entries will be cleaned up shortly anyway).
 // Result is cached for the lifetime of the process; PID namespace is assumed stable.
@@ -141,8 +139,8 @@ static bool IsKfdPidNamespaced() {
       // this entry, so skip it rather than falsely flagging namespaced.
       continue;
     }
-    // We could read the fd set: presence of /dev/kfd means same namespace,
-    // absence means a different container-local process reused this PID number.
+    // Absence of /dev/kfd here means a container-local process reused this host
+    // PID number, i.e. a different namespace.
     if (state == KfdOpenState::kNoKfd) {
       namespaced = true;
     }
