@@ -31,7 +31,9 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);

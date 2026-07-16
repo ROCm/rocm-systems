@@ -199,7 +199,7 @@ namespace code {
 
       void AddAmdNote(uint32_t type, const void* desc, uint32_t desc_size);
       template <typename S>
-      bool GetAmdNote(uint32_t type, S** desc)
+      bool GetAmdNote(uint32_t type, S** desc, uint32_t* desc_size_out = nullptr)
       {
         uint32_t desc_size;
         if (!img->note()->getNote("AMD", type, (void**) desc, &desc_size)) {
@@ -210,6 +210,9 @@ namespace code {
           out << "Note size mismatch, type: " << type << " size: " << desc_size << " expected at least " << sizeof(S) << std::endl;
           return false;
         }
+        // Callers that read variable-length fields trailing the fixed struct
+        // must bound those reads against the actual descriptor size; expose it.
+        if (desc_size_out) { *desc_size_out = desc_size; }
         return true;
       }
 
@@ -262,12 +265,12 @@ namespace code {
       bool GetNoteCodeObjectVersion(std::string& version);
       void AddNoteHsail(uint32_t hsail_major, uint32_t hsail_minor, hsa_profile_t profile, hsa_machine_model_t machine_model, hsa_default_float_rounding_mode_t rounding_mode);
       bool GetNoteHsail(uint32_t* hsail_major, uint32_t* hsail_minor, hsa_profile_t* profile, hsa_machine_model_t* machine_model, hsa_default_float_rounding_mode_t* default_float_round);
-      void AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping);
+      bool AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping);
       bool GetNoteIsa(std::string& vendor_name, std::string& architecture_name, uint32_t* major_version, uint32_t* minor_version, uint32_t* stepping);
-      void AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer);
+      bool AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer);
       bool GetNoteProducer(uint32_t* major, uint32_t* minor, std::string& producer_name);
-      void AddNoteProducerOptions(const std::string& options);
-      void AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options);
+      bool AddNoteProducerOptions(const std::string& options);
+      bool AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options);
       bool GetNoteProducerOptions(std::string& options);
 
       bool GetIsa(std::string& isaName, unsigned *genericVersion = nullptr);

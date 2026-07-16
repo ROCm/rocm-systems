@@ -551,6 +551,7 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.CPUAccessToGPUMemoryTest();
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
+    vmt.ImportedShareableHandleSetAccessAfterFdClose();
     RunCustomTestEpilog(&vmt);
 }
 
@@ -596,6 +597,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
     VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {

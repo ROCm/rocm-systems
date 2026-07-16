@@ -23,7 +23,7 @@ from amdisa.codegen.execute.sema_lower import (
     RegClass,
     lower_sema_block,
 )
-from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_ternary
+from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_cvt_pk,
@@ -1042,6 +1042,42 @@ class TestDeriveVectorBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SUB in all_kinds
 
+    def test_signed_add_sub_use_unsigned_operands_to_avoid_ub(self):
+        ops = [
+            ('add', SemaNodeKind.ADD, ('0', '1')),
+            ('sub', SemaNodeKind.SUB, ('0', '1')),
+            ('subrev', SemaNodeKind.SUB, ('1', '0')),
+            ('rsub', SemaNodeKind.SUB, ('1', '0')),
+        ]
+        dtypes = [
+            ('i16', SemaType('I', 16), SemaType('U', 16), 'int16_t'),
+            ('i32', SemaType.I32, SemaType.U32, 'int32_t'),
+        ]
+        for dtype, signed_ty, unsigned_ty, cpp_type in dtypes:
+            for op, kind, operand_order in ops:
+                sem = _FakeSem(
+                    f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype
+                )
+                block = derive_sema_block(sem)
+                assert block is not None
+
+                rhs = block.body.children[1]
+                assert block.body.children[0].cast_target == signed_ty
+                assert rhs.kind == kind
+                assert rhs.ty == unsigned_ty
+                assert [c.ty for c in rhs.children] == [unsigned_ty, unsigned_ty]
+                assert [c.children[1].lit_value for c in rhs.children] == list(
+                    operand_order
+                )
+
+                cpp = lower_sema_block(block)
+                assert (
+                    f'static_cast<{cpp_type}>(inst.src0.read_lane(wf, lane))' not in cpp
+                )
+                assert (
+                    f'static_cast<{cpp_type}>(inst.src1.read_lane(wf, lane))' not in cpp
+                )
+
     def test_lshlrev(self):
         sem = _FakeSem('V_LSHLREV_B32', 'vector_binop', 'lshlrev', 'b32')
         block = derive_sema_block(sem)
@@ -1178,6 +1214,27 @@ class TestDeriveVectorTernary:
 
         assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
         assert 'a * b' not in cpp
+
+    def test_u16_mad_widens_before_multiply(self):
+        sem = _FakeSem('V_MAD_LEGACY_U16', 'vector_ternary', 'mad', 'u16')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert '::rocjitsu::amdgpu::mad_lo_u16' in cpp
+        assert 'static_cast<uint32_t>(static_cast<uint16_t>(' in cpp
+        assert (
+            'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>('
+            not in cpp
+        )
+        assert 'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *' not in cpp
+        assert 'static_cast<uint16_t>(inst.src1.read_lane(wf, lane))' not in cpp
+        assert 'static_cast<uint16_t>(inst.src2.read_lane(wf, lane))' not in cpp
+        compact_cpp = ''.join(cpp.split())
+        assert (
+            '::rocjitsu::amdgpu::mad_lo_u16('
+            'inst.src0.read_lane(wf,lane),'
+            'inst.src1.read_lane(wf,lane),'
+            'inst.src2.read_lane(wf,lane))' in compact_cpp
+        )
 
     def test_signed_bfe_keeps_braced_one_literal(self):
         sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
@@ -1922,6 +1979,20 @@ class TestDerivePacked:
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_pk_mov_b32_generator_uses_op_sel_for_both_outputs(self):
+        cpp = gen_pk_mov_b32(
+            ['inst.vdst'],
+            ['inst.src0', 'inst.src1'],
+            opsel_exprs=('inst.inst_.op_sel', 'inst.inst_.op_sel_hi'),
+        )
+
+        assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
+        assert 'uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane)' in cpp
+        assert 'uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane)' in cpp
+        assert 'encoding_value_ >= 256' not in cpp
 
 
 class TestDeriveDot:

@@ -28,6 +28,8 @@ real hardware. Supports three execution strategies:
 | gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
 | RISC-V | RV32IMAFDC | RV | Experimental | &mdash; | &mdash; |
 
+<!-- \NPI new GPU: add a row to the supported-architectures table above. -->
+
 ## Project layout
 
 ```

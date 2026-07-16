@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -201,7 +202,9 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -605,6 +608,12 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtF16F32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -622,14 +631,14 @@ void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
           util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -659,7 +668,11 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -695,6 +708,10 @@ void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3_TRUE16();
+  }
   uint64_t exec = wf.exec();
   const uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -928,7 +945,9 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1312,7 +1331,9 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1440,7 +1461,9 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1503,7 +1526,9 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1567,7 +1592,9 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1631,7 +1658,9 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1730,7 +1759,11 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1750,6 +1783,12 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
   }
 }
 
+void VMovB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1767,16 +1806,15 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
-              ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                       : src0.read_lane(wf, lane)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2440,7 +2478,9 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2503,7 +2543,9 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2629,7 +2671,9 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3137,7 +3181,9 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3201,7 +3247,9 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3265,7 +3313,9 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3683,7 +3733,11 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3703,6 +3757,12 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3720,16 +3780,15 @@ void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(util::f32_to_f16(static_cast<float>(static_cast<uint16_t>(
-              ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                       : src0.read_lane(wf, lane)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3759,7 +3818,11 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3779,6 +3842,12 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3796,17 +3865,15 @@ void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(util::f32_to_f16(static_cast<float>(static_cast<int16_t>(
-              ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                       : src0.read_lane(wf, lane)) &
-              0xFFFF)))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFF)))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3836,7 +3903,11 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3856,6 +3927,12 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3873,22 +3950,21 @@ void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))));
+        float s = util::f16_to_f32(static_cast<uint16_t>(
+            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
         if (std::isnan(s) || s < 0.0f)
           return 0u;
         if (s >= 65536.0f)
           return static_cast<uint32_t>(UINT16_MAX);
         return static_cast<uint32_t>(static_cast<uint16_t>(s));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3918,7 +3994,11 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3938,6 +4018,12 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3955,14 +4041,14 @@ void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))));
+        float s = util::f16_to_f32(static_cast<uint16_t>(
+            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
         if (std::isnan(s))
           return 0u;
         if (s >= 32768.0f)
@@ -3971,8 +4057,7 @@ void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));
         return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s)));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4001,7 +4086,11 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4021,6 +4110,12 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
   }
 }
 
+void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4037,7 +4132,12 @@ void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::rcp_f32_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4046,8 +4146,7 @@ void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::rcp_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4066,8 +4165,7 @@ void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4096,7 +4194,11 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4116,6 +4218,12 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
   }
 }
 
+void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4132,7 +4240,17 @@ void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) {
+      auto r = util::stdx::sqrt(a);
+      util::stdx::where(util::stdx::isnan(a), r) = a;
+      util::stdx::where(a < 0.0f, r) = std::numeric_limits<float>::quiet_NaN();
+      return r;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4141,8 +4259,7 @@ void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::sqrt_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4161,8 +4278,7 @@ void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4191,7 +4307,11 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4211,6 +4331,12 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
   }
 }
 
+void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4227,7 +4353,12 @@ void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::rsq_f32_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4236,8 +4367,7 @@ void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::rsq_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4256,8 +4386,7 @@ void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4286,7 +4415,11 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4306,6 +4439,12 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
   }
 }
 
+void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4322,7 +4461,12 @@ void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::log_f32_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4331,8 +4475,7 @@ void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::log_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4351,8 +4494,7 @@ void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4381,7 +4523,11 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4401,6 +4547,12 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
   }
 }
 
+void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4417,7 +4569,12 @@ void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::exp_f32_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4426,8 +4583,7 @@ void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::exp_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4446,8 +4602,7 @@ void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4477,7 +4632,11 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4497,6 +4656,12 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
   }
 }
 
+void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4513,7 +4678,13 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16(
+        [](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4522,18 +4693,17 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = [&]() {
             int e;
-            return std::frexp(static_cast<float>([&]() {
-                                float sv = util::f16_to_f32(
-                                    static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                               ? (src0.read_lane(wf, lane) >> 16)
-                                                               : src0.read_lane(wf, lane))));
-                                if (inst_.abs & (1u << 0))
-                                  sv = std::fabs(sv);
-                                if (inst_.neg & (1u << 0))
-                                  sv = -sv;
-                                return sv;
-                              }()),
-                              &e);
+            return std::frexp(
+                static_cast<float>([&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(
+                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                  if (inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }()),
+                &e);
           }();
           if (inst_.omod == 1)
             v *= 2.0f;
@@ -4547,8 +4717,7 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4578,7 +4747,11 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4598,6 +4771,12 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
   }
 }
 
+void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4614,7 +4793,15 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) {
+      return util::stdx::static_simd_cast<util::native<float>>(
+          util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a)));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4624,8 +4811,7 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             float s = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -4649,8 +4835,7 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4680,7 +4865,11 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4700,6 +4889,12 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   }
 }
 
+void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4716,7 +4911,12 @@ void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::floor_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4725,8 +4925,7 @@ void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = util::floor_scalar([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4745,8 +4944,7 @@ void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4775,7 +4973,11 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4795,6 +4997,12 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
   }
 }
 
+void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4811,7 +5019,12 @@ void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::ceil_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4820,8 +5033,7 @@ void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = util::ceil_scalar([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4840,8 +5052,7 @@ void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4871,7 +5082,11 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4891,6 +5106,12 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   }
 }
 
+void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4907,7 +5128,12 @@ void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::trunc_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4916,8 +5142,7 @@ void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = util::trunc_scalar([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -4936,8 +5161,7 @@ void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -4967,7 +5191,11 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4987,6 +5215,12 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
   }
 }
 
+void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5003,7 +5237,12 @@ void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return util::rndne_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5012,8 +5251,7 @@ void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = std::nearbyint([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -5032,8 +5270,7 @@ void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5063,7 +5300,11 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5083,6 +5324,12 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   }
 }
 
+void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5099,7 +5346,12 @@ void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) { return a - util::floor_simd(a); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5109,8 +5361,7 @@ void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto v = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -5131,8 +5382,7 @@ void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5161,7 +5411,11 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5181,6 +5435,12 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
   }
 }
 
+void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5198,6 +5458,7 @@ void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5206,8 +5467,7 @@ void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::sin_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -5226,8 +5486,7 @@ void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5256,7 +5515,11 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5276,6 +5539,12 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
   }
 }
 
+void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5293,6 +5562,7 @@ void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5301,8 +5571,7 @@ void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float v = [&]() {
           float v = amdgpu::transcendental::cos_f32([&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -5321,8 +5590,7 @@ void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5372,6 +5640,12 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
   }
 }
 
+void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
@@ -5389,7 +5663,11 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5409,6 +5687,12 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5426,21 +5710,20 @@ void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))));
+        float s = util::f16_to_f32(static_cast<uint16_t>(
+            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
         if (std::isnan(s))
           return 0u;
         float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
         return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5470,7 +5753,11 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5490,6 +5777,12 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtNormU16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5507,21 +5800,20 @@ void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))));
+        float s = util::f16_to_f32(static_cast<uint16_t>(
+            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
         if (std::isnan(s))
           return 0u;
         float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
         return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5550,7 +5842,11 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5570,6 +5866,12 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
   }
 }
 
+void VNotB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VNotB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5587,16 +5889,15 @@ void VNotB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              (~((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              (~::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -5626,7 +5927,11 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5663,14 +5968,14 @@ void VCvtI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane)) &
-                        0xFFFF))));
+    vdst.write_lane(
+        wf, lane,
+        static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(
+            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFF))));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -5699,7 +6004,11 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5736,13 +6045,12 @@ void VCvtU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane,
-                    (((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane)) &
-                     0xFFFFu));
+                    (::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFFu));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -5927,7 +6235,11 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6004,7 +6316,11 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6161,11 +6477,15 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6450,11 +6770,15 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6960,11 +7284,15 @@ VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -7033,11 +7361,15 @@ VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8485,11 +8817,19 @@ VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8507,6 +8847,12 @@ VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinNumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8527,7 +8873,15 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(
+          util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8537,8 +8891,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = std::fmin(
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                 if (inst_.abs & (1u << 0))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 0))
@@ -8547,8 +8900,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               }(),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                 if (inst_.abs & (1u << 1))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 1))
@@ -8567,8 +8919,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -8601,11 +8952,19 @@ VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8623,6 +8982,12 @@ VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8643,7 +9008,15 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(
+          util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8653,8 +9026,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = std::fmax(
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                 if (inst_.abs & (1u << 0))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 0))
@@ -8663,8 +9035,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               }(),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                 if (inst_.abs & (1u << 1))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 1))
@@ -8683,8 +9054,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -8716,11 +9086,19 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8738,6 +9116,12 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8758,34 +9142,38 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16([&]() {
         float v = [&]() {
-          float v =
-              ([&]() {
-                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
-                if (inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }() +
-               [&]() {
-                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                     ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                              : src1.read_lane(wf, lane))));
-                 if (inst_.abs & (1u << 1))
-                   sv = std::fabs(sv);
-                 if (inst_.neg & (1u << 1))
-                   sv = -sv;
-                 return sv;
-               }());
+          float v = ([&]() {
+            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+            if (inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }() +
+                     [&]() {
+                       float sv = util::f16_to_f32(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                       if (inst_.abs & (1u << 1))
+                         sv = std::fabs(sv);
+                       if (inst_.neg & (1u << 1))
+                         sv = -sv;
+                       return sv;
+                     }());
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -8798,8 +9186,7 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -8831,11 +9218,19 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8853,6 +9248,12 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VSubF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8873,34 +9274,38 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16([&]() {
         float v = [&]() {
-          float v =
-              ([&]() {
-                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
-                if (inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }() -
-               [&]() {
-                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                     ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                              : src1.read_lane(wf, lane))));
-                 if (inst_.abs & (1u << 1))
-                   sv = std::fabs(sv);
-                 if (inst_.neg & (1u << 1))
-                   sv = -sv;
-                 return sv;
-               }());
+          float v = ([&]() {
+            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+            if (inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }() -
+                     [&]() {
+                       float sv = util::f16_to_f32(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                       if (inst_.abs & (1u << 1))
+                         sv = std::fabs(sv);
+                       if (inst_.neg & (1u << 1))
+                         sv = -sv;
+                       return sv;
+                     }());
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -8913,8 +9318,7 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -8947,11 +9351,19 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -8969,6 +9381,12 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VSubrevF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8989,34 +9407,38 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16([&]() {
         float v = [&]() {
-          float v =
-              ([&]() {
-                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane))));
-                if (inst_.abs & (1u << 1))
-                  sv = std::fabs(sv);
-                if (inst_.neg & (1u << 1))
-                  sv = -sv;
-                return sv;
-              }() -
-               [&]() {
-                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                     ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))));
-                 if (inst_.abs & (1u << 0))
-                   sv = std::fabs(sv);
-                 if (inst_.neg & (1u << 0))
-                   sv = -sv;
-                 return sv;
-               }());
+          float v = ([&]() {
+            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+            if (inst_.abs & (1u << 1))
+              sv = std::fabs(sv);
+            if (inst_.neg & (1u << 1))
+              sv = -sv;
+            return sv;
+          }() -
+                     [&]() {
+                       float sv = util::f16_to_f32(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                       if (inst_.abs & (1u << 0))
+                         sv = std::fabs(sv);
+                       if (inst_.neg & (1u << 0))
+                         sv = -sv;
+                       return sv;
+                     }());
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -9029,8 +9451,7 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -9062,11 +9483,19 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -9084,6 +9513,12 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMulF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9104,34 +9539,38 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16([&]() {
         float v = [&]() {
-          float v =
-              ([&]() {
-                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
-                if (inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }() *
-               [&]() {
-                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                     ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                              : src1.read_lane(wf, lane))));
-                 if (inst_.abs & (1u << 1))
-                   sv = std::fabs(sv);
-                 if (inst_.neg & (1u << 1))
-                   sv = -sv;
-                 return sv;
-               }());
+          float v = ([&]() {
+            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+            if (inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }() *
+                     [&]() {
+                       float sv = util::f16_to_f32(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                       if (inst_.abs & (1u << 1))
+                         sv = std::fabs(sv);
+                       if (inst_.neg & (1u << 1))
+                         sv = -sv;
+                       return sv;
+                     }());
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -9144,8 +9583,7 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -9178,11 +9616,19 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -9200,6 +9646,12 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VFmacF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9220,7 +9672,13 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     vdst.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src0.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9230,8 +9688,7 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = std::fma(
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                 if (inst_.abs & (1u << 0))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 0))
@@ -9240,17 +9697,16 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               }(),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                 if (inst_.abs & (1u << 1))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 1))
                   sv = -sv;
                 return sv;
               }(),
-              util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x8u) != 0
-                                                          ? (vdst.read_lane(wf, lane) >> 16)
-                                                          : vdst.read_lane(wf, lane)))));
+              util::f16_to_f32(
+                  static_cast<uint16_t>(((opsel & 0x8u) != 0 ? (vdst.read_lane(wf, lane) >> 16)
+                                                             : vdst.read_lane(wf, lane)))));
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -9263,8 +9719,7 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -9297,11 +9752,19 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -9319,6 +9782,12 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VLdexpF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9339,7 +9808,18 @@ void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
+      auto x = util::f16_to_f32_simd(a);
+      auto n = util::stdx::static_simd_cast<
+          util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
+          (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+      return util::f32_to_f16_simd(util::stdx::ldexp(x, n));
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9349,17 +9829,15 @@ void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = std::ldexp(
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                 if (inst_.abs & (1u << 0))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 0))
                   sv = -sv;
                 return sv;
               }(),
-              static_cast<int32_t>(static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                             ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane)))));
+              static_cast<int32_t>(static_cast<int16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
           if (inst_.omod == 1)
             v *= 2.0f;
           else if (inst_.omod == 2)
@@ -9372,8 +9850,7 @@ void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -10272,15 +10749,21 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -10437,7 +10920,11 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -10475,15 +10962,26 @@ void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
+      using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+      auto va = util::stdx::static_simd_cast<U64>(a);
+      auto vb = util::stdx::static_simd_cast<U64>(b);
+      auto val = (va << 32) | vb;
+      auto sh = util::stdx::static_simd_cast<U64>(c & 31u);
+      return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane, [&]() {
       auto a = src0.read_lane(wf, lane);
       auto b = src1.read_lane(wf, lane);
-      auto c = ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                        : src2.read_lane(wf, lane));
+      auto c = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
       uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
       return static_cast<uint32_t>(val >> (c & 31u));
     }());
@@ -10528,7 +11026,11 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -10566,15 +11068,26 @@ void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
+      using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+      auto va = util::stdx::static_simd_cast<U64>(a);
+      auto vb = util::stdx::static_simd_cast<U64>(b);
+      auto val = (va << 32) | vb;
+      auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);
+      return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane, [&]() {
       auto a = src0.read_lane(wf, lane);
       auto b = src1.read_lane(wf, lane);
-      auto c = ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                        : src2.read_lane(wf, lane));
+      auto c = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
       uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
       return static_cast<uint32_t>(val >> ((c & 3u) * 8u));
     }());
@@ -11598,15 +12111,21 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -11835,15 +12354,27 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -11861,6 +12392,12 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11881,7 +12418,13 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11892,8 +12435,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               std::fmin(
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                     if (inst_.abs & (1u << 0))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 0))
@@ -11902,8 +12444,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }(),
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                                 : src1.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                     if (inst_.abs & (1u << 1))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 1))
@@ -11912,8 +12453,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }()),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                             : src2.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
                 if (inst_.abs & (1u << 2))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 2))
@@ -11932,8 +12472,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -11968,15 +12507,27 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -11994,6 +12545,12 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -12014,7 +12571,13 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -12025,8 +12588,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               std::fmax(
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                     if (inst_.abs & (1u << 0))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 0))
@@ -12035,8 +12597,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }(),
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                                 : src1.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                     if (inst_.abs & (1u << 1))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 1))
@@ -12045,8 +12606,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }()),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                             : src2.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
                 if (inst_.abs & (1u << 2))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 2))
@@ -12065,8 +12625,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -12259,15 +12818,27 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -12285,6 +12856,12 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -12305,7 +12882,14 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto a, auto b, auto c) {
+      return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -12315,8 +12899,7 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -12325,8 +12908,7 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -12335,8 +12917,7 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto c = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                           : src2.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
               if (inst_.abs & (1u << 2))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 2))
@@ -12360,8 +12941,7 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -12396,15 +12976,27 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -12422,6 +13014,12 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -12442,7 +13040,14 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto a, auto b, auto c) {
+      return util::ieee_maximum_simd(util::ieee_maximum_simd(a, b), c);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -12452,8 +13057,7 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -12462,8 +13066,7 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -12472,8 +13075,7 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto c = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                           : src2.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
               if (inst_.abs & (1u << 2))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 2))
@@ -12497,8 +13099,7 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -12612,15 +13213,27 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -12638,6 +13251,12 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -12659,6 +13278,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -12668,8 +13288,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -12678,8 +13297,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -12688,8 +13306,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto c = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                           : src2.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
               if (inst_.abs & (1u << 2))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 2))
@@ -12710,8 +13327,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -12825,15 +13441,21 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13206,15 +13828,27 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13232,6 +13866,12 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13253,24 +13893,17 @@ void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>(((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                             ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))) *
-                                  static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                             ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane)))) +
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                            ? (src2.read_lane(wf, lane) >> 16)
-                                                            : src2.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
-    }
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t result = (s0 * s1 + s2) & 0xffffu;
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
+
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
                                                           dpp_bank_mask_, dpp_bound_ctrl_);
@@ -13616,15 +14249,27 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13642,6 +14287,12 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13662,7 +14313,13 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -13672,8 +14329,7 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = std::fma(
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                 if (inst_.abs & (1u << 0))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 0))
@@ -13682,8 +14338,7 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               }(),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                             : src1.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                 if (inst_.abs & (1u << 1))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 1))
@@ -13692,8 +14347,7 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               }(),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                             : src2.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
                 if (inst_.abs & (1u << 2))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 2))
@@ -13712,8 +14366,7 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -13747,15 +14400,27 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13773,6 +14438,12 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13793,24 +14464,33 @@ void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      using I = util::native<int32_t>;
+      auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
+      auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
+      auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
+      return util::stdx::static_simd_cast<util::native<uint32_t>>(
+                 util::stdx::min(util::stdx::min(sa, sb), sc)) &
+             0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::min(std::min(static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                          ? (src0.read_lane(wf, lane) >> 16)
-                                                          : src0.read_lane(wf, lane))),
-                                static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                          ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane)))),
-                       static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                 ? (src2.read_lane(wf, lane) >> 16)
-                                                 : src2.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::min(
+              std::min(static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+              static_cast<int16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2))))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -13844,15 +14524,27 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13870,6 +14562,12 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13890,24 +14588,30 @@ void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      auto sa = a & 0xFFFFu;
+      auto sb = b & 0xFFFFu;
+      auto sc = c & 0xFFFFu;
+      return util::stdx::min(util::stdx::min(sa, sb), sc) & 0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::min(std::min(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))),
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                           ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane)))),
-                       static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                  ? (src2.read_lane(wf, lane) >> 16)
-                                                  : src2.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::min(std::min(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src0, wf, lane, opsel, 0)),
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src1, wf, lane, opsel, 1))),
+                       static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -13941,15 +14645,27 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -13967,6 +14683,12 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13987,24 +14709,33 @@ void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      using I = util::native<int32_t>;
+      auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
+      auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
+      auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
+      return util::stdx::static_simd_cast<util::native<uint32_t>>(
+                 util::stdx::max(util::stdx::max(sa, sb), sc)) &
+             0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::max(std::max(static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                          ? (src0.read_lane(wf, lane) >> 16)
-                                                          : src0.read_lane(wf, lane))),
-                                static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                          ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane)))),
-                       static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                 ? (src2.read_lane(wf, lane) >> 16)
-                                                 : src2.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::max(
+              std::max(static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+              static_cast<int16_t>(
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2))))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -14038,15 +14769,27 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -14064,6 +14807,12 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14084,24 +14833,30 @@ void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      auto sa = a & 0xFFFFu;
+      auto sb = b & 0xFFFFu;
+      auto sc = c & 0xFFFFu;
+      return util::stdx::max(util::stdx::max(sa, sb), sc) & 0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::max(std::max(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))),
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                           ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane)))),
-                       static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                  ? (src2.read_lane(wf, lane) >> 16)
-                                                  : src2.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::max(std::max(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src0, wf, lane, opsel, 0)),
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src1, wf, lane, opsel, 1))),
+                       static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -14135,15 +14890,27 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -14161,6 +14928,12 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14181,26 +14954,35 @@ void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      using I = util::native<int32_t>;
+      auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
+      auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
+      auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
+      return util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(
+                 util::stdx::min(util::stdx::max(sa, sb), sc), util::stdx::min(sa, sb))) &
+             0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
-            auto a = static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                               ? (src0.read_lane(wf, lane) >> 16)
-                                               : src0.read_lane(wf, lane)));
-            auto b = static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                               ? (src1.read_lane(wf, lane) >> 16)
-                                               : src1.read_lane(wf, lane)));
-            auto c = static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                               ? (src2.read_lane(wf, lane) >> 16)
-                                               : src2.read_lane(wf, lane)));
+            auto a = static_cast<int16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
+            auto b = static_cast<int16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
+            auto c = static_cast<int16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2));
             return std::max(std::min(std::max(a, b), c), std::min(a, b));
           }())))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -14234,15 +15016,27 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -14260,6 +15054,12 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14280,26 +15080,34 @@ void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
+      auto sa = a & 0xFFFFu;
+      auto sb = b & 0xFFFFu;
+      auto sc = c & 0xFFFFu;
+      return util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),
+                             util::stdx::min(sa, sb)) &
+             0xFFFFu;
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>([&]() {
-            auto a = static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                ? (src0.read_lane(wf, lane) >> 16)
-                                                : src0.read_lane(wf, lane)));
-            auto b = static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                ? (src1.read_lane(wf, lane) >> 16)
-                                                : src1.read_lane(wf, lane)));
-            auto c = static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                ? (src2.read_lane(wf, lane) >> 16)
-                                                : src2.read_lane(wf, lane)));
+            auto a = static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
+            auto b = static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
+            auto c = static_cast<uint16_t>(
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2));
             return std::max(std::min(std::max(a, b), c), std::min(a, b));
           }()))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -14333,15 +15141,27 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -14359,6 +15179,12 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14380,25 +15206,20 @@ void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              static_cast<int16_t>(((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                               ? (src0.read_lane(wf, lane) >> 16)
-                                                               : src0.read_lane(wf, lane))) *
-                                     static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                               ? (src1.read_lane(wf, lane) >> 16)
-                                                               : src1.read_lane(wf, lane)))) +
-                                    static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x4u) != 0
-                                                              ? (src2.read_lane(wf, lane) >> 16)
-                                                              : src2.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
-    }
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    int32_t a = static_cast<int16_t>(s0);
+    int32_t b = static_cast<int16_t>(s1);
+    int32_t c = static_cast<int16_t>(s2);
+    uint32_t result = static_cast<uint32_t>(static_cast<uint16_t>(a * b + c));
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
+
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
                                                           dpp_bank_mask_, dpp_bound_ctrl_);
@@ -14431,15 +15252,27 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -14457,6 +15290,12 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VDivFixupF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14477,13 +15316,22 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  }
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float p = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    float p = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
     if (inst_.abs & (1u << 0))
       p = std::fabs(p);
     if (inst_.neg & (1u << 0))
@@ -14529,7 +15377,8 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       result *= 0.5f;
     if (inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    uint32_t result_bits = util::f32_to_f16(result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -14877,11 +15726,19 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -14923,12 +15780,18 @@ void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(
+        uint32_t, [](auto a, auto b, auto c) { return (a & 0xFFFFu) * (b & 0xFFFFu) + c; });
+  }
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFFu;
-    uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFFu;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = src2.read_lane(wf, lane);
     vdst.write_lane(wf, lane, s0 * s1 + s2);
   }
@@ -14964,11 +15827,19 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -15010,12 +15881,23 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(uint32_t, [](auto a, auto b, auto c) {
+      auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 16);
+      auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 16);
+      return sa * sb + c;
+    });
+  }
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int32_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    int32_t s0 = static_cast<int16_t>(s0_raw);
+    int32_t s1 = static_cast<int16_t>(s1_raw);
     int32_t s2 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
@@ -15257,11 +16139,19 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -15285,6 +16175,12 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   }
 }
 
+void VCndmaskB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -15304,20 +16200,19 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>(((src2.read_scalar64(wf) >> lane) & 1)
-                                    ? static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                                 ? (src1.read_lane(wf, lane) >> 16)
-                                                                 : src1.read_lane(wf, lane)))
-                                    : static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
+              ((src2.read_scalar64(wf) >> lane) & 1)
+                  ? static_cast<uint16_t>(
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
+                  : static_cast<uint16_t>(
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -15676,7 +16571,11 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -15694,6 +16593,12 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VDot2F16F16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15757,7 +16662,7 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint32_t result_bits = util::f32_to_f16(result);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -15799,7 +16704,11 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -15817,6 +16726,12 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VDot2Bf16Bf16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15880,7 +16795,7 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint32_t result_bits = util::f32_to_bf16(result);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -16072,15 +16987,27 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -16098,6 +17025,12 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -16118,7 +17051,13 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -16129,8 +17068,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               std::fmin(
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                     if (inst_.abs & (1u << 0))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 0))
@@ -16139,8 +17077,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }(),
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                                 : src1.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                     if (inst_.abs & (1u << 1))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 1))
@@ -16149,8 +17086,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }()),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                             : src2.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
                 if (inst_.abs & (1u << 2))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 2))
@@ -16169,8 +17105,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -16205,15 +17140,27 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -16231,6 +17178,12 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -16251,7 +17204,13 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+        [](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -16262,8 +17221,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               std::fmax(
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                     if (inst_.abs & (1u << 0))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 0))
@@ -16272,8 +17230,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }(),
                   [&]() {
                     float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                                 : src1.read_lane(wf, lane))));
+                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
                     if (inst_.abs & (1u << 1))
                       sv = std::fabs(sv);
                     if (inst_.neg & (1u << 1))
@@ -16282,8 +17239,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   }()),
               [&]() {
                 float sv = util::f16_to_f32(static_cast<uint16_t>(
-                    ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                             : src2.read_lane(wf, lane))));
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
                 if (inst_.abs & (1u << 2))
                   sv = std::fabs(sv);
                 if (inst_.neg & (1u << 2))
@@ -16302,8 +17258,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -16496,15 +17451,27 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -16522,6 +17489,12 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -16542,7 +17515,14 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto a, auto b, auto c) {
+      return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -16552,8 +17532,7 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -16562,8 +17541,7 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -16572,8 +17550,7 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto c = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                           : src2.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
               if (inst_.abs & (1u << 2))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 2))
@@ -16597,8 +17574,7 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -16633,15 +17609,27 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -16659,6 +17647,12 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -16679,7 +17673,14 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto a, auto b, auto c) {
+      return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c);
+    });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -16689,8 +17690,7 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -16699,8 +17699,7 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -16709,8 +17708,7 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto c = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x4u) != 0 ? (src2.read_lane(wf, lane) >> 16)
-                                                           : src2.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
               if (inst_.abs & (1u << 2))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 2))
@@ -16734,8 +17732,7 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -16828,7 +17825,11 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -16865,32 +17866,32 @@ void VSExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   if (exec != 0) {
-    vdst.write_scalar(wf, util::f32_to_f16([&]() {
-                        float v = [&]() {
-                          float v = amdgpu::transcendental::exp_f32([&]() {
-                            float sv = util::f16_to_f32(
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_scalar(wf) >> 16)
-                                                           : src0.read_scalar(wf))));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }());
-                          if (inst_.omod == 1)
-                            v *= 2.0f;
-                          else if (inst_.omod == 2)
-                            v *= 4.0f;
-                          else if (inst_.omod == 3)
-                            v *= 0.5f;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0f, 1.0f);
-                        return v;
-                      }()));
+    vdst.write_scalar(
+        wf, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = amdgpu::transcendental::exp_f32([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(
+                  ((opsel & 0x1u) != 0 ? (src0.read_scalar(wf) >> 16) : src0.read_scalar(wf))));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }());
+            if (inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -16981,7 +17982,11 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17018,32 +18023,32 @@ void VSLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   if (exec != 0) {
-    vdst.write_scalar(wf, util::f32_to_f16([&]() {
-                        float v = [&]() {
-                          float v = amdgpu::transcendental::log_f32([&]() {
-                            float sv = util::f16_to_f32(
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_scalar(wf) >> 16)
-                                                           : src0.read_scalar(wf))));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }());
-                          if (inst_.omod == 1)
-                            v *= 2.0f;
-                          else if (inst_.omod == 2)
-                            v *= 4.0f;
-                          else if (inst_.omod == 3)
-                            v *= 0.5f;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0f, 1.0f);
-                        return v;
-                      }()));
+    vdst.write_scalar(
+        wf, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = amdgpu::transcendental::log_f32([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(
+                  ((opsel & 0x1u) != 0 ? (src0.read_scalar(wf) >> 16) : src0.read_scalar(wf))));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }());
+            if (inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -17134,7 +18139,11 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17171,32 +18180,32 @@ void VSRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   if (exec != 0) {
-    vdst.write_scalar(wf, util::f32_to_f16([&]() {
-                        float v = [&]() {
-                          float v = amdgpu::transcendental::rcp_f32([&]() {
-                            float sv = util::f16_to_f32(
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_scalar(wf) >> 16)
-                                                           : src0.read_scalar(wf))));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }());
-                          if (inst_.omod == 1)
-                            v *= 2.0f;
-                          else if (inst_.omod == 2)
-                            v *= 4.0f;
-                          else if (inst_.omod == 3)
-                            v *= 0.5f;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0f, 1.0f);
-                        return v;
-                      }()));
+    vdst.write_scalar(
+        wf, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = amdgpu::transcendental::rcp_f32([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(
+                  ((opsel & 0x1u) != 0 ? (src0.read_scalar(wf) >> 16) : src0.read_scalar(wf))));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }());
+            if (inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -17287,7 +18296,11 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17324,32 +18337,32 @@ void VSRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   if (exec != 0) {
-    vdst.write_scalar(wf, util::f32_to_f16([&]() {
-                        float v = [&]() {
-                          float v = amdgpu::transcendental::rsq_f32([&]() {
-                            float sv = util::f16_to_f32(
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_scalar(wf) >> 16)
-                                                           : src0.read_scalar(wf))));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }());
-                          if (inst_.omod == 1)
-                            v *= 2.0f;
-                          else if (inst_.omod == 2)
-                            v *= 4.0f;
-                          else if (inst_.omod == 3)
-                            v *= 0.5f;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0f, 1.0f);
-                        return v;
-                      }()));
+    vdst.write_scalar(
+        wf, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = amdgpu::transcendental::rsq_f32([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(
+                  ((opsel & 0x1u) != 0 ? (src0.read_scalar(wf) >> 16) : src0.read_scalar(wf))));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }());
+            if (inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -17442,7 +18455,11 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17479,32 +18496,32 @@ void VSSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   if (exec != 0) {
-    vdst.write_scalar(wf, util::f32_to_f16([&]() {
-                        float v = [&]() {
-                          float v = amdgpu::transcendental::sqrt_f32([&]() {
-                            float sv = util::f16_to_f32(
-                                static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                           ? (src0.read_scalar(wf) >> 16)
-                                                           : src0.read_scalar(wf))));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }());
-                          if (inst_.omod == 1)
-                            v *= 2.0f;
-                          else if (inst_.omod == 2)
-                            v *= 4.0f;
-                          else if (inst_.omod == 3)
-                            v *= 0.5f;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0f, 1.0f);
-                        return v;
-                      }()));
+    vdst.write_scalar(
+        wf, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = amdgpu::transcendental::sqrt_f32([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(
+                  ((opsel & 0x1u) != 0 ? (src0.read_scalar(wf) >> 16) : src0.read_scalar(wf))));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }());
+            if (inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -17535,11 +18552,19 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17557,6 +18582,12 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -17578,19 +18609,17 @@ void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                            ? (src0.read_lane(wf, lane) >> 16)
-                                                            : src0.read_lane(wf, lane))) +
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src0, wf, lane, opsel, 0)) +
+                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -17623,11 +18652,19 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17645,6 +18682,12 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VSubNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -17666,19 +18709,17 @@ void VSubNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                            ? (src0.read_lane(wf, lane) >> 16)
-                                                            : src0.read_lane(wf, lane))) -
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src0, wf, lane, opsel, 0)) -
+                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -17711,11 +18752,19 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17733,6 +18782,12 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -17754,6 +18809,7 @@ void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -17761,13 +18817,10 @@ void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))))) *
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)))) *
               static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane)))))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -17967,11 +19020,19 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -17989,6 +19050,12 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18010,20 +19077,18 @@ void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::max(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                  ? (src0.read_lane(wf, lane) >> 16)
-                                                  : src0.read_lane(wf, lane))),
-                       static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                  ? (src1.read_lane(wf, lane) >> 16)
-                                                  : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::max(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18055,11 +19120,19 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18077,6 +19150,12 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18098,20 +19177,18 @@ void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::max(static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                 : src0.read_lane(wf, lane))),
-                       static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                 ? (src1.read_lane(wf, lane) >> 16)
-                                                 : src1.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::max(static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                           src1, wf, lane, opsel, 1))))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18143,11 +19220,19 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18165,6 +19250,12 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18186,20 +19277,18 @@ void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::min(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                  ? (src0.read_lane(wf, lane) >> 16)
-                                                  : src0.read_lane(wf, lane))),
-                       static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                  ? (src1.read_lane(wf, lane) >> 16)
-                                                  : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::min(static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<uint16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18231,11 +19320,19 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18253,6 +19350,12 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18274,20 +19377,18 @@ void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::min(static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                 : src0.read_lane(wf, lane))),
-                       static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                 ? (src1.read_lane(wf, lane) >> 16)
-                                                 : src1.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+              std::min(static_cast<int16_t>(
+                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
+                       static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                           src1, wf, lane, opsel, 1))))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18320,11 +19421,19 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18342,6 +19451,12 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VAddNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18363,20 +19478,16 @@ void VAddNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              static_cast<int16_t>((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))) +
-                                    static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                              ? (src1.read_lane(wf, lane) >> 16)
-                                                              : src1.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      uint32_t src_half = static_cast<uint32_t>(
+          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+              (::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) +
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18409,11 +19520,19 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18431,6 +19550,12 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VSubNcI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VSubNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -18452,20 +19577,16 @@ void VSubNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              static_cast<int16_t>((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                              ? (src0.read_lane(wf, lane) >> 16)
-                                                              : src0.read_lane(wf, lane))) -
-                                    static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                              ? (src1.read_lane(wf, lane) >> 16)
-                                                              : src1.read_lane(wf, lane)))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      uint32_t src_half = static_cast<uint32_t>(
+          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+              (::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) -
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18686,11 +19807,19 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18728,12 +19857,17 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
+        uint32_t, [](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); });
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFF;
-    uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFF;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1);
     vdst.write_lane(wf, lane, s0 | (s1 << 16));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -18766,11 +19900,19 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18808,19 +19950,31 @@ void VCvtPkNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, [](auto a, auto b) {
+      using U = util::native<uint32_t>;
+      auto lo = util::cvt_pknorm_i16_f32_simd(util::f16_to_f32_simd(a));
+      auto hi = util::cvt_pknorm_i16_f32_simd(util::f16_to_f32_simd(b));
+      return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |
+             (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu);
+    });
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    auto cvt_u16 = [](float f) -> uint16_t {
+    float s0 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)));
+    float s1 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)));
+    auto cvt_i16 = [](float f) -> int16_t {
       if (std::isnan(f))
         return 0;
-      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
     };
-    uint16_t lo = cvt_u16(s0);
-    uint16_t hi = cvt_u16(s1);
+    int16_t lo = cvt_i16(s0);
+    int16_t hi = cvt_i16(s1);
     vdst.write_lane(wf, lane,
                     (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
   }
@@ -18854,11 +20008,19 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -18896,12 +20058,22 @@ void VCvtPkNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, [](auto a, auto b) {
+      auto lo = util::cvt_pknorm_u16_f32_simd(util::f16_to_f32_simd(a));
+      auto hi = util::cvt_pknorm_u16_f32_simd(util::f16_to_f32_simd(b));
+      return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu);
+    });
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float s0 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)));
+    float s1 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)));
     auto cvt_u16 = [](float f) -> uint16_t {
       if (std::isnan(f))
         return 0;
@@ -19744,7 +20916,9 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -20036,7 +21210,9 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -20079,11 +21255,19 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20101,6 +21285,12 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VLshlrevB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -20122,22 +21312,16 @@ void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane)))
-                                 << (static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                ? (src0.read_lane(wf, lane) >> 16)
-                                                                : src0.read_lane(wf, lane))) &
-                                     15u))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
-    }
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t result = (s1 << (s0 & 15u)) & 0xffffu;
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
+
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
                                                           dpp_bank_mask_, dpp_bound_ctrl_);
@@ -20168,11 +21352,19 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20190,6 +21382,12 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -20211,22 +21409,16 @@ void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))) >>
-                                 (static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                             ? (src0.read_lane(wf, lane) >> 16)
-                                                             : src0.read_lane(wf, lane))) &
-                                  15u))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
-    }
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t result = s1 >> (s0 & 15u);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
+
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
                                                           dpp_bank_mask_, dpp_bound_ctrl_);
@@ -20257,11 +21449,19 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20279,6 +21479,12 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -20300,25 +21506,18 @@ void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
-            auto v = static_cast<int16_t>(static_cast<int16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                         : src1.read_lane(wf, lane))));
-            return static_cast<uint32_t>(static_cast<uint16_t>(
-                v >> (static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                ? (src0.read_lane(wf, lane) >> 16)
-                                                : src0.read_lane(wf, lane))) &
-                      15u)));
-          }())))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
-    }
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    auto v = static_cast<int16_t>(s1);
+    uint32_t result =
+        static_cast<uint32_t>(static_cast<uint16_t>(v >> (static_cast<int16_t>(s0) & 15u)));
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
+
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
                                                           dpp_bank_mask_, dpp_bound_ctrl_);
@@ -20495,11 +21694,15 @@ VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20568,11 +21771,15 @@ VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20790,11 +21997,19 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20812,6 +22027,12 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VAndB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VAndB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -20833,19 +22054,17 @@ void VAndB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                            ? (src0.read_lane(wf, lane) >> 16)
-                                                            : src0.read_lane(wf, lane))) &
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src0, wf, lane, opsel, 0)) &
+                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -20877,11 +22096,19 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20899,6 +22126,12 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VOrB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VOrB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -20920,19 +22153,17 @@ void VOrB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                            ? (src0.read_lane(wf, lane) >> 16)
-                                                            : src0.read_lane(wf, lane))) |
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src0, wf, lane, opsel, 0)) |
+                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -20964,11 +22195,19 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -20986,6 +22225,12 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VXorB16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VXorB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -21007,19 +22252,17 @@ void VXorB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                            ? (src0.read_lane(wf, lane) >> 16)
-                                                            : src0.read_lane(wf, lane))) ^
-                                 static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                            ? (src1.read_lane(wf, lane) >> 16)
-                                                            : src1.read_lane(wf, lane))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+          static_cast<uint16_t>((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src0, wf, lane, opsel, 0)) ^
+                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                     src1, wf, lane, opsel, 1)))))));
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21198,11 +22441,19 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -21220,6 +22471,12 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMinimumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -21241,6 +22498,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -21250,8 +22508,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -21260,8 +22517,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -21286,8 +22542,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21320,11 +22575,19 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -21342,6 +22605,12 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VMaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -21363,6 +22632,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -21372,8 +22642,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           float v = [&]() {
             auto a = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                           : src0.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
               if (inst_.abs & (1u << 0))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 0))
@@ -21382,8 +22651,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
             }();
             auto b = [&]() {
               float sv = util::f16_to_f32(static_cast<uint16_t>(
-                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                           : src1.read_lane(wf, lane))));
+                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
               if (inst_.abs & (1u << 1))
                 sv = std::fabs(sv);
               if (inst_.neg & (1u << 1))
@@ -21408,8 +22676,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
-                                                src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21466,6 +22733,12 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtPkFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21493,7 +22766,7 @@ void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_fp8_e4m3_rne(s0);
     uint32_t hi = util::f32_to_fp8_e4m3_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -21549,6 +22822,12 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtPkBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21576,7 +22855,7 @@ void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
     uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -21631,6 +22910,12 @@ VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+}
+
+void VCvtSrFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VCvtSrFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -21718,6 +23003,12 @@ VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
   }
 }
 
+void VCvtSrBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VCvtSrBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -21778,11 +23069,19 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -21820,15 +23119,19 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a < b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -21837,8 +23140,7 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() <
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -21881,11 +23183,19 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -21923,15 +23233,19 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a == b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -21940,8 +23254,7 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() ==
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -21984,11 +23297,19 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22026,15 +23347,19 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a <= b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22043,8 +23368,7 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() <=
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -22087,11 +23411,19 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22129,15 +23461,19 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a > b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22146,8 +23482,7 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() >
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -22190,11 +23525,19 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22232,7 +23575,12 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return (a < b) || (a > b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -22240,8 +23588,7 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (([&]() {
           auto a = [&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -22250,8 +23597,7 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           }();
           auto b = [&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                         : src1.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
             if (inst_.abs & (1u << 1))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 1))
@@ -22296,11 +23642,19 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22338,15 +23692,19 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a >= b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22355,8 +23713,7 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() >=
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -22398,11 +23755,19 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22440,15 +23805,20 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16(
+        [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((!std::isnan([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22457,8 +23827,7 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }()) &&
          !std::isnan([&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -22500,11 +23869,19 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22542,15 +23919,20 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16(
+        [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((std::isnan([&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                        : src0.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
            if (inst_.abs & (1u << 0))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 0))
@@ -22559,8 +23941,7 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          }()) ||
          std::isnan([&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -22603,11 +23984,19 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22645,15 +24034,19 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return !(a >= b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((!([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22662,8 +24055,7 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() >=
            [&]() {
              float sv = util::f16_to_f32(static_cast<uint16_t>(
-                 ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane))));
+                 ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
              if (inst_.abs & (1u << 1))
                sv = std::fabs(sv);
              if (inst_.neg & (1u << 1))
@@ -22706,11 +24098,19 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22748,7 +24148,12 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return !((a < b) || (a > b)); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -22756,8 +24161,7 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if ((!([&]() {
           auto a = [&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
-                                                         : src0.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
             if (inst_.abs & (1u << 0))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 0))
@@ -22766,8 +24170,7 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           }();
           auto b = [&]() {
             float sv = util::f16_to_f32(static_cast<uint16_t>(
-                ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                         : src1.read_lane(wf, lane))));
+                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
             if (inst_.abs & (1u << 1))
               sv = std::fabs(sv);
             if (inst_.neg & (1u << 1))
@@ -22812,11 +24215,19 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22854,15 +24265,19 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return !(a > b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((!([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22871,8 +24286,7 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() >
            [&]() {
              float sv = util::f16_to_f32(static_cast<uint16_t>(
-                 ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane))));
+                 ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
              if (inst_.abs & (1u << 1))
                sv = std::fabs(sv);
              if (inst_.neg & (1u << 1))
@@ -22915,11 +24329,19 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -22957,15 +24379,19 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return !(a <= b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((!([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -22974,8 +24400,7 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() <=
            [&]() {
              float sv = util::f16_to_f32(static_cast<uint16_t>(
-                 ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane))));
+                 ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
              if (inst_.abs & (1u << 1))
                sv = std::fabs(sv);
              if (inst_.neg & (1u << 1))
@@ -23018,11 +24443,19 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -23060,15 +24493,19 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return a != b; });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if (([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -23077,8 +24514,7 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() !=
          [&]() {
            float sv = util::f16_to_f32(static_cast<uint16_t>(
-               ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                        : src1.read_lane(wf, lane))));
+               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
            if (inst_.abs & (1u << 1))
              sv = std::fabs(sv);
            if (inst_.neg & (1u << 1))
@@ -23121,11 +24557,19 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -23163,15 +24607,19 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16([](auto a, auto b) { return !(a < b); });
+  }
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     if ((!([&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                                 ? (src0.read_lane(wf, lane) >> 16)
-                                                                 : src0.read_lane(wf, lane))));
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
           if (inst_.abs & (1u << 0))
             sv = std::fabs(sv);
           if (inst_.neg & (1u << 0))
@@ -23180,8 +24628,7 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         }() <
            [&]() {
              float sv = util::f16_to_f32(static_cast<uint16_t>(
-                 ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
-                                                          : src1.read_lane(wf, lane))));
+                 ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
              if (inst_.abs & (1u << 1))
                sv = std::fabs(sv);
              if (inst_.neg & (1u << 1))
@@ -24244,11 +25691,15 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24317,11 +25768,15 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24390,11 +25845,15 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24463,11 +25922,15 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24536,11 +25999,15 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24609,11 +26076,15 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24681,11 +26152,15 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24753,11 +26228,15 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24826,11 +26305,15 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24899,11 +26382,15 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -24972,11 +26459,15 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25045,11 +26536,15 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25118,11 +26613,15 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25191,11 +26690,15 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25264,11 +26767,19 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25307,16 +26818,13 @@ void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) <
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) <
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25353,11 +26861,19 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25396,16 +26912,13 @@ void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) ==
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) ==
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25442,11 +26955,19 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25485,16 +27006,13 @@ void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) <=
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) <=
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25531,11 +27049,19 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25574,16 +27100,13 @@ void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) >
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) >
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25620,11 +27143,19 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25663,16 +27194,13 @@ void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) !=
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) !=
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25709,11 +27237,19 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25752,16 +27288,13 @@ void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                   ? (src0.read_lane(wf, lane) >> 16)
-                                   : src0.read_lane(wf, lane))) >=
-         static_cast<int16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                   ? (src1.read_lane(wf, lane) >> 16)
-                                   : src1.read_lane(wf, lane)))))
+    if ((static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) >=
+         static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25798,11 +27331,19 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25841,16 +27382,13 @@ void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) <
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) <
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25887,11 +27425,19 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -25930,16 +27476,14 @@ void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) ==
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(
+             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) ==
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -25976,11 +27520,19 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -26019,16 +27571,14 @@ void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) <=
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(
+             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) <=
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -26065,11 +27615,19 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -26108,16 +27666,13 @@ void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) >
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) >
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -26154,11 +27709,19 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -26197,16 +27760,14 @@ void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) !=
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(
+             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) !=
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -26243,11 +27804,19 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -26286,16 +27855,14 @@ void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    if ((static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                    ? (src0.read_lane(wf, lane) >> 16)
-                                    : src0.read_lane(wf, lane))) >=
-         static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                    ? (src1.read_lane(wf, lane) >> 16)
-                                    : src1.read_lane(wf, lane)))))
+    if ((static_cast<uint16_t>(
+             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)) >=
+         static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))))
       vcc |= (1ULL << lane);
   }
   if (wf.wf_size() <= 32)
@@ -28084,11 +29651,19 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28126,6 +29701,34 @@ void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
+  if (inst_.src0 != amdgpu::SRC_DPP && !amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    auto &inst = *this;
+    ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32(0x8000u, [](auto a, auto b) {
+      using U = util::native<uint32_t>;
+      U h = a & 0xFFFFu;
+      U exp = (h >> 10) & 0x1Fu;
+      U mant = h & 0x3FFu;
+      auto sgn = ((h >> 15) & 1u) != 0u;
+      auto qnan = ((h >> 9) & 1u) != 0u;
+      auto is_nan = (exp == 0x1Fu) && (mant != 0u);
+      auto is_inf = (exp == 0x1Fu) && (mant == 0u);
+      auto is_zero = (exp == 0u) && (mant == 0u);
+      auto is_den = (exp == 0u) && (mant != 0u);
+      auto is_norm = (exp >= 1u) && (exp <= 30u);
+      U cls(0u);
+      util::stdx::where(is_nan && !qnan, cls) = 0x001u;
+      util::stdx::where(is_nan && qnan, cls) = 0x002u;
+      util::stdx::where(is_inf && sgn, cls) = 0x004u;
+      util::stdx::where(is_norm && sgn, cls) = 0x008u;
+      util::stdx::where(is_den && sgn, cls) = 0x010u;
+      util::stdx::where(is_zero && sgn, cls) = 0x020u;
+      util::stdx::where(is_zero && !sgn, cls) = 0x040u;
+      util::stdx::where(is_den && !sgn, cls) = 0x080u;
+      util::stdx::where(is_norm && !sgn, cls) = 0x100u;
+      util::stdx::where(is_inf && !sgn, cls) = 0x200u;
+      return (cls & b) != 0u;
+    });
+  }
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -28138,7 +29741,7 @@ void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       s0_raw &= 0x7FFFu;
     if (inst_.neg & (1u << 0))
       s0_raw ^= 0x8000u;
-    uint32_t mask = src1.read_lane(wf, lane);
+    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     bool match = false;
     uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
     uint16_t f16_mant = s0_raw & 0x3FF;
@@ -28278,7 +29881,9 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -28351,11 +29956,19 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28445,11 +30058,19 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28539,11 +30160,19 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28633,11 +30262,19 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28727,11 +30364,19 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28821,11 +30466,19 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -28915,11 +30568,19 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29009,11 +30670,19 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29103,11 +30772,19 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29197,11 +30874,19 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29291,11 +30976,19 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29385,11 +31078,19 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29479,11 +31180,19 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -29573,11 +31282,19 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -30941,11 +32658,15 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31032,11 +32753,15 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31123,11 +32848,15 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31214,11 +32943,15 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31305,11 +33038,15 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31396,11 +33133,15 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31487,11 +33228,15 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31578,11 +33323,15 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31669,11 +33418,15 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31760,11 +33513,15 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31851,11 +33608,15 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -31942,11 +33703,15 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32033,11 +33798,15 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32124,11 +33893,15 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32215,11 +33988,19 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32305,11 +34086,19 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32395,11 +34184,19 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32485,11 +34282,19 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32575,11 +34380,19 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32665,11 +34478,19 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32755,11 +34576,19 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32845,11 +34674,19 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -32935,11 +34772,19 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -33025,11 +34870,19 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -33115,11 +34968,19 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -33205,11 +35066,19 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -35287,11 +37156,19 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
+        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
+                               (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
+                              0xFFFFu),
+        true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -35341,7 +37218,7 @@ void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       s0_raw &= 0x7FFFu;
     if (inst_.neg & (1u << 0))
       s0_raw ^= 0x8000u;
-    uint32_t mask = src1.read_lane(wf, lane);
+    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     bool match = false;
     uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
     uint16_t f16_mant = s0_raw & 0x3FF;
@@ -35515,7 +37392,9 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+        (static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -35954,16 +37833,22 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(64, OperandType::OPR_SIMM32,
-                   static_cast<int>(
-                       reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
+                   (static_cast<uint64_t>(
+                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32)
+                    << 32),
+                   true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(64, OperandType::OPR_SIMM32,
-                   static_cast<int>(
-                       reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
+                   (static_cast<uint64_t>(
+                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32)
+                    << 32),
+                   true);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(64, OperandType::OPR_SIMM32,
-                   static_cast<int>(
-                       reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
+                   (static_cast<uint64_t>(
+                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32)
+                    << 32),
+                   true);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);

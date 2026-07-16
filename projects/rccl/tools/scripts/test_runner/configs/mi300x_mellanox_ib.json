@@ -559,12 +559,63 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "DdaFabricEligibilityTest",
+          "description": "Dda Fabric eligibility tests",
+          "test_filter": "DdaFabricEligibilityTest.*"
+        },
+        {
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
         }
       ]
     },
+    "host_api_tests_base": {
+      "extends": "net_ib_base",
+      "env_variables": {
+        "RCCL_RMA_USE_DMABUF": "1"
+      },
+      "tests": [
+        {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
+        {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
+        {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
+        {"name": "HostApi_SignalOnlyNoData", "description": "Host API: signal only, no data", "test_filter": "HostApiTest.SignalOnlyNoData"},
+        {"name": "HostApi_WaitSignalFenceSemantics", "description": "Host API: wait signal fence semantics", "test_filter": "HostApiTest.WaitSignalFenceSemantics"},
+        {"name": "HostApi_DataVisibilityAfterSync", "description": "Host API: data visibility after sync", "test_filter": "HostApiTest.DataVisibilityAfterSync"},
+        {"name": "HostApi_PutSignalNullLocalbuff", "description": "Host API: put signal null localbuff", "test_filter": "HostApiTest.PutSignalNullLocalbuff"},
+        {"name": "HostApi_PutSignalNullWindow", "description": "Host API: put signal null window", "test_filter": "HostApiTest.PutSignalNullWindow"},
+        {"name": "HostApi_PutSignalOffsetOutOfBounds", "description": "Host API: put signal offset out of bounds", "test_filter": "HostApiTest.PutSignalOffsetOutOfBounds"},
+        {"name": "HostApi_PutSignalInvalidSigIdx", "description": "Host API: put signal invalid sig idx", "test_filter": "HostApiTest.PutSignalInvalidSigIdx"},
+        {"name": "HostApi_SignalCumulativeFence", "description": "Host API: signal cumulative fence", "test_filter": "HostApiTest.SignalCumulativeFence"},
+        {"name": "HostApi_MultipleSendersOneReceiver", "description": "Host API: multiple senders one receiver", "test_filter": "HostApiTest.MultipleSendersOneReceiver"},
+        {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
+        {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
+        {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
+        {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
+        {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
+        {"name": "HostApi_WaitSignalZeroDesc", "description": "Host API: wait signal zero desc", "test_filter": "HostApiTest.WaitSignalZeroDesc"},
+        {"name": "HostApi_TwoCommunicatorsIndependentWindows", "description": "Host API: two communicators independent windows", "test_filter": "HostApiTest.TwoCommunicatorsIndependentWindows"},
+        {"name": "HostApi_StressManySmallPuts", "description": "Host API: stress many small puts", "test_filter": "HostApiTest.StressManySmallPuts"},
+        {"name": "HostApi_PutToSelf", "description": "Host API: put to self", "test_filter": "HostApiTest.PutToSelf"},
+        {"name": "HostApi_DoubleDeregister", "description": "Host API: double deregister", "test_filter": "HostApiTest.DoubleDeregister"},
+        {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"}
+      ]
+    },
+    "host_api_tests_symmem": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      }
+    },
+    "host_api_tests_default": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0"
+      }
+    },
+
     "unit_tests_standard": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -699,6 +750,23 @@
         {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
       ]
     },
+    "asymmetric_visibility": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
+      ]
+    },
     "debug_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -785,6 +853,34 @@
           "name": "CommMPITests_TrafficClass",
           "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
           "test_filter": "TrafficClassMPITest.*"
+        },
+        {
+          "name": "CommMPITests_CtaConfigOverride",
+          "description": "ncclConfig_t minCTAs/maxCTAs override accepted and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs"
+        },
+        {
+          "name": "CommMPITests_CtaDefaultNoClamp",
+          "description": "Default config (no min/maxCTAs): the maxCTAs cap in connect.cc is a no-op and does not reduce nChannels",
+          "test_filter": "CtaConfigMPITest.DefaultConfigDoesNotClampChannels"
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobs",
+          "description": "NCCL_MIN_CTAS/NCCL_MAX_CTAS env knobs override config and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "2",
+            "NCCL_MAX_CTAS": "4"
+          }
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobsNegative",
+          "description": "Non-positive NCCL_MIN_CTAS/NCCL_MAX_CTAS are rejected and left at default",
+          "test_filter": "CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "0",
+            "NCCL_MAX_CTAS": "0"
+          }
         }
       ]
     },
@@ -1315,6 +1411,91 @@
       ]
     },
 
+    "symmetric_window_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "SymWin_AllReduce_BothWindows_OutOfPlace",
+          "description": "AllReduce with both send and recv windows registered (symmetric baseline)",
+          "test_filter": "SymWin_AllReduce.BothWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlySendWindow",
+          "description": "AllReduce with only send buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlySendWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlyRecvWindow",
+          "description": "AllReduce with only recv buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlyRecvWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_NoWindows",
+          "description": "AllReduce without window registration (non-symmetric fallback)",
+          "test_filter": "SymWin_AllReduce.NoWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_SingleWindow_InPlace",
+          "description": "AllReduce in-place with single window (primary one-buffer use case)",
+          "test_filter": "SymWin_AllReduce.SingleWindow_InPlace"
+        },
+        {
+          "name": "SymWin_ReduceScatter_BothWindows",
+          "description": "ReduceScatter with both windows registered",
+          "test_filter": "SymWin_ReduceScatter.BothWindows"
+        },
+        {
+          "name": "SymWin_ReduceScatter_OnlySendWindow",
+          "description": "ReduceScatter with only send window (relaxed path)",
+          "test_filter": "SymWin_ReduceScatter.OnlySendWindow"
+        },
+        {
+          "name": "SymWin_ReduceScatter_NoWindows",
+          "description": "ReduceScatter without windows (fallback)",
+          "test_filter": "SymWin_ReduceScatter.NoWindows"
+        },
+        {
+          "name": "SymWin_AllGather_BothWindows",
+          "description": "AllGather with both windows registered",
+          "test_filter": "SymWin_AllGather.BothWindows"
+        },
+        {
+          "name": "SymWin_AllGather_OnlyRecvWindow",
+          "description": "AllGather with only recv window (relaxed path)",
+          "test_filter": "SymWin_AllGather.OnlyRecvWindow"
+        },
+        {
+          "name": "SymWin_AllGather_NoWindows",
+          "description": "AllGather without windows (fallback)",
+          "test_filter": "SymWin_AllGather.NoWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Basic",
+          "description": "Basic window register/deregister lifecycle",
+          "test_filter": "SymWin_WindowLifecycle.RegisterDeregister_Basic"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Multiple",
+          "description": "Multiple independent window registrations",
+          "test_filter": "SymWin_WindowLifecycle.MultipleWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Repeated",
+          "description": "Repeated register/deregister cycles",
+          "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        }
+      ]
+    },
     "net_ib_branch_coverage": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -3061,6 +3242,12 @@
       "enabled": true
     },
     {
+      "name": "Asymmetric Visibility",
+      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
+      "config": "asymmetric_visibility",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
@@ -3568,6 +3755,24 @@
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - SymmMem",
+      "description": "Host API tests with symmetric memory support",
+      "config": "host_api_tests_symmem",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - Default",
+      "description": "Host API tests with default memory support",
+      "config": "host_api_tests_default",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Window Tests - Single Node",
+      "description": "Symmetric window registration tests for relaxed one-buffer path validation",
+      "config": "symmetric_window_tests",
       "enabled": true
     }
   ]

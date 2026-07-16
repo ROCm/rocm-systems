@@ -579,7 +579,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-    rocr::os::DmaBufClose(res.dmabuf_fd);
+    if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
@@ -643,7 +643,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
                                         &source_handle, mem);
 #if defined(__linux__)
-  rocr::os::DmaBufClose(source_fd);
+  rocr::os::DmaBufClose(&source_fd);
 #endif
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
@@ -678,11 +678,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
-  if (handle->dmabuf_fd >= 0) {
-    hsa_status_t status = rocr::os::DmaBufClose(handle->dmabuf_fd);
-    handle->dmabuf_fd = -1;
-    if (status != HSA_STATUS_SUCCESS) return status;
-  }
+  hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   if (memhandle != nullptr) {
@@ -692,7 +688,7 @@ hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
     }
   }
   *handle = {};
-  return HSA_STATUS_SUCCESS;
+  return ret;
 }
 
 hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {
@@ -994,6 +990,31 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
 
   *address = queue_info.SaveAreaHeader;
   *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+  const auto& properties = gpu_agent.properties();
+
+  std::string status_path =
+  "/sys/class/drm/renderD" + std::to_string(properties.DrmRenderMinor) + "/device/ualink/accel_state";
+  FILE* file = fopen(status_path.c_str(), "r");
+  if (!file) {
+    return HSA_STATUS_ERROR;
+  }
+  char status[10];
+  if (fscanf(file, "%9s", status) != 1) {
+    fclose(file);
+    return HSA_STATUS_ERROR;
+  }
+  fclose(file);
+  if (!strcmp(status, "ready") || !strcmp(status, "active")) {
+    *ready = true;
+  } else {
+    *ready = false;
+  }
 
   return HSA_STATUS_SUCCESS;
 }

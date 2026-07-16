@@ -452,6 +452,10 @@ rocprofiler-sdk:
           event: 23
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: CPF
           event: 24
     - name: CPF_CPF_STAT_IDLE
@@ -552,6 +556,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -735,8 +740,9 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: 
-            (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_128B_sum*128)/1024
+            (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_128B_sum*128+GL2C_EA_RDREQ_256B_sum*256)/1024
     - name: BANDWIDTH_EA
       description: Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle.
       properties: []
@@ -774,6 +780,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: FETCH_SIZE
     - name: FlatLDSInsts
       description: The average number of FLAT instructions that read or write to LDS executed per 
@@ -857,6 +864,10 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: GL1A
           event: 0
     - name: GL1A_CYCLE
@@ -867,6 +878,13 @@ rocprofiler-sdk:
             - gfx1250
           block: GL1A
           event: 77
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1A
+          event: 23
     - name: GL1C_GL2_REQ_READ_LEVEL
       description: Number of cycles in-flight for reads, atomics with return, NOP_RTN0. Average GL2 
         read latency = GL1C_PERF_SEL_GL2_REQ_READ_LEVEL/SUM_OF_REQ_COUNTERS
@@ -986,7 +1004,32 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ_128B,sum)
+    - name: GL2C_EA_RDREQ_256B
+      description: Number of 256-byte GL2C/EA read requests
+      properties: []
+      definitions:
+        - architectures:
+            - gfx12
+            - gfx1200
+            - gfx1201
+          block: GL2C
+          event: 149
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 122
+    - name: GL2C_EA_RDREQ_256B_sum
+      description: Number of 256-byte GL2C/EA read requests. Sum over GL2C instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx12
+            - gfx1200
+            - gfx1201
+            - gfx1250
+          expression: reduce(GL2C_EA_RDREQ_256B,sum)
     - name: GL2C_EA_RDREQ_32B
       description: Number of 32-byte GL2C/EA read requests
       properties: []
@@ -1038,6 +1081,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ_32B,sum)
     - name: GL2C_EA_RDREQ_64B
       description: Number of 64-byte GL2C/EA read requests
@@ -1090,6 +1134,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ_64B,sum)
     - name: GL2C_EA_RDREQ_96B
       description: Number of 96-byte GL2C/EA read requests
@@ -7093,6 +7138,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 54
         - architectures:
@@ -7123,6 +7172,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 55
         - architectures:
@@ -7318,6 +7371,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 49
         - architectures:

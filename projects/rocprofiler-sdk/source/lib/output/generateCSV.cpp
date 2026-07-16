@@ -441,6 +441,7 @@ generate_csv(const output_config&                                           cfg,
         {
             auto row_ss   = std::stringstream{};
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
+
             rocprofiler::tool::csv::memory_copy_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
@@ -979,6 +980,14 @@ generate_csv(const output_config&                                               
         }
     }
 }
+
+// CSV output for HIP graph launch summary records is deprecated; consume via rocpd/JSON.
+void
+generate_csv(const output_config& /*cfg*/,
+             const metadata& /*tool_metadata*/,
+             const generator<rocprofiler_buffer_tracing_hip_graph_record_t>& /*data*/,
+             const stats_entry_t& /*stats*/)
+{}
 
 void
 generate_csv(const output_config& cfg,
