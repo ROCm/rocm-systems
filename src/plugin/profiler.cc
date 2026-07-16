@@ -15,6 +15,8 @@
 #include "plugin.h"
 #include "compiler.h"
 #include "device.h"
+#include "sym_kernels.h"
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -27,6 +29,7 @@ extern ncclProfiler_t* getNcclProfiler_v3(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v4(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v5(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v6(void* lib);
+extern ncclProfiler_t* getNcclProfiler_v7(void* lib);
 
 // Observability threshold for pending+active ops. We keep enqueueing beyond
 // this so KernelCh events stay paired with their parent task events.
@@ -117,7 +120,10 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
     profilerName = ncclPluginLibPaths[ncclPluginTypeProfiler];
   }
 
-  ncclProfiler = getNcclProfiler_v6(profilerPluginLib);
+  ncclProfiler = getNcclProfiler_v7(profilerPluginLib);
+  if (ncclProfiler == nullptr) {
+    ncclProfiler = getNcclProfiler_v6(profilerPluginLib);
+  }
   if (ncclProfiler == nullptr) {
     ncclProfiler = getNcclProfiler_v5(profilerPluginLib);
   }
@@ -283,6 +289,7 @@ static void printProfilerEventMask(int mask) {
   if (mask & ncclProfileProxyStep) pos += sprintf(enabled + pos, "ProxyStep ");
   if (mask & ncclProfileProxyCtrl) pos += sprintf(enabled + pos, "ProxyCtrl ");
   if (mask & ncclProfileKernelCh) pos += sprintf(enabled + pos, "KernelCh ");
+  if (mask & ncclProfileKernelPhase) pos += sprintf(enabled + pos, "KernelPhase ");
   if (mask & ncclProfileNetPlugin) pos += sprintf(enabled + pos, "NetPlugin ");
   if (mask & ncclProfileGroupApi) pos += sprintf(enabled + pos, "GroupApi ");
   if (mask & ncclProfileCollApi) pos += sprintf(enabled + pos, "CollApi ");
@@ -294,7 +301,21 @@ static void printProfilerEventMask(int mask) {
   INFO(NCCL_INIT, "Profiler event mask: 0x%x (%d) - Enabled: %s", mask, mask, enabled);
 }
 
+// KernelPhase sub-events are gated on ncclProfileKernelCh, so KernelCh must be set
+// whenever KernelPhase is. Enforce that on any incoming mask and log if it changes.
+static int ncclProfilerEnforceMaskDeps(int mask, const char* source) {
+  if ((mask & ncclProfileKernelPhase) && !(mask & ncclProfileKernelCh)) {
+    mask |= ncclProfileKernelCh;
+    INFO(NCCL_INIT,
+         "Profiler: enabling ncclProfileKernelCh implicitly (%s set ncclProfileKernelPhase, which requires it)",
+         source);
+  }
+  return mask;
+}
+
 void ncclProfilerSetRasOverride(int mask) {
+  // A RAS-set mask must satisfy the same KernelPhase->KernelCh dependency as any other.
+  mask = ncclProfilerEnforceMaskDeps(mask, "RAS override");
   // Store the 'active' flag (release) LAST, pairing with the acquire-load in ncclProfilerPluginInit so both
   // mask writes are visible there.
   COMPILER_ATOMIC_STORE(&ncclProfilerEventMask, mask, std::memory_order_relaxed);
@@ -318,6 +339,9 @@ ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) {
       ncclProfilerPluginUnload();
       INFO(NCCL_INIT, "Profiler init failed with error '%d': %s. Continue without profiler.", err, strerror(errno));
     }
+
+    // KernelPhase requires KernelCh; enable it implicitly (logs if it changes the mask).
+    ncclProfilerEventMask = ncclProfilerEnforceMaskDeps(ncclProfilerEventMask, "plugin");
 
     printProfilerEventMask(ncclProfilerEventMask);
   }
@@ -540,6 +564,9 @@ ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan* plan) {
   TIME_START_EVENT(groupStop);
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0) && plan->groupEventHandle) {
     ncclProfiler->stopEvent(plan->groupEventHandle);
+    // Null after stopping: the next callback (graph replay) re-creates it, keeping
+    // start/stop balanced and making any stray double-stop a safe no-op.
+    plan->groupEventHandle = nullptr;
   }
   TIME_STOP_EVENT(groupStop);
   return ncclSuccess;
@@ -567,8 +594,20 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         eDescr.coll.datatype = ncclDatatypeToString(ct->datatype);
         eDescr.coll.nChannels = ct->nChannels;
         eDescr.coll.nWarps = ct->nWarps;
-        eDescr.coll.algo = ncclAlgoToString(ct->algorithm);
-        eDescr.coll.proto = ncclProtoToString(ct->protocol);
+        eDescr.coll.isSymColl = plan->isSymColl;
+        if (plan->isSymColl) {
+          // Override algo with the kernel variant (e.g. "AGxLL_R") so perftest
+          // tuning mode (-U 1) shows a meaningful algorithm column.
+          const char* variant = ncclSymkKernelIdToString(static_cast<int>(ct->devFuncId));
+          eDescr.coll.kernelVariant = variant;
+          const char* underscore = strchr(variant, '_');
+          eDescr.coll.algo = underscore ? underscore + 1 : variant;
+          eDescr.coll.proto = "";
+        } else {
+          eDescr.coll.algo = ncclAlgoToString(ct->algorithm);
+          eDescr.coll.proto = ncclProtoToString(ct->protocol);
+          eDescr.coll.kernelVariant = nullptr;
+        }
         ncclProfiler->startEvent(plan->comm->profilerContext, &ct->eventHandle, &eDescr);
       }
     }
@@ -618,14 +657,22 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
 ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan* plan) {
   TIME_START_EVENT(taskStop);
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
+    // Null each handle after stopping: the next callback (graph replay) re-creates
+    // them, keeping start/stop balanced and making a stray double-stop a safe no-op.
     struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue);
     while (ct) {
-      if (ct->eventHandle) ncclProfiler->stopEvent(ct->eventHandle);
+      if (ct->eventHandle) {
+        ncclProfiler->stopEvent(ct->eventHandle);
+        ct->eventHandle = nullptr;
+      }
       ct = ct->next;
     }
     struct ncclTaskP2p* pt = ncclIntruQueueHead(&plan->p2pTaskQueue);
     while (pt) {
-      if (pt->eventHandle) ncclProfiler->stopEvent(pt->eventHandle);
+      if (pt->eventHandle) {
+        ncclProfiler->stopEvent(pt->eventHandle);
+        pt->eventHandle = nullptr;
+      }
       pt = pt->next;
     }
   }
@@ -835,6 +882,54 @@ static void profilerRecycleList(struct ncclProfilerThread* pt, struct ncclProfil
   }
 }
 
+static const char* profilerPhaseNames[] = {"initial_sync", "compute", "final_sync"};
+
+static void profilerFireKernelPhaseEvents(struct ncclProfilerWorkOp* op) {
+  if (COMPILER_EXPECT(ncclProfiler == NULL, 1)) return;
+  if (!(op->eActivationMask & ncclProfileKernelPhase)) return;
+  if (op->workPhases == nullptr) return;
+
+  int ch = op->channelId;
+  uint64_t wc = op->workCounter;
+  int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
+  uint64_t* ts = op->workPhases[ch].data[slot].timestamps;
+
+  // Fold a missing intermediate boundary onto the adjacent outer one; if both are
+  // missing the kernel didn't instrument phases, so skip rather than mislabel.
+  bool haveAfterOpen = ts[NCCL_KERNEL_PHASE_AFTER_OPEN] != 0;
+  bool haveBeforeClose = ts[NCCL_KERNEL_PHASE_BEFORE_CLOSE] != 0;
+  if (!haveAfterOpen && !haveBeforeClose) {
+    memset(ts, 0, sizeof(uint64_t) * MAX_PROFILER_PHASES);
+    return;
+  }
+  if (!haveAfterOpen && ts[NCCL_KERNEL_PHASE_BEGIN] != 0)
+    ts[NCCL_KERNEL_PHASE_AFTER_OPEN] = ts[NCCL_KERNEL_PHASE_BEGIN];
+  if (!haveBeforeClose && ts[NCCL_KERNEL_PHASE_END] != 0)
+    ts[NCCL_KERNEL_PHASE_BEFORE_CLOSE] = ts[NCCL_KERNEL_PHASE_END];
+
+  for (int i = 0; i < MAX_PROFILER_PHASES - 1; i++) {
+    if (ts[i] == 0 || ts[i + 1] == 0) continue;
+    if (ts[i] == ts[i + 1]) continue; // skip zero-duration (synthesized) boundary
+    void* phaseHandle = nullptr;
+    ncclProfilerEventDescr_t eDescr = {};
+    eDescr.type = ncclProfileKernelPhase;
+    eDescr.parentObj = op->kernelEventHandle;
+    eDescr.kernelPhase.channelId = op->channelId;
+    eDescr.kernelPhase.phaseId = i;
+    eDescr.kernelPhase.phaseName = profilerPhaseNames[i];
+    eDescr.kernelPhase.pTimer = ts[i];
+    ncclProfiler->startEvent(op->profilerContext, &phaseHandle, &eDescr);
+    if (phaseHandle) {
+      ncclProfilerEventStateArgs_t a = {};
+      // Phase stop reuses kernelCh.pTimer (same single-timestamp shape); see profiler_v7.h.
+      a.kernelCh.pTimer = ts[i + 1];
+      ncclProfiler->recordEventState(phaseHandle, ncclProfilerKernelPhaseStop, &a);
+      ncclProfiler->stopEvent(phaseHandle);
+    }
+  }
+  memset(ts, 0, sizeof(uint64_t) * MAX_PROFILER_PHASES);
+}
+
 // Runs without pt->mutex held: plugin callbacks may block, so we mustn't
 // stall posters. Completed ops are returned as a local list and recycled by
 // the caller under lock; *outNewTail receives the new tail of pt->active.
@@ -861,9 +956,16 @@ static struct ncclProfilerWorkOp* profilerProgressOps(struct ncclProfilerThread*
       ncclProfilerStartKernelChEvent(op, op->workStarted[ch].data[slot].timestamp);
       op->started = true;
     }
+    // Also wait for the phases counter so phase child events fire under a live
+    // kernelCh parent. `<=` for the same slot-wraparound reason as above.
     if (op->started && !op->completed && wc <= op->workCompleted[ch].data[slot].counter) {
-      ncclProfilerStopKernelChEvent(op, op->workCompleted[ch].data[slot].timestamp);
-      op->completed = true;
+      bool phasesReady = !(op->eActivationMask & ncclProfileKernelPhase) || op->workPhases == nullptr ||
+                         wc <= op->workPhases[ch].data[slot].counter;
+      if (phasesReady) {
+        profilerFireKernelPhaseEvents(op);
+        ncclProfilerStopKernelChEvent(op, op->workCompleted[ch].data[slot].timestamp);
+        op->completed = true;
+      }
     }
     if (op->completed) {
       if (prev) prev->next = next;
@@ -1071,7 +1173,7 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) {
 // send/recv pair (which the device counts as one fused work per channel) can
 // post against the same device slot.
 static void profilerEnqueueOp(struct ncclProfilerThread* pt, struct ncclComm* comm, int channelId, uint64_t wc,
-                              int eActivationMask, void* taskEventHandle) {
+                              int eActivationMask, void* taskEventHandle, bool sym) {
   bool dropped = false;
   uint64_t dropTotal = 0;
   size_t inflightAtDrop = 0;
@@ -1092,8 +1194,10 @@ static void profilerEnqueueOp(struct ncclProfilerThread* pt, struct ncclComm* co
       op->eActivationMask = eActivationMask;
       op->taskEventHandle = taskEventHandle;
       op->profilerContext = comm->profilerContext;
-      op->workStarted = comm->profiler.workStarted;
-      op->workCompleted = comm->profiler.workCompleted;
+      // Sym collectives poll a dedicated buffer set (see ncclProfilerCommState).
+      op->workStarted = sym ? comm->profiler.symWorkStarted : comm->profiler.workStarted;
+      op->workCompleted = sym ? comm->profiler.symWorkCompleted : comm->profiler.workCompleted;
+      op->workPhases = sym ? comm->profiler.symWorkPhases : comm->profiler.workPhases;
       op->kernelEventHandle = nullptr;
       op->started = false;
       op->completed = false;
@@ -1138,8 +1242,42 @@ static ncclResult_t profilerPostWorkInternal(struct ncclComm* comm, int channelI
   struct ncclProfilerThread* pt = comm->profiler.profilerThread;
   if (pt == nullptr || !(eActivationMask & ncclProfileKernelCh)) return ncclSuccess;
   uint64_t wc = ++comm->profiler.workCounter[channelId];
-  profilerEnqueueOp(pt, comm, channelId, wc, eActivationMask, taskEventHandle);
+  profilerEnqueueOp(pt, comm, channelId, wc, eActivationMask, taskEventHandle, /*sym=*/false);
   return ncclSuccess;
+}
+
+// Reserve per-channel sym workCounters into the args buffer pre-launch, before the
+// driver snapshots it at cuLaunchKernel (the device kernel reads them from there). The
+// matching KernelCh ops are enqueued later by ncclProfilerPostPlanWork() from the host
+// callback. No-op for the clean kernel (graph capture / profiling off). Uses the
+// dedicated sym counters, which never share the regular/p2p sequence (ncclProfilerCommState).
+void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  if (!ncclProfilerPluginLoaded() || comm->profiler.profilerThread == nullptr) return;
+  if (!plan->isSymColl) return;
+  struct ncclTaskColl* sct = ncclIntruQueueHead(&plan->collTaskQueue);
+  if (sct == nullptr || !(sct->eActivationMask & ncclProfileKernelCh)) return;
+  struct ncclSymkDevWorkArgs* argsBuf = (struct ncclSymkDevWorkArgs*)plan->kernelSymArgs;
+  if (!argsBuf->profilerEnabled) return;
+  uint64_t* counters = argsBuf->getProfilerCounters();
+  int nChannels = countOneBits(plan->channelMask);
+  for (int c = 0; c < nChannels; c++) counters[c] = ++comm->profiler.symWorkCounter[c];
+}
+
+// Enqueue the KernelCh ops for a sym plan using the counters reserved pre-launch by
+// ncclProfilerReserveSymCounters() (read back from the args buffer, not re-bumped).
+// No-op for the clean kernel (graph capture / profiling off).
+static void profilerPostPlanWorkSym(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  struct ncclTaskColl* sct = ncclIntruQueueHead(&plan->collTaskQueue);
+  if (sct == nullptr || !(sct->eActivationMask & ncclProfileKernelCh)) return;
+  struct ncclProfilerThread* pt = comm->profiler.profilerThread;
+  if (pt == nullptr) return;
+  struct ncclSymkDevWorkArgs* argsBuf = (struct ncclSymkDevWorkArgs*)plan->kernelSymArgs;
+  if (!argsBuf->profilerEnabled) return;
+  uint64_t* counters = argsBuf->getProfilerCounters();
+  int nChannels = countOneBits(plan->channelMask);
+  for (int c = 0; c < nChannels; c++) {
+    profilerEnqueueOp(pt, comm, c, counters[c], sct->eActivationMask, sct->eventHandle, /*sym=*/true);
+  }
 }
 
 // Posts must mirror the device kernel's per-channel workCounter advance
@@ -1149,12 +1287,19 @@ static ncclResult_t profilerPostWorkInternal(struct ncclComm* comm, int channelI
 //   * P2p:  one bump per channel in channelMask per addP2pToPlan() pair;
 //           sibling tasks of a pair must not double-post. Multiple pairs
 //           that overlap a channel each contribute one bump.
-//   * Bcast/RMA/CE/sym-coll: piggyback or no KernelCh.
+//   * Sym-coll: one bump per channel in [0, countOneBits(channelMask)), with
+//     the counter mirrored into the kernel args buffer (see below).
+//   * Bcast/RMA/CE: piggyback or no KernelCh.
 // Drift breaks the slot-counter invariant in profilerProgressOps, leaks
 // ops into pt->active, and (eventually) corrupts unrelated CUDA driver
 // state by exhausting the op pool. Return value is discarded by callers.
 ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   if (!ncclProfilerPluginLoaded() || !comm->profiler.profilerThread) return ncclSuccess;
+
+  if (plan->isSymColl) {
+    profilerPostPlanWorkSym(comm, plan);
+    return ncclSuccess;
+  }
 
   struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue);
   while (ct) {
@@ -1188,8 +1333,8 @@ ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPl
         uint64_t bit = 1ull << c;
         if (!((m0 | m1) & bit)) continue;
         uint64_t wc = ++comm->profiler.workCounter[c];
-        if (m0 & bit) profilerEnqueueOp(thr, comm, c, wc, t0->eActivationMask, t0->eventHandle);
-        if (m1 & bit) profilerEnqueueOp(thr, comm, c, wc, t1->eActivationMask, t1->eventHandle);
+        if (m0 & bit) profilerEnqueueOp(thr, comm, c, wc, t0->eActivationMask, t0->eventHandle, /*sym=*/false);
+        if (m1 & bit) profilerEnqueueOp(thr, comm, c, wc, t1->eActivationMask, t1->eventHandle, /*sym=*/false);
       }
     }
     p2pt = p2pt->next;

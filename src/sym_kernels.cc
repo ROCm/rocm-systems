@@ -243,6 +243,12 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &symk->kcomm.devComm, /*isInternal=*/true,
                                          /*deviceCodeVersion=*/NCCL_VERSION_CODE));
+
+    // Dedicated sym profiler buffers, kept separate from the regular kernels' so the
+    // sym workCounter never interleaves with device channels[].workCounter.
+    symk->kcomm.workStarted = comm->profiler.symWorkStarted;
+    symk->kcomm.workCompleted = comm->profiler.symWorkCompleted;
+    symk->kcomm.workPhases = comm->profiler.symWorkPhases;
   }
   return ncclSuccess;
 }

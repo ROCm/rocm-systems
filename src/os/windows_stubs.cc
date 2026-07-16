@@ -470,6 +470,11 @@ ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPl
   return ncclSuccess;
 }
 
+void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  (void)comm;
+  (void)plan;
+}
+
 /* CE profiler stubs (ncclCeCollArgs / ncclCeBatchOpsParams forward-declared in profiler.h) */
 ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   (void)comm;

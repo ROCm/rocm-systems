@@ -63,37 +63,48 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   for (int sym = 0; sym <= 1; sym++) {
     int kcount = sym == 0 ? ncclDevKernelCount : ncclSymkKernelCount;
     void** kptrs = sym == 0 ? ncclDevKernelList : ncclSymkKernelList;
+    // Symmetric kernels have a parallel list of instrumented variants (indexed
+    // identically). They share requirements/smem, so configure both here.
+    void** kptrsProfile = sym == 0 ? nullptr : ncclSymkKernelListProfile;
     int* krequires = sym == 0 ? ncclDevKernelRequirements : ncclSymkKernelRequirements;
     for (int k = 0; k < kcount; k++) {
       if (kptrs[k] != nullptr && driverVersion < krequires[k]) {
         INFO(NCCL_INIT, "Skipping %skernel %d which requires driver %d", sym ? "symmetric " : "", k, krequires[k]);
         kptrs[k] = nullptr;
+        if (kptrsProfile != nullptr) kptrsProfile[k] = nullptr;
       }
-      void* fn = kptrs[k];
-      cudaFuncAttributes attr = {0};
-      if (fn == nullptr) continue;
 
-      if (!CUDASUCCESS(cudaFuncGetAttributes(&attr, fn))) continue; // Silently ignore failures
+      // Configure the default and, for sym kernels, the instrumented variant. Smem is
+      // recorded once from the default (v==0) and shared (identical footprints).
+      void* variants[2] = {kptrs[k], kptrsProfile != nullptr ? kptrsProfile[k] : nullptr};
+      int nVariants = kptrsProfile != nullptr ? 2 : 1;
+      for (int v = 0; v < nVariants; v++) {
+        void* fn = variants[v];
+        cudaFuncAttributes attr = {0};
+        if (fn == nullptr) continue;
 
-      if (maxStackSize) {
-        if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
-      }
-      if (carveout) {
-        CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, carveout), result,
-                      ignore1);
-      ignore1:;
-      }
-      {
-        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
-        if (sym) {
-          ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
-        } else {
-          maxDynamicSmem = std::min(maxDynamicSmem, dynSmem);
+        if (!CUDASUCCESS(cudaFuncGetAttributes(&attr, fn))) continue; // Silently ignore failures
+
+        if (maxStackSize) {
+          if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
         }
-        CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem), result,
-                      next_kernel);
+        if (carveout) {
+          CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, carveout), result,
+                        ignore1);
+        ignore1:;
+        }
+        {
+          int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+          if (sym) {
+            if (v == 0) ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+          } else {
+            maxDynamicSmem = std::min(maxDynamicSmem, dynSmem);
+          }
+          CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem), result,
+                        next_variant);
+        }
+      next_variant:;
       }
-    next_kernel:;
     }
   }
 
@@ -1504,6 +1515,9 @@ static ncclResult_t uploadProxyOps(struct ncclComm* comm, struct ncclKernelPlan*
 }
 
 static ncclResult_t hostStreamPlanTask(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  // Start/post/stop profiler events for every plan (sym and non-sym) so start and stop
+  // stay balanced -- once per launch in eager mode, once per replay under graph capture.
+  // Sym plans reserve their device counters pre-launch; the events are handled here.
   NCCLCHECK(ncclProfilerStartGroupEvent(plan));
   NCCLCHECK(ncclProfilerStartTaskEvents(plan));
   NCCLCHECK(ncclProfilerPostPlanWork(comm, plan));
@@ -1511,6 +1525,7 @@ static ncclResult_t hostStreamPlanTask(struct ncclComm* comm, struct ncclKernelP
     NCCLCHECK(uploadProxyOps(comm, plan));
     NCCLCHECK(ncclProxyStart(comm));
   }
+  // Balances the start above (one stop per invocation); the stops also null their handles.
   NCCLCHECK(ncclProfilerStopTaskEvents(plan));
   NCCLCHECK(ncclProfilerStopGroupEvent(plan));
   if (!plan->persistent) {
@@ -1815,6 +1830,10 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
   // but before launching the kernel. We are not allowed to call CUDA unless the
   // kernel launch is captured.
   NCCLCHECK(uploadWork(comm, plan));
+  // Reserve sym per-channel profiler counters into the args buffer before the driver
+  // snapshots it at cuLaunchKernel (below). The events themselves fire from the host
+  // callback (hostStreamPlanTask). No-op for the clean kernel.
+  if (plan->isSymColl) ncclProfilerReserveSymCounters(comm, plan);
   return ncclSuccess;
 }
 

@@ -388,7 +388,7 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
   allreduceEnds<UnrollPeers>(handler, tn, t, red, input, output, nElts, nPreBytes / sizeof(T), nSufElts);
 }
 
-template <template <typename> typename Red, typename T, bool EnableTma>
+template <bool EnableProfiler, template <typename> typename Red, typename T, bool EnableTma>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLD_AGxST_impl(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
@@ -399,8 +399,15 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLD_AGxST_impl(ncclSymkD
   int const& nRanks = handler.comm.nRanks;
 
   bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) {
+    // Finish the opening barrier here so AFTER_OPEN marks the end of the peer sync.
+    // Same barrier ops as the default variant (which fuses the wait into allreduce),
+    // so the two stay barrier-compatible when peers disagree on profiling.
+    bar.wait(ncclCoopCta(), cuda::memory_order_acquire);
+    ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+  }
 
-  bool waitNeeded = true;
+  bool waitNeeded = !EnableProfiler;
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
                                         ncclSymPtr<T> output) {
         // Threads numbered globally such that we round robin warps by rank then block.
@@ -413,17 +420,18 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLD_AGxST_impl(ncclSymkD
     waitNeeded = false;
   });
 
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLD_AGxST(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_AllReduce_RSxLD_AGxST_impl<Red, T, /*EnableTma=*/false>(args);
+  ncclSymkRun_AllReduce_RSxLD_AGxST_impl<EnableProfiler, Red, T, /*EnableTma=*/false>(args);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxTmaLD_AGxTmaST(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_AllReduce_RSxLD_AGxST_impl<Red, T, /*EnableTma=*/true>(args);
+  ncclSymkRun_AllReduce_RSxLD_AGxST_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
 }
 
 template <typename Red, typename T>
@@ -475,7 +483,7 @@ static __device__ void allreduceMultimem(int tn, int t, Red red, T* input, T* ou
   }
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLDMC_AGxSTMC(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x, /*multimem=*/true};
@@ -487,6 +495,7 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLDMC_AGxSTMC(ncclSymkDe
   auto const& multimem = handler.comm.lsaMultimem;
 
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
                                         ncclSymPtr<T> output) {
@@ -498,10 +507,11 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLDMC_AGxSTMC(ncclSymkDe
     allreduceMultimem(gtn, gt, red, input.multimemPtr(multimem), output.multimemPtr(multimem), nElts);
   });
 
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWorkArgs const* args, bool multimem) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
@@ -527,6 +537,9 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
     ncclCoopCta cta;
     int t = threadIdx.x;
     int tn = ncclSymkMaxThreads;
+    // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
+    // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.
+    [[maybe_unused]] bool profilerPhase1Done = false;
 
     if (__builtin_expect(packAligned, true)) {
       NVCC_PRAGMA_UNROLL_DISABLED
@@ -542,6 +555,12 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
           storePack((Pack*)output, t, nPacks, applyCast<Acc, T>(out));
         }
         lla2a.endEpoch(cta);
+        if NCCL_IF_CONSTEXPR (EnableProfiler) {
+          if (!profilerPhase1Done) {
+            ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+            profilerPhase1Done = true;
+          }
+        }
 
         input += tn * EltPerPack;
         output += tn * EltPerPack;
@@ -561,6 +580,12 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
           storePack(output, t * EltPerPack, nElts, applyCast<Acc, T>(out));
         }
         lla2a.endEpoch(cta);
+        if NCCL_IF_CONSTEXPR (EnableProfiler) {
+          if (!profilerPhase1Done) {
+            ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+            profilerPhase1Done = true;
+          }
+        }
 
         input += tn * EltPerPack;
         output += tn * EltPerPack;
@@ -568,15 +593,16 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
         nPacks -= tn;
       }
     }
+    if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   });
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_AllReduce_AGxLL_R_impl<Red, T>(args, /*multimem=*/false);
+  ncclSymkRun_AllReduce_AGxLL_R_impl<EnableProfiler, Red, T>(args, /*multimem=*/false);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLLMC_R(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_AllReduce_AGxLL_R_impl<Red, T>(args, /*multimem=*/true);
+  ncclSymkRun_AllReduce_AGxLL_R_impl<EnableProfiler, Red, T>(args, /*multimem=*/true);
 }

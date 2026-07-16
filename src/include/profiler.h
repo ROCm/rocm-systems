@@ -19,6 +19,7 @@ struct ncclInfo;
 struct ncclComm;
 struct ncclProxyOp;
 struct ncclDevProfiler;
+struct ncclDevProfilerPhases;
 
 struct ncclProfilerWorkOp {
   int channelId;
@@ -31,6 +32,7 @@ struct ncclProfilerWorkOp {
   // polls the correct (originating comm) buffers.
   struct ncclDevProfiler* workStarted;
   struct ncclDevProfiler* workCompleted;
+  struct ncclDevProfilerPhases* workPhases;
   bool started;
   bool completed;
   struct ncclProfilerWorkOp* next;
@@ -42,7 +44,15 @@ struct ncclProfilerThread;
 struct ncclProfilerCommState {
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
   uint64_t workCounter[MAXCHANNELS];
+  // Dedicated counter/buffers for symmetric collectives: sym kernels read a fixed
+  // counter from the args buffer and never advance the device channels[].workCounter,
+  // so sharing the above with regular/p2p kernels would desync the two sequences.
+  struct ncclDevProfiler* symWorkStarted /*[MAXCHANNELS]*/;
+  struct ncclDevProfiler* symWorkCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* symWorkPhases /*[MAXCHANNELS]*/;
+  uint64_t symWorkCounter[MAXCHANNELS];
   // Shared with comm-split children when shareResources is set.
   struct ncclProfilerThread* profilerThread;
 };
@@ -134,6 +144,10 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm);
 // plan. Called from hostStreamPlanCallback so the host workCounter stays in
 // lock-step with the device on every (graph-captured) replay.
 ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPlan* plan);
+// Reserve the per-channel sym workCounters into the plan's args buffer before
+// cuLaunchKernel snapshots it (called pre-launch). The matching KernelCh ops are
+// posted later by ncclProfilerPostPlanWork() from the host callback.
+void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 // Profiler callback for network plugin
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData);

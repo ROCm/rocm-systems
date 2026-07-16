@@ -436,6 +436,25 @@ struct ncclDevProfiler {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
+// Phase boundary indices into ncclDevProfilerPhases::timestamps[]. Adjacent boundaries
+// form three sub-events: BEGIN->AFTER_OPEN (initial_sync), AFTER_OPEN->BEFORE_CLOSE
+// (compute), BEFORE_CLOSE->END (final_sync). BEGIN/END always bracket the true kernel
+// span. LL kernels fuse the peer sync into the first data exchange, so AFTER_OPEN lands
+// at the end of the first epoch (initial_sync absorbs it -- for a single-iteration
+// message it covers most of the kernel) and BEFORE_CLOSE ~= END (LL has no closing
+// barrier). That is expected for LL, not a measurement bug.
+#define NCCL_KERNEL_PHASE_BEGIN 0
+#define NCCL_KERNEL_PHASE_AFTER_OPEN 1
+#define NCCL_KERNEL_PHASE_BEFORE_CLOSE 2
+#define NCCL_KERNEL_PHASE_END 3
+#define MAX_PROFILER_PHASES 4
+struct ncclDevProfilerPhases {
+  struct {
+    uint64_t counter;
+    uint64_t timestamps[MAX_PROFILER_PHASES];
+  } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
+};
+
 struct ncclKernelComm {
   int rank;
   int nRanks;
@@ -458,6 +477,7 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
 };
 
 struct alignas(16) ncclKernelCommAndChannels {

@@ -14,6 +14,7 @@
 #include "tuning.h"
 #include "enqueue.h"
 #include "config/algorithm_registry.h"
+#include "profiler.h"
 #include <cuda_fp16.h>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
@@ -128,9 +129,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
   if (!foundSymm) goto exit;
 
   // make sure kernel args space can hold at least a single work
-  if (comm->workArgsBytes < ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1)) {
+  if (comm->workArgsBytes < ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded())) {
     WARN("Symmetric kernel args size %u is smaller than minimum size %zu", comm->workArgsBytes,
-         ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1));
+         ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded()));
     return ncclInternalError;
   }
 
@@ -158,8 +159,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // its own batch). This realizes the per-call caps exactly and never ignores a
         // non-head configured task.
         bool configBoundary = task->aggIsolate || (task->next != nullptr && task->next->aggIsolate);
-        if (ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, nWorks + 1) > comm->workArgsBytes || task->next == nullptr ||
-            configBoundary) {
+        if (ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) >
+              comm->workArgsBytes ||
+            task->next == nullptr || configBoundary) {
           task->isSymLast = 1;
           break;
         }
@@ -281,7 +283,17 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
   plan->hasProxyOps = false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)headTask->devFuncId;
   int kernelIndex = ncclSymkGetKernelIndex(kernelId, headTask->opDev.op, headTask->datatype);
-  plan->kernelFn = ncclSymkKernelList[kernelIndex];
+  // Profiling requested = plugin loaded and mask has ncclProfileKernelCh. Set
+  // hasProfilerOps (like non-sym plans) so the host callback fires the group/coll events.
+  bool profilingRequested = ncclProfilerPluginLoaded() && (headTask->eActivationMask & ncclProfileKernelCh);
+  plan->hasProfilerOps = profilingRequested;
+  // Device-side instrumentation is eager-only: the args buffer is snapshotted at
+  // cuLaunchKernel, so the mirrored counter can't advance across graph replays. Under
+  // capture we launch the clean kernel and keep only host-side group/coll events.
+  bool profilerEnabled = profilingRequested && !plan->persistent;
+  plan->kernelFn = (profilerEnabled && ncclSymkKernelListProfile[kernelIndex] != nullptr) ?
+                     ncclSymkKernelListProfile[kernelIndex] :
+                     ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
   plan->kernelDynSmem = (1 & ncclSymkDynamicSmemKernelMask() >> (int)kernelId) ? maxDynamicSmem : 0;
   task = headTask;
@@ -295,14 +307,16 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
     task = task->next;
   }
 
-  plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount);
+  plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount, profilerEnabled);
   argsBuf = (struct ncclSymkDevWorkArgs*)calloc(1, plan->kernelArgsSize);
+
+  argsBuf->nMaxChannels = nMaxChannels;
+  argsBuf->maxDynamicSmem = maxDynamicSmem;
+  argsBuf->profilerEnabled = profilerEnabled ? 1 : 0;
 
   remainCell = cellPerChannel = DIVUP(DIVUP(totalCount, nMaxChannels), cellCount);
   workRangePtr = argsBuf->getWorkRange();
   workBufPtr = argsBuf->getWorks(nMaxChannels);
-  argsBuf->nMaxChannels = nMaxChannels;
-  argsBuf->maxDynamicSmem = maxDynamicSmem;
 
   while (!ncclIntruQueueEmpty(symTaskQueue)) {
     struct ncclSymkDevWork devWork = {};
@@ -373,10 +387,10 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
     memcpy(workBufPtr + workIndex, &devWork, sizeof(struct ncclSymkDevWork));
     workIndex++;
 
-    // Profiler
+    // Profiler: preserve task for profiler event firing in hostStreamPlanTask
     plan->groupApiEventHandle = task->groupApiEventHandle;
+    ncclIntruQueueEnqueue(&plan->collTaskQueue, task);
 
-    ncclMemoryPoolFree<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, task);
     if (isSymLast == 1) break;
     if (curChannel == nMaxChannels) {
       WARN("ncclSymmetricTaskScheduler ran out of channel space (nMaxChannels=%d, workCount=%d, workIndex=%d)",
