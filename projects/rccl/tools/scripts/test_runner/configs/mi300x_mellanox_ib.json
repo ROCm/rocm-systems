@@ -869,7 +869,8 @@
         {"name": "CollTraceUtils.aggregateResults", "description": "CollTrace utils aggregate results", "test_filter": "CollTraceUtilsTest.aggregateResultsTest"},
         {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
-        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
+        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
+        {"name": "CpuAffinity.RestoredAfterInitRank", "description": "Verify CPU affinity mask is restored after ncclCommInitRank (NCCL #2033 regression)", "test_filter": "CpuAffinity.RestoredAfterInitRank"}
       ]
     },
     "asymmetric_visibility": {
