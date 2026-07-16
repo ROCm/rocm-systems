@@ -154,11 +154,6 @@ def step_uses(step: Mapping[str, Any], action_prefix: str) -> bool:
     return isinstance(uses, str) and uses.startswith(action_prefix)
 
 
-def step_run_contains(step: Mapping[str, Any], needle: str) -> bool:
-    run = step.get("run")
-    return isinstance(run, str) and needle in run
-
-
 def step_with_name(
     steps: Iterable[Mapping[str, Any]], name: str
 ) -> Optional[Mapping[str, Any]]:
@@ -829,6 +824,79 @@ def check_run_ci_skipped_tests_summary(verbose: bool) -> None:
     ok("run-ci.py reports skipped tests with their resolved reason")
 
 
+def _load_summary_module():
+    """Import summarize-junit-results.py as a module (its filename isn't a
+    valid identifier) to unit test its pure functions directly."""
+    spec = importlib.util.spec_from_file_location("summarize_junit", SUMMARY_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_summarize_junit_results_unit(verbose: bool) -> None:
+    summarize = _load_summary_module()
+
+    expected_groups = {
+        "junit-build-rhel-system-deps-0": "system-deps",
+        "junit-build-ubuntu-22.04-system-deps-1": "system-deps",
+        "junit-build-rhel-primary-build-3": "rhel",
+        "junit-build-ubuntu-24.04-primary-build-0": "ubuntu-24.04",
+        "junit-build-debian-primary-build-0": "debian",
+    }
+    for artifact, expected in expected_groups.items():
+        actual = summarize.build_group_from_artifact(artifact)
+        require(
+            actual == expected,
+            f"build_group_from_artifact({artifact!r}) returned {actual!r}, expected {expected!r}",
+        )
+
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-summary-unit-") as temp_dir:
+        root = Path(temp_dir) / "junit-results"
+
+        def write_artifact(name: str, content: str) -> None:
+            artifact_dir = root / name
+            artifact_dir.mkdir(parents=True)
+            (artifact_dir / "test-results.xml").write_text(content, encoding="utf-8")
+
+        write_artifact(
+            "junit-build-rhel-primary-build-0",
+            '<testsuite tests="5" failures="1" skipped="0" time="12.5">'
+            '<testcase classname="t" name="a"><failure/></testcase></testsuite>',
+        )
+        # Truncated file — ctest killed mid-write (timeout/OOM), uploaded anyway.
+        write_artifact(
+            "junit-build-debian-primary-build-0", '<testsuites><testsuite tests="12"'
+        )
+        # Zero-byte file — upload raced the write.
+        write_artifact("junit-build-ubuntu-22.04-primary-build-0", "")
+
+        paths = summarize.collect_paths([str(root / "**" / "*.xml")])
+        results = [
+            result
+            for result in (summarize.parse_junit(path, "build") for path in paths)
+            if result is not None
+        ]
+        require(
+            len(results) == 1,
+            f"expected only the well-formed artifact to parse, got {len(results)}",
+        )
+        require(
+            results[0].group_key == "rhel" and results[0].failed == 1,
+            "the well-formed artifact must still parse correctly when malformed "
+            "artifacts are present alongside it",
+        )
+
+        markdown = summarize.render_build_summary(results)
+        require(
+            "System deps" not in markdown,
+            "no system-deps artifact was supplied, so the summary must not invent one",
+        )
+
+        if verbose:
+            print(markdown)
+    ok("summarize-junit-results.py buckets system-deps and skips malformed XML")
+
+
 def check_run_ci_split_stage_contract(verbose: bool) -> None:
     with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-check-") as temp_dir:
         temp_path = Path(temp_dir)
@@ -918,10 +986,8 @@ _NON_XML_ESC = "[NON-XML-CHAR-0x1B]"
 
 def write_fake_build_xml_failure(bin_dir: Path, binary_dir: Path) -> None:
     """Fake ctest reproducing a real CTEST_USE_LAUNCHERS build failure:
-    NO LastBuild*.log at all (verified against a live minimal repro — see
-    planning/bugfix-build-failure-colored-log-xml.md), only
-    Testing/<TAG>/Build.xml with the failing rule's output pre-escaped
-    exactly the way real CTest escapes it, then exits non-zero.
+    NO LastBuild*.log at all, only Testing/<TAG>/Build.xml with the failing rule's
+    output pre-escaped exactly the way real CTest escapes it, then exits non-zero.
     """
     tag_dir = binary_dir / "Testing" / "20260101-0000"
     tool_path = bin_dir / "ctest"
@@ -1102,6 +1168,7 @@ def run_checks(args: argparse.Namespace) -> None:
     check_run_ci_build_success_annotation(args.verbose)
     check_summarize_skipped_tests_unit(args.verbose)
     check_run_ci_skipped_tests_summary(args.verbose)
+    check_summarize_junit_results_unit(args.verbose)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

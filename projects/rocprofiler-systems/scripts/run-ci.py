@@ -76,14 +76,6 @@ def log_group_end():
         print("::endgroup::", flush=True)
 
 
-def log_step(title):
-    """Lightweight visual separator used between sub-steps within a group."""
-    if IS_GITHUB_ACTIONS:
-        print(f"--- {title}", flush=True)
-    else:
-        print(_color(f"\n  >> {title}", "magenta"), flush=True)
-
-
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -265,8 +257,7 @@ def generate_build_script(args):
 def _ctest_test_params(ctest_args, binary_dir):
     """Parse ctest command-line args into cmake ctest_test() named parameters.
 
-    Returns (preamble, params) where preamble is cmake set() calls that must
-    appear before ctest_test(), and params is the inline keyword block.
+    Returns the inline keyword block (a string) for ctest_test().
 
     cmake 3.24+ ctest_test() has named parameters for filtering:
       -E  <regex>   -> EXCLUDE
@@ -276,6 +267,7 @@ def _ctest_test_params(ctest_args, binary_dir):
 
     OUTPUT_JUNIT is always set to produce the JUnit test-results file.
     """
+
     exclude = None
     include = None
     exclude_label = None
@@ -319,8 +311,7 @@ def _ctest_test_params(ctest_args, binary_dir):
     if include_label:
         kw_lines.append(f'INCLUDE_LABEL "{include_label}"')
 
-    params = "\n            ".join(kw_lines)
-    return "", params
+    return "\n            ".join(kw_lines)
 
 
 def generate_test_script(args, ctest_args=None):
@@ -335,7 +326,7 @@ def generate_test_script(args, ctest_args=None):
     BINARY_DIR = os.path.realpath(args.binary_dir)
     DASHBOARD_MODE = args.mode
 
-    test_preamble, test_params = _ctest_test_params(ctest_args, BINARY_DIR)
+    test_params = _ctest_test_params(ctest_args, BINARY_DIR)
 
     _cov_block = ""
     if CODECOV:
@@ -349,7 +340,6 @@ def generate_test_script(args, ctest_args=None):
 
     return _script_preamble() + _pytest_setup_block(BINARY_DIR) + f"""
         ctest_start({DASHBOARD_MODE} APPEND)
-        {test_preamble}
         ctest_test(BUILD "{BINARY_DIR}"
             {test_params}
             RETURN_VALUE _test_ret)
@@ -367,7 +357,7 @@ def generate_all_script(args, ctest_args=None):
     SOURCE_DIR = os.path.realpath(args.source_dir)
     BINARY_DIR = os.path.realpath(args.binary_dir)
 
-    test_preamble, test_params = _ctest_test_params(ctest_args, BINARY_DIR)
+    test_params = _ctest_test_params(ctest_args, BINARY_DIR)
 
     _cov_block = ""
     if CODECOV:
@@ -394,7 +384,6 @@ def generate_all_script(args, ctest_args=None):
         """
         + _pytest_setup_block(BINARY_DIR)
         + f"""
-        {test_preamble}
         ctest_test(BUILD "{BINARY_DIR}"
             {test_params}
             RETURN_VALUE _test_ret)
