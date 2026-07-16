@@ -64,9 +64,9 @@
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
 #elif defined(__powerpc64__) || defined(__PPC64__)
-// PowerPC has compatibility shim for x86 intrinsics
+// PowerPC compatibility shim for x86 intrinsics
 #define NO_WARN_X86_INTRINSICS
-#include <immintrin.h>
+#include <x86intrin.h>
 #endif
 #endif
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
