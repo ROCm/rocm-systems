@@ -41,7 +41,7 @@ void expect_ld_preload_eq(const std::string &expected) {
   EXPECT_EQ(expected, ld_preload);
 }
 
-#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME)
+#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
 std::string canonical_existing_path(const std::filesystem::path &path) {
   std::error_code ec;
   std::filesystem::path canonical = std::filesystem::canonical(path, ec);
@@ -49,35 +49,38 @@ std::string canonical_existing_path(const std::filesystem::path &path) {
 }
 #endif
 
-void expect_no_asan_preload_order() {
+#if !defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) && !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+void expect_no_sanitizer_preload_order() {
   ScopedEnvVar restore_ld_preload("LD_PRELOAD");
   const std::string interposer = "/tmp/librocjitsu.so";
   const std::string existing = "/tmp/libexisting.so";
 
   ASSERT_TRUE(rocjitsu::cli::find_loaded_asan_runtime().empty());
+  ASSERT_TRUE(rocjitsu::cli::find_loaded_tsan_runtime().empty());
   ASSERT_EQ(0, setenv("LD_PRELOAD", existing.c_str(), 1));
 
   rocjitsu::cli::prepend_launch_preloads(interposer);
 
   expect_ld_preload_eq(interposer + ":" + existing);
 }
+#endif
 
 } // namespace
 
 TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
-#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME)
-  GTEST_SKIP() << "shared-ASan builds exercise the ASan ordering case";
+#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+  GTEST_SKIP() << "shared sanitizer builds exercise sanitizer ordering cases";
 #else
-  expect_no_asan_preload_order();
+  expect_no_sanitizer_preload_order();
 #endif
 }
 
-TEST(LaunchPreloadTest, AsanNamedExecutableAliasDoesNotPreloadExecutable) {
-#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME)
-  GTEST_SKIP() << "shared-ASan builds exercise the ASan ordering case";
+TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
+#if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+  GTEST_SKIP() << "shared sanitizer builds exercise sanitizer ordering cases";
 #else
   if (std::getenv("RJ_LAUNCH_PRELOAD_ALIAS_CHILD")) {
-    expect_no_asan_preload_order();
+    expect_no_sanitizer_preload_order();
     return;
   }
 
@@ -92,29 +95,33 @@ TEST(LaunchPreloadTest, AsanNamedExecutableAliasDoesNotPreloadExecutable) {
               std::filesystem::exists(temp_dir))
       << ec.message();
 
-  const std::filesystem::path alias = temp_dir / "launch-asan-preload-test";
-  std::filesystem::remove(alias, ec);
-  ec.clear();
-  std::filesystem::create_symlink(exe, alias, ec);
-  ASSERT_FALSE(ec) << ec.message();
+  static constexpr const char *alias_names[] = {"launch-asan-preload-test",
+                                                "launch-tsan-preload-test"};
+  for (const char *alias_name : alias_names) {
+    const std::filesystem::path alias = temp_dir / alias_name;
+    std::filesystem::remove(alias, ec);
+    ec.clear();
+    std::filesystem::create_symlink(exe, alias, ec);
+    ASSERT_FALSE(ec) << ec.message();
 
-  pid_t pid = fork();
-  ASSERT_NE(-1, pid);
-  if (pid == 0) {
-    setenv("RJ_LAUNCH_PRELOAD_ALIAS_CHILD", "1", 1);
-    const std::string alias_string = alias.string();
-    execl(alias_string.c_str(), alias_string.c_str(),
-          "--gtest_filter=LaunchPreloadTest."
-          "AsanNamedExecutableAliasDoesNotPreloadExecutable",
-          nullptr);
-    _exit(127);
+    pid_t pid = fork();
+    ASSERT_NE(-1, pid);
+    if (pid == 0) {
+      setenv("RJ_LAUNCH_PRELOAD_ALIAS_CHILD", "1", 1);
+      const std::string alias_string = alias.string();
+      execl(alias_string.c_str(), alias_string.c_str(),
+            "--gtest_filter=LaunchPreloadTest."
+            "SanitizerNamedExecutableAliasDoesNotPreloadExecutable",
+            nullptr);
+      _exit(127);
+    }
+
+    int status = 0;
+    ASSERT_EQ(pid, waitpid(pid, &status, 0));
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(0, WEXITSTATUS(status));
   }
-
-  int status = 0;
-  ASSERT_EQ(pid, waitpid(pid, &status, 0));
   std::filesystem::remove_all(temp_dir, ec);
-  ASSERT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(0, WEXITSTATUS(status));
 #endif
 }
 
@@ -134,5 +141,24 @@ TEST(LaunchPreloadTest, SharedAsanPrependsAsanBeforeInterposerAndExistingPreload
   rocjitsu::cli::prepend_launch_preloads(interposer);
 
   expect_ld_preload_eq(expected_asan + ":" + interposer + ":" + existing);
+#endif
+}
+
+TEST(LaunchPreloadTest, SharedTsanPrependsTsanBeforeInterposerAndExistingPreload) {
+#if !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
+  GTEST_SKIP() << "requires a shared-TSan build";
+#else
+  ScopedEnvVar restore_ld_preload("LD_PRELOAD");
+  const std::string interposer = "/tmp/librocjitsu.so";
+  const std::string existing = "/tmp/libexisting.so";
+  const std::string expected_tsan = canonical_existing_path(RJ_EXPECTED_SHARED_TSAN_RUNTIME);
+
+  ASSERT_FALSE(expected_tsan.empty()) << RJ_EXPECTED_SHARED_TSAN_RUNTIME;
+  EXPECT_EQ(expected_tsan, rocjitsu::cli::find_loaded_tsan_runtime());
+  ASSERT_EQ(0, setenv("LD_PRELOAD", existing.c_str(), 1));
+
+  rocjitsu::cli::prepend_launch_preloads(interposer);
+
+  expect_ld_preload_eq(expected_tsan + ":" + interposer + ":" + existing);
 #endif
 }

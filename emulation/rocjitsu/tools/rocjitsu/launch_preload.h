@@ -9,6 +9,8 @@ namespace rocjitsu::cli {
 
 std::string find_loaded_asan_runtime();
 
+std::string find_loaded_tsan_runtime();
+
 void prepend_launch_preloads(const std::string &interposer_path);
 
 } // namespace rocjitsu::cli
