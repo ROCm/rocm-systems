@@ -326,6 +326,54 @@ TEST(RjWaitcheck, ExhaustiveSchedulesKernelsAndReportsSlowest) {
   EXPECT_TRUE(contains(stdout_text, "entry=0xc")) << stdout_text;
 }
 
+TEST(RjWaitcheck, ExhaustiveWritesLosslessPerKernelDiagnosticJsonl) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "multi_kernel_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto diagnostics = temp_dir.path / "diagnostics.jsonl";
+  constexpr uint32_t endpgm = 0xBF810000u;
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"first_hazard", {0xE0501000u, 0x80000008u, 0x7E020300u, endpgm}},
+       {"second_hazard", {0xE0501000u, 0x80000008u, 0x7E020300u, endpgm}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+      " --exhaustive --target gfx950 --summary-only --no-fail -j2 --diagnostics-jsonl " +
+      shell_quote(diagnostics.string()) + " > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+  const std::string diagnostic_text = read_text_file(diagnostics);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "code-objects=1/1 kernels=2/2")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "diagnostics=2 analysis-errors=0")) << stdout_text;
+  EXPECT_EQ(std::count(diagnostic_text.begin(), diagnostic_text.end(), '\n'), 2);
+  EXPECT_TRUE(contains(diagnostic_text, "\"schema\":\"rj-waitcheck-diagnostic-v1\""))
+      << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"target\":\"gfx950\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"code_object_index\":0")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kernel_name\":\"first_hazard\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kernel_entry_hex\":\"0x0\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kernel_name\":\"second_hazard\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"kernel_entry_hex\":\"0x10\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"access\":\"use\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"register\":{\"class\":\"vgpr\"")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"producer_instruction\":")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"repro_argv\":[")) << diagnostic_text;
+  EXPECT_TRUE(contains(diagnostic_text, "\"repro_command\":")) << diagnostic_text;
+}
+
 TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

@@ -12,8 +12,10 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,6 +65,8 @@ struct CliOptions {
   bool code_object_index_set = false;
   std::optional<uint64_t> kernel_entry;
   size_t max_diagnostics = 32;
+  bool max_diagnostics_set = false;
+  std::optional<std::string> diagnostics_jsonl_path;
   bool all_code_objects = false;
   bool list_code_objects = false;
   bool recursive = false;
@@ -287,6 +291,7 @@ void print_help() {
             << "  --slowest-kernels N      Report the N slowest individually analyzed kernels\n"
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
+            << "  --diagnostics-jsonl PATH Losslessly write per-kernel diagnostics as JSONL\n"
             << "  --stop-after-first-diagnostic\n"
             << "                           Stop each code object after the first observed hazard\n"
             << "  --summary-only           Print only final batch totals\n"
@@ -304,6 +309,209 @@ void print_help() {
   }
   return "unsupported";
 }
+
+[[nodiscard]] std::string_view access_name(WaitcheckAccessKind access) {
+  switch (access) {
+  case WaitcheckAccessKind::Use:
+    return "use";
+  case WaitcheckAccessKind::Def:
+    return "def";
+  case WaitcheckAccessKind::MemoryOrder:
+    return "memory-order";
+  case WaitcheckAccessKind::ProgramEnd:
+    return "program-end";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] std::string_view register_class_name(RegClass reg_class) {
+  switch (reg_class) {
+  case RegClass::SGPR:
+    return "sgpr";
+  case RegClass::VGPR:
+    return "vgpr";
+  case RegClass::ACC_VGPR:
+    return "acc-vgpr";
+  case RegClass::EXEC:
+    return "exec";
+  case RegClass::VCC:
+    return "vcc";
+  case RegClass::SCC:
+    return "scc";
+  case RegClass::M0:
+    return "m0";
+  case RegClass::FLAT_SCRATCH:
+    return "flat-scratch";
+  case RegClass::TTMP:
+    return "ttmp";
+  case RegClass::PC:
+    return "pc";
+  }
+  return "unknown";
+}
+
+void write_json_string(std::ostream &os, std::string_view value) {
+  constexpr char hex[] = "0123456789abcdef";
+  os << '"';
+  for (const unsigned char ch : value) {
+    switch (ch) {
+    case '"':
+      os << "\\\"";
+      break;
+    case '\\':
+      os << "\\\\";
+      break;
+    case '\b':
+      os << "\\b";
+      break;
+    case '\f':
+      os << "\\f";
+      break;
+    case '\n':
+      os << "\\n";
+      break;
+    case '\r':
+      os << "\\r";
+      break;
+    case '\t':
+      os << "\\t";
+      break;
+    default:
+      if (ch < 0x20) {
+        os << "\\u00" << hex[ch >> 4u] << hex[ch & 0xfu];
+      } else {
+        os << static_cast<char>(ch);
+      }
+      break;
+    }
+  }
+  os << '"';
+}
+
+[[nodiscard]] std::string hex_value(uint64_t value) {
+  std::ostringstream os;
+  os << "0x" << std::hex << value;
+  return os.str();
+}
+
+[[nodiscard]] std::string shell_quote(std::string_view value) {
+  std::string result = "'";
+  for (char ch : value) {
+    if (ch == '\'')
+      result += "'\\''";
+    else
+      result += ch;
+  }
+  result += '\'';
+  return result;
+}
+
+class DiagnosticJsonlWriter {
+public:
+  DiagnosticJsonlWriter(std::ostream &output, std::string tool_path)
+      : output_(output), tool_path_(std::move(tool_path)) {}
+
+  void write(std::string_view input_path, rj_code_target_id_t target, uint32_t code_object_index,
+             const WaitcheckKernelInfo *kernel, std::span<const WaitcheckDiagnostic> diagnostics) {
+    if (diagnostics.empty())
+      return;
+    const std::lock_guard lock(mutex_);
+    for (const WaitcheckDiagnostic &diagnostic : diagnostics) {
+      output_ << "{\"schema\":\"rj-waitcheck-diagnostic-v1\",\"input\":";
+      write_json_string(output_, input_path);
+      output_ << ",\"target\":";
+      write_json_string(output_, target_name(target));
+      output_ << ",\"code_object_index\":" << code_object_index << ",\"kernel_name\":";
+      if (kernel)
+        write_json_string(output_, kernel->name);
+      else
+        output_ << "null";
+      output_ << ",\"kernel_entry\":";
+      if (kernel)
+        output_ << kernel->entry_offset;
+      else
+        output_ << "null";
+      output_ << ",\"kernel_entry_hex\":";
+      if (kernel)
+        write_json_string(output_, hex_value(kernel->entry_offset));
+      else
+        output_ << "null";
+      output_ << ",\"wavefront_size\":";
+      if (kernel)
+        output_ << kernel->wavefront_size;
+      else
+        output_ << "null";
+      output_ << ",\"counter\":";
+      write_json_string(output_, wait_counter_name(diagnostic.counter));
+      output_ << ",\"access\":";
+      write_json_string(output_, access_name(diagnostic.access));
+      output_ << ",\"register\":{\"class\":";
+      write_json_string(output_, register_class_name(diagnostic.reg.cls));
+      output_ << ",\"index\":" << diagnostic.reg.index
+              << ",\"width\":" << static_cast<uint32_t>(diagnostic.reg.width)
+              << "},\"required_count\":" << diagnostic.required_count << ",\"section\":";
+      write_json_string(output_, diagnostic.section_name);
+      output_ << ",\"section_offset\":" << diagnostic.section_offset << ",\"section_offset_hex\":";
+      write_json_string(output_, hex_value(diagnostic.section_offset));
+      output_ << ",\"file_offset\":" << diagnostic.file_offset
+              << ",\"producer_section_offset\":" << diagnostic.producer_section_offset
+              << ",\"producer_section_offset_hex\":";
+      write_json_string(output_, hex_value(diagnostic.producer_section_offset));
+      output_ << ",\"producer_file_offset\":" << diagnostic.producer_file_offset
+              << ",\"instruction\":";
+      write_json_string(output_, diagnostic.instruction);
+      output_ << ",\"producer_instruction\":";
+      write_json_string(output_, diagnostic.producer_instruction);
+      output_ << ",\"message\":";
+      write_json_string(output_, diagnostic.message);
+
+      const std::array<std::string, 8> fixed_repro_argv = {tool_path_,
+                                                           std::string(input_path),
+                                                           "--target",
+                                                           std::string(target_name(target)),
+                                                           "--code-object-index",
+                                                           std::to_string(code_object_index),
+                                                           "--no-fail",
+                                                           "--max-diagnostics"};
+      output_ << ",\"repro_argv\":[";
+      bool first = true;
+      for (const std::string &argument : fixed_repro_argv) {
+        if (!first)
+          output_ << ',';
+        first = false;
+        write_json_string(output_, argument);
+      }
+      output_ << ',';
+      write_json_string(output_, "4294967295");
+      if (kernel) {
+        output_ << ',';
+        write_json_string(output_, "--kernel-entry");
+        output_ << ',';
+        write_json_string(output_, hex_value(kernel->entry_offset));
+      }
+      output_ << "],\"repro_command\":";
+      std::string repro_command;
+      for (const std::string &argument : fixed_repro_argv) {
+        if (!repro_command.empty())
+          repro_command += ' ';
+        repro_command += shell_quote(argument);
+      }
+      repro_command += " '4294967295'";
+      if (kernel) {
+        repro_command += " '--kernel-entry' ";
+        repro_command += shell_quote(hex_value(kernel->entry_offset));
+      }
+      write_json_string(output_, repro_command);
+      output_ << "}\n";
+    }
+    output_.flush();
+  }
+
+private:
+  std::ostream &output_;
+  std::string tool_path_;
+  std::mutex mutex_;
+};
 
 [[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
   for (const TargetInfo &info : kSupportedTargets) {
@@ -461,6 +669,17 @@ void print_help() {
         return false;
       }
       options.max_diagnostics = max_diagnostics;
+      options.max_diagnostics_set = true;
+      continue;
+    }
+    if (arg == "--diagnostics-jsonl") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      if (value.empty()) {
+        std::cerr << "diagnostics JSONL path cannot be empty\n";
+        return false;
+      }
+      options.diagnostics_jsonl_path = value;
       continue;
     }
     if (arg == "--slowest-kernels") {
@@ -517,6 +736,20 @@ void print_help() {
     std::cerr << "--slowest-kernels requires --all-code-objects or --exhaustive\n";
     return false;
   }
+  if (options.diagnostics_jsonl_path && !options.all_code_objects) {
+    std::cerr << "--diagnostics-jsonl requires --all-code-objects or --exhaustive\n";
+    return false;
+  }
+  if (options.diagnostics_jsonl_path && options.max_diagnostics_set) {
+    std::cerr << "--diagnostics-jsonl cannot be combined with --max-diagnostics\n";
+    return false;
+  }
+  if (options.diagnostics_jsonl_path && options.stop_after_first_diagnostic) {
+    std::cerr << "--diagnostics-jsonl cannot be combined with --stop-after-first-diagnostic\n";
+    return false;
+  }
+  if (options.diagnostics_jsonl_path)
+    options.max_diagnostics = std::numeric_limits<size_t>::max();
 
   return true;
 }
@@ -947,6 +1180,7 @@ void print_slowest_kernels(const ScanTotals &totals) {
 
 [[nodiscard]] bool scan_all_code_objects(const CliOptions &options, const std::string &input_path,
                                          ScanTotals &totals, std::string &error,
+                                         DiagnosticJsonlWriter *diagnostic_writer,
                                          ProgressDisplay *progress = nullptr) {
   Executable executable(input_path);
   if (!executable.is_valid()) {
@@ -1019,6 +1253,7 @@ void print_slowest_kernels(const ScanTotals &totals) {
   // Interleave bounded kernel batches from different code objects. Each batch
   // reuses one analyzer and decoder, while enough independent work remains for
   // a slow kernel to pin only its current worker.
+  const size_t kernel_batch_size = diagnostic_writer ? 1 : kKernelBatchSize;
   size_t max_batch_count = 0;
   for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
     CodeObjectTask &task = code_object_tasks[task_index];
@@ -1027,18 +1262,18 @@ void print_slowest_kernels(const ScanTotals &totals) {
       work_items.push_back({task_index, 0, 0});
     } else {
       max_batch_count = std::max(max_batch_count,
-                                 (task.kernels.size() + kKernelBatchSize - 1) / kKernelBatchSize);
+                                 (task.kernels.size() + kernel_batch_size - 1) / kernel_batch_size);
     }
   }
   for (size_t batch_index = 0; batch_index < max_batch_count; ++batch_index) {
     for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
       CodeObjectTask &task = code_object_tasks[task_index];
-      const size_t first_kernel = batch_index * kKernelBatchSize;
+      const size_t first_kernel = batch_index * kernel_batch_size;
       if (first_kernel >= task.kernels.size())
         continue;
       task.work_item_indices.push_back(work_items.size());
       work_items.push_back({task_index, first_kernel,
-                            std::min(kKernelBatchSize, task.kernels.size() - first_kernel)});
+                            std::min(kernel_batch_size, task.kernels.size() - first_kernel)});
     }
   }
 
@@ -1068,6 +1303,13 @@ void print_slowest_kernels(const ScanTotals &totals) {
       } else {
         work_results[work_index] =
             run_code_object_analysis(options, task.target, task.index, *task.code_object, progress);
+      }
+      if (diagnostic_writer) {
+        const WaitcheckKernelInfo *kernel =
+            work.kernel_count == 1 ? &task.kernels[work.first_kernel] : nullptr;
+        diagnostic_writer->write(input_path, task.target, task.index, kernel,
+                                 work_results[work_index].report.diagnostics);
+        work_results[work_index].report.diagnostics.clear();
       }
       const bool code_object_completed =
           remaining_work[work.code_object_task].fetch_sub(1, std::memory_order_relaxed) == 1;
@@ -1130,6 +1372,20 @@ int main(int argc, char **argv) {
     return kInputError;
   }
 
+  std::ofstream diagnostic_output;
+  std::unique_ptr<DiagnosticJsonlWriter> diagnostic_writer;
+  if (options.diagnostics_jsonl_path) {
+    diagnostic_output.open(*options.diagnostics_jsonl_path,
+                           std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!diagnostic_output) {
+      std::cerr << "failed to open diagnostics JSONL output: " << *options.diagnostics_jsonl_path
+                << "\n";
+      return kInputError;
+    }
+    diagnostic_writer =
+        std::make_unique<DiagnosticJsonlWriter>(diagnostic_output, std::string(argv[0]));
+  }
+
   if (options.list_code_objects) {
     const bool include_path = options.input_paths.size() > 1;
     ScanTotals totals;
@@ -1164,7 +1420,8 @@ int main(int argc, char **argv) {
     ++totals.inputs;
     std::string error;
     const bool ok = options.all_code_objects
-                        ? scan_all_code_objects(options, input_path, totals, error, progress_ptr)
+                        ? scan_all_code_objects(options, input_path, totals, error,
+                                                diagnostic_writer.get(), progress_ptr)
                         : scan_selected_code_object(options, input_path, totals, error);
     if (!ok) {
       if (progress_ptr)
