@@ -30,6 +30,7 @@ set(HIPFILE_SOURCES
     stats.cpp
     stream.cpp
     sys.cpp
+    thread-pool.cpp
 )
 
 # Create hipfile target
@@ -39,7 +40,7 @@ ais_add_libraries(
     LIBS     mount
     SRCS     ${HIPFILE_SOURCES}
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
-    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_THIRD_PARTY_PATH}
 )
 
 if(HIPFILE_ROCPROFILER_REGISTER)
