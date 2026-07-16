@@ -703,6 +703,20 @@ void append_gfx942_v_mov_b32_v1_v0(std::vector<uint32_t> &program) {
   program.push_back(0x7E020300u);
 }
 
+void append_gfx942_global_load_dword_v4_v2(std::vector<uint32_t> &program) {
+  program.push_back(0xDC508000u);
+  program.push_back(0x047F0002u);
+}
+
+void append_gfx942_ds_read_b32_v4_v0(std::vector<uint32_t> &program) {
+  program.push_back(0xD86C0000u);
+  program.push_back(0x04000000u);
+}
+
+void append_gfx942_v_mov_b32_v5_v4(std::vector<uint32_t> &program) {
+  program.push_back(0x7E0A0304u);
+}
+
 void append_gfx1100_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8903F7u);
 }
@@ -899,6 +913,36 @@ TEST(WaitcheckTest, Gfx942AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942ReportsMissingVmcntBeforeGlobalLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_global_load_dword_v4_v2(program);
+  append_gfx942_v_mov_b32_v5_v4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+}
+
+TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeDsReadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_ds_read_b32_v4_v0(program);
+  append_gfx942_v_mov_b32_v5_v4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
 }
 
 TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeScalarLoadUse) {
