@@ -269,7 +269,7 @@ os/arch" idea, but not its single-container execution model.
 
 ## 5. File-by-file walkthrough
 
-Four files, all under `projects/rccl/`:
+All under `projects/rccl/`:
 
 ```
 projects/rccl/
@@ -278,10 +278,30 @@ projects/rccl/
 │   │   └── rccl-code-coverage.yml      # (1) GH Actions entry point (setup -> matrix -> coverage)
 │   └── scripts/
 │       ├── coverage_configure.py       # (2) target table -> build matrix (one row per target)
-│       └── run_coverage.sh             # (3) cluster launch + orchestration
+│       ├── run_coverage.sh             # (3) entry -> python run_workload.py --workload coverage
+│       ├── run_workload.py             #     entrypoint: pick payload by --workload/$WORKLOAD
+│       ├── orchestrator.py             #     RunConfig (dataclass) + Orchestrator (generic flow)
+│       └── payloads/
+│           ├── base.py                 #     Payload ABC (plugin contract)
+│           ├── coverage.py             #     CoveragePayload
+│           └── __init__.py             #     REGISTRY: workload name -> class
 └── docs/
     └── rccl_code_coverage_ci.md        # (this document)
 ```
+
+> **Class-based Python implementation.** The orchestration is a stdlib-only Python
+> program: `run_workload.py` (entrypoint) + `orchestrator.py` (`RunConfig` dataclass
+> and the generic `Orchestrator` flow: allocation, hostfile, registry login, mnctl
+> launch, artifact collection, teardown) + `payloads/*.py` (workload plugins).
+> `run_coverage.sh` — which the workflow calls — is a one-line shim to
+> `run_workload.py --workload coverage`. The coverage-specific bits (rccl-tests
+> mount, suite-name mapping, stale-CMake cleanup, the `test_runner` invocation) live
+> in `payloads/coverage.py`. To add a workload, add a `payloads/<name>.py` `Payload`
+> subclass and register it in `payloads/__init__.py`; the contract is documented in
+> `payloads/base.py`. See `.github/scripts/README.md` for a quick tour.
+>
+> *(An equivalent bash implementation may exist locally as a historical fallback but
+> is not tracked in the repository.)*
 
 The workflow has two jobs: a lightweight `setup` job (on `ubuntu-24.04`) runs
 `coverage_configure.py` to emit a matrix, then a `coverage` job fans out one run
