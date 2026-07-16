@@ -336,8 +336,11 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) =
-            *reinterpret_cast<const uint64_t*>(laddr);
+        // Always read/write 8B to emit a single load+store instruction;
+        // overread is safe (heap page), NIC uses wqe length for actual size.
+        uint64_t val;
+        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
+        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
       }
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
@@ -393,8 +396,11 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t length,
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) =
-            *reinterpret_cast<const uint64_t*>(laddr);
+        // Always read/write 8B to emit a single load+store instruction;
+        // overread is safe (heap page), NIC uses wqe length for actual size.
+        uint64_t val;
+        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
+        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
       }
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
