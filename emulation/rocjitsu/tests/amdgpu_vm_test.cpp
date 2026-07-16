@@ -692,6 +692,8 @@ TEST_P(IsaTest, VendorSpecificBarrierValueConditionsWaitAndResume) {
   };
   constexpr std::array cases{
       ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0x106, 0x105, 0x5, 0xff},
+      ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<int64_t>::min(),
+                    std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::min()},
       ConditionCase{HSA_SIGNAL_CONDITION_NE, 4, 5, 4, std::numeric_limits<int64_t>::max()},
       ConditionCase{HSA_SIGNAL_CONDITION_LT, 1, 0, 1, std::numeric_limits<int64_t>::max()},
       ConditionCase{HSA_SIGNAL_CONDITION_GTE, 4, 5, 5, std::numeric_limits<int64_t>::max()},
@@ -817,6 +819,58 @@ TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
 
   EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
   EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+}
+
+TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
+  constexpr std::array packet_types{
+      HSA_PACKET_TYPE_BARRIER_AND,
+      HSA_PACKET_TYPE_BARRIER_OR,
+      HSA_PACKET_TYPE_VENDOR_SPECIFIC,
+  };
+
+  for (const auto packet_type : packet_types) {
+    SCOPED_TRACE(packet_type);
+    VmFixture f(arch(), 1, 8);
+
+    const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    constexpr uint64_t kBarrierCompletionSignal = 0x7000;
+    constexpr uint64_t kLaterCompletionSignal = 0x7100;
+    constexpr uint32_t kSignalValueOffset = 8;
+    f.mem()->write64(kBarrierCompletionSignal + kSignalValueOffset, 1);
+    f.mem()->write64(kLaterCompletionSignal + kSignalValueOffset, 1);
+
+    hsa_kernel_dispatch_packet_t dispatch{};
+    dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    dispatch.setup = 1;
+    dispatch.workgroup_size_x = 64;
+    dispatch.workgroup_size_y = 1;
+    dispatch.workgroup_size_z = 1;
+    dispatch.grid_size_x = 64;
+    dispatch.grid_size_y = 1;
+    dispatch.grid_size_z = 1;
+    dispatch.kernel_object = ko;
+
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = packet_type | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.completion_signal.handle = kBarrierCompletionSignal;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(dispatch);
+    queue.submit(barrier);
+    dispatch.completion_signal.handle = kLaterCompletionSignal;
+    queue.submit(dispatch);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.cu()->num_wfs(), 1u);
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
+
+    f.engine->run();
+
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+  }
 }
 
 TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {

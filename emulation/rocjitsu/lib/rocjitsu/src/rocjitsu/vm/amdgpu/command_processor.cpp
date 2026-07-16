@@ -21,6 +21,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -1251,15 +1252,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       uint64_t sig = 0;
       sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-      DispatchEntry dp{};
-      dp.dispatch_id = next_dispatch_id_++;
-      dp.queue_id = queue.queue_id;
-      dp.process_id = queue.process_id;
-      dp.total_wgs = 0;
-      dp.completed_wgs = 0;
-      dp.dispatched_wgs = 0;
-      dp.completion_signal = sig;
-      dp.host_signal = false;
+      DispatchEntry dp{
+          .dispatch_id = next_dispatch_id_++,
+          .queue_id = queue.queue_id,
+          .process_id = queue.process_id,
+          .completion_signal = sig,
+          .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+      };
 
       qs.entries.push_back(std::move(dp));
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
@@ -1272,10 +1271,9 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         bool condition_satisfied = true;
         if (barrier.signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
-          const auto signal_value = static_cast<int64_t>(
+          const auto signal_value = std::bit_cast<int64_t>(
               read_gpu_u64(barrier.signal.handle + SIG_VAL_OFF, queue.process_id));
-          const auto masked_value = static_cast<int64_t>(static_cast<uint64_t>(signal_value) &
-                                                         static_cast<uint64_t>(barrier.mask));
+          const auto masked_value = signal_value & barrier.mask;
           switch (barrier.condition) {
           case HSA_SIGNAL_CONDITION_EQ:
             condition_satisfied = masked_value == barrier.value;
@@ -1358,15 +1356,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         uint64_t sig = 0;
         sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-        DispatchEntry dp{};
-        dp.dispatch_id = next_dispatch_id_++;
-        dp.queue_id = queue.queue_id;
-        dp.process_id = queue.process_id;
-        dp.total_wgs = 0;
-        dp.completed_wgs = 0;
-        dp.dispatched_wgs = 0;
-        dp.completion_signal = sig;
-        dp.host_signal = false;
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = sig,
+            .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
 
         qs.entries.push_back(std::move(dp));
       }
