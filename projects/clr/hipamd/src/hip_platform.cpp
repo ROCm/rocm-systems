@@ -454,7 +454,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
-  hipDeviceProp_t prop = {0};
+  hipDeviceProp_t prop = {};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, dev_id));
 
   if (blockSize > prop.maxThreadsPerMultiProcessor) {
@@ -888,7 +888,6 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
                                          const hipLaunchConfig_t* config) {
   HIP_INIT_API(hipOccupancyMaxActiveClusters, numClusters, f, config);
   dim3 clusterDim;
-  dim3 gridDim;
   int totalClusterSize;
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
   hipFunction_t func;

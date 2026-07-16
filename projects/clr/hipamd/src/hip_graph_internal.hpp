@@ -98,7 +98,7 @@ class UserObject : public amd::ReferenceCountedObject {
  private:
   UserCallbackDestructor callback_;
   void* data_;
-  unsigned int flags_;
+  [[maybe_unused]] unsigned int flags_;
   //! Disable default operator=
   UserObject& operator=(const UserObject&) = delete;
   //! Disable copy constructor
@@ -1769,7 +1769,7 @@ class GraphKernelNode : public GraphNode {
   }
 
   hipError_t SetAttrParams(hipKernelNodeAttrID attr, const hipKernelNodeAttrValue* params) {
-    hipDeviceProp_t prop = {0};
+    hipDeviceProp_t prop = {};
     // Update device ID since new params may require validation for the current device.
     dev_id_ = ihipGetDevice();
     hipError_t status = ihipGetDeviceProperties(&prop, dev_id_);
@@ -1804,8 +1804,8 @@ class GraphKernelNode : public GraphNode {
     } else if (attr == hipKernelNodeAttributeCooperative) {
       kernelAttr_.cooperative = params->cooperative;
     } else if (attr == hipLaunchAttributePriority) {
-      if (params->priority < hip::Stream::Priority::Low ||
-          params->priority > hip::Stream::Priority::High) {
+      if (params->priority < hip::Stream::Priority::High ||
+          params->priority > hip::Stream::Priority::Low) {
         return hipErrorInvalidValue;
       }
       kernelAttr_.priority = params->priority;
@@ -3464,6 +3464,7 @@ class hipGraphExternalSemSignalNode : public GraphNode {
                 sizeof(hipExternalSemaphoreSignalNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipExternalSemaphoreSignalNodeParams* pNodeParams) {
     std::memcpy(&externalSemaphorNodeParam_, pNodeParams,
                 sizeof(hipExternalSemaphoreSignalNodeParams));
@@ -3521,6 +3522,7 @@ class hipGraphExternalSemWaitNode : public GraphNode {
                 sizeof(hipExternalSemaphoreWaitNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipExternalSemaphoreWaitNodeParams* pNodeParams) {
     std::memcpy(&externalSemaphorNodeParam_, pNodeParams,
                 sizeof(hipExternalSemaphoreWaitNodeParams));
@@ -3568,6 +3570,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
     std::memcpy(pNodeParams, &batchMemOpNodeParam_, sizeof(hipBatchMemOpNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
     std::memcpy(&batchMemOpNodeParam_, pNodeParams, sizeof(hipBatchMemOpNodeParams));
     return hipSuccess;

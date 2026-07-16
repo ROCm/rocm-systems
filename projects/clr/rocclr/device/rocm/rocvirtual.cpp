@@ -104,10 +104,10 @@ static constexpr uint16_t kBarrierVendorPacketNopScopeHeader =
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
+[[maybe_unused]] static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
     kBarrierPacketAcquireHeader, 0, 0, {{0}}, 0, {0}};
 
-static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
+[[maybe_unused]] static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
     kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
 
 namespace {
@@ -4356,8 +4356,13 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
 
 // ================================================================================================
 #if IS_LINUX
-__attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
-    void* __restrict dst, const void* __restrict src, size_t size) {
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("unroll-all-loops"), always_inline))
+#else
+__attribute__((always_inline))
+#endif
+static inline void
+nontemporalMemcpy(void* __restrict dst, const void* __restrict src, size_t size) {
 #if defined(ATI_ARCH_X86)
 #if defined(__AVX512F__)
   for (auto i = 0u; i != size / sizeof(__m512i); ++i) {

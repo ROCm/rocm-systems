@@ -25,8 +25,8 @@ size_t constexpr strLiteralLength(char const* str) {
 
 constexpr char const* CLANG_OFFLOAD_BUNDLER_MAGIC_STR = "__CLANG_OFFLOAD_BUNDLE__";
 constexpr char const* OFFLOAD_KIND_HIP = "hip";
-constexpr char const* OFFLOAD_KIND_HIPV4 = "hipv4";
-constexpr char const* OFFLOAD_KIND_HCC = "hcc";
+[[maybe_unused]] constexpr char const* OFFLOAD_KIND_HIPV4 = "hipv4";
+[[maybe_unused]] constexpr char const* OFFLOAD_KIND_HCC = "hcc";
 constexpr char const* AMDGCN_TARGET_TRIPLE = "amdgcn-amd-amdhsa-";
 constexpr char const* SPIRV_BUNDLE_ENTRY_ID = "hip-spirv64-amd-amdhsa-unknown-amdgcnspirv";
 
@@ -149,7 +149,7 @@ static inline unsigned int getGenericVersion(const void* image) {
              : 0;
 }
 
-static inline bool isGenericTarget(const void* image) {
+[[maybe_unused]] static inline bool isGenericTarget(const void* image) {
   return getGenericVersion(image) >= EF_AMDGPU_GENERIC_VERSION_MIN;
 }
 

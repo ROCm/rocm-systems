@@ -573,7 +573,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0600 deviceProps = {0};
+  hipDeviceProp_tR0600 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -779,7 +779,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0000 deviceProps = {0};
+  hipDeviceProp_tR0000 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();

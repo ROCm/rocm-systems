@@ -1530,7 +1530,7 @@ template <typename Tp> struct dispatch_table_info;
     static constexpr auto import_func = &ROCPROFILER_REGISTER_IMPORT_FUNC(NAME);                   \
   };
 
-constexpr auto ComputeTableSize(size_t num_funcs) {
+[[maybe_unused]] constexpr auto ComputeTableSize(size_t num_funcs) {
   return (num_funcs * sizeof(void*)) + sizeof(uint64_t);
 }
 
@@ -1584,7 +1584,7 @@ std::atomic<bool> hip_tools_dispatch_registered{false};
 // This preloading occurs before verifying if the table has been initialized.
 // Since the table is typically already initialized, this adds unnecessary overhead to the critical
 // path.
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__GNUC__) && !defined(__clang__)
 #define NO_VECTORIZE __attribute__((optimize("no-tree-vectorize")))
 #else
 #define NO_VECTORIZE

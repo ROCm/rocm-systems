@@ -21,7 +21,7 @@
 namespace amd::device {
 
 // ================================================================================================
-static constexpr clk_value_type_t ClkValueMapType[6][6] = {
+[[maybe_unused]] static constexpr clk_value_type_t ClkValueMapType[6][6] = {
     {T_CHAR, T_CHAR2, T_CHAR3, T_CHAR4, T_CHAR8, T_CHAR16},
     {T_SHORT, T_SHORT2, T_SHORT3, T_SHORT4, T_SHORT8, T_SHORT16},
     {T_INT, T_INT2, T_INT3, T_INT4, T_INT8, T_INT16},

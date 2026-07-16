@@ -73,11 +73,11 @@ enum MemcpyType {
   hipCopyBufferP2P,   //!< Memcpy from device A to device B
 };
 
-struct Graph;
-struct GraphNode;
+class Graph;
+class GraphNode;
 class GraphExecBase;
 class GraphExecSegmented;
-struct UserObject;
+class UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32

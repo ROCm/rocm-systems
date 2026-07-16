@@ -32,7 +32,7 @@ struct BlockNameIdMapType {
   int value;
 };
 
-static constexpr BlockNameIdMapType viBlockIdOrcaToRocr[] = {
+[[maybe_unused]] static constexpr BlockNameIdMapType viBlockIdOrcaToRocr[] = {
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // CB0 - 0
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 1},      // CB1 - 1
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 2},      // CB2 - 2
