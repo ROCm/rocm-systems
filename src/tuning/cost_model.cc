@@ -352,6 +352,12 @@ ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
     int algo, proto, symKernelId;
     NCCLCHECK(ncclTuningExpandId(i, &algo, &proto, &symKernelId, nullptr));
     for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
+      // First check if LL128 is functional on the platform
+      if (proto == NCCL_PROTO_LL128 && !isLL128Enabled(comm->minCompCap, comm->maxCompCap, comm->graphs[algo].typeInter,
+                                                       comm->graphs[algo].typeIntra, comm->nRanks, f, algo)) {
+        comm->tuningContext.enabled[i][f] = 0;
+      }
+      //  Check the user env vars only for functions that have a forced configuration and not already disabled.
       if (comm->tuningContext.forced[f] == 0 || comm->tuningContext.enabled[i][f] == 0) continue;
       comm->tuningContext.enabled[i][f] = 0;
       TRACE(NCCL_TUNING, "a/p/s %s/%s/%s enabled %d/%d/%d", ncclAlgoStr[algo], ncclProtoStr[proto],
@@ -363,10 +369,6 @@ ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
            (proto != NCCL_PROTO_UNDEF && protoEnable[f * NCCL_NUM_PROTOCOLS + proto] != 0)) ||
           (symKernelId != ncclSymkKernelId_Count && symKernelIdEnable[f * ncclSymkKernelId_Count + symKernelId] != 0)) {
         comm->tuningContext.enabled[i][f] = 1;
-      }
-      if (proto == NCCL_PROTO_LL128 && !isLL128Enabled(comm->minCompCap, comm->maxCompCap, comm->graphs[algo].typeInter,
-                                                       comm->graphs[algo].typeIntra, comm->nRanks, f, algo)) {
-        comm->tuningContext.enabled[i][f] = 0;
       }
     }
   }
