@@ -104,6 +104,60 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def markdown_code(value: Any) -> str:
+    return str(value).replace("`", "\\`")
+
+
+def write_triage_markdown(path: pathlib.Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        stream.write("# Waitcheck diagnostic sample triage\n\n")
+        stream.write(
+            "Classify every item as `true-positive`, `false-positive`, or `inconclusive`. "
+            "Keep the instruction-level evidence and any follow-up bead beside the item.\n\n"
+        )
+        for record in records:
+            sample = record["sample"]
+            stream.write(
+                f"## {sample['rank']:02d}. `{sample['identity_sha256'][:12]}`\n\n"
+            )
+            stream.write("- Classification: `untriaged`\n")
+            stream.write("- Confidence: `untriaged`\n")
+            stream.write(
+                f"- Location: `{markdown_code(record['target'])}` code object "
+                f"`{record['code_object_index']}`, kernel entry "
+                f"`{markdown_code(record['kernel_entry_hex'])}`\n"
+            )
+            stream.write(f"- Kernel: `{markdown_code(record['kernel_name'])}`\n")
+            stream.write(
+                f"- Hazard: `{markdown_code(record['counter'])}` / "
+                f"`{markdown_code(record['access'])}`, required count "
+                f"`{record['required_count']}`\n"
+            )
+            register = record["register"]
+            stream.write(
+                f"- Register: `{markdown_code(register['class'])}"
+                f"[{register['index']}:{register['width']}]`\n"
+            )
+            stream.write(
+                f"- Producer `.text+{markdown_code(record['producer_section_offset_hex'])}`: "
+                f"`{markdown_code(record['producer_instruction'])}`\n"
+            )
+            stream.write(
+                f"- Consumer `.text+{markdown_code(record['section_offset_hex'])}`: "
+                f"`{markdown_code(record['instruction'])}`\n"
+            )
+            stream.write(f"- Message: {record['message']}\n")
+            stream.write("- Reproduction:\n\n")
+            stream.write("  ```sh\n")
+            stream.write(f"  {record['repro_command']}\n")
+            stream.write("  ```\n\n")
+            stream.write("Evidence and rationale:\n\n")
+            stream.write("- TODO\n\n")
+            stream.write("Follow-up:\n\n")
+            stream.write("- TODO\n\n")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -123,6 +177,11 @@ def parse_args() -> argparse.Namespace:
         "--metadata",
         type=pathlib.Path,
         help="metadata JSON path (default: OUTPUT.metadata.json)",
+    )
+    parser.add_argument(
+        "--triage-markdown",
+        type=pathlib.Path,
+        help="triage checklist path (default: OUTPUT with .triage.md suffix)",
     )
     return parser.parse_args()
 
@@ -171,6 +230,8 @@ def main() -> int:
     metadata_path = args.metadata or args.output.with_suffix(
         args.output.suffix + ".metadata.json"
     )
+    triage_path = args.triage_markdown or args.output.with_suffix(".triage.md")
+    write_triage_markdown(triage_path, selected)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {
         "schema": "rj-waitcheck-diagnostic-sample-v1",
@@ -188,6 +249,8 @@ def main() -> int:
         ),
         "output": str(args.output),
         "output_sha256": sha256_file(args.output),
+        "triage_markdown": str(triage_path),
+        "triage_markdown_sha256": sha256_file(triage_path),
         "identity_fields": list(diagnostic_identity(population[0])),
         "population_distribution": {
             "counter": distribution(population, "counter"),
@@ -210,6 +273,7 @@ def main() -> int:
     )
     print(f"sample: {args.output}")
     print(f"metadata: {metadata_path}")
+    print(f"triage checklist: {triage_path}")
     return 0
 
 
