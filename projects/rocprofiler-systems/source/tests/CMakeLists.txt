@@ -37,9 +37,9 @@ list(
 set(_rocprofsys_have_sdk_pmc_tests FALSE)
 if(
     (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
-    OR (
-        ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
-        AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
+    OR(
+    ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
+    AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
     )
 )
     set(_rocprofsys_have_sdk_pmc_tests TRUE)
@@ -54,12 +54,12 @@ add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 target_link_libraries(
     rocprof-sys-unit-tests
     PRIVATE
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-common-library
-        rocprofiler-systems-core-library
-        rocprofiler-systems::rocprofiler-systems-binary
-        $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
-        rocprofiler-systems::rocprofiler-systems-interface-library
+    rocprofiler-systems-googletest-library
+    rocprofiler-systems-common-library
+    rocprofiler-systems-core-library
+    rocprofiler-systems::rocprofiler-systems-binary
+    $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
+    rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
 target_include_directories(
