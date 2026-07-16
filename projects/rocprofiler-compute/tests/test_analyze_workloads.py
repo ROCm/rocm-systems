@@ -8,7 +8,11 @@
 import os
 
 import common
+import pandas as pd
 import pytest
+
+from utils import parser
+from utils.utils_analysis import decode_marker_name
 
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
@@ -22,6 +26,53 @@ TRITON_TRACE_WORKLOAD = "tests/workloads/triton_trace/MI300A"
 # Cached ML API trace workload (torch_compile_triton.py): both PyTorch and
 # Triton operators in a single run.
 ML_API_TRACE_WORKLOAD = "tests/workloads/ml_api_trace/MI300A"
+
+
+def expected_kernel_names_for_operator(
+    workload_dir: str,
+    operator_patterns: list[str],
+    backend: str = "torch",
+) -> set[str]:
+    """Kernel names for operators matching *operator_patterns*."""
+    trace_df = pd.read_csv(f"{workload_dir}/ml_api_trace/consolidated.csv")
+    if "Backend" in trace_df.columns:
+        trace_df = trace_df[trace_df["Backend"] == backend]
+
+    all_operators = trace_df["Operator_Name"].dropna().unique()
+    matched_names = {
+        str(operator).strip()
+        for operator in all_operators
+        if any(
+            parser.torch_operator_pattern_matches(pattern.strip(), candidate)
+            for candidate in {
+                str(operator).strip(),
+                decode_marker_name(str(operator).strip()),
+            }
+            for pattern in operator_patterns
+        )
+    }
+    matched_trace_df = trace_df[trace_df["Operator_Name"].isin(matched_names)]
+    return set(matched_trace_df["Kernel_Name"].dropna().str.strip())
+
+
+def assert_top_stats_kernel_names(
+    workload_dir: str,
+    expected_kernel_names: set[str],
+) -> None:
+    kernel_top_df = pd.read_csv(f"{workload_dir}/pmc_kernel_top.csv")
+    dispatch_info_df = pd.read_csv(f"{workload_dir}/pmc_dispatch_info.csv")
+
+    kernel_top_names = set(kernel_top_df["Kernel_Name"].dropna().str.strip())
+    dispatch_kernel_names = set(dispatch_info_df["Kernel_Name"].dropna().str.strip())
+
+    assert kernel_top_names
+    assert dispatch_kernel_names
+    # Both Top Stats tables must be scoped to exactly the operator's kernels.
+    # Equality (not issubset) catches partial-filtering regressions.
+    assert kernel_top_names == expected_kernel_names
+    assert dispatch_kernel_names == expected_kernel_names
+    assert kernel_top_names == dispatch_kernel_names
+
 
 # 30 workloads common to MI100, MI200, MI300A_A1, MI300X_A1.
 CDNA_WORKLOADS = [
@@ -173,6 +224,8 @@ def test_analyze_torch_trace_filter_operator_MI300X_A1(
     assert "relu" in output
     assert "dispatches:" in output
     assert "total:" in output
+    expected_kernel_names = expected_kernel_names_for_operator(workload_dir, ["*relu*"])
+    assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -198,6 +251,10 @@ def test_analyze_torch_trace_multi_operator_MI300X_A1(
     assert "Matched PyTorch Operators:" in output
     assert "relu" in output
     assert "ones_like" in output
+    expected_kernel_names = expected_kernel_names_for_operator(
+        workload_dir, ["*relu*", "*ones_like*"]
+    )
+    assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -465,5 +522,9 @@ def test_analyze_ml_api_trace_filter_torch_operator_MI300A(
 
     assert "Matched PyTorch Operators:" in output
     assert "randn" in output
+    expected_kernel_names = expected_kernel_names_for_operator(
+        workload_dir, ["*randn*"]
+    )
+    assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)

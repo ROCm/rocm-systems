@@ -19,6 +19,12 @@ from roofline.roofline_main import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
+from utils.kernel_filter import (
+    ML_API_ANALYSIS_CLI_OPTIONS,
+    KernelFilter,
+    build_operator_filter,
+    resolve_kernel_filter,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -72,12 +78,9 @@ class webui_analysis(OmniAnalyze_Base):
 
         self.app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)"})
 
-        # get filtered kernel names from kernel ids
-        filt_kernel_names: list[str] = []
-        kernel_top_df = base_data.dfs[1]
-        for kernel_id in base_data.filter_kernel_ids:
-            filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        filt_kernel_names = sorted(base_data.kernel_filter.names)
         input_filters["kernel"] = filt_kernel_names
+        initial_kernel_filter = base_data.kernel_filter
 
         # setup app layout
         from utils.gui_components.header import get_header
@@ -152,8 +155,15 @@ class webui_analysis(OmniAnalyze_Base):
                 console_debug("analysis", f"gui gpu filter is {gcd_filter}")
                 console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-                run_workload.filter_kernel_ids = (
-                    [str(k) for k in kernel_filter] if kernel_filter else []
+                selected_kernel_names = (
+                    frozenset(str(k).strip() for k in kernel_filter)
+                    if kernel_filter
+                    else frozenset()
+                )
+                run_workload.kernel_filter = (
+                    initial_kernel_filter
+                    if selected_kernel_names == initial_kernel_filter.names
+                    else KernelFilter(names=selected_kernel_names)
                 )
                 run_workload.filter_gpu_ids = (
                     [int(g) for g in gcd_filter] if gcd_filter else []
@@ -171,6 +181,7 @@ class webui_analysis(OmniAnalyze_Base):
                     filter_dispatch_ids=run_workload.filter_dispatch_ids,
                     time_unit=args.time_unit,
                     kernel_verbose=args.kernel_verbose,
+                    kernel_filter=run_workload.kernel_filter,
                 )
                 run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
                 run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
@@ -431,6 +442,52 @@ class webui_analysis(OmniAnalyze_Base):
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        if workload.kernel_selection is not None:
+            workload.kernel_filter = resolve_kernel_filter(
+                workload.kernel_selection, kernel_top_df
+            )
+
+        active_operator_filters = [
+            backend
+            for backend, cli in ML_API_ANALYSIS_CLI_OPTIONS.items()
+            if getattr(args, cli["filter_attr"], None) is not None
+        ]
+        if len(active_operator_filters) > 1:
+            console_error(
+                "analysis",
+                "Only one operator filter may be used per analysis run. "
+                "Run the analysis separately for each framework.",
+            )
+        if active_operator_filters:
+            operator_backend = active_operator_filters[0]
+            base_filter = workload.kernel_filter
+            result = build_operator_filter(
+                args, workload, self.dest_dir, operator_backend
+            )
+            if result is not None:
+                operator_filter, matched_df = result
+                if operator_filter.is_active:
+                    workload.kernel_filter = operator_filter
+                    workload.matched_ml_api_trace_dfs[operator_backend] = matched_df
+                elif base_filter.is_active:
+                    label = ML_API_ANALYSIS_CLI_OPTIONS[operator_backend]["label"]
+                    console_error(
+                        "ml api trace",
+                        f"No {label}-operator kernels overlap with the -k filter. "
+                        "No kernels to analyze.",
+                    )
+        if workload.kernel_filter.is_active:
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                df_in=workload.raw_pmc,
+                raw_data_dir=self.dest_dir,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                time_unit=args.time_unit,
+                kernel_verbose=args.kernel_verbose,
+                kernel_filter=workload.kernel_filter,
+            )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         # Load remaining non-metric tables (sysinfo, etc.)
         parser.load_non_mertrics_table(
             workload, self.dest_dir, args, pc_sampling_tool_data=pc_sampling_data
@@ -446,7 +503,8 @@ class webui_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         input_filters = {
-            "kernel": self._runs[self.dest_dir].filter_kernel_ids,
+            # Resolved to kernel names in build_layout once Top Stats exist.
+            "kernel": sorted(self._runs[self.dest_dir].kernel_filter.names),
             "gpu": self._runs[self.dest_dir].filter_gpu_ids,
             "dispatch": self._runs[self.dest_dir].filter_dispatch_ids,
             "normalization": args.normal_unit,

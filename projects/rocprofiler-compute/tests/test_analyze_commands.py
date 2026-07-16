@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_cli import cli_analysis
+from utils.kernel_filter import KernelFilter
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.parser import load_pc_sampling_data
@@ -975,8 +976,9 @@ def test_apply_filters_direct():
             })
 
         filter_gpu_ids = None
-        filter_kernel_ids = None
+        kernel_filter = KernelFilter()
         filter_dispatch_ids = None
+        dfs: dict = {}
 
     workload = MockWorkload()
 
@@ -985,11 +987,11 @@ def test_apply_filters_direct():
     assert len(result) == 2
 
     workload.filter_gpu_ids = None
-    workload.filter_kernel_ids = ["vecCopy"]
+    workload.kernel_filter = KernelFilter(frozenset(["vecCopy"]))
     result = apply_filters(workload, "/tmp", False, False)
     assert len(result) == 2
 
-    workload.filter_kernel_ids = None
+    workload.kernel_filter = KernelFilter()
     workload.filter_dispatch_ids = ["0", "1"]
     result = apply_filters(workload, "/tmp", False, False)
     assert len(result) == 2
@@ -1031,14 +1033,15 @@ def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
 
     class MockWorkload:
-        filter_kernel_ids = []
+        kernel_filter = KernelFilter()
 
     workload = MockWorkload()
 
     assert load_pc_sampling_data(workload, "none", "count", None).empty
     assert load_pc_sampling_data(workload, "missing", "count", None).empty
 
-    workload.filter_kernel_ids = [0, 1, 2]  # Multiple kernels
+    # Multiple selected kernels
+    workload.kernel_filter = KernelFilter(frozenset(["kernel_a", "kernel_b"]))
     assert load_pc_sampling_data(workload, "test", "count", None).empty
 
     empty_records = load_pc_sample_records({
@@ -1510,7 +1513,7 @@ def mock_workload_for_filter():
             "GPU_ID": [0, 0, 1, 0],
         }),
     }
-    workload.filter_kernel_ids = []
+    workload.kernel_filter = KernelFilter()
     return workload
 
 
@@ -1650,6 +1653,19 @@ def test_create_df_kernel_top_stats_filters():
         assert len(dispatch_df) == 2
         assert all(dispatch_df["Dispatch_ID"] > 2)
 
+        # Test kernel name filter
+        kernel_top_df, dispatch_df = create_df_kernel_top_stats(
+            df_in=raw_pmc_with_node,
+            raw_data_dir=temp_dir,
+            filter_gpu_ids=None,
+            filter_dispatch_ids=None,
+            time_unit="ns",
+            kernel_verbose=0,
+            kernel_filter=KernelFilter(frozenset(["kernel_a"])),
+        )
+        assert set(kernel_top_df["Kernel_Name"]) == {"kernel_a"}
+        assert set(dispatch_df["Kernel_Name"]) == {"kernel_a"}
+
         # Test dispatch ID filter with specific IDs
         kernel_top_df, dispatch_df = create_df_kernel_top_stats(
             df_in=raw_pmc_with_node,
@@ -1682,128 +1698,102 @@ def test_create_df_kernel_top_stats_filters():
 
 
 @pytest.mark.misc
-def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
-    """Test integer kernel ID filtering, Selected marker,
-    uses workload.dfs[1], invalid ID error."""
+def test_apply_kernel_filter_selects_and_marks(mock_workload_for_filter):
+    """apply_kernel_filter keeps only selected kernels and marks them."""
 
     from utils.parser import apply_kernel_filter
 
-    # Flat single-index raw_pmc DataFrame
     raw_df = pd.DataFrame({
-        "Kernel_Name": [
-            "kernel_a",
-            "kernel_b",
-            "kernel_a",
-            "kernel_c",
-        ],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
         "GPU_ID": [0, 0, 1, 0],
         "Dispatch_ID": [1, 2, 3, 4],
     })
 
-    # Test integer kernel ID filtering
-    mock_workload_for_filter.filter_kernel_ids = [0]  # Select first kernel (kernel_a)
+    # Single kernel selection.
+    mock_workload_for_filter.kernel_filter = KernelFilter(frozenset(["kernel_a"]))
     result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
-
-    # Should only contain rows with kernel_a
     assert len(result_df) == 2  # kernel_a appears twice
     assert all(result_df["Kernel_Name"] == "kernel_a")
-
-    # Test that Selected marker is added
+    # Selected marker is set on the matching Top Stats row only.
     assert mock_workload_for_filter.dfs[1].loc[0, "Selected"] == "*"
+    assert mock_workload_for_filter.dfs[1].loc[1, "Selected"] == ""
 
-    # Test multiple kernel IDs
-    mock_workload_for_filter.filter_kernel_ids = [0, 1]  # kernel_a and kernel_b
-    mock_workload_for_filter.dfs[1]["Selected"] = ""  # Reset
+    # Multiple kernel selection.
+    mock_workload_for_filter.kernel_filter = KernelFilter(
+        frozenset(["kernel_a", "kernel_b"])
+    )
     result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
     assert len(result_df) == 3  # 2 kernel_a + 1 kernel_b
 
-    # Test invalid kernel ID (out of bounds) - should call console_error and exit
-    mock_workload_for_filter.filter_kernel_ids = [99]  # Invalid ID
-    mock_workload_for_filter.dfs[1]["Selected"] = ""  # Reset
-    with patch("utils.parser.console_error") as mock_error:
-        # console_error calls sys.exit by default, so mock it to raise SystemExit
-        mock_error.side_effect = SystemExit(1)
-        with pytest.raises(SystemExit):
-            apply_kernel_filter(raw_df, mock_workload_for_filter)
-        mock_error.assert_called_once()
-        # Check error message contains the invalid ID
-        assert "99" in str(mock_error.call_args)
-
 
 @pytest.mark.misc
-def test_apply_kernel_filter_string_names(mock_workload_for_filter):
-    """Test string kernel name filtering and partial match."""
+def test_apply_kernel_filter_strips_whitespace(mock_workload_for_filter):
+    """apply_kernel_filter matches names after stripping whitespace."""
 
     from utils.parser import apply_kernel_filter
 
-    # Flat single-index raw_pmc DataFrame
-    raw_df = pd.DataFrame({
-        "Kernel_Name": [
-            "kernel_a",
-            "kernel_b",
-            "kernel_a",
-            "kernel_c",
-        ],
-        "GPU_ID": [0, 0, 1, 0],
-        "Dispatch_ID": [1, 2, 3, 4],
-    })
-
-    # Test string kernel name filtering - exact match
-    mock_workload_for_filter.filter_kernel_ids = ["kernel_b"]
-    result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
-    assert len(result_df) == 1
-    assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
-
-    # Test filtering with whitespace in kernel names (should be stripped)
     raw_df_with_whitespace = pd.DataFrame({
-        "Kernel_Name": [
-            " kernel_a ",
-            "kernel_b",
-            "kernel_a",
-        ],
+        "Kernel_Name": [" kernel_a ", "kernel_b", "kernel_a"],
         "GPU_ID": [0, 0, 1],
         "Dispatch_ID": [1, 2, 3],
     })
 
-    mock_workload_for_filter.filter_kernel_ids = ["kernel_a"]
+    mock_workload_for_filter.kernel_filter = KernelFilter(frozenset(["kernel_a"]))
     result_df = apply_kernel_filter(raw_df_with_whitespace, mock_workload_for_filter)
-    # Should match both " kernel_a " (stripped) and "kernel_a"
+    # Matches both " kernel_a " (stripped) and "kernel_a".
     assert len(result_df) == 2
 
 
 @pytest.mark.misc
-def test_pc_sampling_single_kernel_uses_workload_dfs():
-    """Test single kernel filter reads from workload.dfs[1],
-    kernel index out of bounds warning."""
-    # Create mock workload with dfs populated
+def test_apply_kernel_filter_inactive_is_passthrough(mock_workload_for_filter):
+    """An inactive filter returns the frame unchanged."""
+
+    from utils.parser import apply_kernel_filter
+
+    raw_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b"],
+        "GPU_ID": [0, 0],
+        "Dispatch_ID": [1, 2],
+    })
+    mock_workload_for_filter.kernel_filter = KernelFilter()
+    result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
+    assert len(result_df) == 2
+
+
+@pytest.mark.misc
+def test_pc_sampling_multiple_kernels_does_not_crash():
+    """A multi-kernel selection filters PC sampling rows by kernel name."""
     workload = Mock()
-    workload.dfs = {
-        1: pd.DataFrame({
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
-            "Count": [2, 1, 1],
-            "Sum(ns)": [900, 800, 200],
-        }),
-    }
+    workload.dfs = {1: pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b"]})}
+    workload.kernel_filter = KernelFilter(frozenset(["kernel_a", "kernel_b"]))
     tool_data = {
         "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
     }
-
-    # Kernel index out of bounds warns and returns empty.
-    workload.filter_kernel_ids = [99]
-    with patch("utils.parser.console_warning") as mock_warning:
+    all_rows = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "source_line": ["a.cpp:1", "b.cpp:1", "c.cpp:1"],
+    })
+    with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+        mock_per_kernel.return_value = all_rows
         result = load_pc_sampling_data(workload, "test", "count", tool_data)
-        mock_warning.assert_called()
-        call_args_str = str(mock_warning.call_args)
-        assert "out of bounds" in call_args_str or "99" in call_args_str
-        assert result.empty
+    assert set(result["Kernel_Name"]) == {"kernel_a", "kernel_b"}
 
-    # Kernel name is extracted from workload.dfs[1].
-    workload.filter_kernel_ids = [1]  # kernel_b
+
+@pytest.mark.misc
+def test_pc_sampling_single_kernel_selected_by_name():
+    """A single-kernel selection is passed through by name."""
+    workload = Mock()
+    workload.dfs = {
+        1: pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"]})
+    }
+    workload.kernel_filter = KernelFilter(frozenset(["kernel_b"]))
+    tool_data = {
+        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
+    }
     with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
         mock_per_kernel.return_value = pd.DataFrame()
         load_pc_sampling_data(workload, "test", "count", tool_data)
-        if mock_per_kernel.called:
-            assert "kernel_b" in str(mock_per_kernel.call_args)
+        assert "kernel_b" in str(mock_per_kernel.call_args)
 
 
 # =============================================================================

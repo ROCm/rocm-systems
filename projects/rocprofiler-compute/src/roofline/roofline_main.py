@@ -275,7 +275,14 @@ class Roofline:
         """Write Plotly figures to standalone HTML files on disk."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
-        if self.__run_parameters.get("kernel_filter", False):
+        filter_label = self.__run_parameters.get("kernel_filter", "")
+        if isinstance(filter_label, str) and filter_label:
+            safe_label = "".join(
+                char if char.isalnum() or char in ("_", "-", ".") else "_"
+                for char in filter_label
+            )
+            kernel_list = "_" + safe_label
+        elif filter_label:
             kernels = getattr(self.__args, "gpu_kernel", None)
             if kernels:
                 flat = [

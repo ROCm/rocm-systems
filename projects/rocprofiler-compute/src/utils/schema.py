@@ -3,9 +3,11 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
+
+from utils.kernel_filter import KernelFilter, KernelSelectionRequest
 
 
 @dataclass
@@ -40,7 +42,8 @@ class Workload:
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
-    filter_kernel_ids: list[int] = field(default_factory=list)
+    kernel_selection: Optional[KernelSelectionRequest] = None
+    kernel_filter: KernelFilter = field(default_factory=KernelFilter)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
     avail_ips: list[int] = field(default_factory=list)

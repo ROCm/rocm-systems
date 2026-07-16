@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import json
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional
@@ -12,6 +11,7 @@ import yaml
 
 import config
 from utils import schema, utils_analysis
+from utils.kernel_filter import KernelFilter, apply_workload_filters
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -19,7 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_common import canonical_config_arch
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -72,38 +72,26 @@ def create_df_kernel_top_stats(
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
     kernel_verbose: int,
+    kernel_filter: Optional[KernelFilter] = None,
     sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
 
+    When ``kernel_filter`` is active, the Top Stats tables are scoped to the
+    selected kernels; otherwise every kernel is included.
+
     Returns:
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in.copy()
-
-    # The logic below for filters are the same as in parser.apply_filters(),
-    # which can be merged together if need it.
-
-    if filter_gpu_ids:
-        df = df.loc[
-            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
-        ]
-
-    if filter_dispatch_ids:
-        # NB: support ignoring the 1st n dispatched execution by '> n'
-        #     The better way may be parsing python slice string
-        first_filter = filter_dispatch_ids[0]
-
-        if isinstance(first_filter, str) and first_filter.startswith(">"):
-            match = re.match(r">\s*(\d+)", str(first_filter))
-            if match:
-                threshold = int(match.group(1))
-                df = df[df["Dispatch_ID"] > threshold]
-        else:
-            filter_strings = [str(f) for f in filter_dispatch_ids]
-            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
+    active_kernel_filter = kernel_filter or KernelFilter()
+    df = apply_workload_filters(
+        df_in,
+        active_kernel_filter,
+        filter_gpu_ids=filter_gpu_ids,
+        filter_dispatch_ids=filter_dispatch_ids,
+    )
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = ["Kernel_Name", "GPU_ID"]

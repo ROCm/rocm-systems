@@ -352,13 +352,12 @@ class RocProfCompute:
         operator_listing = args.list_torch_operators or args.list_triton_operators
 
         if operator_filter or operator_listing:
-            if args.gui is not None:
+            if operator_listing and args.gui is not None:
                 console_error(
                     "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are not "
-                    "supported in --gui mode. Please remove --gui or run "
-                    "without the operator flags.",
+                    "Operator listing flags (--list-torch-operators, "
+                    "--list-triton-operators) are not supported in --gui mode. "
+                    "Please remove --gui or run without the listing flag.",
                 )
             if args.tui:
                 console_error(
@@ -368,18 +367,24 @@ class RocProfCompute:
                     "supported in --tui mode. Please remove --tui or run "
                     "without the operator flags.",
                 )
-            if args.output_format != "stdout":
+            if operator_listing and args.output_format != "stdout":
                 console_error(
                     "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are only "
-                    "supported with --output-format stdout (the default). "
-                    "The matched operator call tree is printed directly to "
-                    "stdout and is not captured in txt, csv, or db output. "
-                    "Remove the --output-format option or drop the operator flags.",
+                    "Operator listing flags (--list-torch-operators, "
+                    "--list-triton-operators) are only supported with "
+                    "--output-format stdout (the default). The matched operator "
+                    "call tree is printed directly to stdout and is not captured "
+                    "in txt, csv, or db output. Remove the --output-format option "
+                    "or drop the listing flag.",
                 )
 
             if operator_filter:
+                if args.output_format != "stdout":
+                    console_warning(
+                        "ml api trace",
+                        "Operator filters will scope analysis output, but the "
+                        "matched operator call tree is only printed in stdout mode.",
+                    )
                 if args.list_stats:
                     console_warning(
                         "ml api trace",

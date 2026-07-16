@@ -15,9 +15,15 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import schema, utils_analysis
+from utils import file_io, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
+from utils.kernel_filter import (
+    ML_API_ANALYSIS_CLI_OPTIONS,
+    apply_workload_filters,
+    build_operator_filter,
+    resolve_kernel_filter,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -93,17 +99,18 @@ class db_analysis(OmniAnalyze_Base):
                 "for profiling data with rocpd output format."
             )
 
-        self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         pc_sampling_tool_data = (
             {path: load_pc_sampling_results(path) for path in self._runs}
             if self.pc_sampling_collected()
             else {}
         )
+        self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+        self._pmc_df_per_workload = self.calc_pmc_df_data()
+        self.resolve_pmc_kernel_filters()
+        self._pmc_df_per_workload = self.apply_pmc_filters()
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data(
             pc_sampling_tool_data
         )
-        self._pmc_df_per_workload = self.calc_pmc_df_data()
-        self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data(
             pc_sampling_tool_data
         )
@@ -434,6 +441,15 @@ class db_analysis(OmniAnalyze_Base):
                     "kernel_name",
                 ]
             ]
+            workload = self._runs.get(workload_path)
+            kernel_filter = getattr(workload, "kernel_filter", None)
+            if kernel_filter is not None and kernel_filter.names:
+                grouped_df = grouped_df[
+                    grouped_df["kernel_name"]
+                    .astype(str)
+                    .str.strip()
+                    .isin(kernel_filter.names)
+                ]
 
             pc_sampling_data_per_workload[workload_path] = grouped_df
 
@@ -893,47 +909,77 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload = self._pmc_df_per_workload.copy()
 
         for workload_path, pmc_df in pmc_df_per_workload.items():
-            top_kernels = (
-                pmc_df
-                .assign(duration=pmc_df["End_Timestamp"] - pmc_df["Start_Timestamp"])
-                .sort_values(by="duration", ascending=False)
-                .drop_duplicates("Kernel_Name")["Kernel_Name"]
-                .to_list()
+            workload = self._runs[workload_path]
+            pmc_df_per_workload[workload_path] = apply_workload_filters(
+                pmc_df,
+                workload.kernel_filter,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                validate_dispatch_ids=True,
             )
-            # Filter gpu_ids
-            if self._runs[workload_path].filter_gpu_ids:
-                pmc_df = pmc_df.loc[
-                    pmc_df["GPU_ID"]
-                    .astype(str)
-                    .isin([self._runs[workload_path].filter_gpu_ids])
-                ]
-            # Filter kernel_ids
-            if self._runs[workload_path].filter_kernel_ids:
-                pmc_df = pmc_df.loc[
-                    pmc_df["Kernel_Name"].isin([
-                        top_kernels[id]
-                        for id in self._runs[workload_path].filter_kernel_ids
-                    ])
-                ]
-            # Filter dispatch_ids
-            if self._runs[workload_path].filter_dispatch_ids:
-                if ">" in self._runs[workload_path].filter_dispatch_ids[0]:
-                    m = re.match(
-                        r"\> (\d+)", self._runs[workload_path].filter_dispatch_ids[0]
-                    )
-                    pmc_df = pmc_df[pmc_df["Dispatch_ID"] > int(m.group(1))]
-                else:
-                    pmc_df = pmc_df.loc[
-                        pmc_df["Dispatch_ID"]
-                        .astype(str)
-                        .isin(self._runs[workload_path].filter_dispatch_ids)
-                    ]
-            pmc_df_per_workload[workload_path] = pmc_df
 
         if pmc_df_per_workload:
             console_debug("Applied analysis mode filters")
 
         return pmc_df_per_workload
+
+    def resolve_pmc_kernel_filters(self) -> None:
+        """Resolve -k/operator selections against the shared PMC dataframe."""
+        args = self.get_args()
+        active_operator_filters = [
+            backend
+            for backend, cli in ML_API_ANALYSIS_CLI_OPTIONS.items()
+            if getattr(args, cli["filter_attr"], None) is not None
+        ]
+        if len(active_operator_filters) > 1:
+            console_error(
+                "analysis",
+                "Only one operator filter may be used per analysis run. "
+                "Run the analysis separately for each framework.",
+            )
+
+        operator_backend = (
+            active_operator_filters[0] if active_operator_filters else None
+        )
+
+        for workload_path, pmc_df in self._pmc_df_per_workload.items():
+            workload = self._runs[workload_path]
+            workload.raw_pmc = pmc_df
+
+            kernel_top_df, _ = file_io.create_df_kernel_top_stats(
+                df_in=pmc_df,
+                raw_data_dir=workload_path,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                time_unit=args.time_unit,
+                kernel_verbose=args.kernel_verbose,
+            )
+            if workload.kernel_selection is not None:
+                workload.kernel_filter = resolve_kernel_filter(
+                    workload.kernel_selection, kernel_top_df
+                )
+
+            if operator_backend is None:
+                continue
+
+            base_filter = workload.kernel_filter
+            result = build_operator_filter(
+                args, workload, workload_path, operator_backend
+            )
+            if result is None:
+                continue
+
+            operator_filter, matched_df = result
+            if operator_filter.is_active:
+                workload.kernel_filter = operator_filter
+                workload.matched_ml_api_trace_dfs[operator_backend] = matched_df
+            elif base_filter.is_active:
+                label = ML_API_ANALYSIS_CLI_OPTIONS[operator_backend]["label"]
+                console_error(
+                    "ml api trace",
+                    f"No {label}-operator kernels overlap with the -k filter. "
+                    "No kernels to analyze.",
+                )
 
     def calc_roofline_data(self) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
         """Calculate both kernel-level and workload-level roofline data"""

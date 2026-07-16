@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--torch-operator` / `--triton-operator` now scope the Top Stats tables (Top Kernels and Dispatch List) to the selected operator's kernels, instead of summarizing the whole trace. This makes the operator call tree and Top Stats reference the same kernels and kernel ids.
+
 * Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
 
 * `--pc-sampling-sorting-type` now defaults to `count` (was `offset`), so the PC sampling table shows the most-sampled instructions first.

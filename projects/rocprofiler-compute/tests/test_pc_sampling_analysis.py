@@ -20,6 +20,7 @@ from utils.file_io import (
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
 )
+from utils.kernel_filter import KernelFilter
 from utils.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
     load_non_mertrics_table,
@@ -887,7 +888,8 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     no_filter = load_pc_sampling_data(schema.Workload(), "ps_file", "offset", tool_data)
     single = load_pc_sampling_data(
         schema.Workload(
-            filter_kernel_ids=[0], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
+            kernel_filter=KernelFilter(frozenset(["vecCopy"])),
+            dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
         ),
         "ps_file",
         "offset",
@@ -903,13 +905,32 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     assert by_kernel[".../vadd.cpp:99"] == "vecAdd"
 
 
-def test_load_pc_sampling_data_multiple_kernels_error() -> None:
-    """Return an empty DataFrame and log an error when >1 kernel ID is filtered."""
-    tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
-    workload = schema.Workload(filter_kernel_ids=[0, 1])
-    with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
-    assert df.empty
+def test_load_pc_sampling_data_multiple_kernels_filter_by_name() -> None:
+    """Return rows for all selected kernels when multiple names are filtered."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(5, 0x10, 0, dispatch_id=0),
+            make_record(6, 0x20, 1, dispatch_id=1),
+            make_record(7, 0x30, 2, dispatch_id=2),
+        ],
+        instructions=["v_mov", "v_add", "v_mul"],
+        comments=["/src/vcopy.cpp:42", "/src/vadd.cpp:99", "/src/vmul.cpp:7"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "vecCopy"),
+            make_kernel_symbol(101, 6, "vecAdd"),
+            make_kernel_symbol(102, 7, "vecMul"),
+        ],
+        kernel_dispatch=[
+            make_dispatch(0, 100),
+            make_dispatch(1, 101),
+            make_dispatch(2, 102),
+        ],
+    )
+    workload = schema.Workload(
+        kernel_filter=KernelFilter(frozenset(["vecCopy", "vecAdd"]))
+    )
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    assert set(df["Kernel_Name"]) == {"vecCopy", "vecAdd"}
 
 
 def test_load_pc_sampling_data_single_kernel_valid() -> None:
@@ -922,22 +943,22 @@ def test_load_pc_sampling_data_single_kernel_valid() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
     )
     workload = schema.Workload(
-        filter_kernel_ids=[0],
+        kernel_filter=KernelFilter(frozenset(["vecCopy"])),
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
     df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert not df.empty
 
 
-def test_load_pc_sampling_data_single_kernel_out_of_bounds() -> None:
-    """Return an empty DataFrame when the filtered kernel ID exceeds kernel-top."""
+def test_load_pc_sampling_data_single_kernel_not_in_trace() -> None:
+    """Return an empty DataFrame when the selected kernel has no PC samples."""
     tool_data = make_tool_data(
         stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
     workload = schema.Workload(
-        filter_kernel_ids=[99],
+        kernel_filter=KernelFilter(frozenset(["vecAdd"])),
         dfs={
             PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({
                 "Kernel_Name": ["vecCopy", "vecAdd"]
@@ -955,7 +976,7 @@ def test_load_pc_sampling_data_method_not_detected() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
     )
     workload = schema.Workload(
-        filter_kernel_ids=[0],
+        kernel_filter=KernelFilter(frozenset(["vecCopy"])),
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
     df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
@@ -985,7 +1006,7 @@ def test_load_pc_sampling_data_method_detection(
         **kwargs,
     )
     workload = schema.Workload(
-        filter_kernel_ids=[0],
+        kernel_filter=KernelFilter(frozenset(["vecCopy"])),
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
     df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
