@@ -3251,8 +3251,13 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
     }
 
     // Fail scratch allocation if reducing occupancy is disabled.
+    // gfx13+ SPI accounts scratch pressure per CU. The legacy trimming path
+    // reduces queue occupancy by shrinking a per-engine scratch allocation model,
+    // which does not match gfx13 slot accounting. Disable it until trimming is
+    // taught the gfx13 per-CU model.
     if (scratch.cooperative || (!use_reclaim) ||
-        core::Runtime::runtime_singleton_->flag().no_scratch_thread_limiter())
+        core::Runtime::runtime_singleton_->flag().no_scratch_thread_limiter() ||
+        supported_isas()[0]->GetMajorVersion() >= 13)
       return;
 
     // Attempt to trim the maximum number of concurrent waves to allow scratch to fit.

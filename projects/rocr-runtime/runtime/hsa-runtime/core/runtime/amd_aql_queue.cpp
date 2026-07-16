@@ -1149,6 +1149,15 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
     uint64_t maxGroupsPerEngine =
         ((symmetricGroups + engines - 1) / engines) + (asymmetryPerRound ? rounds : 0);
 
+    // On gfx13+, SPI accounts scratch slot pressure at CU granularity.
+    // Using the older per-engine model can overestimate slot pressure for small
+    // dispatches because it spreads groups across shader banks instead of the
+    // actual per-CU slot accounting.
+    if (agent_->supported_isas()[0]->GetMajorVersion() >= 13) {
+      uint64_t maxGroupsPerCU = (groups + cu_count - 1) / cu_count;
+      return maxGroupsPerCU * cu_count;
+    }
+
     // For gfx10+ devices we must attempt to assign the smaller of 256 lanes or 16 groups to each
     // engine.
     if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
@@ -1190,6 +1199,12 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   uint32_t dispatch_slots = groups * waves_per_group;
   dispatch_slots = std::min(dispatch_slots, device_slots);
+  if (core::Runtime::runtime_singleton_->flag().force_scratch_device_slots_debug()) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO,
+             "HSA_FORCE_SCRATCH_DEVICE_SLOTS_DEBUG=1: overriding dispatch_slots=%u with device_slots=%u",
+             dispatch_slots, device_slots);
+    dispatch_slots = device_slots;
+  }
 
   const uint64_t lanes_per_wave = (error_code & 0x400) ? 32 : 64;
 
