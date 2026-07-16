@@ -1822,7 +1822,9 @@ if(RJ_ENABLE_HIP_TESTS)
             rj_install_test_target(daemon_test)
         endif()
         set(RJ_DAEMON_TESTS
+            RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
