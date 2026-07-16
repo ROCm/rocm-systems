@@ -123,7 +123,7 @@
 
 		     "runtime_trace" : {
 			     "type": "boolean",
-			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, rocSHMEM, and Kernel dispatch traces."
+			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, rocJPEG, rocSHMEM, and Kernel dispatch traces."
 		     },
 
                      "sys_trace" : {
