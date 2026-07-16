@@ -40,6 +40,12 @@ namespace {
 
 inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
 
+// Translation output is generated from one accepted code object. Bound the
+// additional ELF storage, including alignment padding, before the patcher makes
+// any potentially large allocation. Other patcher callers can choose a
+// different explicit budget.
+constexpr size_t kMaxTranslatedFileGrowth = size_t{64} * 1024 * 1024;
+
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
@@ -1122,7 +1128,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  if (!patcher.replace_text(translated_text)) {
+  if (!patcher.replace_text(translated_text, kMaxTranslatedFileGrowth)) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return leave_unchanged();

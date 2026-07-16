@@ -19,11 +19,14 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <numeric>
 #include <optional>
 // Standard library
 #include <span>
+#include <stdexcept>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -32,25 +35,34 @@ namespace {
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
-[[nodiscard]] std::vector<Elf64_Shdr> read_section_headers(const std::vector<uint8_t> &image,
-                                                           const Elf64_Ehdr &ehdr) {
-  assert(ehdr.e_shentsize == sizeof(Elf64_Shdr) && "unsupported section header size");
-  assert(ehdr.e_shoff + static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) <= image.size() &&
-         "section header table out of bounds");
+[[nodiscard]] std::optional<std::vector<Elf64_Shdr>>
+read_section_headers(const std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr) {
+  if ((ehdr.e_shoff == 0) != (ehdr.e_shnum == 0))
+    return std::nullopt;
+  if (ehdr.e_shoff == 0)
+    return std::vector<Elf64_Shdr>{};
+
+  if (ehdr.e_shentsize != sizeof(Elf64_Shdr) || ehdr.e_shoff > image.size() ||
+      static_cast<uint64_t>(ehdr.e_shnum) >
+          (static_cast<uint64_t>(image.size()) - ehdr.e_shoff) / sizeof(Elf64_Shdr))
+    return std::nullopt;
 
   std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
   std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
   return shdrs;
 }
 
-[[nodiscard]] std::vector<Elf64_Phdr> read_program_headers(const std::vector<uint8_t> &image,
-                                                           const Elf64_Ehdr &ehdr) {
-  if (ehdr.e_phoff == 0 || ehdr.e_phnum == 0)
-    return {};
+[[nodiscard]] std::optional<std::vector<Elf64_Phdr>>
+read_program_headers(const std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr) {
+  if ((ehdr.e_phoff == 0) != (ehdr.e_phnum == 0))
+    return std::nullopt;
+  if (ehdr.e_phoff == 0)
+    return std::vector<Elf64_Phdr>{};
 
-  assert(ehdr.e_phentsize == sizeof(Elf64_Phdr) && "unsupported program header size");
-  assert(ehdr.e_phoff + static_cast<uint64_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr) <= image.size() &&
-         "program header table out of bounds");
+  if (ehdr.e_phentsize != sizeof(Elf64_Phdr) || ehdr.e_phoff > image.size() ||
+      static_cast<uint64_t>(ehdr.e_phnum) >
+          (static_cast<uint64_t>(image.size()) - ehdr.e_phoff) / sizeof(Elf64_Phdr))
+    return std::nullopt;
 
   std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
   std::memcpy(phdrs.data(), image.data() + ehdr.e_phoff, phdrs.size() * sizeof(Elf64_Phdr));
@@ -73,17 +85,55 @@ void write_elf_tables(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
   }
 }
 
-void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
-                       std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
-                       uint64_t file_offset, std::span<const uint8_t> bytes,
-                       std::optional<size_t> grown_section_index, bool grow_load_at_segment_end) {
-  assert(file_offset <= image.size() && "ELF insertion offset out of bounds");
+[[nodiscard]] bool can_add_u64(uint64_t value, uint64_t delta) {
+  return value <= std::numeric_limits<uint64_t>::max() - delta;
+}
+
+[[nodiscard]] bool insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
+                                     std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
+                                     uint64_t file_offset, std::span<const uint8_t> bytes,
+                                     std::optional<size_t> grown_section_index,
+                                     bool grow_load_at_segment_end) {
+  if (file_offset > image.size() || bytes.size() > image.max_size() - image.size())
+    return false;
   if (bytes.empty())
-    return;
+    return true;
 
   const uint64_t delta = bytes.size();
-  image.insert(image.begin() + static_cast<std::ptrdiff_t>(file_offset), bytes.begin(),
-               bytes.end());
+  if ((ehdr.e_shoff >= file_offset && !can_add_u64(ehdr.e_shoff, delta)) ||
+      (ehdr.e_phoff != 0 && ehdr.e_phoff >= file_offset && !can_add_u64(ehdr.e_phoff, delta)))
+    return false;
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (grown_section_index && i == *grown_section_index)
+      continue;
+    if (shdrs[i].sh_type != SHT_NULL && shdrs[i].sh_offset >= file_offset &&
+        !can_add_u64(shdrs[i].sh_offset, delta))
+      return false;
+  }
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (!can_add_u64(phdr.p_offset, phdr.p_filesz))
+      return false;
+    const uint64_t old_end = phdr.p_offset + phdr.p_filesz;
+    if (phdr.p_offset >= file_offset) {
+      if (!can_add_u64(phdr.p_offset, delta))
+        return false;
+      continue;
+    }
+    const bool inside_segment = file_offset < old_end;
+    const bool at_segment_end = grow_load_at_segment_end && file_offset == old_end;
+    if (phdr.p_type == PT_LOAD && (inside_segment || at_segment_end) &&
+        (!can_add_u64(phdr.p_filesz, delta) || !can_add_u64(phdr.p_memsz, delta)))
+      return false;
+  }
+
+  try {
+    image.insert(image.begin() + static_cast<std::ptrdiff_t>(file_offset), bytes.begin(),
+                 bytes.end());
+  } catch (const std::bad_alloc &) {
+    return false;
+  } catch (const std::length_error &) {
+    return false;
+  }
 
   if (ehdr.e_shoff >= file_offset)
     ehdr.e_shoff += delta;
@@ -118,34 +168,42 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
       phdr.p_memsz += delta;
     }
   }
+  return true;
 }
 
-[[nodiscard]] uint64_t checked_lcm_u64(uint64_t lhs, uint64_t rhs) {
+[[nodiscard]] std::optional<uint64_t> checked_lcm_u64(uint64_t lhs, uint64_t rhs) {
   const uint64_t gcd = std::gcd(lhs, rhs);
   if (gcd == 0)
-    return 0;
-  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs &&
-         "ELF load alignment LCM overflow");
-  return std::lcm(lhs, rhs);
+    return std::nullopt;
+  if (lhs / gcd > std::numeric_limits<uint64_t>::max() / rhs)
+    return std::nullopt;
+  return (lhs / gcd) * rhs;
 }
 
-[[nodiscard]] uint64_t align_up(uint64_t value, uint64_t alignment) {
+[[nodiscard]] std::optional<uint64_t> checked_align_up(uint64_t value, uint64_t alignment) {
   if (alignment <= 1)
     return value;
   const uint64_t remainder = value % alignment;
-  return remainder == 0 ? value : value + alignment - remainder;
+  const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
+  if (value > std::numeric_limits<uint64_t>::max() - padding)
+    return std::nullopt;
+  return value + padding;
 }
 
-[[nodiscard]] uint64_t shifted_load_delta_alignment(std::span<const Elf64_Phdr> phdrs,
-                                                    uint64_t file_offset) {
+[[nodiscard]] std::optional<uint64_t>
+shifted_load_delta_alignment(std::span<const Elf64_Phdr> phdrs, uint64_t file_offset) {
   uint64_t alignment = 1;
   // Later LOAD segments remain loader-valid only when their file shift keeps
   // p_offset % p_align congruent with p_vaddr % p_align.
   for (const Elf64_Phdr &phdr : phdrs) {
     if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
       continue;
-    if (phdr.p_offset >= file_offset)
-      alignment = checked_lcm_u64(alignment, phdr.p_align);
+    if (phdr.p_offset >= file_offset) {
+      const auto next = checked_lcm_u64(alignment, phdr.p_align);
+      if (!next)
+        return std::nullopt;
+      alignment = *next;
+    }
   }
   return alignment;
 }
@@ -194,12 +252,14 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return file_offset <= limit && size <= limit - file_offset;
 }
 
-void shift_symbols_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
-                                     std::span<const Elf64_Shdr> shdrs,
-                                     const std::vector<bool> &shift_section_vaddr, uint64_t delta) {
+[[nodiscard]] bool shift_symbols_in_moved_sections(std::vector<uint8_t> &image,
+                                                   const Elf64_Ehdr &ehdr,
+                                                   std::span<const Elf64_Shdr> shdrs,
+                                                   const std::vector<bool> &shift_section_vaddr,
+                                                   uint64_t delta) {
   assert(shdrs.size() == shift_section_vaddr.size() && "section shift map size mismatch");
   if (delta == 0 || ehdr.e_type == ET_REL)
-    return;
+    return true;
 
   // ET_DYN symbol values are virtual addresses. Symbols bound to moved
   // allocated sections must track those sections' new virtual addresses.
@@ -223,12 +283,13 @@ void shift_symbols_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Eh
       if (!shift_section_vaddr[symbol.st_shndx])
         continue;
 
-      assert(symbol.st_value <= std::numeric_limits<uint64_t>::max() - delta &&
-             "ELF symbol value overflow");
+      if (!can_add_u64(symbol.st_value, delta))
+        return false;
       symbol.st_value += delta;
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
   }
+  return true;
 }
 
 void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
@@ -264,17 +325,18 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
           continue;
         symbol_text_offset = symbol.st_value - text.sh_addr;
       }
-      if (symbol_text_offset > old_text_size)
+      // Appended executable cave code is contiguous only with a function that
+      // already reaches the old end of .text. Growing every function through
+      // the cave makes their ranges overlap inter-function alignment padding;
+      // a subsequent instrumentation pass then tries to decode that padding as
+      // instructions. The CFG builder sees all function ranges together, so a
+      // branch from an earlier function can still reach the cave block covered
+      // by the tail function.
+      if (symbol.st_size == 0)
         continue;
 
-      // The translator appends executable cave code after the original .text
-      // contents and branches into it from relocated instructions.  AMDGPU code
-      // objects often leave padding after the kernel function, so a valid input
-      // function symbol may not reach the old section end.  Any non-empty
-      // function body that starts in the translated .text can now reach appended
-      // cave code, so keep its extent covering those bytes for loaders and
-      // runtime tooling that consult FUNC ranges.
-      if (symbol.st_size == 0)
+      if (symbol_text_offset > old_text_size ||
+          symbol.st_size != old_text_size - symbol_text_offset)
         continue;
 
       const uint64_t grown_size = new_text_size - symbol_text_offset;
@@ -299,19 +361,18 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
     // address must be large enough to recover the pre-insert range.
     assert(shdrs[i].sh_addr >= delta && "moved section address underflow");
     const uint64_t old_addr = shdrs[i].sh_addr - delta;
-    if (place >= old_addr && place < old_addr + shdrs[i].sh_size)
+    if (place >= old_addr && place - old_addr < shdrs[i].sh_size)
       return true;
   }
   return false;
 }
 
-void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
-                                                std::span<const Elf64_Shdr> shdrs,
-                                                const std::vector<bool> &shift_section_vaddr,
-                                                uint64_t delta) {
+[[nodiscard]] bool shift_relocation_offsets_in_moved_sections(
+    std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+    const std::vector<bool> &shift_section_vaddr, uint64_t delta) {
   assert(shdrs.size() == shift_section_vaddr.size() && "section shift map size mismatch");
   if (delta == 0 || ehdr.e_type != ET_DYN)
-    return;
+    return true;
 
   // AMDHSA uses Elf64_Rela records, and ET_DYN relocation r_offset is the
   // relocated storage address. Any relocation whose place is inside a section we
@@ -332,8 +393,8 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
         std::memcpy(&rela, image.data() + offset, sizeof(rela));
         if (!relocation_place_was_moved(rela.r_offset, shdrs, shift_section_vaddr, delta))
           continue;
-        assert(rela.r_offset <= std::numeric_limits<uint64_t>::max() - delta &&
-               "ELF relocation offset overflow");
+        if (!can_add_u64(rela.r_offset, delta))
+          return false;
         rela.r_offset += delta;
         std::memcpy(image.data() + offset, &rela, sizeof(rela));
       }
@@ -349,12 +410,13 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
       std::memcpy(&rel, image.data() + offset, sizeof(rel));
       if (!relocation_place_was_moved(rel.r_offset, shdrs, shift_section_vaddr, delta))
         continue;
-      assert(rel.r_offset <= std::numeric_limits<uint64_t>::max() - delta &&
-             "ELF relocation offset overflow");
+      if (!can_add_u64(rel.r_offset, delta))
+        return false;
       rel.r_offset += delta;
       std::memcpy(image.data() + offset, &rel, sizeof(rel));
     }
   }
+  return true;
 }
 
 [[nodiscard]] bool kernel_descriptor_symbol(const Elf64_Sym &symbol, const char *strtab,
@@ -381,12 +443,12 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
   return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
 }
 
-void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
+[[nodiscard]] bool adjust_kernel_descriptor_entry_offsets_in_moved_sections(
     std::vector<uint8_t> &image, std::span<const Elf64_Shdr> shdrs,
     const std::vector<bool> &shift_section_vaddr, uint64_t delta) {
   assert(shdrs.size() == shift_section_vaddr.size() && "section shift map size mismatch");
   if (delta == 0)
-    return;
+    return true;
 
   // KERNEL_CODE_ENTRY_BYTE_OFFSET is relative to the descriptor address, not to
   // .text. When a .kd object lives in a shifted allocated section, preserve the
@@ -428,7 +490,10 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
       if (symbol.st_value < section.sh_addr)
         continue;
 
-      const uint64_t file_offset = section.sh_offset + (symbol.st_value - section.sh_addr);
+      const uint64_t section_offset = symbol.st_value - section.sh_addr;
+      if (!can_add_u64(section.sh_offset, section_offset))
+        return false;
+      const uint64_t file_offset = section.sh_offset + section_offset;
       if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
         continue;
       if (!adjusted_file_offsets.insert(file_offset).second)
@@ -436,12 +501,15 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 
       KD desc{};
       std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
-      assert(delta <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
-             "kernel descriptor shift too large");
+      if (delta > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+          desc.kernel_code_entry_byte_offset <
+              std::numeric_limits<int64_t>::min() + static_cast<int64_t>(delta))
+        return false;
       desc.kernel_code_entry_byte_offset -= static_cast<int64_t>(delta);
       std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
     }
   }
+  return true;
 }
 
 } // namespace
@@ -464,7 +532,19 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
+bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
+                                     size_t max_file_growth) noexcept {
+  try {
+    return replace_text_impl(new_text, max_file_growth);
+  } catch (const std::bad_alloc &) {
+    return false;
+  } catch (const std::length_error &) {
+    return false;
+  }
+}
+
+bool CodeObjectPatcher::replace_text_impl(std::span<const uint8_t> new_text,
+                                          size_t max_file_growth) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -478,10 +558,20 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
   if (!image_contains_range(image_.size(), text_offset_, text_size_))
     return false;
 
-  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
-  auto header = *ehdr;
-  auto shdrs = read_section_headers(image_, header);
-  auto phdrs = read_program_headers(image_, header);
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+  // Build the replacement transactionally. Malformed metadata discovered late
+  // in relocation or descriptor adjustment must not leave a partially shifted
+  // code object behind.
+  std::vector<uint8_t> image = image_;
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  auto maybe_shdrs = read_section_headers(image, header);
+  auto maybe_phdrs = read_program_headers(image, header);
+  if (!maybe_shdrs || !maybe_phdrs)
+    return false;
+  auto shdrs = std::move(*maybe_shdrs);
+  auto phdrs = std::move(*maybe_phdrs);
 
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
@@ -491,68 +581,100 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
 
   const auto text_header = shdrs[*text_index];
   const uint64_t old_text_end_file = text_offset_ + text_size_;
+  if (!can_add_u64(text_header.sh_addr, text_size_))
+    return false;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
   const uint64_t growth = new_text.size() - text_size_;
 
   if (growth != 0) {
-    // Growing .text can shift later LOAD segments. Pad the inserted file range
-    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
-    // p_align. The padding is executable segment filler, not part of .text.
-    const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
-    const uint64_t padded_file_delta = align_up(growth, file_delta_alignment);
-    assert(padded_file_delta >= growth && "aligned text growth underflowed");
-    assert(padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
-
-    std::vector<uint8_t> inserted(padded_file_delta, 0);
     std::vector<bool> shift_section_vaddr(shdrs.size(), false);
+    uint64_t shifted_section_alignment = 1;
     for (size_t i = 0; i < shdrs.size(); ++i) {
       if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
         continue;
-      if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr)
-        shift_section_vaddr[i] = true;
+      const bool shifts_in_file = shdrs[i].sh_offset >= old_text_end_file;
+      const bool shifts_in_memory =
+          (shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr;
+      shift_section_vaddr[i] = shifts_in_memory;
+      if (shifts_in_memory && !can_add_u64(shdrs[i].sh_addr, growth))
+        return false;
+      if (shifts_in_file || shifts_in_memory) {
+        const auto next = checked_lcm_u64(shifted_section_alignment,
+                                          std::max<uint64_t>(shdrs[i].sh_addralign, 1));
+        if (!next)
+          return false;
+        shifted_section_alignment = *next;
+      }
     }
+    // Growing .text can shift later LOAD segments. Pad the inserted file range
+    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
+    // p_align and every shifted allocated section keeps its address-alignment
+    // residue. The padding is executable segment filler, not part of .text.
+    const auto load_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
+    if (!load_alignment)
+      return false;
+    const auto file_delta_alignment = checked_lcm_u64(*load_alignment, shifted_section_alignment);
+    if (!file_delta_alignment)
+      return false;
+    const auto padded_file_delta = checked_align_up(growth, *file_delta_alignment);
+    if (!padded_file_delta || *padded_file_delta < growth)
+      return false;
+    if (*padded_file_delta > max_file_growth || *padded_file_delta % sizeof(uint32_t) != 0 ||
+        *padded_file_delta > image.max_size() - image.size())
+      return false;
 
+    std::vector<uint8_t> inserted;
+    inserted.resize(*padded_file_delta, 0);
     std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
     for (size_t i = 0; i < phdrs.size(); ++i) {
-      if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file)
+      if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file) {
+        if (!can_add_u64(phdrs[i].p_vaddr, *padded_file_delta) ||
+            !can_add_u64(phdrs[i].p_paddr, *padded_file_delta))
+          return false;
         shift_segment_vaddr[i] = true;
+      }
     }
 
-    insert_file_bytes(image_, header, shdrs, phdrs, old_text_end_file, inserted, *text_index, true);
+    if (!insert_file_bytes(image, header, shdrs, phdrs, old_text_end_file, inserted, *text_index,
+                           true))
+      return false;
 
     for (size_t i = 0; i < shdrs.size(); ++i) {
       if (!shift_section_vaddr[i])
         continue;
       [[maybe_unused]] const uint64_t old_addr = shdrs[i].sh_addr;
-      shdrs[i].sh_addr += padded_file_delta;
+      if (!can_add_u64(shdrs[i].sh_addr, *padded_file_delta))
+        return false;
+      shdrs[i].sh_addr += *padded_file_delta;
       assert((shdrs[i].sh_addralign <= 1 ||
               shdrs[i].sh_addr % shdrs[i].sh_addralign == old_addr % shdrs[i].sh_addralign) &&
              "shifted allocated section lost its address alignment residue");
     }
 
-    shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, padded_file_delta);
-    shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
-                                               padded_file_delta);
-    adjust_kernel_descriptor_entry_offsets_in_moved_sections(image_, shdrs, shift_section_vaddr,
-                                                             padded_file_delta);
+    if (!shift_symbols_in_moved_sections(image, header, shdrs, shift_section_vaddr,
+                                         *padded_file_delta) ||
+        !shift_relocation_offsets_in_moved_sections(image, header, shdrs, shift_section_vaddr,
+                                                    *padded_file_delta) ||
+        !adjust_kernel_descriptor_entry_offsets_in_moved_sections(image, shdrs, shift_section_vaddr,
+                                                                  *padded_file_delta))
+      return false;
 
     for (size_t i = 0; i < phdrs.size(); ++i) {
       if (!shift_segment_vaddr[i])
         continue;
-      assert((phdrs[i].p_align <= 1 || padded_file_delta % phdrs[i].p_align == 0) &&
+      assert((phdrs[i].p_align <= 1 || *padded_file_delta % phdrs[i].p_align == 0) &&
              "text padding does not preserve shifted LOAD alignment");
-      phdrs[i].p_vaddr += padded_file_delta;
-      phdrs[i].p_paddr += padded_file_delta;
+      phdrs[i].p_vaddr += *padded_file_delta;
+      phdrs[i].p_paddr += *padded_file_delta;
       assert((phdrs[i].p_align <= 1 ||
               phdrs[i].p_offset % phdrs[i].p_align == phdrs[i].p_vaddr % phdrs[i].p_align) &&
              "shifted LOAD lost file/virtual address congruence");
     }
   }
 
-  std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
+  std::memcpy(image.data() + text_offset_, new_text.data(), new_text.size());
   shdrs[*text_index].sh_size = new_text.size();
-  grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
-  text_size_ = new_text.size();
+  grow_text_function_symbols(image, header, shdrs, *text_index, text_size_, new_text.size());
 
   for (const Elf64_Phdr &phdr : phdrs) {
     if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
@@ -560,7 +682,9 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
     assert(phdr.p_offset % phdr.p_align == phdr.p_vaddr % phdr.p_align &&
            "patched LOAD lost file/virtual address congruence");
   }
-  write_elf_tables(image_, header, shdrs, phdrs);
+  write_elf_tables(image, header, shdrs, phdrs);
+  image_ = std::move(image);
+  text_size_ = new_text.size();
   return true;
 }
 
