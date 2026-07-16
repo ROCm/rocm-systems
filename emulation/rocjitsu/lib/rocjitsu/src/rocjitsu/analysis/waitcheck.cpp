@@ -92,6 +92,10 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
+[[nodiscard]] bool tracks_committed_vgpr_generations(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
 [[nodiscard]] bool tracks_gfx12_sgpr_hazards(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
@@ -1051,7 +1055,7 @@ private:
                                            uint64_t file_offset_base, rj_code_arch_t arch,
                                            bool emit_diagnostics) {
     PendingState state = input;
-    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (!tracks_committed_vgpr_generations(arch))
       state.ready_regs = {};
     RegisterSet local_ready_regs;
     uint64_t section_offset = block.start_offset();
@@ -1064,7 +1068,7 @@ private:
       if (emit_diagnostics && should_stop_after_diagnostic())
         break;
     }
-    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (!tracks_committed_vgpr_generations(arch))
       state.ready_regs = {};
     return state;
   }
@@ -2001,12 +2005,13 @@ private:
   [[nodiscard]] static bool
   creates_immediate_overlay_generation(rj_code_arch_t arch, const Instruction &inst,
                                        std::span<const ClassifiedEvent> current_events) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || inst.is_memory_op())
+    if (!tracks_committed_vgpr_generations(arch) || inst.is_memory_op())
       return false;
-    // GFX950 schedules ordinary VALU and AccVGPR transfers into the currently
-    // visible generation while an asynchronous replacement of the same VGPR is
-    // pending. A memory instruction creates another pending generation instead
-    // and therefore does not qualify for this synchronous-overlay exception.
+    // CDNA software pipelines can schedule ordinary VALU and AccVGPR transfers
+    // into the currently visible generation while an asynchronous replacement
+    // of the same VGPR is pending. A memory instruction creates another pending
+    // generation and therefore does not qualify for this synchronous-overlay
+    // exception.
     return std::ranges::none_of(current_events, [](const ClassifiedEvent &event) {
       return event.registers == TrackedRegisterSource::Defs;
     });
@@ -2691,8 +2696,8 @@ private:
           // the matching wait retires it, instructions may still consume a
           // committed generation that was available when the load issued.
           // Restrict RAW diagnostics to lanes for which no such old generation
-          // exists. Definitions are handled separately below because GFX950
-          // also supports synchronous overlays of the visible generation.
+          // exists. Definitions are handled separately below because CDNA also
+          // supports synchronous overlays of the visible generation.
           const RegisterSet pending_only_regs = event.regs - event.old_value_regs;
           reg = first_intersection(pending_only_regs, du.uses);
         }
@@ -3010,8 +3015,8 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
-    event.produces_regs =
-        arch == ROCJITSU_CODE_ARCH_CDNA4 && classification.registers == TrackedRegisterSource::Defs;
+    event.produces_regs = tracks_committed_vgpr_generations(arch) &&
+                          classification.registers == TrackedRegisterSource::Defs;
     if (event.produces_regs)
       event.old_value_regs = event.regs & (state.ready_regs | local_ready_regs);
     event.special_reg = classification.special_reg;
@@ -3105,7 +3110,7 @@ private:
       add_event(state, local_ready_regs, event, inst, du, section_name, section_offset, file_offset,
                 inst.disassemble(), arch, record_stats);
     }
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (tracks_committed_vgpr_generations(arch)) {
       RegisterSet unavailable_regs;
       for (const auto &pending : state.pending) {
         for (const PendingEvent &pending_event : pending) {

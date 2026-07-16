@@ -703,6 +703,10 @@ void append_gfx942_v_mov_b32_v1_v0(std::vector<uint32_t> &program) {
   program.push_back(0x7E020300u);
 }
 
+void append_gfx942_v_mov_b32_v4_v2(std::vector<uint32_t> &program) {
+  program.push_back(0x7E080302u);
+}
+
 void append_gfx942_global_load_dword_v4_v2(std::vector<uint32_t> &program) {
   program.push_back(0xDC508000u);
   program.push_back(0x047F0002u);
@@ -972,6 +976,79 @@ TEST(WaitcheckTest, Gfx942AcceptsSWaitcntLgkmcntZeroBeforeScalarLoadUse) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942AcceptsOldVgprUseWhileDsReplacementIsPending) {
+  std::vector<uint32_t> program;
+  append_gfx942_v_mov_b32_v4_v2(program);   // Establish the committed v4 generation.
+  append_gfx942_ds_read_b32_v4_v0(program); // Start an asynchronous replacement.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the old v4 generation.
+  append_gfx942_v_mov_b32_v4_v2(program);   // Replace that old generation in place.
+  append_gfx942_s_waitcnt_lgkmcnt_0(program);
+  append_gfx942_v_mov_b32_v5_v4(program); // Consume the replacement generation.
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942AcceptsLiveInVgprUseWhileReplacementIsPending) {
+  std::vector<uint32_t> program;
+  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the ABI/live-in v4 generation.
+  append_gfx942_ds_read_b32_v4_v0(program); // Start an asynchronous replacement.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the old v4 generation.
+  append_gfx942_s_waitcnt_lgkmcnt_0(program);
+  append_gfx942_v_mov_b32_v5_v4(program); // Consume the replacement generation.
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942AcceptsSynchronousOverlayCreatedAfterDsRead) {
+  std::vector<uint32_t> program;
+  append_gfx942_ds_read_b32_v4_v0(program); // Start the future generation.
+  append_gfx942_v_mov_b32_v4_v2(program);   // Create the immediately visible generation.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Consume that visible generation.
+  append_gfx942_s_waitcnt_lgkmcnt_0(program);
+  append_gfx942_v_mov_b32_v5_v4(program); // Consume the retired DS generation.
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942StillReportsUncommittedVgprUseWithOtherReadyValues) {
+  std::vector<uint32_t> program;
+  append_gfx942_v_mov_b32_v4_v2(program); // An unrelated committed generation.
+  append_gfx942_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx942_v_mov_b32_v4_v2(program); // Another unrelated definition.
+  append_gfx942_v_mov_b32_v1_v0(program); // Consume the uncommitted load result.
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+}
+
+TEST(WaitcheckTest, Gfx942StillReportsUncommittedCrossCounterAsyncReplacement) {
+  std::vector<uint32_t> program;
+  append_gfx942_ds_read_b32_v4_v0(program);
+  append_gfx942_global_load_dword_v4_v2(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
 }
 
 TEST(WaitcheckTest, Gfx1100DecodesLegacyAndSopkWaitcnts) {
