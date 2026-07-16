@@ -371,6 +371,39 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 
     if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
+        const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
+        // Small-chunk fast lane: LL protocol (no GPU barrier).
+        if (rcclParamDdaLL() &&
+            a2aBytes <= (size_t)rcclParamDdaLLThreshold() &&
+            ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL,
+               "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+          NCCLCHECK(ncclAllToAllDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            comm,
+            stream));
+          return ncclSuccess;
+        }
+        // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
+        if (rcclParamDdaLL128() &&
+            a2aBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+            ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL,
+               "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+          NCCLCHECK(ncclAllToAllDdaFabricLL128(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            comm,
+            stream));
+          return ncclSuccess;
+        }
         if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL,
                "AllToAll: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",

@@ -40,6 +40,8 @@ set(SRC_FILES
   dda_all_gather_fabric_ll.cu
   dda_all_gather_fabric_ll128.cu
   dda_alltoall_fabric.cu
+  dda_alltoall_fabric_ll.cu
+  dda_alltoall_fabric_ll128.cu
   device_buffer.cc
   enqueue.cc
   fabric_gpu_barrier.cu
@@ -124,6 +126,8 @@ set(SRC_FILES
   include/algorithms/all_gather/all_gather_dda_fabric_ll.h
   include/algorithms/all_gather/all_gather_dda_fabric_ll128.h
   include/algorithms/alltoall/alltoall_dda_fabric.h
+  include/algorithms/alltoall/alltoall_dda_fabric_ll.h
+  include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -699,6 +703,8 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   # ce_reduce.cc contains the CE AllReduce __global__ kernel and its launcher;
   # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
   # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
