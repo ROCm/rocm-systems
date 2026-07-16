@@ -4,7 +4,7 @@
 
 The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; per-ISA differences are confined to the instruction builder and decoder.
 
-This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original *inline-nop* trampoline, and a *probe call* that invokes a copied no-op probe body (`rj_nop_probe`) via `s_swappc_b64` before the relocated original. Multiple instrumentation points per code object are supported. Still future work: per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator, register **spilling** (non-empty spill sets currently fail closed), and **automatic SGPR-count growth** so the probe's link pair is always granted (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
+This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original *inline-nop* trampoline, and a *probe call* that invokes a copied no-op probe body (`rj_nop_probe`) via `s_swappc_b64` before the relocated original. Multiple instrumentation points per code object are supported. A reusable gfx1201 VGPR spilling backend is documented in [AMDGPU register spilling](spilling.md), although the legacy probe-call path still fails closed for non-empty spill sets. Still future work for that path includes per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator, integration with the spill backend, and automatic SGPR-count growth so the probe's link pair is always granted (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 
 ---
 
@@ -184,19 +184,26 @@ Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records expl
 
 **Files:** `code/patch/spill_manager.h`, `code/patch/spill_manager.cpp`
 
-Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines will use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after. Not consumed by the inline-nop pipeline.
+Per-kernel scratch-layout planner and gfx1201 ordinary-VGPR save/restore backend. DBI clients use it to reserve byte offsets within per-lane scratch, emit fixed-offset or caller-qualified dynamic-stack sequences, and coordinate authoritative kernel-descriptor growth. The legacy probe-call and inline-nop pipelines do not yet consume it. See [AMDGPU register spilling](spilling.md) for the complete contract.
 
 #### Responsibilities
 
 - Reserve a "DBI spill zone" appended above the kernel's existing `private_segment_fixed_size`, aligned to 16 bytes.
 - Hand out stable per-register byte offsets within that zone. Registers cannot get more than one offset.
 - Enforce a hard per-lane scratch cap. Allocations that would push the bumped total past the cap fail; on failure the manager state is unchanged.
-- Compute the bumped `private_segment_fixed_size` that the kernel descriptor patcher will write back.
+- Compute and apply the bumped `private_segment_fixed_size`, including
+  zero-to-nonzero private-segment enablement.
+- Emit fixed-offset and caller-qualified dynamic-stack ordinary-VGPR save and
+  restore sequences for gfx1201.
 
 #### What it is not
 
 - Not a memory allocator. SpillManager only computes layout.
-- Not the code generator. SpillManager hands out offsets; emitting the actual `scratch_store` / `scratch_load` (or equivalents) will be the trampoline builder's job.
+- Not a victim selector. The caller must prove register liveness, ownership,
+  and placement safety.
+- Not a general code generator. The backend emits only its supported gfx1201
+  VGPR sequences; other targets and register classes remain client-visible
+  failures.
 - Not an MFMA-clobber tracker. AccVGPR clobbering by long-latency MFMA is deferred.
 
 #### Public API

@@ -117,6 +117,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
+| [AMDGPU Register Spilling](docs/spilling.md) | Reusable DBI private-layout and VGPR save/restore backend |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 
 ### Reference

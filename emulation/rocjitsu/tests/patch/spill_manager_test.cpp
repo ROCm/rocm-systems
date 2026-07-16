@@ -4,12 +4,21 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -28,10 +37,73 @@ namespace rocjitsu {
 namespace {
 
 constexpr uint32_t kBigLimit = 16384;
+constexpr uint64_t kAdversarialDescriptorOffset = 0x80;
+constexpr uint64_t kMetadataNoteOffset = 0x100;
 
 RegisterRef sgpr(uint16_t i) { return RegisterRef{RegClass::SGPR, i, 1}; }
 RegisterRef vgpr(uint16_t i) { return RegisterRef{RegClass::VGPR, i, 1}; }
 RegisterRef accvgpr(uint16_t i) { return RegisterRef{RegClass::ACC_VGPR, i, 1}; }
+
+TEST(PrivateSegmentCursor, PreviewIsAlignedAndNonMutating) {
+  PrivateSegmentCursor cursor(/*first_byte=*/18);
+  EXPECT_EQ(cursor.preview(/*byte_count=*/8, /*alignment=*/16, /*limit=*/64), 32u);
+  EXPECT_EQ(cursor.high_water_mark(), 18u);
+
+  EXPECT_EQ(cursor.allocate(/*byte_count=*/8, /*alignment=*/16, /*limit=*/64), 32u);
+  EXPECT_EQ(cursor.high_water_mark(), 40u);
+}
+
+TEST(PrivateSegmentCursor, FailedAllocationDoesNotAdvance) {
+  PrivateSegmentCursor cursor(/*first_byte=*/60);
+  EXPECT_EQ(cursor.allocate(/*byte_count=*/8, /*alignment=*/4, /*limit=*/64), std::nullopt);
+  EXPECT_EQ(cursor.high_water_mark(), 60u);
+  EXPECT_EQ(cursor.allocate(/*byte_count=*/4, /*alignment=*/4, /*limit=*/64), 60u);
+  EXPECT_EQ(cursor.high_water_mark(), 64u);
+}
+
+std::vector<uint8_t> make_metadata_note_elf() {
+  std::vector<uint8_t> payload;
+  auto append_string = [&](std::string_view value) {
+    EXPECT_LE(value.size(), 31u);
+    payload.push_back(static_cast<uint8_t>(0xa0u | value.size()));
+    payload.insert(payload.end(), value.begin(), value.end());
+  };
+  payload.push_back(0x81u); // root map(1)
+  append_string("amdhsa.kernels");
+  payload.push_back(0x92u); // array(2)
+  for (std::string_view name : {std::string_view("target"), std::string_view("other")}) {
+    payload.push_back(0x82u); // kernel map(2)
+    append_string(".name");
+    append_string(name);
+    append_string(".private_segment_fixed_size");
+    payload.push_back(0u);
+  }
+
+  constexpr std::array<uint8_t, 8> kNoteName = {'A', 'M', 'D', 'G', 'P', 'U', 0, 0};
+  const uint64_t note_size = sizeof(Elf64_Nhdr) + kNoteName.size() + ((payload.size() + 3u) & ~3u);
+  std::vector<uint8_t> image(kMetadataNoteOffset + note_size, 0);
+  Elf64_Ehdr header{};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_phoff = sizeof(Elf64_Ehdr);
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  header.e_phnum = 1;
+  std::memcpy(image.data(), &header, sizeof(header));
+  Elf64_Phdr program_header{};
+  program_header.p_type = PT_NOTE;
+  program_header.p_offset = kMetadataNoteOffset;
+  program_header.p_filesz = note_size;
+  std::memcpy(image.data() + header.e_phoff, &program_header, sizeof(program_header));
+  Elf64_Nhdr note{};
+  note.n_namesz = 7;
+  note.n_descsz = static_cast<uint32_t>(payload.size());
+  note.n_type = NT_AMDGPU_METADATA;
+  std::memcpy(image.data() + kMetadataNoteOffset, &note, sizeof(note));
+  std::memcpy(image.data() + kMetadataNoteOffset + sizeof(note), kNoteName.data(),
+              kNoteName.size());
+  std::memcpy(image.data() + kMetadataNoteOffset + sizeof(note) + kNoteName.size(), payload.data(),
+              payload.size());
+  return image;
+}
 
 // Minimal synthetic Operand/Instruction/CodeObject/Decoder for integration
 // tests. Mirrors the pattern in tests/analysis/liveness_test.cpp;
@@ -381,8 +453,8 @@ TEST(SpillManager, AllocateSlotsRollsBackOnPartialOverflow) {
   EXPECT_EQ(m.offset_for(sgpr(6)), std::nullopt);
   EXPECT_EQ(m.offset_for(sgpr(7)), std::nullopt);
 
-  // Proves next_offset_ was actually rewound (not just total_bytes_): a
-  // subsequent single-slot allocation lands at the rolled-back cursor.
+  // Proves the allocation cursor was not advanced: a subsequent single-slot
+  // allocation lands at the original high-water mark.
   auto recovered = m.allocate_slot(sgpr(6));
   ASSERT_TRUE(recovered.has_value());
   EXPECT_EQ(*recovered, 8u);
@@ -513,6 +585,192 @@ TEST(SpillManager, ConstructorOverLimitFailsAllAllocations) {
   RegisterSet set;
   set.expand(sgpr(2));
   EXPECT_FALSE(m.reserve(set));
+}
+
+TEST(SpillManager, BuildsGfx1201VgprSaveRestoreSequence) {
+  SpillManager manager(/*original_private_bytes=*/0, kMaxAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10, /*vgpr_count=*/3,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
+  EXPECT_EQ(sequence->total_private_bytes, 12u);
+  EXPECT_EQ(manager.total_private_bytes(), 12u);
+  ASSERT_EQ(sequence->save_words.size(), 11u);
+  ASSERT_EQ(sequence->restore_words.size(), 10u);
+  // Pending guest VMEM definitions must complete before any victim is read.
+  EXPECT_EQ(sequence->save_words[0], 0xbfc00000u);
+  EXPECT_EQ(sequence->save_words[1], 0xed06807cu);
+  EXPECT_EQ(sequence->save_words[2], 10u << 23u);
+  EXPECT_EQ(sequence->save_words[3], 0u);
+  EXPECT_EQ(sequence->save_words[10], 0xbfc10000u);
+  EXPECT_EQ(sequence->restore_words[0], 0xed05007cu);
+  EXPECT_EQ(sequence->restore_words[1], 10u);
+  EXPECT_EQ(sequence->restore_words[2], 0u);
+  EXPECT_EQ(sequence->restore_words[9], 0xbfc00000u);
+}
+
+TEST(SpillManager, BuildsSccPreservingDynamicStackVgprFrame) {
+  const auto sequence = build_dynamic_stack_vgpr_spill_sequence(
+      /*vgpr_base=*/10, /*vgpr_count=*/3, /*stack_top_sgpr=*/32,
+      /*frame_base_sgpr=*/33, /*saved_frame_base_sgpr=*/80, /*saved_scc_sgpr=*/66,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_TRUE(sequence->uses_dynamic_stack_frame);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
+  EXPECT_EQ(sequence->total_private_bytes, 0u);
+  ASSERT_EQ(sequence->save_words.size(), 17u);
+  ASSERT_EQ(sequence->restore_words.size(), 12u);
+  EXPECT_EQ(sequence->save_words[0], *build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[1],
+            *build_rdna4_s_cselect_b32(66, scalar_positive_inline_u32(1),
+                                       scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[2], build_s_mov_b32(80, 33, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[3], build_s_mov_b32(33, 32, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[4], 0xed068021u);
+  EXPECT_EQ(sequence->save_words[5], 10u << 23u);
+  EXPECT_EQ(sequence->save_words[6], 0u);
+  EXPECT_EQ(sequence->save_words[13], *build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[14],
+            *build_rdna4_s_add_u32(32, 32, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[15], 12u);
+  EXPECT_EQ(sequence->save_words[16],
+            *build_rdna4_s_cmp_lg_u32(66, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->restore_words[0], 0xed050021u);
+  EXPECT_EQ(sequence->restore_words[1], 10u);
+  EXPECT_EQ(sequence->restore_words[9], *build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->restore_words[10], build_s_mov_b32(32, 33, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->restore_words[11], build_s_mov_b32(33, 80, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
+TEST(SpillManager, VgprSequenceAppendsAfterOriginalPrivateSegment) {
+  SpillManager manager(/*original_private_bytes=*/20, kMaxAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/7, /*vgpr_count=*/2,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{32, 36}));
+  EXPECT_EQ(sequence->total_private_bytes, 40u);
+
+  const auto repeated = build_vgpr_spill_sequence(manager, /*vgpr_base=*/7, /*vgpr_count=*/2,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(repeated);
+  EXPECT_EQ(repeated->slot_offsets, sequence->slot_offsets);
+  EXPECT_EQ(manager.total_private_bytes(), 40u);
+}
+
+TEST(SpillManager, VgprSequenceFailureRollsBack) {
+  SpillManager capacity_limited(/*original_private_bytes=*/0, /*limit=*/8);
+  EXPECT_FALSE(build_vgpr_spill_sequence(capacity_limited, 10, 3, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(capacity_limited.total_private_bytes(), 0u);
+  EXPECT_EQ(capacity_limited.offset_for(vgpr(10)), std::nullopt);
+
+  SpillManager unencodable(/*original_private_bytes=*/kMaxAddressFreeScratchPrivateBytes,
+                           /*limit=*/kMaxAddressFreeScratchPrivateBytes + 4u);
+  EXPECT_FALSE(build_vgpr_spill_sequence(unencodable, 10, 1, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(unencodable.offset_for(vgpr(10)), std::nullopt);
+
+  SpillManager unsupported(/*original_private_bytes=*/0, /*limit=*/16);
+  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 10, 1, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 255, 2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(unsupported.total_private_bytes(), 0u);
+}
+
+TEST(SpillManager, DescriptorGrowthEnablesPrivateSegmentAndIsKernelLocal) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+  std::array<uint8_t, 2 * sizeof(KD)> image{};
+  KD first{};
+  first.compute_pgm_rsrc1 = 0x12345678u;
+  first.compute_pgm_rsrc2 = 0x87654000u;
+  first.kernel_code_entry_byte_offset = -0x1000;
+  first.group_segment_fixed_size = 96;
+  KD second{};
+  second.compute_pgm_rsrc1 = 0xa5a5a5a5u;
+  second.compute_pgm_rsrc2 = 0x5a5a5a5au;
+  second.private_segment_fixed_size = 64;
+  std::memcpy(image.data(), &first, sizeof(first));
+  std::memcpy(image.data() + sizeof(KD), &second, sizeof(second));
+  const std::array<uint8_t, sizeof(KD)> second_before = [&] {
+    std::array<uint8_t, sizeof(KD)> bytes{};
+    std::memcpy(bytes.data(), image.data() + sizeof(KD), sizeof(KD));
+    return bytes;
+  }();
+
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, /*descriptor_file_offset=*/0,
+                                                /*required_private_bytes=*/12,
+                                                /*uses_dynamic_stack=*/false),
+            SpillDescriptorUpdate::Updated);
+  KD patched{};
+  std::memcpy(&patched, image.data(), sizeof(patched));
+  EXPECT_EQ(patched.private_segment_fixed_size, 12u);
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(patched.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT), 1u);
+  EXPECT_EQ(patched.compute_pgm_rsrc1, first.compute_pgm_rsrc1);
+  EXPECT_EQ(patched.kernel_code_entry_byte_offset, first.kernel_code_entry_byte_offset);
+  EXPECT_EQ(patched.group_segment_fixed_size, first.group_segment_fixed_size);
+  EXPECT_TRUE(std::equal(second_before.begin(), second_before.end(), image.begin() + sizeof(KD)));
+}
+
+TEST(SpillManager, DescriptorGrowthHandlesFixedAndDynamicStackBacking) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+  KD descriptor{};
+  descriptor.private_segment_fixed_size = 32;
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  std::array<uint8_t, sizeof(KD)> image{};
+  std::memcpy(image.data(), &descriptor, sizeof(descriptor));
+
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 16, false),
+            SpillDescriptorUpdate::Unchanged);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 48, false),
+            SpillDescriptorUpdate::Updated);
+  KD grown{};
+  std::memcpy(&grown, image.data(), sizeof(grown));
+  EXPECT_EQ(grown.private_segment_fixed_size, 48u);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 64, true),
+            SpillDescriptorUpdate::Updated);
+  std::memcpy(&grown, image.data(), sizeof(grown));
+  EXPECT_EQ(grown.private_segment_fixed_size, 64u);
+  const auto before_invalid = image;
+  EXPECT_EQ(
+      update_kernel_descriptor_for_spills(image, 0, kMaxAddressFreeScratchPrivateBytes + 1u, false),
+      SpillDescriptorUpdate::InvalidPrivateSize);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48, false),
+            SpillDescriptorUpdate::InvalidDescriptor);
+  EXPECT_EQ(image, before_invalid);
+}
+
+TEST(SpillManager, DescriptorGrowthIgnoresAndPreservesMetadataNotes) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  std::vector<std::pair<std::string_view, std::vector<uint8_t>>> cases;
+  cases.emplace_back(
+      "absent", std::vector<uint8_t>(kAdversarialDescriptorOffset + sizeof(KD), uint8_t{0x5a}));
+  cases.emplace_back("contradictory", make_metadata_note_elf());
+  auto malformed = make_metadata_note_elf();
+  malformed[kMetadataNoteOffset + sizeof(Elf64_Nhdr) + 8u] = 0xc1u;
+  cases.emplace_back("malformed", std::move(malformed));
+
+  for (auto &[name, image] : cases) {
+    SCOPED_TRACE(name);
+    KD descriptor{};
+    descriptor.private_segment_fixed_size = 16;
+    descriptor.compute_pgm_rsrc1 = 0xa5a55a5au;
+    std::memcpy(image.data() + kAdversarialDescriptorOffset, &descriptor, sizeof(descriptor));
+    const std::vector<uint8_t> before = image;
+
+    EXPECT_EQ(update_kernel_descriptor_for_spills(image, kAdversarialDescriptorOffset, 128,
+                                                  /*uses_dynamic_stack=*/false),
+              SpillDescriptorUpdate::Updated);
+
+    KD patched{};
+    std::memcpy(&patched, image.data() + kAdversarialDescriptorOffset, sizeof(patched));
+    EXPECT_EQ(patched.private_segment_fixed_size, 128u);
+    EXPECT_EQ(patched.compute_pgm_rsrc1, descriptor.compute_pgm_rsrc1);
+    EXPECT_TRUE(
+        std::equal(before.begin(), before.begin() + kAdversarialDescriptorOffset, image.begin()));
+    EXPECT_TRUE(std::equal(before.begin() + kAdversarialDescriptorOffset + sizeof(KD), before.end(),
+                           image.begin() + kAdversarialDescriptorOffset + sizeof(KD)));
+  }
 }
 
 // End-to-end smoke test: feed a real LivenessAnalysis result into SpillManager.
