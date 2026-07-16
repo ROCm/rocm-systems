@@ -902,7 +902,6 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
     } else {
       // Check if skip wait optimization is enabled. It will try to predict the same engine in ROCr
       // and ignore the signal wait, relying on in-order engine execution
-      const Settings& settings = gpu_.dev().settings();
       if (engine != HwQueueEngine::Compute) {
         explicit_wait = true;
       }
@@ -1172,9 +1171,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
               amd::Image* img = mem->asImage();
 
               // Copy memory from the original image buffer into the backing store image
-              bool result =
-                  blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
-                                              true, img->getRowPitch(), img->getSlicePitch());
+              blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(), true,
+                                          img->getRowPitch(), img->getSlicePitch());
               // Make sure the copy operation is done
               setAqlHeader(dispatchPacketHeader_);
               // Use backing store SRD as the replacment
@@ -2377,16 +2375,17 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       maskGroups_(0),
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
+      schedulerQueueThreadRunning_(false),
       barriers_(*this),
-      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_,
+                      kStagingPoolNumSignals),
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
+      dedicated_queue_(dedicated_queue),
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      dedicated_queue_(dedicated_queue),
-      schedulerQueueThreadRunning_(false),
       hostcallBuffer_(nullptr) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
@@ -2651,7 +2650,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, pool_signal_[active_chunk_]);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
+    active_chunk_ = (active_chunk_ + 1) % num_chunk_signals_;
     // Make sure the new active chunk is free
     bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
     assert(test && "Runtime can't fail a wait for chunk!");
@@ -2968,7 +2967,7 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
   while (current != nullptr) {
     if (current->profilingInfo().enabled_) {
       if (!current->data().empty()) {
-        for (auto i = 0; i < current->data().size(); i++) {
+        for (size_t i = 0; i < current->data().size(); i++) {
           // Since this is a valid command to get a timestamp, we use the
           // timestamp provided by the runtime (saved in the data())
           ts = reinterpret_cast<Timestamp*>(current->data()[i]);
@@ -4433,7 +4432,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
-    Memory* memory = dev().getRocMemory(dstMemory);
+    dev().getRocMemory(dstMemory);
 
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
@@ -4732,7 +4731,6 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
 
   const amd::KernelSignature& signature = kernel.signature();
-  const amd::KernelParameters& kernelParams = kernel.parameters();
 
   bool isGraphCapture = command_ != nullptr && command_->getPktCapturingState();
 
@@ -4963,7 +4961,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 #else
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
-        auto kSentinel = *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
+        [[maybe_unused]] auto kSentinel =
+            *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
       }
     }
   }
@@ -5145,8 +5144,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
-                                                true, image->getRowPitch(), image->getSlicePitch());
+      blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(), true,
+                                  image->getRowPitch(), image->getSlicePitch());
     }
   }
   return true;

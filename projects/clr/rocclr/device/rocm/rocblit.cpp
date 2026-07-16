@@ -17,12 +17,11 @@
 namespace amd::roc {
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
     : HostBlitManager(gpu, setup),
-      MinSizeForPinnedXfer(dev().settings().pinnedMinXferSize_),
       PinXferSize(dev().settings().pinnedXferSize_),
+      MinSizeForPinnedXfer(dev().settings().pinnedMinXferSize_),
       StagingXferSize(dev().settings().stagedXferSize_),
       completeOperation_(false),
-      context_(nullptr) {
-}
+      context_(nullptr) {}
 
 inline void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
@@ -1100,8 +1099,6 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
   size_t copyOffset = 0;
   size_t totalSize = size;
 
-  // Staging Buffer or Pinned Host Memory
-  address stagingBuffer = 0;
   // src and dst agent for rocr
   hsa_agent_t srcAgent = hostToDev ? dev().getCpuAgent() : dev().getBackendDevice();
   hsa_agent_t dstAgent = hostToDev ? dev().getBackendDevice() : dev().getCpuAgent();
@@ -1361,7 +1358,6 @@ bool KernelBlitManager::copyBufferToImageKernel(
   Memory* dstView = &gpuMem(dstMemory);
   bool result = false;
   amd::Image* dstImage = static_cast<amd::Image*>(dstMemory.owner());
-  amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(dstImage->getImageFormat());
   bool swapLayer =
       (dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
@@ -1981,7 +1977,6 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
                                        bool entire, amd::CopyMetadata copyMetadata) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  bool rejected = false;
 
   // hsa_amd_memory_async_copy_rect requires dword-aligned row/slice pitches.
   // When they are not aligned, DmaBlitManager::copyBufferRect falls back to one
@@ -3758,11 +3753,6 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   size_t localWorkSize[1] = {1};
 
   amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
-
-  device::Kernel* devKernel =
-      const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
-
-  Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 
   auto* sp =
       reinterpret_cast<SchedulerParam*>(gpu().allocKernArg(sizeof(SchedulerParam), kCBAlignment));

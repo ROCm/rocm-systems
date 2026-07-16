@@ -278,7 +278,6 @@ void ShowOptionsHelp(const char* helpValue, Options& Opts) {
 
     const char* sname = OPTION_sname(od);
     const char* lname = OPTION_lname(od);
-    size_t sz = 0;
     Opts.optionsLog() += "\t";
     if (OPTION_form(od) == OFA_NORMAL) {
       for (int j = 0; j < 2; ++j) {
