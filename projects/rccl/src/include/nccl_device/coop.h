@@ -153,26 +153,53 @@ struct ncclCoopLanes { // Some lanes of this warp.
 constexpr int ncclCoopNamedBarrierSlots = 16; // mirrors CUDA's 16 hardware named barriers (ids 0-15)
 struct ncclCoopNamedBarrierSlot { uint32_t arrive; uint32_t sense; };
 
+#if !defined(__clang_llvm_bitcode_lib__)
+// Native/in-tree path: function-local LDS. It is statically reachable from the
+// kernel that inlines this, so the backend sizes it into the kernel's group
+// segment. Compiled out of the bitcode library, where the only path to the
+// LDS-using sync() is an indirect (vtable) call the LDS-sizing pass can't see.
 NCCL_DEVICE_INLINE ncclCoopNamedBarrierSlot* ncclCoopNamedBarrierState() {
   __shared__ ncclCoopNamedBarrierSlot slots[ncclCoopNamedBarrierSlots];
   return slots;
 }
+#endif
 
-NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {
-  ncclCoopNamedBarrierSlot* slots = ncclCoopNamedBarrierState();
+// Zero caller-provided (kernel-owned) slots before first use. The bitcode
+// binding passes a kernel __shared__ pointer here so the LDS lives in the
+// launching kernel rather than in the indirectly-called thunk.
+NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit(ncclCoopNamedBarrierSlot* slots) {
   for (int i = threadIdx.x; i < ncclCoopNamedBarrierSlots; i += blockDim.x) { slots[i].arrive = 0; slots[i].sense = 0; }
   __syncthreads();
 }
+
+#if !defined(__clang_llvm_bitcode_lib__)
+// Back-compat no-arg form: existing in-tree kernels keep calling this unchanged.
+NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {
+  ncclCoopNamedBarrierInit(ncclCoopNamedBarrierState());
+}
+#endif
 #else
 NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {}
 #endif
 
 struct ncclCoopWarpSpan {
   uint32_t warp0:8, nWarps:8, id:8;
+#if defined(__HIP_PLATFORM_AMD__)
+  // Caller/kernel-owned named-barrier scratch. Optional on native AMD (sync()
+  // falls back to function-local LDS); supplied by the bitcode thunk, where a
+  // function-local __shared__ in this indirectly-called code can't be sized
+  // into the launching kernel's group segment (HSA exception 0x1016 otherwise).
+  ncclCoopNamedBarrierSlot* slots;
 
+  NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id,
+                                                ncclCoopNamedBarrierSlot* slots = nullptr):
+    warp0(warp0), nWarps(nWarps), id(id), slots(slots) {
+  }
+#else
   NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id):
     warp0(warp0), nWarps(nWarps), id(id) {
   }
+#endif
 
   NCCL_DEVICE_INLINE int thread_rank() const {
     return threadIdx.x - WARP_SIZE*warp0;
@@ -190,7 +217,11 @@ struct ncclCoopWarpSpan {
     // Single-warp span is lockstep: skip the shared atomic (hot path) and just fence.
     using Atom = cuda::atomic_ref<uint32_t, cuda::thread_scope_block>;
     if (nWarps <= 1) { cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_block); return; }
-    ncclCoopNamedBarrierSlot* slot = &ncclCoopNamedBarrierState()[id];
+  #if defined(__clang_llvm_bitcode_lib__)
+    ncclCoopNamedBarrierSlot* slot = &slots[id];                          // bitcode: caller-owned LDS only
+  #else
+    ncclCoopNamedBarrierSlot* slot = &(slots ? slots : ncclCoopNamedBarrierState())[id];
+  #endif
     cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_block);
     if ((threadIdx.x % WARP_SIZE) == 0) {  // one leader per warp
       uint32_t s = Atom{slot->sense}.load(cuda::memory_order_relaxed);
@@ -209,6 +240,11 @@ struct ncclCoopWarpSpan {
 #endif
   }
 };
+#if defined(__HIP_PLATFORM_AMD__)
+// The added scratch pointer must keep ncclCoopWarpSpan within ncclCoopAny's
+// type-erased Storage (16 bytes); this is tight (4B bitfield + 8B pointer).
+static_assert(sizeof(ncclCoopWarpSpan) <= 16, "ncclCoopWarpSpan must fit ncclCoopAny::Storage");
+#endif
 #endif
 
 #if NCCL_CHECK_CUDACC

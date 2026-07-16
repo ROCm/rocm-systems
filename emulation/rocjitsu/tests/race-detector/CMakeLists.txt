@@ -8,6 +8,9 @@
 # causes OOM kills at moderate parallelism (~15+ concurrent tests). The
 # race detector only needs a few CUs to exercise cross-wave and
 # cross-workgroup synchronization checking.
+# The gfx950 race detector cases include CDNA-specific inline assembly
+# sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
+# generic HIP smoke tests are overridden for local validation on another ISA.
 rj_add_hip_test(hip_race_tests_gfx950 ARCH gfx950 SOURCE hip_race_gfx950_test.hip)
 rj_add_hip_test(hip_race_tests_gfx1151 ARCH gfx1151 SOURCE hip_race_gfx1151_test.hip)
 set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)

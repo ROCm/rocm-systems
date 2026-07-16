@@ -196,6 +196,20 @@ save(ArchiveT& ar, rocprofiler_stream_id_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_graph_exec_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_graph_node_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_counter_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(handle);
@@ -715,6 +729,23 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_kernel_dispatch_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_graph_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
+    ROCP_SDK_SAVE_DATA_FIELD(operation);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(graph_exec_id);
+    ROCP_SDK_SAVE_DATA_FIELD(kernel_dispatch_count);
 }
 
 template <typename ArchiveT>

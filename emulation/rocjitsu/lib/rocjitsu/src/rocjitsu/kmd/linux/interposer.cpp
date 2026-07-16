@@ -2,17 +2,27 @@
 // SPDX-License-Identifier: MIT
 
 /// @file interposer.cpp
-/// @brief LD_PRELOAD interposer that redirects KFD syscalls to the simulated driver.
+/// @brief LD_PRELOAD interposer that redirects KFD syscalls to rocjitsu KFD drivers.
 ///
-/// @details Intercepts open, close, ioctl, mmap, munmap, and fopen to route
-/// /dev/kfd operations and sysfs topology reads through SimulatedDriver.
-/// All mutable state is consolidated in InterposerContext.
+/// @details Intercepts open, close, ioctl, mmap, munmap, and filesystem access
+/// to route /dev/kfd operations and sysfs topology reads through one of two
+/// strategies. Normal simulation creates a VM and uses SimulatedKfd to own all
+/// visible GPU discovery and queue execution. DBT guest mode does not create a
+/// VM: GuestKfd forwards host-GPU KFD work to the real /dev/kfd while appending
+/// one synthetic guest GPU for ROCR discovery. The HSA tools hook then maps
+/// guest-agent API calls to the selected host agent and translates guest code
+/// objects before loading them. All mutable state is consolidated in
+/// InterposerContext.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -42,12 +52,16 @@ RJ_DIAGNOSTIC_POP
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <exception>
 #include <fcntl.h>
 #include <linux/memfd.h>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <signal.h>
 #include <sstream>
 #include <string>
@@ -62,13 +76,16 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
-#include <unordered_set>
+#include <utility>
+#include <vector>
 
 extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
 extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
 
+using rocjitsu::GuestKfd;
+using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
-using rocjitsu::SimulatedDriver;
+using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
 static int connect_to_daemon() {
@@ -80,13 +97,65 @@ static int connect_to_daemon() {
   addr.sun_family = AF_UNIX;
   path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
   if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-    syscall(SYS_close, sock);
+    rocjitsu::libc_passthrough().close(sock);
     return -1;
   }
   return sock;
 }
 
 namespace {
+
+/// @brief Convert a kernel-style driver ioctl result into the libc ioctl(2)
+/// return/`errno` contract.
+///
+/// @param r Driver result: `>= 0` on success, `-errno` on failure.
+/// @returns @p r unchanged when non-negative; otherwise `-1` with `errno` set to
+///          `-r`.
+int kfd_ioctl_ret(int r) {
+  if (r < 0) {
+    errno = -r;
+    return -1;
+  }
+  return r;
+}
+
+/// @brief Return the child-process rocjitsu config path.
+///
+/// @details The launcher writes the config path to the shared runtime file for
+/// both local simulation and DBT guest mode.
+std::optional<std::string> child_config_path() {
+  auto cfg_file = rocjitsu::rpc_default_config_file_path();
+  char cfg_buf[4096]{};
+  auto &real = rocjitsu::libc_passthrough();
+  int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
+  if (cfg_fd < 0)
+    return std::nullopt;
+
+  auto n = real.read(cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  real.close(cfg_fd);
+  if (n <= 0)
+    return std::nullopt;
+
+  while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
+    cfg_buf[--n] = '\0';
+  return std::string(cfg_buf);
+}
+
+void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  // syscall(2) is the libc wrapper, not a raw inline syscall instruction: on
+  // kernel errors it returns -1 and sets errno. For mmap(2), success returns
+  // the mapped address; for munmap(2), success returns exactly 0.
+  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+  if (rc == -1)
+    return MAP_FAILED;
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+}
+
+int raw_munmap_syscall(void *addr, size_t length) {
+  long rc = syscall(SYS_munmap, addr, length);
+  assert(rc == 0 || rc == -1);
+  return static_cast<int>(rc);
+}
 
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
@@ -100,76 +169,19 @@ __attribute__((constructor)) void rj_install_signal_handler() {
   sigaction(SIGSEGV, &sa, nullptr);
 }
 
-/// @brief Real libc function pointers resolved via dlsym(RTLD_NEXT).
-/// @details Holds the original libc implementations that our LD_PRELOAD
-/// interposer shadows. Resolved once at constructor time via resolve().
-class LibcPassthrough {
-public:
-  int (*openat)(int, const char *, int, ...) = nullptr;
-  int (*close)(int) = nullptr;
-  int (*ioctl)(int, unsigned long, ...) = nullptr;
-  void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
-  int (*munmap)(void *, size_t) = nullptr;
-  int (*mprotect)(void *, size_t, int) = nullptr;
-  int (*madvise)(void *, size_t, int) = nullptr;
-  int (*dup)(int) = nullptr;
-  int (*dup2)(int, int) = nullptr;
-  int (*dup3)(int, int, int) = nullptr;
-  int (*fcntl)(int, int, ...) = nullptr;
-  FILE *(*fopen)(const char *, const char *) = nullptr;
-  FILE *(*freopen)(const char *, const char *, FILE *) = nullptr;
-  DIR *(*opendir)(const char *) = nullptr;
-  int (*stat)(const char *, struct stat *) = nullptr;
-  int (*lstat)(const char *, struct stat *) = nullptr;
-  int (*access)(const char *, int) = nullptr;
-  int (*fstat_fn)(int, struct stat *) = nullptr;
-  ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
-  pid_t (*fork)() = nullptr;
-
-  bool ready() const { return initialized_; }
-
-  void resolve() {
-    auto *handle = RTLD_NEXT;
-    openat = util::lookup_symbol<decltype(openat)>(handle, "openat");
-    close = util::lookup_symbol<decltype(close)>(handle, "close");
-    ioctl = util::lookup_symbol<decltype(ioctl)>(handle, "ioctl");
-    mmap = util::lookup_symbol<decltype(mmap)>(handle, "mmap");
-    munmap = util::lookup_symbol<decltype(munmap)>(handle, "munmap");
-    mprotect = util::lookup_symbol<decltype(mprotect)>(handle, "mprotect");
-    madvise = util::lookup_symbol<decltype(madvise)>(handle, "madvise");
-    dup = util::lookup_symbol<decltype(dup)>(handle, "dup");
-    dup2 = util::lookup_symbol<decltype(dup2)>(handle, "dup2");
-    dup3 = util::lookup_symbol<decltype(dup3)>(handle, "dup3");
-    fcntl = util::lookup_symbol<decltype(fcntl)>(handle, "fcntl");
-    fopen = util::lookup_symbol<decltype(fopen)>(handle, "fopen");
-    freopen = util::lookup_symbol<decltype(freopen)>(handle, "freopen");
-    opendir = util::lookup_symbol<decltype(opendir)>(handle, "opendir");
-    stat = util::lookup_symbol<decltype(stat)>(handle, "stat");
-    lstat = util::lookup_symbol<decltype(lstat)>(handle, "lstat");
-    access = util::lookup_symbol<decltype(access)>(handle, "access");
-    fstat_fn = util::lookup_symbol<decltype(fstat_fn)>(handle, "fstat");
-    readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
-    fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
-    assert(openat && close && ioctl && mmap && munmap && mprotect && madvise);
-    assert(dup && dup2 && fcntl && fopen && freopen && opendir && fork);
-    assert(stat && lstat && access && fstat_fn && readlink_fn);
-    initialized_ = true;
-  }
-
-private:
-  bool initialized_ = false;
-};
-
 /// @brief All mutable interposer state.
 class InterposerContext {
 public:
-  static inline std::atomic<bool> in_construction{false};
-  static inline LibcPassthrough real{};
+  /// @brief Which backend holds the open reference for a tracked KFD dup fd.
+  enum class DupBackend : uint8_t { Local, Remote };
+
+  static inline thread_local bool in_construction = false;
+  static rocjitsu::LibcPassthrough &real() { return rocjitsu::libc_passthrough(); }
   static InterposerContext &ctx;
 
   static void init() {
     new (storage_) InterposerContext();
-    real.resolve();
+    real().resolve();
   }
 
   /// @brief Reset interposer state in a forked child process.
@@ -178,7 +190,31 @@ public:
   /// be locked by threads that no longer exist. We reinitialize everything so
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
+    active_driver_.store(nullptr, std::memory_order_release);
     rj_vm_ = nullptr;
+    if (guest_driver_)
+      guest_driver_->reset_after_fork();
+    guest_driver_.reset();
+    // Drop the child's reference to the inherited RemoteDriver. Storing nullptr
+    // releases this shared_ptr; if it was the last reference in the child, the
+    // child's ~RemoteDriver runs and closes only the child's inherited (dup'd)
+    // fds — it does not send RPC_CLOSE and cannot invalidate the parent's live
+    // connection, so this is safe in a forked child.
+    //
+    // Unlike the plain mutexes below, remote_ is NOT reinitialized via
+    // placement-new: re-constructing a live object over itself ends the current
+    // object's lifetime without running its destructor, which is UB for a
+    // non-trivial type like std::atomic<std::shared_ptr<>> (it leaks/By-passes the
+    // control-block bookkeeping). A plain store(nullptr) is the correct way to
+    // release it.
+    //
+    // Caveat: std::atomic<std::shared_ptr<>> may serialize on a libstdc++-internal
+    // pool spinlock. If a parent thread was mid remote_.load()/store() at fork(),
+    // the child inherits that lock held-by-a-dead-thread and this store() could
+    // block. reset_after_fork() therefore assumes no in-flight remote_ atomic
+    // access at the fork point (the common fork-then-exec / single-threaded-fork
+    // case) — placement-new would not sidestep this deadlock either (still UB),
+    // and leaving remote_ non-null would wrongly reuse the parent's connection.
     remote_.store(nullptr, std::memory_order_relaxed);
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
     remote_open_refs_.store(0, std::memory_order_relaxed);
@@ -187,92 +223,156 @@ public:
     new (&remote_mutex_) std::mutex();
     sysfs_fds_.clear();
     drm_fds_.clear();
-    handle_to_drm_fd_.clear();
     kfd_dup_fds_.clear();
     in_construction = false;
   }
 
-  SimulatedDriver *driver() { return rj_vm_ ? rj_vm_->vm->driver() : nullptr; }
+  LinuxKfd *driver() { return active_driver_.load(std::memory_order_acquire); }
   int driver_fd() {
     auto *d = driver();
     return d ? d->fd() : -1;
   }
   bool initialized() const {
-    return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+    return active_driver_.load(std::memory_order_acquire) != nullptr ||
+           remote_.load(std::memory_order_acquire) != nullptr;
   }
 
-  std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
-
-  RemoteDriver *remote() { return remote_.load(std::memory_order_acquire); }
+  /// @brief Take a lifetime-extending snapshot of the active remote driver.
+  /// @details The returned shared_ptr keeps the RemoteDriver alive for as long as
+  /// the caller holds it, even if a concurrent teardown_remote() clears remote_.
+  std::shared_ptr<RemoteDriver> remote() { return remote_.load(std::memory_order_acquire); }
 
   int remote_kfd_fd() const { return remote_kfd_fd_.load(std::memory_order_acquire); }
 
-  RemoteDriver *remote_lookup(int fd) {
-    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+  std::shared_ptr<RemoteDriver> remote_lookup(int fd) {
+    auto active_remote = remote_.load(std::memory_order_acquire);
     return (fd >= 0 && fd == remote_kfd_fd_.load(std::memory_order_acquire) && active_remote)
                ? active_remote
                : nullptr;
   }
 
-  std::string remote_topology_path() {
-    std::lock_guard lock(remote_mutex_);
-    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
-    return active_remote ? std::string(active_remote->topology_path()) : std::string{};
-  }
-
+  // No lock needed: the snapshot keeps the RemoteDriver alive, and its handshake
+  // metadata (topology/drm paths, gpu_info) is immutable after open() — close()
+  // does not clear it — so this read never races a concurrent teardown. Callers
+  // that need BOTH the topology and drm paths together must take a single
+  // remote() snapshot and read both from it (see redirect_sysfs_path), so the two
+  // paths can't come from different RemoteDrivers across a teardown/reconnect.
   std::string remote_drm_path() {
-    std::lock_guard lock(remote_mutex_);
-    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    auto active_remote = remote_.load(std::memory_order_acquire);
     return active_remote ? std::string(active_remote->drm_path()) : std::string{};
   }
 
-  /// @brief True when a daemon-mode (remote) KFD connection is open.
-  bool is_remote_mode() const { return remote_open_refs_.load(std::memory_order_acquire) > 0; }
-
-  /// @brief Add one open reference for a remote (daemon-mode) KFD fd.
-  /// @details Each live remote KFD fd (the primary plus every dup) holds one
-  /// reference; the RPC connection is torn down only when the last reference is
-  /// dropped. Mirrors SimulatedDriver's local open refcount for the daemon path.
-  void retain_remote_open() { remote_open_refs_.fetch_add(1, std::memory_order_acq_rel); }
+  /// @brief Retain one remote open reference if a remote connection is live.
+  /// @details Combined check-and-retain under remote_mutex_ so a concurrent
+  /// last-release+teardown cannot slip between "is a remote live?" and the
+  /// increment and resurrect a torn-down connection. Returns true if a reference
+  /// was added (i.e. a remote is active). Mirrors the local path, which does the
+  /// same check-and-retain under process_mutex_.
+  bool retain_remote_open_if_active() {
+    std::lock_guard lock(remote_mutex_);
+    if (!remote_.load(std::memory_order_acquire))
+      return false;
+    remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
+    return true;
+  }
 
   /// @brief Drop one remote open reference, tearing down the connection on the
   /// last release.
   /// @details On the final release this sends RPC_CLOSE to the daemon (via
   /// RemoteDriver::close()) so the daemon frees this client's process state,
-  /// rather than leaking it until socket disconnect at process exit.
+  /// rather than leaking it until socket disconnect at process exit. The whole
+  /// decrement-and-maybe-teardown runs under remote_mutex_ so it is serialized
+  /// against retain and get_or_create_remote; retain can never observe a live
+  /// remote and add a reference in the window where this is tearing one down.
   void release_remote_open() {
-    int prev = remote_open_refs_.fetch_sub(1, std::memory_order_acq_rel);
-    assert(prev > 0 && "remote open refcount underflow");
-    if (prev == 1)
-      teardown_remote();
+    std::shared_ptr<RemoteDriver> dead;
+    {
+      std::lock_guard lock(remote_mutex_);
+      // Tolerate a spurious release after teardown already reset the count to 0:
+      // teardown_locked() clears kfd_dup_fds_ and zeroes the count together, so a
+      // dup close that lost the race can still land here. Only decrement a live
+      // reference.
+      int prev = remote_open_refs_.load(std::memory_order_acquire);
+      if (prev <= 0)
+        return;
+      remote_open_refs_.store(prev - 1, std::memory_order_release);
+      if (prev == 1)
+        dead = teardown_remote_locked();
+    }
+    // Perform the graceful RPC_CLOSE OUTSIDE remote_mutex_. The atomic shared_ptr
+    // already guarantees the driver's lifetime, so the (blocking) RPC shutdown
+    // does not need the lock; holding remote_mutex_ across a blocking send/recv
+    // would stall every other remote_mutex_ user behind an arbitrary-length RPC.
+    if (dead)
+      dead->close();
   }
 
-  RemoteDriver *get_or_create_remote() {
+  /// @brief Result of get_or_create_remote(): the live driver plus the primary
+  /// KFD fd number captured under remote_mutex_.
+  /// @details Returning the fd snapshot (rather than making the caller re-read
+  /// remote_kfd_fd() after the lock drops) closes a race where a concurrent
+  /// dup2/dup3 clears remote_kfd_fd_ between the helper returning and the caller
+  /// reading it, making open("/dev/kfd") return -1 or a reused non-KFD fd.
+  struct RemoteOpenResult {
+    std::shared_ptr<RemoteDriver> driver;
+    int fd = -1;
+    explicit operator bool() const { return static_cast<bool>(driver); }
+  };
+
+  RemoteOpenResult get_or_create_remote() {
     std::lock_guard lock(remote_mutex_);
-    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
-    if (active_remote && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
-      // Re-open of an already-connected daemon: each open holds one reference,
-      // mirroring SimulatedDriver::open() retaining the local process.
-      retain_remote_open();
-      return active_remote;
+    auto active_remote = remote_.load(std::memory_order_acquire);
+    if (active_remote) {
+      // The connection is already live: retain a reference and reuse it. Never
+      // re-open() a live RemoteDriver — that would re-handshake and leak a fresh
+      // socket/fd. remote_mutex_ is already held here, so increment directly
+      // (serialized with release).
+      remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
+      // If the cached primary fd number was lost (e.g. dup2 overwrote it while
+      // other refs kept the connection alive), mint a fresh synthetic primary fd
+      // WITHOUT reconnecting so open("/dev/kfd") still returns a valid fd.
+      int fd = remote_kfd_fd_.load(std::memory_order_acquire);
+      if (fd < 0) {
+        fd = active_remote->reissue_synthetic_kfd_fd();
+        if (fd < 0) {
+          // Roll back the reference taken above. remote_mutex_ is held, so
+          // decrement directly rather than via release_remote_open() (which would
+          // re-lock and deadlock).
+          remote_open_refs_.fetch_sub(1, std::memory_order_acq_rel);
+          return {};
+        }
+        remote_kfd_fd_.store(fd, std::memory_order_release);
+      }
+      // Return the fd captured under the lock so a concurrent invalidation
+      // cannot clear it before the caller uses it.
+      return {active_remote, fd};
     }
     int sock = connect_to_daemon();
     if (sock < 0)
-      return nullptr;
-    if (!active_remote) {
-      active_remote = new RemoteDriver(sock);
-      remote_.store(active_remote, std::memory_order_release);
-    }
+      return {};
+    // Build the driver and open its KFD connection BEFORE publishing remote_.
+    // Publishing early (then returning on open()<0) would leave remote_ non-null
+    // with remote_kfd_fd_ == -1, so initialized() would report success and gate
+    // out local-VM creation / a later remote retry. Only a fully-open driver is
+    // ever visible to lock-free readers.
+    if (!active_remote)
+      active_remote = std::make_shared<RemoteDriver>(sock);
     int fd = active_remote->open();
     if (fd < 0)
-      return nullptr;
+      return {};
+    // Publish the fd and open refcount BEFORE remote_. initialized() and the
+    // lock-free readers gate on remote_, so making the remote_ release-store the
+    // LAST step guarantees any thread that observes a non-null remote_ also sees
+    // a valid remote_kfd_fd_ and a nonzero open refcount — never a half-published
+    // remote whose fd/ref state has not landed yet.
     remote_kfd_fd_.store(fd, std::memory_order_release);
     // The primary remote KFD fd holds the first open reference.
     remote_open_refs_.store(1, std::memory_order_release);
-    return active_remote;
+    remote_.store(active_remote, std::memory_order_release);
+    return {active_remote, fd};
   }
 
-  SimulatedDriver *lookup(int fd) {
+  LinuxKfd *lookup(int fd) {
     auto *d = driver();
     return (d && fd >= 0 && fd == d->fd()) ? d : nullptr;
   }
@@ -287,6 +387,38 @@ public:
     return d ? d->redirect_sysfs_path(path) : std::string{};
   }
 
+  std::string redirect_sysfs_path(const char *path) {
+    if (!path)
+      return {};
+
+    std::string_view sv(path);
+    if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/devices/virtual/kfd") &&
+        !sv.starts_with("/sys/class/kfd"))
+      return {};
+
+    // initialized() already covers a live remote (remote_ != nullptr), which is
+    // the stable signal independent of the primary fd number; only create a local
+    // VM when nothing is initialized yet.
+    if (!initialized())
+      get_or_create();
+
+    // Read topology and drm paths from ONE remote snapshot so a concurrent
+    // teardown/reconnect between the two reads cannot combine a topology path from
+    // one RemoteDriver with a drm path from another (or an empty one). The
+    // metadata is immutable-after-open, so a single live snapshot is consistent.
+    if (auto remote = remote_.load(std::memory_order_acquire)) {
+      std::string remote_topology(remote->topology_path());
+      if (!remote_topology.empty()) {
+        std::string redirected = LinuxKfd::redirect_sysfs_root_path(
+            path, remote_topology, std::string(remote->drm_path()));
+        if (!redirected.empty())
+          return redirected;
+      }
+    }
+
+    return redirect(path);
+  }
+
   bool is_kfd_primary(int fd) {
     return fd == driver_fd() || fd == remote_kfd_fd_.load(std::memory_order_acquire);
   }
@@ -298,76 +430,260 @@ public:
 
   bool is_kfd_tracked(int fd) { return is_kfd_primary(fd) || is_kfd_dup(fd); }
 
-  void track_dup(int fd) {
+  void track_open_fd(int fd) {
     if (fd < 0 || is_kfd_primary(fd))
       return;
-    bool newly_tracked = false;
+    std::lock_guard lock(fd_mutex_);
+    // GuestKfd::open() already retained one driver (local) reference before
+    // returning this app-facing dup fd. Track it as a Local dup so ioctl/mmap/
+    // close route through the driver without incrementing the reference count a
+    // second time (unlike commit_dup(), which consumes a fresh reservation).
+    kfd_dup_fds_.emplace(fd, DupBackend::Local);
+  }
+
+  /// @brief Resolve which backend a tracked KFD fd belongs to.
+  /// @details Returns the backend of the local/remote primary fd, or the backend
+  /// recorded for a tracked dup, or nullopt if the fd is not a tracked KFD fd.
+  /// A dup must inherit the SOURCE fd's backend rather than guessing from global
+  /// state: when local mode was created first and the daemon later becomes
+  /// active, both driver() and remote_ are non-null, so guessing would mis-tag a
+  /// dup of the remote fd as Local and release the wrong backend on close.
+  std::optional<DupBackend> kfd_backend_of(int fd) {
+    if (fd < 0)
+      return std::nullopt;
+    if (fd == driver_fd())
+      return DupBackend::Local;
+    if (fd == remote_kfd_fd_.load(std::memory_order_acquire))
+      return DupBackend::Remote;
+    std::lock_guard lock(fd_mutex_);
+    auto it = kfd_dup_fds_.find(fd);
+    if (it != kfd_dup_fds_.end())
+      return it->second;
+    return std::nullopt;
+  }
+
+  /// @brief Retain one open reference on a specific backend.
+  /// @returns true if a reference was acquired; false if that backend is no
+  /// longer active (local VM gone, or remote torn down). Mirrors release_backend.
+  bool retain_backend(DupBackend backend) {
+    if (backend == DupBackend::Local) {
+      auto *d = driver();
+      // retain_local_open() reports false if the local process was already torn
+      // down (a racing last-close), so a dup of a dying local fd is not falsely
+      // treated as retained.
+      return d && d->retain_local_open();
+    }
+    return retain_remote_open_if_active();
+  }
+
+  /// @brief Release one open reference on the backend recorded for a dup.
+  /// @details Local dups release the local process refcount; remote dups release
+  /// the daemon connection refcount. release_remote_open() is a no-op when no
+  /// remote reference is live, so a release that races a teardown is harmless.
+  void release_backend(DupBackend backend) {
+    if (backend == DupBackend::Local) {
+      if (auto *d = driver())
+        d->close();
+    } else {
+      release_remote_open();
+    }
+  }
+
+  /// @brief Reserve (retain) a reference on the backend that owns @p src_fd,
+  /// before duplicating it, so the backend cannot be torn down by a racing
+  /// last-close between the dup syscall and tracking the new fd.
+  /// @details Acquires the open reference on the source fd's backend FIRST; the
+  /// caller then performs the dup syscall and, on success, hands the reserved
+  /// backend to commit_dup() (which records the new fd tagged with that same
+  /// backend). Reserving before the syscall keeps the invariant "every entry in
+  /// kfd_dup_fds_ holds exactly one reference on its recorded backend" and passing
+  /// the source backend through (rather than rediscovering it from global state)
+  /// prevents mis-tagging a remote-fd dup as Local when both backends are active.
+  /// @returns The reserved backend, or nullopt if @p src_fd is not a tracked KFD
+  /// fd or its backend is no longer active. On a non-nullopt return the caller
+  /// MUST consume the reservation exactly once: commit_dup() on syscall success,
+  /// or release_backend() on syscall failure.
+  [[nodiscard]] std::optional<DupBackend> reserve_dup_backend(int src_fd) {
+    auto backend = kfd_backend_of(src_fd);
+    if (!backend)
+      return std::nullopt;
+    if (!retain_backend(*backend))
+      return std::nullopt; // backend went away before we could reserve.
+    return backend;
+  }
+
+  /// @brief Record a dup fd whose backend reference was already reserved via
+  /// reserve_dup_backend(). Consumes exactly that one reserved reference.
+  void commit_dup(int fd, DupBackend backend) {
+    if (fd < 0 || is_kfd_primary(fd)) {
+      // Cannot track this as a dup (invalid, or the number aliases a primary).
+      // Release the reserved reference to stay balanced.
+      release_backend(backend);
+      return;
+    }
+    bool inserted = false;
     {
       std::lock_guard lock(fd_mutex_);
-      newly_tracked = kfd_dup_fds_.insert(fd).second;
+      inserted = kfd_dup_fds_.emplace(fd, backend).second;
     }
-    if (!newly_tracked)
-      return;
-    // Each live KFD fd (primary + every dup) holds one open reference, so the
-    // process/connection is torn down only when the last fd closes. Retain on
-    // whichever backend is active (local SimulatedDriver or remote daemon RPC).
-    if (auto *d = driver())
-      d->retain_local_open();
-    else if (is_remote_mode())
-      retain_remote_open();
+    if (!inserted)
+      // fd already tracked (dup returned a recycled number we still hold): undo
+      // the reserved reference so the count stays balanced.
+      release_backend(backend);
   }
 
   void untrack_dup(int fd) {
     if (fd < 0)
       return;
+    DupBackend backend;
     bool was_tracked = false;
     {
       std::lock_guard lock(fd_mutex_);
-      was_tracked = kfd_dup_fds_.erase(fd) != 0;
+      auto it = kfd_dup_fds_.find(fd);
+      if (it != kfd_dup_fds_.end()) {
+        backend = it->second;
+        kfd_dup_fds_.erase(it);
+        was_tracked = true;
+      }
     }
-    if (!was_tracked)
+    if (was_tracked)
+      release_backend(backend);
+  }
+
+  /// @brief Drop all KFD identity/references for an fd number that dup2/dup3 is
+  /// about to reuse (the syscall already atomically closed whatever it was).
+  /// @details Covers three cases so the reused number cannot keep routing to a
+  /// stale backend:
+  ///   - tracked KFD dup: release its recorded backend and erase its entry;
+  ///   - remote primary: clear remote_kfd_fd_ and drop its open reference;
+  ///   - local primary: forget the primary fd number and drop its open reference.
+  /// The primary paths mirror close()'s handling of the primary fd, minus the
+  /// real close() (dup2/dup3 already replaced the descriptor).
+  void invalidate_overwritten_kfd_fd(int fd) {
+    if (fd < 0)
       return;
-    if (auto *d = driver())
-      d->close();
-    else if (is_remote_mode())
-      release_remote_open();
+    // Remote primary? Compare-and-clear remote_kfd_fd_ under remote_mutex_ so the
+    // "is this the primary?" test and the clear are atomic with respect to
+    // get_or_create_remote() (which retains/reissues the fd under the same lock).
+    // Without the lock a racing open could observe the old fd number after this
+    // cleared it, and hand back a stale/invalidated descriptor.
+    if (invalidate_remote_primary(fd))
+      return;
+    // Local primary? Let invalidate_primary_fd() decide under the driver's own
+    // lock rather than pre-filtering on an unlocked fd() load: fd() can change
+    // between the check and the lock (a concurrent open()/re-mint), which could
+    // skip invalidating the overwritten primary and leave the reused number
+    // misclassified as KFD. The under-lock compare-and-clear is authoritative,
+    // and its result tells us whether to drop an open reference:
+    //   - kClearedDropRef: the primary held one counted open reference (e.g.
+    //     SimulatedKfd) — drop it via close();
+    //   - kClearedKeepRefs: the classification was cleared but the primary fd is
+    //     internal and NOT counted in the open-reference bookkeeping (e.g.
+    //     GuestKfd's hidden real fd, kept alive by app dups) — do NOT close();
+    //   - kNotPrimary: fall through to dup tracking.
+    if (auto *d = driver()) {
+      switch (d->invalidate_primary_fd(fd)) {
+      case LinuxKfd::PrimaryInvalidation::kClearedDropRef:
+        d->close(); // drop the primary open reference
+        return;
+      case LinuxKfd::PrimaryInvalidation::kClearedKeepRefs:
+        return; // classification cleared; no counted reference to drop
+      case LinuxKfd::PrimaryInvalidation::kNotPrimary:
+        break; // fall through to dup handling
+      }
+    }
+    // Otherwise, a tracked dup (or nothing).
+    untrack_dup(fd);
+  }
+
+  /// @brief If @p fd is the remote primary, clear it and drop its open reference.
+  /// @returns true if @p fd matched the remote primary (handled here); false so
+  /// the caller falls through to local-primary / dup handling.
+  /// @details The compare-and-clear and the reference drop run under
+  /// remote_mutex_, serialized with get_or_create_remote()'s retain/reissue. On
+  /// the last reference the connection is torn down and the (blocking) RPC_CLOSE
+  /// is run OUTSIDE the lock, mirroring release_remote_open().
+  bool invalidate_remote_primary(int fd) {
+    std::shared_ptr<RemoteDriver> dead;
+    {
+      std::lock_guard lock(remote_mutex_);
+      int expected = fd;
+      if (!remote_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
+        return false; // not the remote primary
+      // The number is being reused; it no longer names the synthetic remote KFD
+      // fd. Drop the primary's open reference (inlined from release_remote_open()
+      // because we already hold remote_mutex_). If other refs keep the connection
+      // alive, remote_ stays non-null with remote_kfd_fd_ == -1; routing then uses
+      // ctx.remote() (not the fd number) and a later open("/dev/kfd") re-mints a
+      // fresh primary fd via get_or_create_remote() without reconnecting.
+      int prev = remote_open_refs_.load(std::memory_order_acquire);
+      if (prev > 0) {
+        remote_open_refs_.store(prev - 1, std::memory_order_release);
+        if (prev == 1)
+          dead = teardown_remote_locked();
+      }
+    }
+    if (dead)
+      dead->close();
+    return true;
   }
 
   void clear_dups() {
-    size_t released = 0;
+    std::vector<DupBackend> released;
     {
       std::lock_guard lock(fd_mutex_);
-      released = kfd_dup_fds_.size();
+      released.reserve(kfd_dup_fds_.size());
+      for (auto &[fd, backend] : kfd_dup_fds_)
+        released.push_back(backend);
       kfd_dup_fds_.clear();
     }
-    // Drop the references the cleared dups were holding. Used when a fresh
-    // open() rebinds the local process; the just-opened reference is preserved
-    // because clear_dups runs before any new dups are tracked. Remote teardown
-    // releases its own references explicitly and never routes through here.
-    if (auto *d = driver())
-      for (size_t i = 0; i < released; ++i)
-        d->close();
+    // Drop the references the cleared dups were holding, each on the backend it
+    // was tracked against. Used when a fresh open() rebinds the local process;
+    // the just-opened reference is preserved because clear_dups runs before any
+    // new dups are tracked.
+    for (DupBackend backend : released)
+      release_backend(backend);
   }
 
-  /// @brief Tear down the remote (daemon) connection: send RPC_CLOSE, close the
-  /// synthetic primary fd, and drop daemon-redirect topology paths.
-  /// @details Invoked on the last remote open reference release. Any remaining
-  /// dup-tracked fds refer to the now-closed synthetic fd; clear the set so
-  /// their subsequent close()/ioctl calls fall through to the real syscall
-  /// instead of being misrouted to a dead RPC connection.
-  void teardown_remote() {
-    std::lock_guard lock(remote_mutex_);
-    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+  /// @brief Tear down the remote connection state. Caller MUST hold remote_mutex_.
+  /// @details Only invoked from release_remote_open() on the last reference, which
+  /// already holds remote_mutex_. Keeping the lock across the decrement, the
+  /// pointer/refcount reset, and the fd/dup cleanup makes the whole "last release
+  /// destroys" decision atomic with respect to retain_remote_open_if_active() and
+  /// get_or_create_remote(). Any remaining Remote-tagged dup fds refer to the
+  /// now-closed synthetic fd; erasing them makes their later close()/ioctl fall
+  /// through to the real syscall instead of a dead RPC connection.
+  /// @returns The extracted RemoteDriver so the caller can run the (blocking)
+  /// RPC_CLOSE shutdown OUTSIDE remote_mutex_; the shared_ptr keeps it alive.
+  [[nodiscard]] std::shared_ptr<RemoteDriver> teardown_remote_locked() {
+    auto active_remote = remote_.load(std::memory_order_acquire);
     if (!active_remote)
-      return;
-    active_remote->close();
+      return nullptr;
+    // Clear the published pointer first so no new reader can pick this driver up.
+    // The RemoteDriver is destroyed by the last shared_ptr: if a racing reader
+    // still holds a snapshot mid-ioctl/mmap, destruction (and socket close in
+    // ~RemoteDriver) is deferred until it releases, so there is no use-after-free.
     remote_.store(nullptr, std::memory_order_release);
-    delete active_remote;
+    // Reset the refcount to 0 under the lock. A concurrent
+    // retain_remote_open_if_active() serializes on remote_mutex_ and, seeing
+    // remote_ == nullptr, refuses to add a reference, so it cannot resurrect this
+    // torn-down connection.
+    remote_open_refs_.store(0, std::memory_order_release);
     int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0)
-      InterposerContext::real.close(fd);
-    std::lock_guard fd_lock(fd_mutex_);
-    kfd_dup_fds_.clear();
+      InterposerContext::real().close(fd);
+    // Erase ONLY the Remote-tagged dups. kfd_dup_fds_ can hold Local entries too
+    // (local + daemon mode simultaneously active); clearing the whole map would
+    // drop a live local dup's tracking without releasing its local open
+    // reference, leaking it and breaking its later close. The remote refcount is
+    // zero here, so every remaining Remote entry has already had its reference
+    // released via untrack_dup()/clear_dups(); we only drop stale tracking.
+    {
+      std::lock_guard fd_lock(fd_mutex_);
+      std::erase_if(kfd_dup_fds_,
+                    [](const auto &entry) { return entry.second == DupBackend::Remote; });
+    }
+    return active_remote;
   }
 
   void track_sysfs(int fd, const std::string &path) {
@@ -407,55 +723,46 @@ public:
     return drm_fds_.erase(fd) != 0;
   }
 
-  int drm_fd_for_handle(void *handle) {
-    std::lock_guard lock(fd_mutex_);
-    auto it = handle_to_drm_fd_.find(handle);
-    return (it != handle_to_drm_fd_.end()) ? it->second : -1;
-  }
-
-  void track_drm_handle(void *handle, int fd) {
-    std::lock_guard lock(fd_mutex_);
-    handle_to_drm_fd_[handle] = fd;
-  }
-
-  int untrack_drm_handle(void *handle) {
-    std::lock_guard lock(fd_mutex_);
-    auto it = handle_to_drm_fd_.find(handle);
-    if (it == handle_to_drm_fd_.end())
-      return -1;
-    int fd = it->second;
-    handle_to_drm_fd_.erase(it);
-    return fd;
-  }
-
-  SimulatedDriver *get_or_create() {
+  LinuxKfd *get_or_create() {
     std::lock_guard lock(init_mutex_);
-    if (!rj_vm_) {
+    if (active_driver_.load(std::memory_order_acquire) == nullptr) {
       in_construction = true;
-      auto cfg_file = rocjitsu::rpc_default_config_file_path();
-      char cfg_buf[4096]{};
-      int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
-      if (cfg_fd < 0) {
-        util::Logger::debug_print("rocjitsu: no config file at ", cfg_file);
+      std::optional<std::string> cfg_path = child_config_path();
+      if (!cfg_path) {
+        util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
         return nullptr;
       }
-      auto n = syscall(SYS_read, cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
-      syscall(SYS_close, cfg_fd);
-      if (n <= 0) {
+
+      try {
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
+        if (dbt_guest.enabled) {
+          auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest));
+          if (!guest_driver->prepare_for_discovery()) {
+            in_construction = false;
+            return nullptr;
+          }
+          auto *driver = guest_driver.get();
+          guest_driver_ = std::move(guest_driver);
+          active_driver_.store(driver, std::memory_order_release);
+          in_construction = false;
+          return driver;
+        }
+      } catch (const std::exception &e) {
+        util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
         in_construction = false;
         return nullptr;
       }
-      while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-        cfg_buf[--n] = '\0';
-      if (rj_vm_create(cfg_buf, RJ_VM_MODE_LOCAL, &rj_vm_) != ROCJITSU_STATUS_SUCCESS) {
+      rj_vm_t *created_vm = nullptr;
+      if (rj_vm_create(cfg_path->c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+          ROCJITSU_STATUS_SUCCESS) {
         util::Logger::debug_print("rocjitsu: failed to create VM");
         in_construction = false;
         return nullptr;
       }
+      rj_vm_ = created_vm;
 
-      // Set up execution plugins based on environment variables.
-      if (rj_vm_->soc) {
+      if (created_vm->soc) {
         std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
         if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
           pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
@@ -490,10 +797,18 @@ public:
           pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
           fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
         }
-        rj_vm_->soc->set_plugin_group(pg);
+        created_vm->soc->set_plugin_group(pg);
       }
 
-      std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+      // Publish the fully-constructed, not-yet-running driver BEFORE starting the
+      // engine thread: the release-store of active_driver_ pairs with acquire
+      // loads in driver()/initialized(), so any reader that observes the driver
+      // also observes all of the setup above (config, plugin group, sinks).
+      // Starting rj_vm_run() before the store would let the detached engine
+      // thread begin mutating the VM before it is published.
+      LinuxKfd *driver = created_vm->vm->driver();
+      active_driver_.store(driver, std::memory_order_release);
+      std::thread([vm = created_vm]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
     return driver();
@@ -513,19 +828,23 @@ public:
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
+  std::unique_ptr<GuestKfd> guest_driver_;
+  std::atomic<LinuxKfd *> active_driver_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
-  /// @details Stored atomically so lock-free readers (`remote()`,
+  /// @details Held as an atomic shared_ptr so lock-free readers (`remote()`,
   /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
-  /// path) never race the writer that swaps it under `remote_mutex_` in
-  /// `get_or_create_remote()`/`teardown_remote()`. The mutex still serializes the
-  /// compound new+open and delete+clear sequences; the atomic only makes the
-  /// bare pointer read/write data-race-free.
-  std::atomic<RemoteDriver *> remote_{nullptr};
+  /// path) each take a lifetime-extending snapshot: a racing `teardown_remote()`
+  /// that stores nullptr cannot free the object while another thread still holds
+  /// a snapshot in `remote->ioctl()`/`remote->mmap()`. The object is destroyed by
+  /// the last shared_ptr, not by a manual delete, so there is no use-after-free.
+  /// `remote_mutex_` still serializes the compound create+open and clear
+  /// sequences; the atomic makes the pointer swap data-race-free.
+  std::atomic<std::shared_ptr<RemoteDriver>> remote_{nullptr};
   std::atomic<int> remote_kfd_fd_{-1};
   /// @brief Open-reference count for the remote (daemon-mode) KFD connection.
   /// @details The primary remote fd and every dup of it each hold one
   /// reference; the RPC connection is torn down only when the last reference is
-  /// released. Mirrors SimulatedDriver's local open refcount for daemon mode.
+  /// released. Mirrors SimulatedKfd's local open refcount for daemon mode.
   std::atomic<int> remote_open_refs_{0};
 
   std::mutex init_mutex_;
@@ -533,8 +852,13 @@ private:
   std::mutex remote_mutex_;
   std::unordered_map<int, std::string> sysfs_fds_;
   std::unordered_map<int, uint32_t> drm_fds_;
-  std::unordered_map<void *, int> handle_to_drm_fd_;
-  std::unordered_set<int> kfd_dup_fds_;
+  /// @brief Tracked KFD dup fds → the backend that holds their open reference.
+  /// @details Each dup of a KFD fd retains one open reference. The backend is
+  /// captured at track time so untrack releases the SAME backend even if the
+  /// active backend changed (local↔remote) or was torn down in between; a dup is
+  /// recorded only if a reference was actually acquired, so track/untrack stay
+  /// balanced and can never over-release or resurrect the wrong connection.
+  std::unordered_map<int, DupBackend> kfd_dup_fds_;
 
   alignas(16) static uint8_t storage_[];
 };
@@ -554,43 +878,88 @@ extern "C" {
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
-static const Sysfs::GpuInfo *interposer_gpu_info();
+static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor);
 
 struct SyntheticDrmOpenResult {
   bool handled = false;
   int fd = -1;
 };
 
+bool parse_render_minor_suffix(const char *first, const char *last, uint32_t *render_minor) {
+  uint32_t parsed = 0;
+  auto result = std::from_chars(first, last, parsed);
+  if (result.ec != std::errc{} || result.ptr != last)
+    return false;
+  *render_minor = parsed;
+  return true;
+}
+
+bool render_minor_from_drm_node_path(const char *raw_path, const char *drm_base,
+                                     uint32_t *render_minor) {
+  std::string_view path(raw_path);
+  static constexpr std::string_view kRealRenderPrefix = "/dev/dri/renderD";
+  if (path.starts_with(kRealRenderPrefix))
+    return parse_render_minor_suffix(path.data() + kRealRenderPrefix.size(),
+                                     path.data() + path.size(), render_minor);
+
+  if (!drm_base || drm_base[0] == '\0')
+    return false;
+
+  std::string redirected_render_prefix = std::string(drm_base) + "/dev_dri/renderD";
+  if (!path.starts_with(redirected_render_prefix))
+    return false;
+  return parse_render_minor_suffix(path.data() + redirected_render_prefix.size(),
+                                   path.data() + path.size(), render_minor);
+}
+
 static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
-  static constexpr std::string_view kRenderPrefix = "/dev/dri/renderD";
-  if (!path || !std::string_view(path).starts_with(kRenderPrefix))
+  if (!path)
     return {};
 
-  if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-      !InterposerContext::ctx.initialized())
+  std::string_view path_view(path);
+  if (!path_view.starts_with("/dev/dri/renderD") &&
+      path_view.find("/dev_dri/renderD") == std::string_view::npos)
+    return {};
+
+  if (!InterposerContext::ctx.initialized())
     InterposerContext::ctx.get_or_create();
 
-  if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
+  // Snapshot the remote once; a live snapshot (not remote_kfd_fd() >= 0) is the
+  // stable signal that a daemon connection can service this render node, even if
+  // a dup2/dup3 cleared the primary fd number while other refs keep it alive.
+  auto remote = InterposerContext::ctx.remote();
+  if (InterposerContext::ctx.driver_fd() < 0 && !remote)
     return {};
 
-  uint32_t render_minor = 128;
-  auto minor_str = std::string_view(path).substr(kRenderPrefix.size());
-  if (!minor_str.empty()) {
-    uint32_t parsed_minor = 0;
-    auto *first = minor_str.data();
-    auto *last = first + minor_str.size();
-    if (auto result = std::from_chars(first, last, parsed_minor);
-        result.ec == std::errc{} && result.ptr == last)
-      render_minor = parsed_minor;
-  }
+  std::string drm_base;
+  if (auto *drv = InterposerContext::ctx.driver())
+    drm_base = drv->drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
 
-  auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
+  // HIP/libdrm may open the generated dev_dri node after following redirected
+  // sysfs metadata instead of opening the literal /dev/dri/renderD* path.
+  // Treat both path forms as the same synthetic DRM render node.
+  uint32_t render_minor = 0;
+  if (!render_minor_from_drm_node_path(path, drm_base.c_str(), &render_minor))
+    return {};
+
+  auto *drv = InterposerContext::ctx.driver();
+  const bool local_handles_render = drv && drv->handles_drm_render_minor(render_minor);
+  const bool remote_handles_render = static_cast<bool>(remote);
+  if (!local_handles_render && !remote_handles_render)
+    return {};
+
+  auto raw_drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
   if (raw_drm_fd < 0)
     return {true, -1};
 
-  int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
+  // Use real().fcntl, not the unqualified fcntl: this TU defines the interposed
+  // fcntl with external linkage, so an unqualified call would re-enter our own
+  // hook (reserve_dup_backend/untrack_dup, fd_mutex_) needlessly.
+  int high_fd = InterposerContext::real().fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
   int saved_errno = errno;
-  InterposerContext::real.close(raw_drm_fd);
+  InterposerContext::real().close(raw_drm_fd);
   if (high_fd < 0) {
     errno = saved_errno;
     return {true, -1};
@@ -609,64 +978,47 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
     va_end(ap);
   }
 
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   auto *volatile p = path;
   if (!p || InterposerContext::in_construction)
-    return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
+    return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
     return drm_fd.fd;
 
   if (std::strcmp(path, "/dev/kfd") == 0) {
-    if (InterposerContext::ctx.get_or_create_remote())
-      return InterposerContext::ctx.remote_kfd_fd();
+    // Use the fd captured under remote_mutex_ (not a fresh remote_kfd_fd() read),
+    // so a concurrent dup2/dup3 that invalidates the primary fd cannot make this
+    // return -1 or a reused non-KFD descriptor.
+    if (auto remote = InterposerContext::ctx.get_or_create_remote())
+      return remote.fd;
 
     auto *drv = InterposerContext::ctx.get_or_create();
     if (!drv) {
       errno = ENODEV;
       return -1;
     }
-    drv->open();
-    InterposerContext::ctx.clear_dups();
-    return InterposerContext::ctx.driver_fd();
+    int kfd_fd = drv->open();
+    if (kfd_fd < 0)
+      return kfd_fd;
+    if (kfd_fd != drv->fd())
+      InterposerContext::ctx.track_open_fd(kfd_fd);
+    if (!drv->owns_fd(drv->fd()))
+      InterposerContext::ctx.clear_dups();
+    return kfd_fd;
   }
 
-  if (std::string_view(path).starts_with("/sys/class/drm") ||
-      std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
-      std::string_view(path).starts_with("/sys/class/kfd")) {
-    if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-        !InterposerContext::ctx.initialized())
-      InterposerContext::ctx.get_or_create();
-  }
-  std::string redirected;
-  auto remote_topo = InterposerContext::ctx.remote_topology_path();
-  if (!remote_topo.empty()) {
-    std::string_view sv(path);
-    constexpr const char *kfd_prefix = "/sys/devices/virtual/kfd/kfd/topology";
-    constexpr const char *kfd_alt = "/sys/class/kfd/kfd/topology";
-    constexpr const char *drm_prefix = "/sys/class/drm";
-    if (sv.starts_with(kfd_prefix))
-      redirected = remote_topo + std::string(sv.substr(std::strlen(kfd_prefix)));
-    else if (sv.starts_with(kfd_alt))
-      redirected = remote_topo + std::string(sv.substr(std::strlen(kfd_alt)));
-    else if (sv.starts_with(drm_prefix)) {
-      auto remote_drm = InterposerContext::ctx.remote_drm_path();
-      if (!remote_drm.empty())
-        redirected = remote_drm + std::string(sv.substr(std::strlen(drm_prefix)));
-    }
-  }
-  if (redirected.empty())
-    redirected = InterposerContext::ctx.redirect(path);
+  std::string redirected = InterposerContext::ctx.redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (!redirected.empty()) {
-    int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
+    int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
     if (fd >= 0)
       InterposerContext::ctx.track_sysfs(fd, redirected);
     return fd;
   }
 
-  return InterposerContext::real.openat(AT_FDCWD, path, flags, mode);
+  return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 }
 
 RJ_INTERPOSER_EXPORT int open64(const char *path, int flags, ...) {
@@ -703,44 +1055,19 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
 
   auto *volatile p_at = path;
   if (!p_at)
-    return InterposerContext::real.openat(dirfd, path, flags, mode);
+    return InterposerContext::real().openat(dirfd, path, flags, mode);
   if (InterposerContext::in_construction)
-    return InterposerContext::real.openat(dirfd, path, flags, mode);
+    return InterposerContext::real().openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
     if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
       return drm_fd.fd;
 
-    if (std::string_view(path).starts_with("/sys/class/drm") ||
-        std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
-        std::string_view(path).starts_with("/sys/class/kfd")) {
-      if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-          !InterposerContext::ctx.initialized())
-        InterposerContext::ctx.get_or_create();
-    }
-    std::string redirected;
-    auto remote_topo_at = InterposerContext::ctx.remote_topology_path();
-    if (!remote_topo_at.empty()) {
-      std::string_view sv(path);
-      constexpr const char *kfd_p = "/sys/devices/virtual/kfd/kfd/topology";
-      constexpr const char *kfd_a = "/sys/class/kfd/kfd/topology";
-      constexpr const char *drm_p = "/sys/class/drm";
-      if (sv.starts_with(kfd_p))
-        redirected = remote_topo_at + std::string(sv.substr(std::strlen(kfd_p)));
-      else if (sv.starts_with(kfd_a))
-        redirected = remote_topo_at + std::string(sv.substr(std::strlen(kfd_a)));
-      else if (sv.starts_with(drm_p)) {
-        auto remote_drm_at = InterposerContext::ctx.remote_drm_path();
-        if (!remote_drm_at.empty())
-          redirected = remote_drm_at + std::string(sv.substr(std::strlen(drm_p)));
-      }
-    }
-    if (redirected.empty())
-      redirected = InterposerContext::ctx.redirect(path);
+    std::string redirected = InterposerContext::ctx.redirect_sysfs_path(path);
     if (redirected.empty())
       redirected = redirect_sys_dev_char(path);
     if (!redirected.empty()) {
-      int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
+      int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
       if (fd >= 0)
         InterposerContext::ctx.track_sysfs(fd, redirected);
       return fd;
@@ -749,14 +1076,14 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     auto dir_path = InterposerContext::ctx.lookup_sysfs(dirfd);
     if (!dir_path.empty()) {
       std::string full = dir_path + "/" + path;
-      int fd = InterposerContext::real.openat(AT_FDCWD, full.c_str(), flags, mode);
+      int fd = InterposerContext::real().openat(AT_FDCWD, full.c_str(), flags, mode);
       if (fd >= 0)
         InterposerContext::ctx.track_sysfs(fd, full);
       return fd;
     }
   }
 
-  return InterposerContext::real.openat(dirfd, path, flags, mode);
+  return InterposerContext::real().openat(dirfd, path, flags, mode);
 }
 
 RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
@@ -771,7 +1098,7 @@ RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
 }
 
 RJ_INTERPOSER_EXPORT int close(int fd) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is
@@ -782,12 +1109,12 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   }
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
-    InterposerContext::real.close(fd);
+    InterposerContext::real().close(fd);
     return 0;
   }
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     InterposerContext::ctx.untrack_dup(fd);
-    return static_cast<int>(InterposerContext::real.close(fd));
+    return static_cast<int>(InterposerContext::real().close(fd));
   }
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
     drv->close();
@@ -795,13 +1122,13 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   }
   if (InterposerContext::ctx.owns_fd(fd))
     return 0;
-  return static_cast<int>(InterposerContext::real.close(fd));
+  return static_cast<int>(InterposerContext::real().close(fd));
 }
 
 __attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, request);
   void *arg = va_arg(ap, void *);
@@ -864,11 +1191,12 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       //   READ_MMR_REG (gb_addr_cfg is mandatory for all families),
       //   VRAM_GTT, MEMORY. Failures (-1) abort device init.
       auto *info = static_cast<drm_amdgpu_info *>(arg);
-      auto *gpu = interposer_gpu_info();
-      if (!gpu) {
+      auto gpu_info = interposer_gpu_info(InterposerContext::ctx.drm_render_minor(fd));
+      if (!gpu_info) {
         errno = ENODEV;
         return -1;
       }
+      const Sysfs::GpuInfo *gpu = &*gpu_info;
       auto *out = info->return_pointer ? reinterpret_cast<void *>(info->return_pointer) : nullptr;
       if (!out || info->return_size == 0)
         return 0;
@@ -951,76 +1279,124 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     return -1;
   }
 
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->ioctl(request, arg);
-  if (InterposerContext::ctx.is_kfd_dup(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->ioctl(request, arg);
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
+    return kfd_ioctl_ret(remote->ioctl(request, arg));
+  // Dispatch a tracked KFD fd by its RECORDED backend, not by "remote if any
+  // remote is live". In mixed local+daemon mode a Local-tagged dup must route to
+  // the local driver and a Remote-tagged dup to the remote connection; guessing
+  // remote would silently switch a local dup's backend.
+  if (auto backend = InterposerContext::ctx.kfd_backend_of(fd)) {
+    if (*backend == InterposerContext::DupBackend::Remote) {
+      // kfd_backend_of() already established this fd is Remote-backed, so route
+      // via the remote snapshot directly rather than remote_lookup(remote_kfd_fd_):
+      // the primary fd number may have been invalidated/reused while a remote
+      // shared_ptr snapshot is still live, and this dup still belongs to it.
+      if (auto remote = InterposerContext::ctx.remote())
+        return kfd_ioctl_ret(remote->ioctl(request, arg));
+    } else if (auto *drv = InterposerContext::ctx.driver()) {
+      return kfd_ioctl_ret(drv->ioctl(request, arg));
+    }
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
-  // daemon mode). Forward only AMDKFD-typed ioctls, and only on fds we already
-  // track as KFD (primary or dup), so an arbitrary unrelated fd carrying a
-  // type-'K' ioctl is never misrouted to the remote KFD driver.
-  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && InterposerContext::ctx.is_kfd_tracked(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote())
-      return remote->ioctl(request, arg);
+  // daemon mode). Forward only AMDKFD-typed ioctls, and only on fds whose backend
+  // is KNOWN to be Remote. Capture the backend once (a single locked lookup) and
+  // require it to hold a Remote value: this both excludes Local-backed fds (a
+  // Local dup whose driver() was transiently null above belongs to the local
+  // driver) and refuses to route when the backend is unknown/nullopt (e.g.
+  // tracking removed concurrently), so a type-'K' ioctl is never guessed onto the
+  // remote connection.
+  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE) {
+    auto backend = InterposerContext::ctx.kfd_backend_of(fd);
+    if (backend == InterposerContext::DupBackend::Remote) {
+      if (auto remote = InterposerContext::ctx.remote())
+        return kfd_ioctl_ret(remote->ioctl(request, arg));
+    }
   }
 
-  auto *drv = InterposerContext::ctx.lookup(fd);
-  if (!drv && InterposerContext::ctx.is_kfd_dup(fd))
-    drv = InterposerContext::ctx.driver();
-  if (drv)
-    return drv->ioctl(request, arg);
-
-  return InterposerContext::real.ioctl(fd, request, arg);
+  // Every tracked KFD primary/dup is routed above by its recorded backend
+  // (remote_lookup / kfd_backend_of). Deliberately NO local-driver fallback for
+  // tracked dups here: a Remote-tagged dup observed during a remote teardown
+  // window (remote_ cleared but its kfd_dup_fds_ entry not yet erased) must fall
+  // through to the real ioctl, not be misrouted to a live local driver in mixed
+  // local+daemon mode.
+  return InterposerContext::real().ioctl(fd, request, arg);
 }
 
 RJ_INTERPOSER_EXPORT int dup(int oldfd) {
-  assert(InterposerContext::real.ready());
-  int rc = InterposerContext::real.dup(oldfd);
-  if (rc >= 0) {
-    if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-      InterposerContext::ctx.track_dup(rc);
-    else
-      InterposerContext::ctx.untrack_dup(rc);
+  assert(InterposerContext::real().ready());
+  // Reserve the source backend's open reference BEFORE the syscall so a racing
+  // last-close cannot tear the backend down between the dup and tracking the new
+  // fd (which would leave a valid KFD dup untracked / unreferenced).
+  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+  int rc = InterposerContext::real().dup(oldfd);
+  if (rc < 0) {
+    // Syscall failed: roll back the reservation.
+    if (reserved)
+      InterposerContext::ctx.release_backend(*reserved);
+    return rc;
   }
+  if (reserved)
+    InterposerContext::ctx.commit_dup(rc, *reserved);
+  else
+    InterposerContext::ctx.untrack_dup(rc);
   return rc;
 }
 
+namespace {
+// Reconcile interposer tracking after a successful dup2/dup3(oldfd -> newfd),
+// consuming a backend reservation taken (before the syscall) for oldfd.
+// dup2/dup3 atomically CLOSE newfd before installing the duplicate, so any
+// tracking/reference newfd previously held must be dropped before the
+// replacement is tracked:
+//   - stale sysfs/DRM tracking for newfd is removed;
+//   - if newfd was a tracked KFD dup, its reference is released and its stale
+//     kfd_dup_fds_ entry erased (otherwise commit_dup would see the stale entry
+//     and release the newly-reserved backend, leaving the OLD backend recorded);
+//   - if newfd was a PRIMARY KFD fd (local or remote), that primary identity is
+//     invalidated and its reference released, so the reused fd number no longer
+//     routes to the old backend.
+// Then the replacement is recorded on the reserved source backend.
+void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend> reserved) {
+  InterposerContext::ctx.untrack_sysfs(newfd);
+  InterposerContext::ctx.untrack_drm(newfd);
+  InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
+  if (reserved)
+    InterposerContext::ctx.commit_dup(newfd, *reserved);
+}
+} // namespace
+
 RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
   if (oldfd == newfd)
-    return InterposerContext::real.dup2(oldfd, newfd);
-  int rc = InterposerContext::real.dup2(oldfd, newfd);
-  if (rc < 0)
+    return InterposerContext::real().dup2(oldfd, newfd);
+  // Reserve the source backend before the syscall (see dup()).
+  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+  int rc = InterposerContext::real().dup2(oldfd, newfd);
+  if (rc < 0) {
+    if (reserved)
+      InterposerContext::ctx.release_backend(*reserved);
     return rc;
-  // newfd was atomically closed and replaced; reconcile its tracking only now.
-  InterposerContext::ctx.untrack_sysfs(newfd);
-  InterposerContext::ctx.untrack_drm(newfd);
-  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-    InterposerContext::ctx.track_dup(rc);
-  else
-    InterposerContext::ctx.untrack_dup(rc);
+  }
+  reconcile_dup_target(rc, reserved);
   return rc;
 }
 
 #ifdef SYS_dup3
 RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
-  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
-  if (rc < 0)
+  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+  int rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+  if (rc < 0) {
+    if (reserved)
+      InterposerContext::ctx.release_backend(*reserved);
     return rc;
-  InterposerContext::ctx.untrack_sysfs(newfd);
-  InterposerContext::ctx.untrack_drm(newfd);
-  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-    InterposerContext::ctx.track_dup(rc);
-  else
-    InterposerContext::ctx.untrack_dup(rc);
+  }
+  reconcile_dup_target(rc, reserved);
   return rc;
 }
 #endif
@@ -1087,42 +1463,57 @@ namespace {
 // Shared implementation for fcntl / fcntl64. The variadic third argument is
 // extracted by the public entry points (which can't forward a va_list) and
 // passed here already resolved. Both fcntl and fcntl64 share the same kernel
-// ABI, so InterposerContext::real.fcntl services both.
+// ABI, so InterposerContext::real().fcntl services both.
 int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
+  // F_DUPFD/F_DUPFD_CLOEXEC create a new fd like dup(); reserve the source
+  // backend BEFORE the syscall so a racing last-close cannot tear it down
+  // between the dup and tracking the new fd. F_DUPFD does not overwrite an
+  // existing fd, so no primary/dup reconciliation of a target is needed.
+  const bool is_dupfd = (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC);
+  std::optional<InterposerContext::DupBackend> reserved;
+  if (is_dupfd)
+    reserved = InterposerContext::ctx.reserve_dup_backend(fd);
+
   long rc = 0;
   switch (kind) {
   case FcntlArgKind::Int:
-    rc = InterposerContext::real.fcntl(fd, cmd, int_arg);
+    rc = InterposerContext::real().fcntl(fd, cmd, int_arg);
     break;
   case FcntlArgKind::Ptr:
-    rc = InterposerContext::real.fcntl(fd, cmd, ptr_arg);
+    rc = InterposerContext::real().fcntl(fd, cmd, ptr_arg);
     break;
   case FcntlArgKind::None:
   default:
-    rc = InterposerContext::real.fcntl(fd, cmd, 0L);
+    rc = InterposerContext::real().fcntl(fd, cmd, 0L);
     break;
   }
 
-  if (rc >= 0 && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) {
-    if (InterposerContext::ctx.is_kfd_tracked(fd))
-      InterposerContext::ctx.track_dup(static_cast<int>(rc));
-    else
-      InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
-    // Propagate DRM render-node tracking across dup so ioctls on the duped fd
-    // are still recognized. libdrm's amdgpu_device_initialize duplicates the
-    // render fd (via fcntl64 F_DUPFD_CLOEXEC) and issues all AMDGPU_INFO ioctls
-    // on the copy.
-    if (InterposerContext::ctx.is_drm(fd))
-      InterposerContext::ctx.track_drm(static_cast<int>(rc),
-                                       InterposerContext::ctx.drm_render_minor(fd));
+  if (is_dupfd) {
+    if (rc < 0) {
+      // Syscall failed: roll back the reservation.
+      if (reserved)
+        InterposerContext::ctx.release_backend(*reserved);
+    } else {
+      if (reserved)
+        InterposerContext::ctx.commit_dup(static_cast<int>(rc), *reserved);
+      else
+        InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
+      // Propagate DRM render-node tracking across dup so ioctls on the duped fd
+      // are still recognized. libdrm's amdgpu_device_initialize duplicates the
+      // render fd (via fcntl64 F_DUPFD_CLOEXEC) and issues all AMDGPU_INFO ioctls
+      // on the copy.
+      if (InterposerContext::ctx.is_drm(fd))
+        InterposerContext::ctx.track_drm(static_cast<int>(rc),
+                                         InterposerContext::ctx.drm_render_minor(fd));
+    }
   }
   return static_cast<int>(rc);
 }
 } // namespace
 
 RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1140,7 +1531,7 @@ RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
 // interposed separately or libdrm's F_DUPFD_CLOEXEC on the render fd bypasses
 // our dup tracking and subsequent ioctls land on an untracked fd.
 RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1156,15 +1547,34 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
-  assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
+    return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+
+  assert(InterposerContext::real().ready());
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
 
   if (auto *drv = InterposerContext::ctx.lookup(fd))
     return drv->mmap(addr, length, prot, flags, offset);
 
+  // Dispatch a tracked KFD dup by its RECORDED backend (as ioctl() does), not by
+  // "remote if any remote is live"; otherwise a Local-tagged dup would misroute
+  // to the remote in mixed local+daemon mode. For Remote, route via the remote
+  // snapshot directly so routing still works if the primary fd number changed.
+  if (auto backend = InterposerContext::ctx.kfd_backend_of(fd)) {
+    if (*backend == InterposerContext::DupBackend::Remote) {
+      if (auto remote = InterposerContext::ctx.remote())
+        return remote->mmap(addr, length, prot, flags, offset);
+    } else if (auto *drv = InterposerContext::ctx.driver()) {
+      return drv->mmap(addr, length, prot, flags, offset);
+    }
+  }
+
   if (InterposerContext::ctx.is_drm(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+    // Route via the remote snapshot (not remote_lookup(remote_kfd_fd())): a
+    // dup2/dup3 may have cleared the primary fd number while the connection is
+    // still live via other refs, and this DRM fd still belongs to that remote.
+    if (auto remote = InterposerContext::ctx.remote())
       return remote->mmap(addr, length, prot, flags, offset);
     if (auto *drv = InterposerContext::ctx.driver())
       return drv->mmap(addr, length, prot, flags, offset);
@@ -1173,45 +1583,73 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
     int memfd_out = -1;
     off_t memfd_offset = 0;
-    if (InterposerContext::ctx.remote() && InterposerContext::ctx.remote()->find_memfd_for_addr(
-                                               addr, length, &memfd_out, &memfd_offset)) {
-      auto total = static_cast<off_t>(length) + memfd_offset;
-      [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
-      fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
-      auto *raw = InterposerContext::real.mmap(
-          addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
-      if (raw != MAP_FAILED) {
+    auto remote_memfd = InterposerContext::ctx.remote();
+    if (remote_memfd) {
+      auto lookup = remote_memfd->find_memfd_for_addr(addr, length, &memfd_out, &memfd_offset);
+      if (lookup == RemoteDriver::MemfdLookup::kDupFailed) {
+        // A daemon-shared range covered this address but we could not obtain a
+        // descriptor for it. Falling back to an anonymous mapping would silently
+        // detach it from the shared memory, so fail the mmap instead. Preserve
+        // the errno set by the failed dup (EMFILE/ENFILE/...) rather than
+        // clobbering it, so the caller sees the real failure cause.
+        return MAP_FAILED;
+      }
+      if (lookup == RemoteDriver::MemfdLookup::kFound) {
+        // memfd_out is a caller-owned dup; close it once we are done. Its
+        // validity is independent of a concurrent RemoteDriver teardown/close.
+        auto total = static_cast<off_t>(length) + memfd_offset;
+        [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
+        fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
+        auto *raw = InterposerContext::real().mmap(
+            addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
+        // Preserve the mmap errno across close() (which may set its own).
+        int mmap_errno = errno;
+        InterposerContext::real().close(memfd_out);
+        if (raw != MAP_FAILED) {
 #ifdef MADV_POPULATE_WRITE
-        InterposerContext::real.madvise(raw, length, MADV_POPULATE_WRITE);
+          InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
-        return raw;
+          return raw;
+        }
+        // A daemon-shared range matched but the shared mapping failed. Fail
+        // closed with the real errno rather than falling through to an anonymous
+        // MAP_FIXED mapping, which would silently detach this GPUVM address from
+        // the daemon's shared memory (same invariant as kDupFailed above).
+        errno = mmap_errno;
+        return MAP_FAILED;
       }
     }
   }
-  return InterposerContext::real.mmap(addr, length, prot, flags, fd, offset);
+  return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   auto *drv = InterposerContext::ctx.driver();
   if (drv && drv->is_doorbell_range(addr, length)) {
     errno = EPERM;
     return -1;
   }
-  return InterposerContext::real.mprotect(addr, length, prot);
+  return InterposerContext::real().mprotect(addr, length, prot);
 }
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if ((advice == MADV_HUGEPAGE || advice == MADV_DONTFORK) &&
       reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL)
     return 0;
-  return InterposerContext::real.madvise(addr, length, advice);
+  return InterposerContext::real().madvise(addr, length, advice);
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
-  assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
+    return raw_munmap_syscall(addr, length);
+
+  assert(InterposerContext::real().ready());
+  // Address-based unmap: try the live remote snapshot regardless of whether the
+  // primary fd number is currently valid (a dup2/dup3 may have cleared it while
+  // the connection stays alive via other refs).
+  if (auto remote = InterposerContext::ctx.remote()) {
     int ret = remote->munmap(addr, length);
     if (ret != -ENOENT)
       return ret;
@@ -1222,7 +1660,7 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
     if (ret != -ENOENT)
       return ret;
   }
-  return InterposerContext::real.munmap(addr, length);
+  return InterposerContext::real().munmap(addr, length);
 }
 
 } // extern "C"
@@ -1232,7 +1670,7 @@ extern "C" {
 // -- fopen / freopen interposition (sysfs redirect) --
 
 RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<FILE *(*)(const char *, const char *)>(RTLD_NEXT, "fopen");
     return fn ? fn(path, mode) : nullptr;
   }
@@ -1242,39 +1680,15 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
   const char *actual = path;
   std::string redirected;
   if (!InterposerContext::in_construction) {
-    if (std::string_view(path).starts_with("/sys/class/drm") ||
-        std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
-        std::string_view(path).starts_with("/sys/class/kfd")) {
-      if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-          !InterposerContext::ctx.initialized())
-        InterposerContext::ctx.get_or_create();
-    }
-    auto remote_topo_fp = InterposerContext::ctx.remote_topology_path();
-    if (!remote_topo_fp.empty()) {
-      std::string_view sv(path);
-      constexpr const char *kp = "/sys/devices/virtual/kfd/kfd/topology";
-      constexpr const char *ka = "/sys/class/kfd/kfd/topology";
-      constexpr const char *dp = "/sys/class/drm";
-      if (sv.starts_with(kp))
-        redirected = remote_topo_fp + std::string(sv.substr(std::strlen(kp)));
-      else if (sv.starts_with(ka))
-        redirected = remote_topo_fp + std::string(sv.substr(std::strlen(ka)));
-      else if (sv.starts_with(dp)) {
-        auto remote_drm_fp = InterposerContext::ctx.remote_drm_path();
-        if (!remote_drm_fp.empty())
-          redirected = remote_drm_fp + std::string(sv.substr(std::strlen(dp)));
-      }
-    }
-    if (redirected.empty())
-      redirected = InterposerContext::ctx.redirect(path);
+    redirected = InterposerContext::ctx.redirect_sysfs_path(path);
     if (redirected.empty())
       redirected = redirect_sys_dev_char(path);
     if (!redirected.empty())
       actual = redirected.c_str();
   }
 
-  int fd = InterposerContext::real.openat(AT_FDCWD, actual,
-                                          InterposerContext::fopen_flags_from_mode(mode), 0644);
+  int fd = InterposerContext::real().openat(AT_FDCWD, actual,
+                                            InterposerContext::fopen_flags_from_mode(mode), 0644);
   if (fd < 0)
     return nullptr;
   return fdopen(fd, mode);
@@ -1300,36 +1714,13 @@ RJ_INTERPOSER_EXPORT FILE *freopen64(const char *path, const char *mode, FILE *s
 // -- stat/lstat/access interposition --
 
 static std::string redirect_sysfs_path(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
-  std::string_view sv(path);
-  if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/devices/virtual/kfd") &&
-      !sv.starts_with("/sys/class/kfd"))
-    return {};
-  if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-      !InterposerContext::ctx.initialized())
-    InterposerContext::ctx.get_or_create();
-  auto remote_topo = InterposerContext::ctx.remote_topology_path();
-  if (!remote_topo.empty()) {
-    constexpr const char *kp = "/sys/devices/virtual/kfd/kfd/topology";
-    constexpr const char *ka = "/sys/class/kfd/kfd/topology";
-    constexpr const char *dp = "/sys/class/drm";
-    if (sv.starts_with(kp))
-      return remote_topo + std::string(sv.substr(std::strlen(kp)));
-    if (sv.starts_with(ka))
-      return remote_topo + std::string(sv.substr(std::strlen(ka)));
-    if (sv.starts_with(dp)) {
-      auto remote_drm = InterposerContext::ctx.remote_drm_path();
-      if (!remote_drm.empty())
-        return remote_drm + std::string(sv.substr(std::strlen(dp)));
-    }
-  }
-  auto fallback = InterposerContext::ctx.redirect(path);
-  return fallback;
+  return InterposerContext::ctx.redirect_sysfs_path(path);
 }
 
 static std::string redirect_sys_dev_char(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   constexpr std::string_view prefix = "/sys/dev/char/";
@@ -1355,10 +1746,14 @@ static std::string redirect_sys_dev_char(const char *path) {
 
   std::string drm_base;
   auto *drv = InterposerContext::ctx.driver();
-  if (drv)
-    drm_base = drv->topology().drm_path();
-  else
+  if (drv) {
+    auto direct = drv->redirect_sysfs_path(path);
+    if (!direct.empty())
+      return direct;
+    drm_base = drv->drm_path();
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
+  }
   if (drm_base.empty())
     return {};
 
@@ -1371,17 +1766,27 @@ static std::string redirect_sys_dev_char(const char *path) {
   return drm_base + "/" + entry + suffix;
 }
 
-static const Sysfs::GpuInfo *interposer_gpu_info() {
+// Return the GPU metadata BY VALUE. Returning a raw pointer into the local
+// topology or the remote driver would dangle: the remote snapshot below is
+// destroyed when this function returns, so a concurrent teardown could free the
+// object while the caller still dereferenced the pointer. A copy is cheap and
+// severs that lifetime dependency.
+static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor) {
   auto *drv = InterposerContext::ctx.driver();
-  if (drv)
-    return &drv->topology().gpu_info();
-  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-    return remote->gpu_info();
-  return nullptr;
+  if (drv) {
+    if (const Sysfs::GpuInfo *info = drv->gpu_info_for_render_minor(render_minor))
+      return *info;
+    return std::nullopt;
+  }
+  if (auto remote = InterposerContext::ctx.remote()) {
+    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+      return *info;
+  }
+  return std::nullopt;
 }
 
 static std::string redirect_dev_dri(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   // Redirect both the /dev/dri directory and individual node files
@@ -1398,10 +1803,14 @@ static std::string redirect_dev_dri(const char *path) {
     return {};
   std::string drm_base;
   auto *drv = InterposerContext::ctx.driver();
-  if (drv)
-    drm_base = drv->topology().drm_path();
-  else
+  if (drv) {
+    auto direct = drv->redirect_sysfs_path(path);
+    if (!direct.empty())
+      return direct;
+    drm_base = drv->drm_path();
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
+  }
   if (drm_base.empty())
     return {};
   if (is_dir)
@@ -1410,7 +1819,7 @@ static std::string redirect_dev_dri(const char *path) {
 }
 
 RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
     return fn ? fn(path, buf) : -1;
   }
@@ -1420,12 +1829,12 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.stat(redirected.c_str(), buf);
-  return InterposerContext::real.stat(path, buf);
+    return InterposerContext::real().stat(redirected.c_str(), buf);
+  return InterposerContext::real().stat(path, buf);
 }
 
 RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "lstat");
     return fn ? fn(path, buf) : -1;
   }
@@ -1435,12 +1844,12 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.lstat(redirected.c_str(), buf);
-  return InterposerContext::real.lstat(path, buf);
+    return InterposerContext::real().lstat(redirected.c_str(), buf);
+  return InterposerContext::real().lstat(path, buf);
 }
 
 RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, int)>(RTLD_NEXT, "access");
     return fn ? fn(path, mode) : -1;
   }
@@ -1450,14 +1859,14 @@ RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.access(redirected.c_str(), mode);
-  return InterposerContext::real.access(path, mode);
+    return InterposerContext::real().access(redirected.c_str(), mode);
+  return InterposerContext::real().access(path, mode);
 }
 
 // -- opendir interposition --
 
 RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<DIR *(*)(const char *)>(RTLD_NEXT, "opendir");
     return fn ? fn(name) : nullptr;
   }
@@ -1467,50 +1876,25 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
     return nullptr;
   }
   if (!InterposerContext::in_construction) {
-    if (std::string_view(name).starts_with("/sys/class/drm") ||
-        std::string_view(name).starts_with("/sys/devices/virtual/kfd") ||
-        std::string_view(name).starts_with("/sys/class/kfd")) {
-      if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-          !InterposerContext::ctx.initialized())
-        InterposerContext::ctx.get_or_create();
-    }
-    std::string redirected;
-    auto remote_topo_od = InterposerContext::ctx.remote_topology_path();
-    if (!remote_topo_od.empty()) {
-      std::string_view sv(name);
-      constexpr const char *kp = "/sys/devices/virtual/kfd/kfd/topology";
-      constexpr const char *ka = "/sys/class/kfd/kfd/topology";
-      constexpr const char *dp = "/sys/class/drm";
-      if (sv.starts_with(kp))
-        redirected = remote_topo_od + std::string(sv.substr(std::strlen(kp)));
-      else if (sv.starts_with(ka))
-        redirected = remote_topo_od + std::string(sv.substr(std::strlen(ka)));
-      else if (sv.starts_with(dp)) {
-        auto remote_drm_od = InterposerContext::ctx.remote_drm_path();
-        if (!remote_drm_od.empty())
-          redirected = remote_drm_od + std::string(sv.substr(std::strlen(dp)));
-      }
-    }
-    if (redirected.empty())
-      redirected = InterposerContext::ctx.redirect(name);
+    std::string redirected = InterposerContext::ctx.redirect_sysfs_path(name);
     if (redirected.empty())
       redirected = redirect_sys_dev_char(name);
     if (redirected.empty())
       redirected = redirect_dev_dri(name);
     if (!redirected.empty())
-      return InterposerContext::real.opendir(redirected.c_str());
+      return InterposerContext::real().opendir(redirected.c_str());
   }
-  return InterposerContext::real.opendir(name);
+  return InterposerContext::real().opendir(name);
 }
 
 // -- fstat interposition (DRM memfd → synthetic st_rdev) --
 
 RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
     return fn ? fn(fd, buf) : -1;
   }
-  int rc = InterposerContext::real.fstat_fn(fd, buf);
+  int rc = InterposerContext::real().fstat_fn(fd, buf);
   if (rc == 0 && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
@@ -1525,7 +1909,7 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
   if (!real_fstat64)
     return -1;
   int rc = real_fstat64(fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1539,7 +1923,7 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
   if (!real_fxstat)
     return -1;
   int rc = real_fxstat(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1553,7 +1937,7 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
   if (!real_fxstat64)
     return -1;
   int rc = real_fxstat64(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1564,7 +1948,7 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
 // -- readlink interposition (redirect /sys/dev/char/) --
 
 RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
     return fn ? fn(path, buf, bufsiz) : -1;
   }
@@ -1572,7 +1956,7 @@ RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz
   if (redirected.empty())
     redirected = redirect_sysfs_path(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
-  return InterposerContext::real.readlink_fn(actual, buf, bufsiz);
+  return InterposerContext::real().readlink_fn(actual, buf, bufsiz);
 }
 
 // -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
@@ -1662,8 +2046,8 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
 }
 
 RJ_INTERPOSER_EXPORT pid_t fork() {
-  assert(InterposerContext::real.ready());
-  pid_t pid = InterposerContext::real.fork();
+  assert(InterposerContext::real().ready());
+  pid_t pid = InterposerContext::real().fork();
   if (pid == 0)
     InterposerContext::ctx.reset_after_fork();
   return pid;

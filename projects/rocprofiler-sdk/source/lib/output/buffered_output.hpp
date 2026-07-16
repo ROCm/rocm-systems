@@ -216,5 +216,7 @@ using memory_copy_buffered_output_ext_t =
 using pc_sampling_stochastic_buffered_output_t =
     buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t,
                     domain_type::PC_SAMPLING_STOCHASTIC>;
+using hip_graph_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_hip_graph_record_t, domain_type::HIP_GRAPH>;
 }  // namespace tool
 }  // namespace rocprofiler
