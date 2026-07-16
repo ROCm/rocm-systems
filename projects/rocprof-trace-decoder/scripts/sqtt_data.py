@@ -139,7 +139,6 @@ class FuncMap:
         """Returns extra records after this marker header; default is zero."""
         return self.extra_payload_counts.get(marker_id, 0)
 
-
 def merge_funcmaps(funcmaps: Iterable[FuncMap]) -> FuncMap:
     """Merge funcmaps while preserving all metadata used for marker decoding."""
     merged = FuncMap()
@@ -203,18 +202,24 @@ def parse_funcmap(raw: str) -> FuncMap:
             except ValueError:
                 pass
         elif prefix == "M":
+            values = {}
+            valid = True
             for item in rest.split(";"):
                 key, sep, value = item.partition("=")
-                if not sep:
+                key = key.strip()
+                if key not in ("shader_clock_bits", "shader_clock_shift"):
                     continue
-                try:
-                    parsed = int(value)
-                except ValueError:
-                    continue
-                if key.strip() == "shader_clock_bits":
-                    fm.shader_clock_bits = parsed
-                elif key.strip() == "shader_clock_shift":
-                    fm.shader_clock_shift = parsed
+                if not sep or not value.strip().isdigit():
+                    valid = False
+                    break
+                values[key] = int(value)
+            bits = values.get("shader_clock_bits")
+            shift = values.get("shader_clock_shift")
+            if valid and bits is not None and (
+                bits == 0 or (shift is not None and bits <= 29 and shift < 32 and bits <= 32 - shift)
+            ):
+                fm.shader_clock_bits = bits
+                fm.shader_clock_shift = shift or 0
         elif prefix == "K":
             name, loc = _split_source_loc(rest)
             fm.kernels.append(name)
@@ -315,19 +320,25 @@ class ShaderRecord:
     simd: int
     wave_id: int
     flags: int
+    shader_engine: int = 0
 
 
 def decode_marker(value: int, funcmap: FuncMap | None = None) -> tuple[int, bool, bool]:
-    """Decode marker value -> (id, enter, exit_prev)."""
-    exit_prev = bool(value & 0x1)
-    enter = bool(value & 0x2)
-    clock_bits = funcmap.shader_clock_bits if funcmap else 0
-    if clock_bits:
-        id_bits = max(0, 30 - clock_bits)
-        marker_id = (value >> 2) & ((1 << id_bits) - 1 if id_bits else 0)
-    else:
-        marker_id = value >> 2
-    return marker_id, enter, exit_prev
+    """Decode known packed headers/bare exits; keep numeric markers legacy."""
+    raw = value & 0xFFFFFFFF
+    exit_prev = bool(raw & 0x1)
+    enter = bool(raw & 0x2)
+    legacy_id = raw >> 2
+    bits = funcmap.shader_clock_bits if funcmap else 0
+    shift = funcmap.shader_clock_shift if funcmap else 0
+    if not (funcmap and 0 < bits <= 29 and 0 <= shift < 32 and bits <= 32 - shift):
+        return legacy_id, enter, exit_prev
+
+    id_bits = 30 - bits
+    packed_id = legacy_id & ((1 << id_bits) - 1)
+    if packed_id in funcmap.markers or (packed_id == 0 and exit_prev and not enter):
+        return packed_id, enter, exit_prev
+    return legacy_id, enter, exit_prev
 
 
 def _load_shaderdata_from_dir(trace_dir: str) -> list[ShaderRecord]:
@@ -335,23 +346,28 @@ def _load_shaderdata_from_dir(trace_dir: str) -> list[ShaderRecord]:
     records = []
 
     filenames_path = os.path.join(trace_dir, "filenames.json")
-    shaderdata_files = []
+    shaderdata_files: list[tuple[int, str]] = []
 
     if os.path.exists(filenames_path):
         with open(filenames_path) as f:
             meta = json.load(f)
         sd_filenames = meta.get("shaderdata_filenames", {})
         for se_id, file_list in sd_filenames.items():
+            try:
+                shader_engine = int(se_id)
+            except (TypeError, ValueError):
+                continue
             for entry in file_list:
                 fname = entry[0] if isinstance(entry, list) else entry
-                shaderdata_files.append(os.path.join(trace_dir, fname))
+                shaderdata_files.append((shader_engine, os.path.join(trace_dir, fname)))
     else:
-        shaderdata_files = sorted(
+        paths = sorted(
             glob(os.path.join(trace_dir, "shaderdata_*.json")),
             key=lambda p: [int(x) for x in os.path.splitext(os.path.basename(p))[0].split("_")[1:]],
         )
+        shaderdata_files = [(int(os.path.basename(path).split("_")[1]), path) for path in paths]
 
-    for path in shaderdata_files:
+    for shader_engine, path in shaderdata_files:
         if not os.path.exists(path):
             continue
         with open(path) as f:
@@ -361,6 +377,7 @@ def _load_shaderdata_from_dir(trace_dir: str) -> list[ShaderRecord]:
                 time=rec[0], value=rec[1],
                 cu=rec[2], simd=rec[3],
                 wave_id=rec[4], flags=rec[5],
+                shader_engine=shader_engine,
             ))
 
     return records
@@ -391,7 +408,7 @@ def load_occupancy(trace_dir: str) -> tuple[dict[str, str], dict[tuple, list[Wav
 
     Returns:
         dispatches: dict mapping dispatch_id (str) -> kernel name/description
-        wave_spans: dict mapping (cu, simd, wave_slot) -> sorted list of WaveSpan
+        wave_spans: dict mapping (shader_engine, cu, simd, wave_slot) -> sorted list of WaveSpan
     """
     path = os.path.join(trace_dir, "occupancy.json")
     if not os.path.exists(path):
@@ -404,13 +421,17 @@ def load_occupancy(trace_dir: str) -> tuple[dict[str, str], dict[tuple, list[Wav
 
     events: dict[tuple, list[tuple]] = defaultdict(list)
     for key, val in data.items():
-        if key in ("dispatches", "version") or not isinstance(val, list):
+        try:
+            shader_engine = int(key)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(val, list):
             continue
         for rec in val:
-            if len(rec) < 6:
+            if not isinstance(rec, list) or len(rec) < 6:
                 continue
             time, cu, simd, wslot, is_launch, dispatch_id = rec[:6]
-            events[(cu, simd, wslot)].append((time, is_launch, dispatch_id))
+            events[(shader_engine, cu, simd, wslot)].append((time, is_launch, dispatch_id))
 
     wave_spans: dict[tuple, list[WaveSpan]] = {}
     for wave_key, evts in events.items():
@@ -443,7 +464,9 @@ def find_wave_span_at(spans: list[WaveSpan], time: int) -> Optional[WaveSpan]:
     Trace data records can arrive after a dispatch retires (the wave is
     still draining), so we match to the most recent span whose
     launch_time <= time rather than requiring strict [launch, retire]
-    containment.
+    containment. Clock-corrected startup markers can also land just before
+    the first occupancy launch; with no earlier wave in that slot, they
+    belong to that first span.
     """
     lo, hi = 0, len(spans) - 1
     result = None
@@ -455,7 +478,27 @@ def find_wave_span_at(spans: list[WaveSpan], time: int) -> Optional[WaveSpan]:
             lo = mid + 1
         else:
             hi = mid - 1
-    return result
+    return result if result is not None or not spans else spans[0]
+
+
+def make_funcmap_resolver(
+    per_co: dict[int, FuncMap],
+    dispatches: dict[str, str],
+    kernel_to_co: dict[str, int],
+    wave_spans: dict[tuple, list[WaveSpan]],
+    fallback: FuncMap,
+):
+    """Resolve a late record to its latest launch until that slot relaunches."""
+    def resolve(record: ShaderRecord) -> FuncMap:
+        span = find_wave_span_at(
+            wave_spans.get((record.shader_engine, record.cu, record.simd, record.wave_id), []), record.time
+        )
+        if span is None:
+            return fallback
+        codeobj = kernel_to_co.get(dispatches.get(str(span.dispatch_id), ""))
+        return per_co.get(codeobj, fallback)
+
+    return resolve
 
 
 def merge_folded(all_folded: list[dict[str, tuple[int, int]]]) -> dict[str, tuple[int, int]]:
@@ -490,6 +533,7 @@ class AddressTrace:
     addresses: list[int]  # active lanes only; 64-bit for memory, 32-bit for LDS
     marker_id: int = 0  # unique per-op marker ID from funcmap
     source_loc: str = ""  # "file.hip:42" if compiled with -g
+    shader_engine: int = 0
 
     def active_lane_count(self) -> int:
         """Return count of active lanes (same as len(addresses))."""
@@ -632,6 +676,7 @@ def parse_address_block(
         addresses=addresses,
         marker_id=marker_id,
         source_loc=source_loc,
+        shader_engine=header_rec.shader_engine,
     )
     return trace, i
 
@@ -649,8 +694,8 @@ def _parse_buffer_block(
     """Parse buffer component block after exec mask has been read.
 
     Protocol: rsrc_lo, rsrc_hi, soffset, then per-lane voffset.
-    For struct buffers: additionally per-lane vindex.
-    Reconstructs full addresses: base + soffset + voffset[lane].
+    Struct-buffer records contain vindex; consume them but do not guess an
+    address without a verified descriptor-stride decoder.
     """
     is_struct = _is_struct_buffer(kind)
 
@@ -672,15 +717,10 @@ def _parse_buffer_block(
         voffsets.append(records[i].value & 0xFFFFFFFF)
         i += 1
 
-    # For struct buffers: per-lane vindex
-    vindices = None
     if is_struct:
         if i + wave_size > len(records):
             return None, len(records)
-        vindices = []
-        for lane in range(wave_size):
-            vindices.append(records[i].value & 0xFFFFFFFF)
-            i += 1
+        return None, i + wave_size
 
     # Reconstruct addresses for active lanes
     # Base address from rsrc descriptor: bits [47:0]
@@ -702,6 +742,7 @@ def _parse_buffer_block(
         addresses=addresses,
         marker_id=marker_id,
         source_loc=source_loc,
+        shader_engine=header_rec.shader_engine,
     )
     return trace, i
 
@@ -709,13 +750,13 @@ def _parse_buffer_block(
 def preprocess_records(
     records: list[ShaderRecord],
     funcmap: FuncMap,
+    resolve_funcmap=None,
 ) -> tuple[list[ShaderRecord], list[AddressTrace]]:
     """Extract address trace blocks from the record stream.
 
     Address trace blocks span multiple consecutive s_ttracedata records
     (header + exec + addresses), but the raw shaderdata stream interleaves
-    records from all active waves.  We demultiplex by (cu, simd, wave_id)
-    so each wave's records are contiguous before parsing address blocks.
+    records from all active waves.  We demultiplex by (SE, CU, SIMD, wave).
 
     Returns:
         markers: all non-address-trace records (for build_stacks)
@@ -730,26 +771,32 @@ def preprocess_records(
     #
     # A record is an address-trace header if decoding its value gives
     # a marker_id that resolves to an addr_trace_* funcmap entry.
-    # All subsequent records from the same (cu, simd, wave_id) until
+    # All subsequent records from the same wave stream until
     # the next header belong to the same address trace block.
 
     # Group all records by wave identity, preserving time order
-    per_wave: dict[tuple[int, int, int], list[ShaderRecord]] = defaultdict(list)
-    wave_has_addr_trace: set[tuple[int, int, int]] = set()
+    per_wave: dict[tuple[int, int, int, int], list[ShaderRecord]] = defaultdict(list)
+    wave_has_addr_trace: set[tuple[int, int, int, int]] = set()
 
     for rec in records:
-        key = (rec.cu, rec.simd, rec.wave_id)
+        if rec.flags & 2:  # PRIV: generated by the trap handler
+            continue
+        key = (rec.shader_engine, rec.cu, rec.simd, rec.wave_id)
         per_wave[key].append(rec)
+
+    def map_for(record: ShaderRecord) -> FuncMap:
+        return resolve_funcmap(record) if resolve_funcmap is not None else funcmap
 
     for key, wave_records in per_wave.items():
         i = 0
         while i < len(wave_records):
-            marker_id, _enter, _exit_prev = decode_marker(wave_records[i].value, funcmap)
-            name, _mtype = funcmap.resolve(marker_id)
+            current_map = map_for(wave_records[i])
+            marker_id, _enter, _exit_prev = decode_marker(wave_records[i].value, current_map)
+            name, _mtype = current_map.resolve(marker_id)
             if _match_addr_trace(name) is not None:
                 wave_has_addr_trace.add(key)
                 break
-            i += 1 + funcmap.extra_payload_count(marker_id)
+            i += 1 + current_map.extra_payload_count(marker_id)
 
     # Process each wave's records
     for key, wave_records in per_wave.items():
@@ -759,27 +806,29 @@ def preprocess_records(
             i = 0
             while i < len(wave_records):
                 rec = wave_records[i]
-                marker_id, _enter, _exit_prev = decode_marker(rec.value, funcmap)
+                current_map = map_for(rec)
+                marker_id, _enter, _exit_prev = decode_marker(rec.value, current_map)
                 markers.append(rec)
-                i += 1 + funcmap.extra_payload_count(marker_id)
+                i += 1 + current_map.extra_payload_count(marker_id)
             continue
 
         # Parse this wave's contiguous record stream
         i = 0
         while i < len(wave_records):
             rec = wave_records[i]
-            marker_id, enter, exit_prev = decode_marker(rec.value, funcmap)
-            name, mtype = funcmap.resolve(marker_id)
+            current_map = map_for(rec)
+            marker_id, enter, exit_prev = decode_marker(rec.value, current_map)
+            name, mtype = current_map.resolve(marker_id)
 
             if _match_addr_trace(name) is not None:
                 trace, i = parse_address_block(
-                    wave_records, i, rec, name, marker_id, funcmap.wave_size,
-                    funcmap.source_locs.get(marker_id, ""))
+                    wave_records, i, rec, name, marker_id, current_map.wave_size,
+                    current_map.source_locs.get(marker_id, ""))
                 if trace:
                     addr_traces.append(trace)
             else:
                 markers.append(rec)
-                i += 1 + funcmap.extra_payload_count(marker_id)
+                i += 1 + current_map.extra_payload_count(marker_id)
 
     # Re-sort markers by time since we processed per-wave
     markers.sort(key=lambda r: r.time)

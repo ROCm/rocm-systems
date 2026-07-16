@@ -52,10 +52,12 @@ from typing import Optional
 
 from sqtt_data import (
     AddressTrace,
+    build_kernel_to_co,
     discover_base_dir,
     load_funcmaps,
     load_occupancy,
     load_shaderdata,
+    make_funcmap_resolver,
     merge_funcmaps,
     preprocess_records,
 )
@@ -70,6 +72,7 @@ def format_address_trace(trace: AddressTrace) -> dict:
         "kind": trace.kind,
         "marker_id": trace.marker_id,
         "time": trace.time,
+        "shader_engine": trace.shader_engine,
         "cu": trace.cu,
         "simd": trace.simd,
         "wave": trace.wave_id,
@@ -101,17 +104,20 @@ def print_summary(traces: list[AddressTrace], file=sys.stderr):
 
     # Global stats
     total_addrs = sum(len(t.addresses) for t in traces)
+    shader_engines = set()
     cus = set()
     simds = set()
     by_kind: dict[str, int] = {}
     for t in traces:
         by_kind[t.kind] = by_kind.get(t.kind, 0) + 1
+        shader_engines.add(t.shader_engine)
         cus.add(t.cu)
         simds.add(t.simd)
 
     print(f"\nAddress trace summary:", file=file)
     print(f"  Total operations: {len(traces)}", file=file)
     print(f"  Total addresses:  {total_addrs}", file=file)
+    print(f"  Shader engines:  {sorted(shader_engines)}", file=file)
     print(f"  CUs seen:         {sorted(cus)}", file=file)
     print(f"  SIMDs seen:       {sorted(simds)}", file=file)
     print(f"  By kind:", file=file)
@@ -141,15 +147,15 @@ def print_summary(traces: list[AddressTrace], file=sys.stderr):
             mid_traces = by_mid[mid]
             print(f"    marker_id={mid}  ({len(mid_traces)} samples)", file=file)
 
-            # Group by wave (CU, SIMD, wave_id)
-            by_wave: dict[tuple[int, int, int], list[AddressTrace]] = defaultdict(list)
+            # Group by wave (SE, CU, SIMD, wave_id)
+            by_wave: dict[tuple[int, int, int, int], list[AddressTrace]] = defaultdict(list)
             for t in mid_traces:
-                by_wave[(t.cu, t.simd, t.wave_id)].append(t)
+                by_wave[(t.shader_engine, t.cu, t.simd, t.wave_id)].append(t)
 
-            for (cu, simd, wid) in sorted(by_wave.keys()):
-                wave_traces = by_wave[(cu, simd, wid)]
+            for (se, cu, simd, wid) in sorted(by_wave.keys()):
+                wave_traces = by_wave[(se, cu, simd, wid)]
                 is_64bit = wave_traces[0].kind in ("load", "store")
-                print(f"      wave CU={cu} SIMD={simd} wave={wid}  "
+                print(f"      wave SE={se} CU={cu} SIMD={simd} wave={wid}  "
                       f"({len(wave_traces)} samples)", file=file)
 
                 for t in wave_traces:
@@ -217,8 +223,10 @@ def main():
     print(f"Found {len(trace_dirs)} trace dir(s), "
           f"{len(code_objects)} code object(s)", file=sys.stderr)
 
-    # Load funcmaps
-    per_co = load_funcmaps(code_objects, do_demangle=args.demangle)
+    per_co_raw = load_funcmaps(code_objects, do_demangle=False)
+    kernel_to_co = build_kernel_to_co(per_co_raw)
+    per_co = (load_funcmaps(code_objects, do_demangle=True)
+              if args.demangle else per_co_raw)
 
     # Build merged funcmap for preprocessing.
     merged = merge_funcmaps(per_co.values())
@@ -233,7 +241,10 @@ def main():
             continue
         total_records += len(records)
 
-        _, addr_traces = preprocess_records(records, merged)
+        dispatches, wave_spans = load_occupancy(td)
+        resolver = make_funcmap_resolver(
+            per_co, dispatches, kernel_to_co, wave_spans, merged)
+        _, addr_traces = preprocess_records(records, merged, resolver)
 
         # Apply filters
         for t in addr_traces:

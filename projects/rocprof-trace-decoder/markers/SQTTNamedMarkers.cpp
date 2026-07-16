@@ -111,13 +111,12 @@ bool SQTTInstrumentPass::processMarkerCalls(Function& F, GfxGen gen, bool useBar
         auto& [CI, Type] = Calls[i];
         if (!CI) continue; // already consumed by fusion
 
-        // Try to fuse exit+enter pairs: if this is an exit and the
-        // next call is an enter in the same basic block, emit a single
-        // marker with exit_prev=true.
+        // Fuse only directly adjacent exit+enter pairs.  A marker boundary
+        // must not absorb work between the calls.
         if (Type == MarkerType::Exit && i + 1 < Calls.size())
         {
             auto& [NextCI, NextType] = Calls[i + 1];
-            if (NextCI && NextType == MarkerType::Enter && CI->getParent() == NextCI->getParent())
+            if (NextCI && NextType == MarkerType::Enter && CI->getNextNode() == NextCI)
             {
                 uint32_t enterEncoded = resolveMarkerString(NextCI, MarkerType::Enter);
                 if (enterEncoded)

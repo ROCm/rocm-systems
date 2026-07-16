@@ -63,7 +63,7 @@ The chosen `LLVM_DIR` is baked into the generated `rocprof-trace-decoder-config.
 |---|---|
 | `rocprof-trace-decoder` | Shared library (`.so`) |
 | `rocprof-trace-decoder-static` | Static library (`.a`) — built but not installed; consumed via the build-tree CMake export |
-| `SQTTInstrumentPass` | LLVM pass plugin for SQTT marker instrumentation (`BUILD_MARKERS=ON`) |
+| `SQTTInstrumentPass` | LLVM pass plugin for SQTT marker instrumentation (`libsqttinstrumentpass.so`, `BUILD_MARKERS=ON`) |
 | `unit_tests` | Unit test executable (requires `BUILD_TESTS=ON`) |
 | `format` | Run clang-format and cmake-format on all sources |
 | `docs` | Generate Doxygen API documentation |

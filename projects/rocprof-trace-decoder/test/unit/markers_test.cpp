@@ -29,6 +29,7 @@
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/Metadata.h"
@@ -138,13 +139,36 @@ void useFullScopeMasks(SQTTConfig& config)
     config.MemBarrier = MemBarrierMode::None;
 }
 
-CallInst* insertTraceCallBefore(Instruction* insertPt, uint32_t encoded)
+CallInst* insertTraceCallBefore(Instruction* insertPt, uint32_t encoded, bool passHeader = false)
 {
     Module* module = insertPt->getModule();
     LLVMContext& ctx = module->getContext();
     IRBuilder<> builder(insertPt);
     Function* trace = Intrinsic::getOrInsertDeclaration(module, Intrinsic::amdgcn_s_ttracedata);
-    return builder.CreateCall(trace, {ConstantInt::get(Type::getInt32Ty(ctx), encoded)});
+    CallInst* call = builder.CreateCall(trace, {ConstantInt::get(Type::getInt32Ty(ctx), encoded)});
+    if (passHeader) call->setMetadata("sqtt.marker_header", MDNode::get(ctx, {}));
+    return call;
+}
+
+Function* makeNamedMarkerSentinel(Module& module, StringRef name)
+{
+    LLVMContext& ctx = module.getContext();
+    auto* type = FunctionType::get(Type::getVoidTy(ctx), {PointerType::get(ctx, 0)}, false);
+    return Function::Create(type, GlobalValue::ExternalLinkage, name, module);
+}
+
+GlobalVariable* makeMarkerString(Module& module, StringRef value)
+{
+    LLVMContext& ctx = module.getContext();
+    auto* initializer = ConstantDataArray::getString(ctx, value, true);
+    return new GlobalVariable(
+        module,
+        initializer->getType(),
+        true,
+        GlobalValue::PrivateLinkage,
+        initializer,
+        ".sqtt.marker.string"
+    );
 }
 
 void addEarlyFunctionMetadata(Function& function, uint32_t id, unsigned preOptSize, StringRef sourceLoc)
@@ -235,6 +259,29 @@ size_t countIntrinsicCalls(const Function& function, Intrinsic::ID id)
     return count;
 }
 
+size_t countFences(const Function& function)
+{
+    size_t count = 0;
+    for (const BasicBlock& block : function)
+        for (const Instruction& inst : block)
+            if (isa<FenceInst>(inst)) ++count;
+    return count;
+}
+
+std::optional<unsigned> earlyFunctionPreOptSize(const Module& module, StringRef name)
+{
+    const NamedMDNode* entries = module.getNamedMetadata("sqtt.funcmap.early");
+    if (!entries) return std::nullopt;
+    for (const MDNode* entry : entries->operands())
+    {
+        if (entry->getNumOperands() < 3) continue;
+        auto* entryName = dyn_cast<MDString>(entry->getOperand(1));
+        auto* size = mdconst::dyn_extract<ConstantInt>(entry->getOperand(2));
+        if (entryName && size && entryName->getString() == name) return size->getZExtValue();
+    }
+    return std::nullopt;
+}
+
 std::vector<uint32_t> traceMarkerValues(const Function& function)
 {
     std::vector<uint32_t> values;
@@ -253,6 +300,25 @@ std::vector<uint32_t> traceMarkerValues(const Function& function)
         }
     }
     return values;
+}
+
+const CallInst* findM0NopTrace(const Function& function)
+{
+    constexpr const char TraceAsm[] =
+        "s_mov_b32 m0, $1\n"
+        "s_nop 0\n"
+        "s_ttracedata";
+    for (const BasicBlock& block : function)
+    {
+        for (const Instruction& inst : block)
+        {
+            auto* call = dyn_cast<CallInst>(&inst);
+            if (!call) continue;
+            auto* asmCall = dyn_cast<InlineAsm>(call->getCalledOperand());
+            if (asmCall && asmCall->hasSideEffects() && asmCall->getAsmString() == TraceAsm) return call;
+        }
+    }
+    return nullptr;
 }
 
 bool hasPtrToIntFromAddressSpace(const Module& module, unsigned addressSpace, unsigned resultBits)
@@ -323,6 +389,25 @@ std::optional<unsigned> pointEntryId(const std::string& funcMap, StringRef name)
         if (entryName == name) return id;
     }
     return std::nullopt;
+}
+
+size_t countPointEntries(const std::string& funcMap, StringRef name)
+{
+    size_t count = 0;
+    SmallVector<StringRef, 32> lines;
+    StringRef(funcMap).split(lines, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+    for (StringRef line : lines)
+    {
+        line = line.rtrim("\r");
+        if (!line.consume_front("P:")) continue;
+        auto [idText, rest] = line.split(':');
+        unsigned id = 0;
+        if (idText.getAsInteger(10, id)) continue;
+        auto [entryName, sourceLoc] = rest.split('@');
+        (void) sourceLoc;
+        if (entryName == name) ++count;
+    }
+    return count;
 }
 
 std::optional<unsigned> extraPayloadCountForId(const std::string& funcMap, unsigned markerId)
@@ -406,7 +491,7 @@ TEST(MarkerConfig, ParsesEnvironmentAndRejectsConflictingModes)
     EXPECT_EQ(config.MemoryMaxGap, 7u);
     EXPECT_FALSE(config.TraceMemoryAddrs);
     EXPECT_FALSE(config.TraceLDSAddrs);
-    EXPECT_EQ(config.ShaderClockBits, SQTTConfig::AutoShaderClockBits);
+    EXPECT_EQ(config.ShaderClockBits, 0u);
     EXPECT_EQ(config.ShaderClockShift, 8u);
     EXPECT_EQ(config.WaveMask, 0xFFFFFFFFu);
     EXPECT_EQ(config.SimdMask, 0x5u);
@@ -433,6 +518,10 @@ TEST(MarkerTarget, ClassifiesArchitecturesAndInstructionCosts)
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "gfx11_func", "gfx1100")), GfxGen::RDNA);
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "gfx12_func", "gfx1200")), GfxGen::GFX12);
     EXPECT_EQ(getGfxGen(*makeVoidFunction(*module, "unknown_func", "notgfx")), GfxGen::Unknown);
+    EXPECT_FALSE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1200_cycles", "gfx1200")));
+    EXPECT_FALSE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1201_cycles", "gfx1201")));
+    EXPECT_TRUE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1250_cycles", "gfx1250")));
+    EXPECT_TRUE(hasShaderCyclesU64(*makeVoidFunction(*module, "gfx1250_features", "gfx1250:xnack+")));
 
     EXPECT_EQ(getWaveSize(GfxGen::GFX9), 64u);
     EXPECT_EQ(getWaveSize(GfxGen::RDNA), 32u);
@@ -440,10 +529,12 @@ TEST(MarkerTarget, ClassifiesArchitecturesAndInstructionCosts)
     EXPECT_TRUE(supportsImmTrace(GfxGen::GFX12));
 
     SQTTConfig config;
-    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 12u);
+    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 0u);
     EXPECT_EQ(getShaderClockBits(config, GfxGen::RDNA), 0u);
+    EXPECT_FALSE(usesShaderClockPacking(config, GfxGen::GFX12));
     config.ShaderClockBits = 5;
     EXPECT_EQ(getShaderClockBits(config, GfxGen::RDNA), 5u);
+    EXPECT_EQ(getShaderClockBits(config, GfxGen::GFX12), 5u);
     EXPECT_TRUE(usesShaderClockPacking(config, GfxGen::GFX12));
     EXPECT_FALSE(usesShaderClockPacking(config, GfxGen::RDNA));
 
@@ -547,6 +638,177 @@ TEST(MarkerPass, AddressTracingHandlesBuffersAndPermutes)
     EXPECT_EQ(countIntrinsicCalls(*module, Intrinsic::amdgcn_readlane), 5u);
 }
 
+TEST(MarkerPass, AddressTracingOnlyUsesFlatAndGlobalAddressSpaces)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Type* i32 = Type::getInt32Ty(ctx);
+    Type* voidTy = Type::getVoidTy(ctx);
+    FunctionType* type = FunctionType::get(
+        voidTy,
+        {PointerType::get(ctx, 0),
+         PointerType::get(ctx, 1),
+         PointerType::get(ctx, 2),
+         PointerType::get(ctx, 4),
+         PointerType::get(ctx, 5)},
+        false
+    );
+    Function* function = makeFunction(*module, "address_spaces", "gfx1100", type);
+    BasicBlock* entry = BasicBlock::Create(ctx, "entry", function);
+    IRBuilder<> builder(entry);
+    builder.CreateLoad(i32, function->getArg(0));
+    builder.CreateStore(ConstantInt::get(i32, 1), function->getArg(1));
+    builder.CreateLoad(i32, function->getArg(2));
+    builder.CreateLoad(i32, function->getArg(3));
+    builder.CreateLoad(i32, function->getArg(4));
+    builder.CreateRetVoid();
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.TraceMemoryAddrs = true;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    const std::string funcMap = getFuncMap(*module);
+    EXPECT_EQ(countPointEntries(funcMap, "addr_trace_load"), 1u);
+    EXPECT_EQ(countPointEntries(funcMap, "addr_trace_store"), 1u);
+    EXPECT_EQ(countPointEntries(funcMap, "addr_trace_atomic"), 0u);
+}
+
+TEST(MarkerPass, AddressTracingSkipsBufferLoadLds)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Type* voidTy = Type::getVoidTy(ctx);
+    Function* function = makeVoidFunction(*module, "buffer_load_lds", "gfx1200");
+    IRBuilder<> builder(function->getEntryBlock().getTerminator());
+    Function* bufferLoadLds = Function::Create(
+        FunctionType::get(voidTy, false),
+        GlobalValue::ExternalLinkage,
+        "llvm.amdgcn.raw.buffer.load.lds",
+        module.get()
+    );
+    builder.CreateCall(bufferLoadLds);
+    Function* point = makeNamedMarkerSentinel(*module, "__sqtt_named_marker_point");
+    builder.CreateCall(point, {makeMarkerString(*module, "ordinary_point")});
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.TraceMemoryAddrs = true;
+    // This would fail if .buffer.load.lds were misclassified as an address
+    // block during the preflight scan.
+    config.ShaderClockBits = 12;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    const std::string funcMap = getFuncMap(*module);
+    expectContains(funcMap, "M:shader_clock_bits=12;shader_clock_shift=4");
+    expectNotContains(funcMap, "addr_trace_buffer_load");
+    expectNotContains(funcMap, "W:");
+}
+
+TEST(MarkerPass, AddressTraceBlocksKeepDefaultGfx12ClockPackingDisabledAndUseBlockBoundaries)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Type* i32 = Type::getInt32Ty(ctx);
+    Type* voidTy = Type::getVoidTy(ctx);
+    Function* function = makeFunction(
+        *module,
+        "gfx12_address_trace",
+        "gfx1200",
+        FunctionType::get(voidTy, {PointerType::get(ctx, 1)}, false)
+    );
+    BasicBlock* entry = BasicBlock::Create(ctx, "entry", function);
+    IRBuilder<> builder(entry);
+    builder.CreateLoad(i32, function->getArg(0));
+    builder.CreateRetVoid();
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.MemBarrier = MemBarrierMode::Fence;
+    config.TraceMemoryAddrs = true;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    const std::string funcMap = getFuncMap(*module);
+    expectContains(funcMap, "W:32");
+    expectPointEntryWithPayload(funcMap, "addr_trace_load", 66);
+    expectNotContains(funcMap, "M:shader_clock_bits=");
+    EXPECT_EQ(countIntrinsicCalls(*function, Intrinsic::amdgcn_s_getreg), 0u);
+    EXPECT_EQ(countFences(*function), 2u);
+    EXPECT_EQ(countIntrinsicCalls(*function, Intrinsic::amdgcn_sched_barrier), 2u);
+}
+
+TEST(MarkerPass, ForcedGfx12ClockPackingFailsForPayloadMarkers)
+{
+    EXPECT_DEATH(
+        {
+            LLVMContext ctx;
+            auto module = makeModule(ctx);
+            Type* i32 = Type::getInt32Ty(ctx);
+            Type* voidTy = Type::getVoidTy(ctx);
+            Function* function = makeFunction(
+                *module,
+                "forced_clock_address_trace",
+                "gfx1200",
+                FunctionType::get(voidTy, {PointerType::get(ctx, 1)}, false)
+            );
+            BasicBlock* entry = BasicBlock::Create(ctx, "entry", function);
+            IRBuilder<> builder(entry);
+            builder.CreateLoad(i32, function->getArg(0));
+            builder.CreateRetVoid();
+
+            SQTTConfig config;
+            useFullScopeMasks(config);
+            config.TraceMemoryAddrs = true;
+            config.ShaderClockBits = 12;
+
+            ModuleAnalysisManager analysisManager;
+            SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+            pass.run(*module, analysisManager);
+        },
+        "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
+    );
+}
+
+TEST(MarkerPass, ForcedGfx12ClockPackingFailsForNamedData)
+{
+    EXPECT_DEATH(
+        {
+            LLVMContext ctx;
+            auto module = makeModule(ctx);
+            Type* i32 = Type::getInt32Ty(ctx);
+            Type* voidTy = Type::getVoidTy(ctx);
+            Function* data = Function::Create(
+                FunctionType::get(voidTy, {PointerType::get(ctx, 0), i32}, false),
+                GlobalValue::ExternalLinkage,
+                "__sqtt_named_marker_data",
+                module.get()
+            );
+            GlobalVariable* name = makeMarkerString(*module, "one_payload");
+            Function* function = makeVoidFunction(*module, "gfx12_named_data", "gfx1200");
+            IRBuilder<> builder(function->getEntryBlock().getTerminator());
+            builder.CreateCall(data, {name, ConstantInt::get(i32, 17)});
+
+            SQTTConfig config;
+            useFullScopeMasks(config);
+            config.ShaderClockBits = 12;
+
+            ModuleAnalysisManager analysisManager;
+            SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+            pass.run(*module, analysisManager);
+        },
+        "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
+    );
+}
+
 TEST(MarkerPass, Gfx9BufferAndPermuteAddressTracesUseInlineAsmExecProtocol)
 {
     LLVMContext ctx;
@@ -590,6 +852,77 @@ TEST(MarkerPass, Gfx9BufferAndPermuteAddressTracesUseInlineAsmExecProtocol)
     expectContains(ir, "s_mov_b32 m0, exec_lo");
     expectContains(ir, "s_nop 0");
     expectContains(ir, "s_ttracedata");
+    expectContains(ir, "={m0}");
+}
+
+TEST(MarkerPass, FullM0TracesUseExplicitNopSequenceOnEveryArchitecture)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    const uint32_t markerValue = encodeMarker(64, false, false);
+    MDNode* traceMetadata = MDNode::get(ctx, {});
+
+    std::vector<Function*> functions;
+    for (const auto& [name, cpu] : {std::pair{"gfx9_trace", "gfx90a"},
+                                    std::pair{"gfx10_trace", "gfx1030"},
+                                    std::pair{"gfx12_trace", "gfx1200"}})
+    {
+        Function* function = makeVoidFunction(*module, name, cpu);
+        CallInst* trace = insertTraceCallBefore(function->getEntryBlock().getTerminator(), markerValue);
+        trace->setMetadata("sqtt.test.trace", traceMetadata);
+        functions.push_back(function);
+    }
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    for (Function* function : functions)
+    {
+        const CallInst* trace = findM0NopTrace(*function);
+        ASSERT_NE(trace, nullptr) << function->getName().str();
+        auto* inlineAsm = dyn_cast<InlineAsm>(trace->getCalledOperand());
+        ASSERT_NE(inlineAsm, nullptr);
+        EXPECT_EQ(inlineAsm->getConstraintString(), "={m0},i");
+        EXPECT_EQ(trace->getMetadata("sqtt.test.trace"), traceMetadata);
+    }
+}
+
+TEST(MarkerPass, Gfx12PacksOnlyPassGeneratedHeaders)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Type* i32 = Type::getInt32Ty(ctx);
+    Function* function = makeFunction(*module, "numeric_marker", "gfx1200", FunctionType::get(i32, {i32}, false));
+    BasicBlock* entry = BasicBlock::Create(ctx, "entry", function);
+    IRBuilder<> builder(entry);
+    Value* value = builder.CreateAdd(function->getArg(0), ConstantInt::get(i32, 1));
+    builder.CreateAdd(value, ConstantInt::get(i32, 2));
+    Instruction* ret = builder.CreateRet(value);
+
+    // This mirrors the numeric marker API: it has no funcmap entry and must
+    // keep its full legacy value even when the same module has packed headers.
+    insertTraceCallBefore(ret, encodeMarker(1u << 20, false, false));
+    Function* trace = Intrinsic::getOrInsertDeclaration(module.get(), Intrinsic::amdgcn_s_ttracedata);
+    builder.SetInsertPoint(ret);
+    builder.CreateCall(trace, {value});
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.FunctionThreshold = 1;
+    config.ShaderClockBits = 12;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    // Entry and exit function markers read the shader clock; neither
+    // unregistered numeric marker reads it or trips the packed-ID range check.
+    EXPECT_EQ(countIntrinsicCalls(*function, Intrinsic::amdgcn_s_getreg), 2u);
+    expectContains(getFuncMap(*module), "M:shader_clock_bits=12;shader_clock_shift=4");
 }
 
 TEST(MarkerPass, BarrierInstrumentationHandlesSplitAndStandaloneBarriers)
@@ -606,12 +939,19 @@ TEST(MarkerPass, BarrierInstrumentationHandlesSplitAndStandaloneBarriers)
     FunctionCallee signal = Intrinsic::getOrInsertDeclaration(module.get(), Intrinsic::amdgcn_s_barrier_signal);
     FunctionCallee wait = Intrinsic::getOrInsertDeclaration(module.get(), Intrinsic::amdgcn_s_barrier_wait);
     FunctionCallee full = Intrinsic::getOrInsertDeclaration(module.get(), Intrinsic::amdgcn_s_barrier);
+    Function* work = Function::Create(
+        FunctionType::get(Type::getVoidTy(ctx), false),
+        GlobalValue::ExternalLinkage,
+        "barrier_work",
+        module.get()
+    );
 
     builder.CreateCall(signal, {ConstantInt::get(i32, 0)});
     builder.CreateCall(wait, {ConstantInt::get(i16, 0)});
     builder.CreateCall(signal, {ConstantInt::get(i32, 0)});
-    builder.CreateCall(full);
+    builder.CreateCall(work);
     builder.CreateCall(wait, {ConstantInt::get(i16, 0)});
+    builder.CreateCall(full);
 
     SQTTConfig config;
     useFullScopeMasks(config);
@@ -635,6 +975,67 @@ TEST(MarkerPass, BarrierInstrumentationHandlesSplitAndStandaloneBarriers)
     size_t traceCount = countIntrinsicCalls(*module, Intrinsic::amdgcn_s_ttracedata) +
                         countIntrinsicCalls(*module, Intrinsic::amdgcn_s_ttracedata_imm);
     EXPECT_EQ(traceCount, 4u);
+}
+
+TEST(MarkerPass, NamedExitEnterFusionRequiresDirectAdjacency)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Type* i32 = Type::getInt32Ty(ctx);
+    Function* exit = makeNamedMarkerSentinel(*module, "__sqtt_named_marker_exit");
+    Function* enter = makeNamedMarkerSentinel(*module, "__sqtt_named_marker_enter");
+    GlobalVariable* oldName = makeMarkerString(*module, "old");
+    GlobalVariable* newName = makeMarkerString(*module, "new");
+
+    Function* separated = makeFunction(
+        *module, "separated_named_markers", "gfx1100", FunctionType::get(Type::getVoidTy(ctx), {i32}, false)
+    );
+    BasicBlock* separatedEntry = BasicBlock::Create(ctx, "entry", separated);
+    IRBuilder<> separatedBuilder(separatedEntry);
+    separatedBuilder.CreateCall(exit, {oldName});
+    separatedBuilder.CreateAdd(separated->getArg(0), ConstantInt::get(i32, 1));
+    separatedBuilder.CreateCall(enter, {newName});
+    separatedBuilder.CreateRetVoid();
+
+    Function* adjacent = makeVoidFunction(*module, "adjacent_named_markers", "gfx1100");
+    Instruction* adjacentRet = adjacent->getEntryBlock().getTerminator();
+    IRBuilder<> adjacentBuilder(adjacentRet);
+    adjacentBuilder.CreateCall(exit, {oldName});
+    adjacentBuilder.CreateCall(enter, {newName});
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    std::vector<uint32_t> separatedMarkers = traceMarkerValues(*separated);
+    ASSERT_EQ(separatedMarkers.size(), 2u);
+    EXPECT_EQ(separatedMarkers[0], FLAG_EXIT_PREV);
+    EXPECT_EQ(separatedMarkers[1] & FLAG_MASK, FLAG_ENTER);
+
+    std::vector<uint32_t> adjacentMarkers = traceMarkerValues(*adjacent);
+    ASSERT_EQ(adjacentMarkers.size(), 1u);
+    EXPECT_EQ(adjacentMarkers[0] & FLAG_MASK, FLAG_ENTER | FLAG_EXIT_PREV);
+}
+
+TEST(MarkerPass, NumericMarkersAlwaysReceiveConfiguredMemoryBarriers)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Function* function = makeVoidFunction(*module, "numeric_marker", "gfx1100");
+    insertTraceCallBefore(function->getEntryBlock().getTerminator(), encodeMarker(17, false, false));
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.MemBarrier = MemBarrierMode::Fence;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+    pass.run(*module, analysisManager);
+
+    EXPECT_EQ(countFences(*function), 2u);
 }
 
 TEST(MarkerPass, DirectFunctionInstrumentationHandlesO0Fallback)
@@ -679,6 +1080,69 @@ TEST(MarkerPass, DirectFunctionInstrumentationHandlesO0Fallback)
     EXPECT_TRUE(traceMarkerValues(*kernel).empty());
 }
 
+TEST(MarkerPass, FunctionThresholdIgnoresPassMarkersBeforeAndAfterOptimization)
+{
+    LLVMContext ctx;
+    auto module = makeModule(ctx);
+    Function* function = makeVoidFunction(*module, "small_function", "gfx1100");
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.FunctionThreshold = 1;
+
+    ModuleAnalysisManager analysisManager;
+    SQTTInstrumentPass early(config, SQTTInstrumentPass::Mode::Early);
+    early.run(*module, analysisManager);
+
+    EXPECT_EQ(earlyFunctionPreOptSize(*module, function->getName()), 1u);
+
+    SQTTInstrumentPass late(config, SQTTInstrumentPass::Mode::Late);
+    late.run(*module, analysisManager);
+
+    EXPECT_TRUE(traceMarkerValues(*function).empty());
+    expectNotContains(getFuncMap(*module), "small_function");
+}
+
+TEST(MarkerPass, AutomaticFunctionInstrumentationSkipsMustTailFunctions)
+{
+    auto makeMustTailFunction = [](Module& module, StringRef name)
+    {
+        LLVMContext& ctx = module.getContext();
+        Type* i32 = Type::getInt32Ty(ctx);
+        FunctionType* type = FunctionType::get(i32, {i32}, false);
+        Function* callee =
+            Function::Create(type, GlobalValue::ExternalLinkage, name.str() + ".callee", &module);
+        Function* function = makeFunction(module, name, "gfx1100", type);
+        BasicBlock* entry = BasicBlock::Create(ctx, "entry", function);
+        IRBuilder<> builder(entry);
+        CallInst* call = builder.CreateCall(callee, {function->getArg(0)});
+        call->setTailCallKind(CallInst::TCK_MustTail);
+        builder.CreateRet(call);
+        return function;
+    };
+
+    SQTTConfig config;
+    useFullScopeMasks(config);
+    config.FunctionThreshold = 1;
+    ModuleAnalysisManager analysisManager;
+
+    LLVMContext earlyCtx;
+    auto earlyModule = makeModule(earlyCtx);
+    Function* earlyFunction = makeMustTailFunction(*earlyModule, "early_musttail");
+    SQTTInstrumentPass early(config, SQTTInstrumentPass::Mode::Early);
+    early.run(*earlyModule, analysisManager);
+    EXPECT_TRUE(traceMarkerValues(*earlyFunction).empty());
+    EXPECT_FALSE(earlyModule->getNamedMetadata("sqtt.funcmap.early"));
+
+    LLVMContext lateCtx;
+    auto lateModule = makeModule(lateCtx);
+    Function* lateFunction = makeMustTailFunction(*lateModule, "late_musttail");
+    SQTTInstrumentPass late(config, SQTTInstrumentPass::Mode::Late);
+    late.run(*lateModule, analysisManager);
+    EXPECT_TRUE(traceMarkerValues(*lateFunction).empty());
+    expectNotContains(getFuncMap(*lateModule), "late_musttail");
+}
+
 TEST(MarkerPass, FunctionThresholdPrunesMarkersAndPreservesExistingLlvmUsed)
 {
     LLVMContext ctx;
@@ -689,8 +1153,8 @@ TEST(MarkerPass, FunctionThresholdPrunesMarkersAndPreservesExistingLlvmUsed)
 
     Function* small = makeVoidFunction(*module, "small_function", "gfx1100");
     Instruction* smallRet = small->getEntryBlock().getTerminator();
-    insertTraceCallBefore(smallRet, encodeMarker(smallId, true, false));
-    insertTraceCallBefore(smallRet, encodeMarker(smallId, false, true));
+    insertTraceCallBefore(smallRet, encodeMarker(smallId, true, false), true);
+    insertTraceCallBefore(smallRet, encodeMarker(smallId, false, true), true);
     addEarlyFunctionMetadata(*small, smallId, 1, "small.hip:3");
 
     Function* large =
@@ -702,9 +1166,14 @@ TEST(MarkerPass, FunctionThresholdPrunesMarkersAndPreservesExistingLlvmUsed)
     builder.CreateRetVoid();
     Instruction* firstLargeInst = &*large->getEntryBlock().getFirstInsertionPt();
     Instruction* largeRet = large->getEntryBlock().getTerminator();
-    insertTraceCallBefore(firstLargeInst, encodeMarker(largeId, true, false));
-    insertTraceCallBefore(largeRet, encodeMarker(largeId, false, true));
+    insertTraceCallBefore(firstLargeInst, encodeMarker(largeId, true, false), true);
+    insertTraceCallBefore(largeRet, encodeMarker(largeId, false, true), true);
     addEarlyFunctionMetadata(*large, largeId, 40, "large.hip:17");
+
+    // This unregistered numeric marker happens to use the pruned function's
+    // old ID. It must not be removed or rewritten with pass-owned headers.
+    Function* numeric = makeVoidFunction(*module, "numeric_marker", "gfx90a");
+    insertTraceCallBefore(numeric->getEntryBlock().getTerminator(), encodeMarker(smallId, true, false));
 
     addEarlyFunctionMapEntry(*module, 99, "inlined_large_function", 40, "inlined.hip:21");
     addEarlyFunctionMapEntry(*module, 100, "inlined_small_function", 1, "inlined.hip:4");
@@ -727,4 +1196,9 @@ TEST(MarkerPass, FunctionThresholdPrunesMarkersAndPreservesExistingLlvmUsed)
 
     EXPECT_EQ(countIntrinsicCalls(*small, Intrinsic::amdgcn_s_ttracedata), 0u);
     EXPECT_EQ(countIntrinsicCalls(*small, Intrinsic::amdgcn_s_ttracedata_imm), 0u);
+    const CallInst* numericTrace = findM0NopTrace(*numeric);
+    ASSERT_NE(numericTrace, nullptr);
+    auto* numericValue = dyn_cast<ConstantInt>(numericTrace->getArgOperand(0));
+    ASSERT_NE(numericValue, nullptr);
+    EXPECT_EQ(numericValue->getZExtValue(), encodeMarker(smallId, true, false));
 }

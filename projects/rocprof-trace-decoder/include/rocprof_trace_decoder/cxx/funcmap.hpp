@@ -106,16 +106,65 @@ struct FuncmapEntry
     uint32_t id{0}; // 0 for Kernel rows (no ID)
     std::string name{};
     std::string source_loc{}; // empty if absent
+    uint64_t vaddr{0}; // resolved by CodeobjDecoderComponent; 0 if unresolved
     uint32_t extra_payload_count{0}; // following shaderdata records owned by this marker header
-    uint64_t vaddr{0};        // resolved by CodeobjDecoderComponent; 0 if unresolved
 };
+
+namespace detail
+{
+constexpr uint32_t bit_mask(unsigned bits) noexcept
+{
+    return bits >= 32 ? 0xFFFFFFFFu : ((bits == 0) ? 0u : ((uint32_t(1) << bits) - 1u));
+}
+} // namespace detail
 
 struct MarkerEncoding
 {
-    uint32_t shader_clock_bits{0};  // 0 means legacy encoding
+    uint32_t shader_clock_bits{0};  // 0 means no packed shader-clock field
     uint32_t shader_clock_shift{0}; // source bit offset in shader_cycles_lo
 
+    // The instrumentation pass only emits layouts that retain at least one
+    // marker-ID bit and whose shader-clock window fits in a 32-bit source
+    // clock.
+    constexpr bool is_valid() const noexcept
+    {
+        return shader_clock_bits == 0 ||
+               (shader_clock_bits <= 29 && shader_clock_shift < 32 &&
+                shader_clock_bits <= 32 - shader_clock_shift);
+    }
+
     constexpr bool has_shader_clock() const noexcept { return shader_clock_bits != 0; }
+
+    /// Extract the right-aligned sampled shader-clock field from a raw marker
+    /// word. Malformed or legacy layouts return zero.
+    constexpr uint32_t decode_shader_clock(uint32_t raw) const noexcept
+    {
+        return (!has_shader_clock() || !is_valid())
+                   ? 0u
+                   : (raw >> (32u - shader_clock_bits)) & detail::bit_mask(shader_clock_bits);
+    }
+
+    /// Raw marker-word bits that contain the ID. The no-clock layout returns
+    /// 0xFFFFFFFC; malformed packed metadata falls back to that safe layout.
+    constexpr uint32_t marker_id_mask() const noexcept
+    {
+        return (!has_shader_clock() || !is_valid()) ? 0xFFFFFFFCu
+                                                    : detail::bit_mask(30u - shader_clock_bits) << 2u;
+    }
+
+    /// Raw marker-word bits occupied by the right-aligned sampled clock.
+    constexpr uint32_t packed_shader_clock_mask() const noexcept
+    {
+        return (!has_shader_clock() || !is_valid()) ? 0u
+                                                    : detail::bit_mask(shader_clock_bits) << (32u - shader_clock_bits);
+    }
+
+    /// Corresponding bit window in the producer's low shader-clock word.
+    constexpr uint32_t shader_clock_source_mask() const noexcept
+    {
+        return (!has_shader_clock() || !is_valid()) ? 0u
+                                                    : detail::bit_mask(shader_clock_bits) << shader_clock_shift;
+    }
 };
 
 struct FuncmapDiagnostic
@@ -137,8 +186,8 @@ struct Funcmap
     std::vector<EntryPtr> entries{};                // owns rows, stable insertion order
     std::unordered_map<uint32_t, EntryPtr> by_id{}; // ID -> entry; last-writer-wins on dup
     uint32_t wave_size{0};                          // 0 if no `W:` row
-    MarkerEncoding marker_encoding{};
     std::vector<FuncmapDiagnostic> diagnostics{};   // collected during parse / extraction
+    MarkerEncoding marker_encoding{};
 
     // Returns the entry for `marker_id` (refcount bump, no string copy), or
     // nullptr if absent.
@@ -150,7 +199,6 @@ struct MarkerValue
     uint32_t id;
     bool is_enter;
     bool exit_prev;
-    uint32_t shader_clock;
 };
 
 // Parse the `.sqtt_funcmap` ASCII blob. Diagnostics go into
@@ -185,31 +233,28 @@ inline Funcmap::EntryPtr Funcmap::find(uint32_t marker_id) const
 
 constexpr MarkerValue decode_marker_value(uint32_t v) noexcept
 {
-    return MarkerValue{v >> 2, bool((v >> 1) & 1u), bool(v & 1u), 0};
+    return MarkerValue{v >> 2, bool((v >> 1) & 1u), bool(v & 1u)};
 }
-
-namespace detail
-{
-constexpr uint32_t bit_mask(unsigned bits) noexcept
-{
-    return bits >= 32 ? 0xFFFFFFFFu : ((bits == 0) ? 0u : ((uint32_t(1) << bits) - 1u));
-}
-} // namespace detail
 
 constexpr MarkerValue decode_marker_value(uint32_t v, MarkerEncoding encoding) noexcept
 {
-    if (!encoding.has_shader_clock()) return decode_marker_value(v);
+    if (!encoding.has_shader_clock() || !encoding.is_valid()) return decode_marker_value(v);
 
-    uint32_t clock_bits = encoding.shader_clock_bits;
-    uint32_t id_bits = (clock_bits >= 30) ? 0 : (30 - clock_bits);
-    uint32_t clock = (clock_bits >= 32) ? v : ((v >> (32 - clock_bits)) & detail::bit_mask(clock_bits));
+    uint32_t id_bits = 30 - encoding.shader_clock_bits;
     uint32_t id = (v >> 2) & detail::bit_mask(id_bits);
-    return MarkerValue{id, bool((v >> 1) & 1u), bool(v & 1u), clock};
+    return MarkerValue{id, bool((v >> 1) & 1u), bool(v & 1u)};
 }
 
 inline MarkerValue decode_marker_value(uint32_t v, const Funcmap& funcmap) noexcept
 {
-    return decode_marker_value(v, funcmap.marker_encoding);
+    MarkerValue marker = decode_marker_value(v, funcmap.marker_encoding);
+    if (!funcmap.marker_encoding.has_shader_clock() || !funcmap.marker_encoding.is_valid()) return marker;
+
+    // Numeric point/enter markers intentionally retain their legacy values.
+    // A funcmap identifies the pass-generated headers that actually use the
+    // packed layout; a bare exit has no ID but is always packed.
+    if (funcmap.find(marker.id) || (marker.id == 0 && marker.exit_prev && !marker.is_enter)) return marker;
+    return decode_marker_value(v);
 }
 
 namespace detail
@@ -363,6 +408,7 @@ inline Funcmap parse_funcmap_section(std::string_view blob, bool silent)
             {
                 MarkerEncoding encoding{};
                 bool saw_clock_bits = false;
+                bool saw_clock_shift = false;
                 bool ok = true;
                 size_t attr_pos = 0;
                 while (attr_pos <= payload.size())
@@ -391,13 +437,17 @@ inline Funcmap parse_funcmap_section(std::string_view blob, bool silent)
                             if (!detail::parse_u32(value, parsed))
                                 ok = false;
                             else
+                            {
                                 encoding.shader_clock_shift = parsed;
+                                saw_clock_shift = true;
+                            }
                         }
                     }
                     if (attr_end >= payload.size()) break;
                     attr_pos = attr_end + 1;
                 }
-                if (!ok || (saw_clock_bits && encoding.shader_clock_bits > 29) ||
+                if (!ok || (saw_clock_bits && encoding.shader_clock_bits > 0 && !saw_clock_shift) ||
+                    (saw_clock_bits && encoding.shader_clock_bits > 29) ||
                     (saw_clock_bits && encoding.shader_clock_shift > 32) ||
                     (saw_clock_bits && encoding.shader_clock_bits > 32 - encoding.shader_clock_shift))
                 {

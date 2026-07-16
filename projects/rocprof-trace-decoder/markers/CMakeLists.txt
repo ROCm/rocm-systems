@@ -63,7 +63,8 @@ endif()
 set_target_properties(
     SQTTInstrumentPass
     PROPERTIES NO_SONAME ON
-               PREFIX ""
+               PREFIX "lib"
+               OUTPUT_NAME "sqttinstrumentpass"
                POSITION_INDEPENDENT_CODE ON
                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"

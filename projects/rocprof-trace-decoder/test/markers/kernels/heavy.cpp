@@ -98,24 +98,59 @@ using IVec4    = __attribute__((__vector_size__(4 * sizeof(uint32_t)))) uint32_t
 using Vec16   = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using Vec8     = __attribute__((__vector_size__(8 * sizeof(float)))) float;
 using float8x8 = __attribute__((__vector_size__(8 * sizeof(uint8_t)))) uint8_t;
+using IVec2 = __attribute__((__vector_size__(2 * sizeof(int)))) int;
+using IVec8 = __attribute__((__vector_size__(8 * sizeof(int)))) int;
 
 static_assert(sizeof(float8) == sizeof(uint8_t));
+
+#if defined(__gfx942__) || defined(__gfx950__)
 
 inline __device__ uint64_t castfrom8x8(const float8x8& f)
 {
     return *reinterpret_cast<const uint64_t*>(&f);
 }
 
-inline __device__ Vec4 mfma(const float8x8& a, const float8x8& b)
+inline __device__ Vec4 mfma(const float8x8& a, const float8x8& b, const Vec4& initial = Vec4{})
 {
-    return __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(castfrom8x8(a), castfrom8x8(b), Vec4{}, 0, 0, 0); 
+    return __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(castfrom8x8(a), castfrom8x8(b), initial, 0, 0, 0);
 }
 
 inline __device__ Vec4 mfma(const float8x8& a0, const float8x8& a1, const float8x8& b0, const float8x8& b1)
 {
-    Vec4 ret = __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(castfrom8x8(a0), castfrom8x8(b0), Vec4{}, 0, 0, 0);
-    return __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(castfrom8x8(a1), castfrom8x8(b1), ret, 0, 0, 0);
+    Vec4 ret = mfma(a0, b0);
+    return mfma(a1, b1, ret);
 }
+
+#else
+
+#if defined(__gfx1200__) || defined(__gfx1201__)
+inline __device__ IVec2 castfrom8x8(const float8x8& f)
+{
+    return *reinterpret_cast<const IVec2*>(&f);
+}
+inline __device__ Vec8 mfma(const float8x8& a, const float8x8& b, const Vec8& initial = Vec8{})
+{
+    return __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(castfrom8x8(a), castfrom8x8(b), initial);
+}
+#else
+inline __device__ IVec8 castfrom8x8(const float8x8& f)
+{
+    return *reinterpret_cast<const IVec8*>(&f);
+}
+inline __device__ Vec8 mfma(const IVec8& a, const IVec8& b, const Vec8& initial = Vec8{})
+{
+    return __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(a, b, 0, initial, 0, 0);
+}
+#endif
+
+inline __device__ Vec4 mfma(const float8x8& a0, const float8x8& a1, const float8x8& b0, const float8x8& b1)
+{
+    Vec8 ret = mfma(castfrom8x8(a0), castfrom8x8(b0));
+    ret = mfma(castfrom8x8(a1), castfrom8x8(b1), ret);
+    return {ret[0], ret[1], ret[2], ret[3]};
+}
+
+#endif
 
 // HEIGHT <= 4
 // WIDTH > 4 causes register spill
@@ -309,94 +344,59 @@ void launchHip(
     int M, int N, int K
 ) {
     dim3 block(TBLOCK, 32, 1);
+    dim3 grid((M + 4*SHMBLOCK - 1) / SHMBLOCK / 4, N / SHMBLOCK);
 
-    int mi300_threads = SHMBLOCK * SHMBLOCK * 304;
-    int bpcu = M * N / mi300_threads;
-
-    if (bpcu >= 8 && M >= 4*SHMBLOCK)
-    {
-        dim3 grid((M + 4*SHMBLOCK - 1) / SHMBLOCK / 4, N / SHMBLOCK);
-
-        fp8_gemm_kernel<4><<<grid, block, 0, 0>>>(
-            reinterpret_cast<const uint8_t*>(a),
-            reinterpret_cast<const uint8_t*>(b),
-            reinterpret_cast<float16*>(c),
-            scale_a,
-            scale_b,
-            M, N, K);
-    }
-    else if (bpcu >= 3 && M >= 2*SHMBLOCK)
-    {
-        dim3 grid((M + 2*SHMBLOCK - 1) / SHMBLOCK / 2, N / SHMBLOCK);
-
-        fp8_gemm_kernel<2><<<grid, block, 0, 0>>>(
-            reinterpret_cast<const uint8_t*>(a),
-            reinterpret_cast<const uint8_t*>(b),
-            reinterpret_cast<float16*>(c),
-            scale_a,
-            scale_b,
-            M, N, K);
-    }
-    else if (bpcu >= 1 || N > M || 2 * M * N > mi300_threads)
-    {
-        dim3 grid((M + SHMBLOCK - 1) / SHMBLOCK, N / SHMBLOCK);
-
-        fp8_gemm_kernel<1><<<grid, block, 0, 0>>>(
-            reinterpret_cast<const uint8_t*>(a),
-            reinterpret_cast<const uint8_t*>(b),
-            reinterpret_cast<float16*>(c),
-            scale_a,
-            scale_b,
-            M, N, K);
-    }
-    else
-    {
-        dim3 grid((M + SHMBLOCK - 1) / SHMBLOCK, 2 * N / SHMBLOCK);
-
-        fp8_gemm_kernel<1, 2><<<grid, block, 0, 0>>>(
-            reinterpret_cast<const uint8_t*>(a),
-            reinterpret_cast<const uint8_t*>(b),
-            reinterpret_cast<float16*>(c),
-            scale_a,
-            scale_b,
-            M, N, K);
-    }
+    fp8_gemm_kernel<4><<<grid, block, 0, 0>>>(
+        reinterpret_cast<const uint8_t*>(a),
+        reinterpret_cast<const uint8_t*>(b),
+        reinterpret_cast<float16*>(c),
+        scale_a,
+        scale_b,
+        M, N, K);
 
     HIP_API_CALL(hipGetLastError());
     HIP_API_CALL(hipDeviceSynchronize());
 }
 
+
 int main()
 {
     const int device = 0;
-    const int M = 6144;
-    const int K = 7168;
-    const int minN = 576;
-    const int maxN = 4608;
+    int M = 6144;
+    int K = 7168;
+    int N = 4608;
 
     hipDeviceProp_t devProp{};
     HIP_API_CALL(hipGetDeviceProperties(&devProp, device));
     HIP_API_CALL(hipSetDevice(device));
 
+    if (devProp.major > 9 && devProp.minor == 0)
+    {
+        M /= 3;
+        K /= 3;
+        N /= 3;
+    }
+    else if (devProp.major > 9 && devProp.minor == 5)
+    {
+        M /= 2;
+        K /= 2;
+    }
+
     Matrix<float8> a(K, M);
-    Matrix<float8> b(K, maxN);
-    Matrix<float16> c(M, maxN);
+    Matrix<float8> b(K, N);
+    Matrix<float16> c(M, N);
     Matrix<float> scale_a(K/128, M);
-    Matrix<float> scale_b(K/128, maxN/128);
+    Matrix<float> scale_b(K/128, N/128);
 
     // warmup
-    launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, minN, K);
-    launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, maxN, K);
+    launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, N, K);
 
     HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerResume(0);
 
     int runs = 10;
     for (int i=0; i<runs; i++)
-    {
-        launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, minN, K);
-        launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, maxN, K);
-    }
+        launchHip(a.dev, b.dev, c.dev, scale_a.dev, scale_b.dev, M, N, K);
 
     HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerPause(0);

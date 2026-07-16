@@ -25,7 +25,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -104,8 +103,6 @@ enum class MemBarrierMode
 
 struct SQTTConfig
 {
-    static constexpr unsigned AutoShaderClockBits = std::numeric_limits<unsigned>::max();
-
     bool InstrumentBarriers = false;
     CostMode Mode = CostMode::InstructionCount;
     unsigned FunctionThreshold = 0; // 0 = disabled
@@ -119,7 +116,7 @@ struct SQTTConfig
     MemBarrierMode MemBarrier = MemBarrierMode::Fence;
     bool TraceMemoryAddrs = false; // trace global/buffer/flat addresses
     bool TraceLDSAddrs = false;    // trace LDS addresses
-    unsigned ShaderClockBits = AutoShaderClockBits; // auto: gfx12 defaults to clock packing
+    unsigned ShaderClockBits = 0; // opt in to clock packing explicitly
     unsigned ShaderClockShift = 4;
 
     bool hasAddressTracing() const { return TraceMemoryAddrs || TraceLDSAddrs; }
@@ -197,7 +194,7 @@ struct SQTTConfig
         c.SimdMask = parseEnvMask("SQTT_SCOPE_SIMD", 0xF);
         c.CuMask = parseEnvMask("SQTT_SCOPE_CU", 0x3);
         c.WgMask = parseEnvMask("SQTT_SCOPE_WG", 0xFFFFFFFF);
-        c.ShaderClockBits = parseEnvUnsigned("SQTT_SHADER_CLOCK_BITS", AutoShaderClockBits);
+        c.ShaderClockBits = parseEnvUnsigned("SQTT_SHADER_CLOCK_BITS", 0);
         c.ShaderClockShift = parseEnvUnsigned("SQTT_SHADER_CLOCK_SHIFT", 4);
 
         const char* funcEnv = std::getenv("SQTT_INSTRUMENT_FUNCTIONS");

@@ -86,6 +86,7 @@ from sqtt_data import (
     load_occupancy,
     load_shaderdata,
     build_kernel_to_co,
+    make_funcmap_resolver,
     merge_folded,
     merge_funcmaps,
     preprocess_records,
@@ -97,7 +98,7 @@ from sqtt_data import (
 # ---------------------------------------------------------------------------
 
 # A unique wave identity
-WaveKey = tuple[int, int, int]  # (cu, simd, wave_id)
+WaveKey = tuple[int, int, int, int, int]  # (se, cu, simd, wave_id, instance)
 
 
 def build_stacks(
@@ -124,7 +125,7 @@ def build_stacks(
     # Merged funcmap for fallback resolution.
     merged = merge_funcmaps(per_co.values())
 
-    # Build sorted launch times per (cu, simd, wave_slot) from occupancy.
+    # Build sorted launch times per (SE, CU, SIMD, wave_slot) from occupancy.
     slot_launches: dict[tuple, list[int]] = defaultdict(list)
     for wk, spans in wave_spans.items():
         for span in spans:
@@ -132,9 +133,9 @@ def build_stacks(
     for wk in slot_launches:
         slot_launches[wk].sort()
 
-    def _wave_instance(cu: int, simd: int, wave_id: int, time: int) -> int:
+    def _wave_instance(shader_engine: int, cu: int, simd: int, wave_id: int, time: int) -> int:
         """Find which wave instance (launch index) a record belongs to."""
-        launches = slot_launches.get((cu, simd, wave_id), [])
+        launches = slot_launches.get((shader_engine, cu, simd, wave_id), [])
         if not launches:
             return 0
         lo, hi = 0, len(launches) - 1
@@ -148,17 +149,19 @@ def build_stacks(
                 hi = mid - 1
         return result
 
-    # Group records by (cu, simd, wave_id, instance)
+    # Group records by (SE, CU, SIMD, wave_id, instance)
     wave_records: dict[tuple, list[ShaderRecord]] = defaultdict(list)
     for rec in records:
+        if rec.flags & 2:
+            continue
         if filter_cu is not None and rec.cu != filter_cu:
             continue
         if filter_simd is not None and rec.simd != filter_simd:
             continue
         if filter_wave is not None and rec.wave_id != filter_wave:
             continue
-        inst = _wave_instance(rec.cu, rec.simd, rec.wave_id, rec.time)
-        key = (rec.cu, rec.simd, rec.wave_id, inst)
+        inst = _wave_instance(rec.shader_engine, rec.cu, rec.simd, rec.wave_id, rec.time)
+        key = (rec.shader_engine, rec.cu, rec.simd, rec.wave_id, inst)
         wave_records[key].append(rec)
 
     # (total_cycles, exec_count) per stack
@@ -193,15 +196,10 @@ def build_stacks(
         cur_dispatch_id: Optional[int] = None
         cur_funcmap: FuncMap = merged
 
-        base_wk = wave_key[:3]
+        base_wk = wave_key[:4]
         spans = wave_spans.get(base_wk, [])
 
         for rec in recs:
-            marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
-
-            if marker_id == 0 and not exit_prev:
-                continue
-
             # Check dispatch context
             span = find_wave_span_at(spans, rec.time)
             dispatch_id = span.dispatch_id if span else None
@@ -211,6 +209,10 @@ def build_stacks(
                 cur_dispatch_id = dispatch_id
                 stack = []
                 cur_prefix, cur_funcmap = _dispatch_prefix(dispatch_id)
+
+            marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
+            if marker_id == 0 and not exit_prev:
+                continue
 
             name, mtype = cur_funcmap.resolve(marker_id)
 
@@ -568,9 +570,10 @@ def main():
                             if not v.startswith("0 /")])
 
         # Filter out address trace records before building stacks
-        records, addr_traces = preprocess_records(records, merged)
+        resolver = make_funcmap_resolver(per_co, dispatches, kernel_to_co, wave_spans, merged)
+        records, addr_traces = preprocess_records(records, merged, resolver)
 
-        waves = set((r.cu, r.simd, r.wave_id) for r in records)
+        waves = set((record.shader_engine, record.cu, record.simd, record.wave_id) for record in records)
         total_records += len(records)
         all_waves.update(waves)
 
