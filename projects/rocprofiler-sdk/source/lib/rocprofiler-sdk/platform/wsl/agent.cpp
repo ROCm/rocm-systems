@@ -499,7 +499,7 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
         // yet (LuidLowPart/HighPart == 0); in that case fall back to matching by PCI
         // DeviceId, which the shim always fills. WSL is typically single-GPU, so the
         // DeviceId fallback is unambiguous there. Skip nodes that match neither.
-        const bool node_has_luid   = (n.LuidLowPart != 0 || n.LuidHighPart != 0);
+        const bool node_has_luid    = (n.LuidLowPart != 0 || n.LuidHighPart != 0);
         const bool adapter_has_luid = (luid.LowPart != 0 || luid.HighPart != 0);
         if(node_has_luid && adapter_has_luid)
         {
@@ -901,15 +901,17 @@ enumerate()
             if(topo.fw_ucode != 0) info.fw_version.ui32.uCode = topo.fw_ucode;
             if(topo.sdma_ucode != 0) info.sdma_fw_version.uCodeSDMA = topo.sdma_ucode;
 
-            const bool force_gfx =
-                (std::getenv("ROCPROFILER_FORCE_GFX") != nullptr &&
-                 *std::getenv("ROCPROFILER_FORCE_GFX") != '\0' &&
-                 ::rocprofiler::agent::parse_gfx_target_version(std::getenv("ROCPROFILER_FORCE_GFX"))
-                     .has_value());
+            const bool force_gfx = (std::getenv("ROCPROFILER_FORCE_GFX") != nullptr &&
+                                    *std::getenv("ROCPROFILER_FORCE_GFX") != '\0' &&
+                                    ::rocprofiler::agent::parse_gfx_target_version(
+                                        std::getenv("ROCPROFILER_FORCE_GFX"))
+                                        .has_value());
             if(!force_gfx && topo.engine_id_major != 0)
             {
-                auto shim_gfx = fmt::format(
-                    "gfx{}{}{:x}", topo.engine_id_major, topo.engine_id_minor, topo.engine_id_stepping);
+                auto shim_gfx = fmt::format("gfx{}{}{:x}",
+                                            topo.engine_id_major,
+                                            topo.engine_id_minor,
+                                            topo.engine_id_stepping);
                 if(auto _ver = ::rocprofiler::agent::parse_gfx_target_version(shim_gfx))
                 {
                     info.name               = common::get_string_entry(shim_gfx)->c_str();
