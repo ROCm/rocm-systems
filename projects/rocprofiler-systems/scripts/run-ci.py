@@ -117,6 +117,7 @@ def generate_custom(args, cmake_args, ctest_args):
     GIT_CMD = which("git", require=True)
     GCOV_CMD = which("gcov", require=False)
     CMAKE_CMD = which("cmake", require=True)
+    CTEST_CMD = which("ctest", require=True)
 
     NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
 
