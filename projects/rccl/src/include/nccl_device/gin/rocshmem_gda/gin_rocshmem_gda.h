@@ -33,7 +33,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         __threadfence_system();
       }
 
-      if (hasWins) {
+      // Skip zero-length RDMA writes (0-byte put_nbi can stall quiet()/flush() -> deadlock); signal still delivered, matching native rocSHMEM/PROXY.
+      if (hasWins && bytes != 0) {
         ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
         ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
 
