@@ -23,19 +23,18 @@ What operating systems does HIP support?
 ----------------------------------------
 
 Linux as well as Windows are supported by ROCm. The exact versions are listed in
-the system requirements for :ref:`rocm-install-on-linux:supported_distributions`
-and :ref:`rocm-install-on-windows:supported-skus-win`.
+the system requirements for :ref:`Install ROCm <rocm:rocm-install-selector>`.
 
 .. note::
    Not all HIP runtime API functions are yet supported on Windows.
-   A note is added to those functions' documentation in the
+   A note is added to those functions' documentation in the 
    :ref:`HIP runtime API reference<runtime_api_reference>`.
 
 What libraries does HIP provide?
 --------------------------------
 
-HIP provides key math and AI libraries. See :doc:`rocm:reference/api-libraries`
-for the full list.
+HIP provides key math and AI libraries. See
+`ROCm Core SDK components <https://rocm.docs.amd.com/en/latest/components/core.html>`__ for the full list.
 
 What CUDA features can be ported to HIP?
 -----------------------------------------------

@@ -322,7 +322,7 @@ using the bitcode APIs provided by HIPRTC.
 CU mode vs WGP mode
 -------------------
 
-All :doc:`supported AMD GPUs <rocm-install-on-linux:reference/system-requirements>` are built around a data-parallel
+All :ref:`supported GPUs <rocm:rocm-install-selector>` are built around a data-parallel
 processor (DPP) array.
 
 On CDNA GPUs, the DPP is organized as a set of compute unit (CU) pipelines, with each CU containing four SIMD64
