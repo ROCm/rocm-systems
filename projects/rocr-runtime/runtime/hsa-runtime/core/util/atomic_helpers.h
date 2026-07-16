@@ -281,12 +281,12 @@ static __forceinline void BasicCheck(const T* ptr) {
 /// @brief: Load value of type T atomically with specified memory order.
 /// @param: ptr(Input), a pointer to type T (may be volatile).
 /// @param: order(Input), memory order with atomic load, relaxed by default.
-/// @return: T (without volatile), loaded value.
+/// @return: T (without cv-qualifiers), loaded value.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
+static __forceinline std::remove_cv_t<T>
     Load(const T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
-  std::remove_volatile_t<T> ret;
+  std::remove_cv_t<T> ret;
   PreFence(order);
   __atomic_load(ptr, &ret, c11ToBuiltInFlags(order));
   PostFence(order);
@@ -300,7 +300,7 @@ static __forceinline std::remove_volatile_t<T>
 /// @return: void.
 template <class T>
 static __forceinline void Store(
-    T* ptr, std::remove_volatile_t<T> val,
+    T* ptr, std::remove_cv_t<T> val,
     std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
@@ -313,10 +313,10 @@ static __forceinline void Store(
 /// @param: val(Input), value to be stored if condition is satisfied.
 /// @param: expected(Input), value which is expected.
 /// @param: order(Input), memory order with atomic operation.
-/// @return: T (without volatile), observed value.
+/// @return: T (without cv-qualifiers), observed value.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Cas(T* ptr, std::remove_volatile_t<T> val, std::remove_volatile_t<T> expected,
+static __forceinline std::remove_cv_t<T>
+    Cas(T* ptr, std::remove_cv_t<T> val, std::remove_cv_t<T> expected,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
@@ -329,13 +329,13 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be stored.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), the value prior to the exchange.
+/// @return: T (without cv-qualifiers), the value prior to the exchange.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Exchange(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    Exchange(T* ptr, std::remove_cv_t<T> val,
              std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
-  std::remove_volatile_t<T> ret;
+  std::remove_cv_t<T> ret;
   PreFence(order);
   __atomic_exchange(ptr, &val, &ret, c11ToBuiltInFlags(order));
   PostFence(order);
@@ -346,14 +346,14 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be added.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), the value of the variable prior to the addition.
+/// @return: T (without cv-qualifiers), the value of the variable prior to the addition.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Add(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    Add(T* ptr, std::remove_cv_t<T> val,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -363,14 +363,14 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be subtraced.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of the variable prior to the subtraction.
+/// @return: T (without cv-qualifiers), value of the variable prior to the subtraction.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Sub(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    Sub(T* ptr, std::remove_cv_t<T> val,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -380,14 +380,14 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is ANDed with variable.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of variable prior to the operation.
+/// @return: T (without cv-qualifiers), value of variable prior to the operation.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    And(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    And(T* ptr, std::remove_cv_t<T> val,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -396,14 +396,14 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is ORed with variable.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of variable prior to the operation.
+/// @return: T (without cv-qualifiers), value of variable prior to the operation.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Or(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    Or(T* ptr, std::remove_cv_t<T> val,
        std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -413,14 +413,14 @@ static __forceinline std::remove_volatile_t<T>
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is XORed with variable.
 /// @order: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of variable prior to the operation.
+/// @return: T (without cv-qualifiers), value of variable prior to the operation.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
-    Xor(T* ptr, std::remove_volatile_t<T> val,
+static __forceinline std::remove_cv_t<T>
+    Xor(T* ptr, std::remove_cv_t<T> val,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -429,13 +429,13 @@ static __forceinline std::remove_volatile_t<T>
 /// order.
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of variable prior to the operation.
+/// @return: T (without cv-qualifiers), value of variable prior to the operation.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
+static __forceinline std::remove_cv_t<T>
     Increment(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
@@ -444,13 +444,13 @@ static __forceinline std::remove_volatile_t<T>
 /// order.
 /// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T (without volatile), value of variable prior to the operation.
+/// @return: T (without cv-qualifiers), value of variable prior to the operation.
 template <class T>
-static __forceinline std::remove_volatile_t<T>
+static __forceinline std::remove_cv_t<T>
     Decrement(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  std::remove_volatile_t<T> ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
+  std::remove_cv_t<T> ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }

@@ -548,6 +548,11 @@ For attachment profiling of running processes:
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--hip-graph-trace",
+        help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--memory-copy-trace",
         help="For collecting Memory Copy Traces. This was part of HIP and HSA traces in previous rocprof versions but is now a separate option",
     )
@@ -1703,6 +1708,10 @@ def run(app_args, args, **kwargs):
         for itr in ("compiler", "runtime"):
             setattrifnone(args, f"hip_{itr}_trace", True)
 
+    if args.hip_runtime_trace:
+        # HIP graphs are part of the HIP runtime
+        setattrifnone(args, "hip_graph_trace", True)
+
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
             setattrifnone(args, f"hsa_{itr}_trace", True)
@@ -1727,6 +1736,7 @@ def run(app_args, args, **kwargs):
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
+            ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],

@@ -18,6 +18,8 @@ namespace cdna4 {
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
   Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
+          bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
@@ -32,6 +34,8 @@ public:
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
 
 private:
+  uint16_t literal16_display_value_ = 0;
+  bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
 };

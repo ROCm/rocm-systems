@@ -26,6 +26,10 @@ __launch_bounds__(512)
         const T* __restrict__ sendbuff,
         int selfRank,
         IpcGpuBarrier barrier) {
+  barrier.syncOnSameBlockIdx<
+      false /* hasPreviousMemAccess */,
+      true /* hasSubsequentMemAccess */>();
+ 
   // use uint4 to do 16-byte loads to maximize memory efficiency
   // We assume that count % countPerThread == 0. This assumption is enforced
   // before kernel launch
@@ -36,17 +40,7 @@ __launch_bounds__(512)
 
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
-  const size_t copyCount = count * NRANKS;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  // It is expensive to launch hipMemcpyAsync on ROCm
-  // Move data copy here. Each block copies part of sendbuff data
-  copyFromSrcToDest<T>(
-      sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
-
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll NRANKS
