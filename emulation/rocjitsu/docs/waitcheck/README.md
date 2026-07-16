@@ -59,6 +59,28 @@ build/tools/rj_waitcheck path/to/corpus \
   --max-diagnostics 0 --stop-after-first-diagnostic --summary-only
 ```
 
+Require a complete target-specific sweep, suitable for an installed PyTorch
+tree or another release corpus:
+
+```sh
+build/tools/rj_waitcheck /path/to/site-packages/torch \
+  --exhaustive --target gfx950 --summary-only
+```
+
+`--exhaustive` implies `--recursive --all-code-objects`. Files that do not
+contain the selected target are ignored, while a selected code object that
+cannot be decoded or fully analyzed is counted as an analysis error and makes
+the command fail. The final summary reports completed/discovered code objects
+and kernel descriptors as `code-objects=C/D kernels=C/D`; a complete sweep has
+matching counts and `analysis-errors=0`. Unlike a bounded measurement sweep,
+exhaustive mode rejects `--skip-unsupported` and
+`--stop-after-first-diagnostic` because either option could hide unchecked
+kernels. When standard error is an interactive terminal, exhaustive mode first
+counts the selected code objects and kernel descriptors and then displays
+progress as `kernels C/D code-objects C/D`. Redirected and procedural runs are
+silent by default; use `--progress` to force the display or `--no-progress` to
+disable it.
+
 Useful options:
 
 | Option | Meaning |
@@ -68,6 +90,9 @@ Useful options:
 | `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. Use this to mirror dispatch-lazy runtime checking on a massive code object. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
+| `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. |
+| `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
+| `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |
@@ -78,7 +103,8 @@ Exit codes:
 
 - `0`: analysis succeeded and no hazards were found, or `--no-fail` was set.
 - `1`: command-line usage error.
-- `2`: input selection, parsing, or analysis error.
+- `2`: input selection, parsing, or analysis error, including an incomplete
+  `--exhaustive` sweep.
 - `4`: one or more hazards were found.
 
 ## Generated Or Standalone Kernel Code

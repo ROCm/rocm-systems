@@ -19,6 +19,8 @@
 #include <system_error>
 #include <vector>
 
+#include <unistd.h>
+
 using namespace rocjitsu;
 
 namespace {
@@ -26,6 +28,8 @@ namespace {
 constexpr int kUsageError = 1;
 constexpr int kInputError = 2;
 constexpr int kHazardDetected = 4;
+
+enum class ProgressMode : uint8_t { Auto, Always, Never };
 
 struct TargetInfo {
   std::string_view name;
@@ -51,11 +55,13 @@ struct CliOptions {
   bool all_code_objects = false;
   bool list_code_objects = false;
   bool recursive = false;
+  bool exhaustive = false;
   bool skip_unsupported = false;
   bool summary_only = false;
   bool stop_after_first_diagnostic = false;
   bool no_fail = false;
   bool show_help = false;
+  ProgressMode progress = ProgressMode::Auto;
 };
 
 struct SelectedCodeObject {
@@ -68,10 +74,108 @@ struct SelectedCodeObject {
 struct ScanTotals {
   uint32_t inputs = 0;
   uint32_t skipped = 0;
+  uint32_t ignored = 0;
+  uint32_t analysis_errors = 0;
+  uint32_t code_objects_discovered = 0;
   uint32_t code_objects = 0;
+  size_t kernels_discovered = 0;
+  size_t kernels_analyzed = 0;
+  size_t instructions_analyzed = 0;
+  size_t memory_events_tracked = 0;
   size_t diagnostics = 0;
   bool diagnostics_truncated = false;
   bool hazards = false;
+};
+
+struct ProgressTotals {
+  size_t code_objects = 0;
+  size_t kernels = 0;
+};
+
+class ProgressDisplay {
+public:
+  explicit ProgressDisplay(ProgressMode mode)
+      : enabled_(mode == ProgressMode::Always ||
+                 (mode == ProgressMode::Auto && isatty(STDERR_FILENO) != 0)) {}
+
+  [[nodiscard]] bool enabled() const { return enabled_; }
+
+  void begin_discovery() {
+    if (!enabled_)
+      return;
+    std::cerr << "\rrj_waitcheck: discovering kernels...\033[K" << std::flush;
+    line_active_ = true;
+  }
+
+  void set_totals(ProgressTotals totals) {
+    totals_ = totals;
+    render(true);
+  }
+
+  void begin_code_object(const std::string &input_path, std::string_view target,
+                         uint32_t code_object_index) {
+    if (!enabled_)
+      return;
+    const std::filesystem::path path(input_path);
+    current_ = path.filename().string();
+    if (current_.empty())
+      current_ = input_path;
+    current_ += ":" + std::string(target) + "[" + std::to_string(code_object_index) + "]";
+    render(true);
+  }
+
+  void kernel_analyzed() {
+    ++kernels_processed_;
+    render(false);
+  }
+
+  void code_object_processed() {
+    ++code_objects_processed_;
+    render(true);
+  }
+
+  void before_message() {
+    if (!enabled_ || !line_active_)
+      return;
+    std::cerr << "\n";
+    line_active_ = false;
+  }
+
+  void finish() {
+    if (!enabled_)
+      return;
+    if (!line_active_)
+      render(true);
+    before_message();
+  }
+
+private:
+  void render(bool force) {
+    if (!enabled_)
+      return;
+    const size_t total_work = totals_.kernels + totals_.code_objects;
+    const size_t completed_work = kernels_processed_ + code_objects_processed_;
+    const size_t percent =
+        total_work == 0 ? 100 : std::min<size_t>(100, completed_work * 100 / total_work);
+    if (!force && last_percent_ && *last_percent_ == percent)
+      return;
+    last_percent_ = percent;
+    std::cerr << "\rrj_waitcheck: " << std::setw(3) << percent << "% kernels " << kernels_processed_
+              << "/" << totals_.kernels << " code-objects " << code_objects_processed_ << "/"
+              << totals_.code_objects;
+    if (!current_.empty())
+      std::cerr << " " << current_;
+    std::cerr << "\033[K" << std::flush;
+    line_active_ = true;
+  }
+
+  bool enabled_ = false;
+  bool line_active_ = false;
+  ProgressTotals totals_;
+  size_t code_objects_processed_ = 0;
+  size_t kernels_processed_ = 0;
+  std::optional<size_t> last_percent_;
+  std::string current_;
 };
 
 void print_supported_targets(std::ostream &os) {
@@ -91,6 +195,9 @@ void print_help() {
             << "  --all-code-objects       Analyze all supported code objects\n"
             << "  --list-code-objects      List supported code objects and exit\n"
             << "  --recursive              Expand directory inputs into recursive file sweeps\n"
+            << "  --exhaustive             Strict recursive target sweep with completeness totals\n"
+            << "  --progress               Show exhaustive kernel progress even without a TTY\n"
+            << "  --no-progress            Disable exhaustive kernel progress\n"
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"
             << "  --stop-after-first-diagnostic\n"
@@ -175,6 +282,20 @@ void print_help() {
       options.recursive = true;
       continue;
     }
+    if (arg == "--exhaustive") {
+      options.exhaustive = true;
+      options.recursive = true;
+      options.all_code_objects = true;
+      continue;
+    }
+    if (arg == "--progress") {
+      options.progress = ProgressMode::Always;
+      continue;
+    }
+    if (arg == "--no-progress") {
+      options.progress = ProgressMode::Never;
+      continue;
+    }
     if (arg == "--skip-unsupported") {
       options.skip_unsupported = true;
       continue;
@@ -252,6 +373,26 @@ void print_help() {
     std::cerr << "--kernel-entry cannot be used with --all-code-objects\n";
     return false;
   }
+  if (options.exhaustive && !options.target) {
+    std::cerr << "--exhaustive requires --target\n";
+    return false;
+  }
+  if (options.exhaustive && options.skip_unsupported) {
+    std::cerr << "--skip-unsupported cannot be used with --exhaustive\n";
+    return false;
+  }
+  if (options.exhaustive && options.stop_after_first_diagnostic) {
+    std::cerr << "--stop-after-first-diagnostic cannot be used with --exhaustive\n";
+    return false;
+  }
+  if (options.exhaustive && options.list_code_objects) {
+    std::cerr << "--list-code-objects cannot be used with --exhaustive\n";
+    return false;
+  }
+  if (!options.exhaustive && options.progress == ProgressMode::Always) {
+    std::cerr << "--progress requires --exhaustive\n";
+    return false;
+  }
 
   return true;
 }
@@ -299,6 +440,29 @@ void print_help() {
   }
   options.input_paths = std::move(expanded);
   return true;
+}
+
+[[nodiscard]] ProgressTotals discover_progress_totals(const CliOptions &options) {
+  ProgressTotals totals;
+  for (const std::string &input_path : options.input_paths) {
+    Executable executable(input_path);
+    if (!executable.is_valid())
+      continue;
+
+    for (const TargetInfo &info : kSupportedTargets) {
+      if (options.target && *options.target != info.target)
+        continue;
+      const uint32_t count = executable.num_code_objects(info.target);
+      for (uint32_t index = 0; index < count; ++index) {
+        const AmdGpuCodeObject *code_object = executable.code_object(info.target, index);
+        if (!code_object)
+          continue;
+        ++totals.code_objects;
+        totals.kernels += waitcheck_kernels(*code_object).size();
+      }
+    }
+  }
+  return totals;
 }
 
 [[nodiscard]] std::string hex_offset(uint64_t value) {
@@ -434,23 +598,55 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
   std::cout << "rj_waitcheck: " << input_path << ": skipped: " << reason << "\n";
 }
 
+void ignore_input(const std::string &input_path, std::string_view reason, ScanTotals &totals,
+                  bool quiet = false) {
+  ++totals.ignored;
+  if (quiet)
+    return;
+  std::cout << "rj_waitcheck: " << input_path << ": ignored: " << reason << "\n";
+}
+
+void record_analysis_error(const std::string &input_path, std::string_view reason,
+                           ScanTotals &totals, ProgressDisplay *progress) {
+  ++totals.analysis_errors;
+  if (progress)
+    progress->before_message();
+  std::cerr << "rj_waitcheck: " << input_path << ": analysis error: " << reason << "\n";
+}
+
 [[nodiscard]] bool analyze_code_object(const CliOptions &options, const std::string &input_path,
                                        rj_code_target_id_t target, uint32_t code_object_index,
                                        const AmdGpuCodeObject &code_object, ScanTotals &totals,
-                                       std::string &error) {
+                                       std::string &error, ProgressDisplay *progress = nullptr) {
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
     error = "target is not supported by waitcheck: " + std::string(target_name(target));
     return false;
   }
 
+  ++totals.code_objects_discovered;
+  if (progress)
+    progress->begin_code_object(input_path, target_name(target), code_object_index);
+
   WaitcheckOptions analysis_options;
   analysis_options.max_diagnostics = options.max_diagnostics;
   analysis_options.stop_after_first_diagnostic = options.stop_after_first_diagnostic;
+  if (progress)
+    analysis_options.kernel_analyzed_callback = [&] { progress->kernel_analyzed(); };
   WaitcheckReport report =
       options.kernel_entry
           ? analyze_waitcnts_for_kernel(code_object, arch, *options.kernel_entry, analysis_options)
           : analyze_waitcnts(code_object, arch, analysis_options);
+  if (progress)
+    progress->code_object_processed();
+
+  totals.kernels_discovered += report.kernels_discovered;
+  totals.kernels_analyzed += report.kernels_analyzed;
+  totals.instructions_analyzed += report.instructions_analyzed;
+  totals.memory_events_tracked += report.memory_events_tracked;
+  totals.diagnostics += report.diagnostics_observed;
+  totals.diagnostics_truncated = totals.diagnostics_truncated || report.diagnostics_truncated;
+  totals.hazards = totals.hazards || !report.passed();
   if (!report.supported) {
     error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
             std::to_string(code_object_index) + "]";
@@ -460,9 +656,6 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
   }
 
   ++totals.code_objects;
-  totals.diagnostics += report.diagnostics_observed;
-  totals.diagnostics_truncated = totals.diagnostics_truncated || report.diagnostics_truncated;
-  totals.hazards = totals.hazards || !report.passed();
 
   if (!options.summary_only) {
     print_summary(input_path, target, code_object_index, options.kernel_entry, report);
@@ -498,9 +691,15 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
 }
 
 [[nodiscard]] bool scan_all_code_objects(const CliOptions &options, const std::string &input_path,
-                                         ScanTotals &totals, std::string &error) {
+                                         ScanTotals &totals, std::string &error,
+                                         ProgressDisplay *progress = nullptr) {
   Executable executable(input_path);
   if (!executable.is_valid()) {
+    if (options.exhaustive) {
+      ignore_input(input_path, "not a supported executable or code object", totals,
+                   options.summary_only);
+      return true;
+    }
     if (options.skip_unsupported) {
       skip_input(input_path, "failed to parse input executable or code object", totals,
                  options.summary_only);
@@ -521,12 +720,20 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
       if (!code_object) {
         std::ostringstream os;
         os << input_path << ": failed to select " << info.name << " code object " << index;
+        if (options.exhaustive) {
+          record_analysis_error(input_path, os.str(), totals, progress);
+          continue;
+        }
         error = os.str();
         return false;
       }
       found = true;
-      if (!analyze_code_object(options, input_path, info.target, index, *code_object, totals,
-                               error)) {
+      if (!analyze_code_object(options, input_path, info.target, index, *code_object, totals, error,
+                               progress)) {
+        if (options.exhaustive) {
+          record_analysis_error(input_path, error, totals, progress);
+          continue;
+        }
         if (options.skip_unsupported) {
           skip_input(input_path, error, totals, options.summary_only);
           continue;
@@ -541,6 +748,10 @@ void skip_input(const std::string &input_path, std::string_view reason, ScanTota
     const std::string reason =
         options.target ? "no " + std::string(target_name(*options.target)) + " code objects found"
                        : "no supported code objects found";
+    if (options.exhaustive) {
+      ignore_input(input_path, reason, totals, options.summary_only);
+      return true;
+    }
     if (options.skip_unsupported) {
       skip_input(input_path, reason, totals, options.summary_only);
       return true;
@@ -593,6 +804,14 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  ProgressDisplay progress(options.progress);
+  ProgressDisplay *progress_ptr = nullptr;
+  if (options.exhaustive && progress.enabled()) {
+    progress_ptr = &progress;
+    progress.begin_discovery();
+    progress.set_totals(discover_progress_totals(options));
+  }
+
   const bool batch_mode = options.input_paths.size() > 1 || options.all_code_objects ||
                           options.skip_unsupported || options.recursive || options.summary_only;
   ScanTotals totals;
@@ -600,20 +819,37 @@ int main(int argc, char **argv) {
     ++totals.inputs;
     std::string error;
     const bool ok = options.all_code_objects
-                        ? scan_all_code_objects(options, input_path, totals, error)
+                        ? scan_all_code_objects(options, input_path, totals, error, progress_ptr)
                         : scan_selected_code_object(options, input_path, totals, error);
     if (!ok) {
+      if (progress_ptr)
+        progress.before_message();
       std::cerr << error << "\n";
       return kInputError;
     }
   }
+  if (progress_ptr)
+    progress.finish();
 
-  if (batch_mode) {
+  if (options.exhaustive) {
+    std::cout << "rj_waitcheck: exhaustive files=" << totals.inputs << " ignored=" << totals.ignored
+              << " code-objects=" << totals.code_objects << "/" << totals.code_objects_discovered
+              << " kernels=" << totals.kernels_analyzed << "/" << totals.kernels_discovered
+              << " instructions=" << totals.instructions_analyzed
+              << " memory-events=" << totals.memory_events_tracked
+              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated)
+              << " analysis-errors=" << totals.analysis_errors << "\n";
+  } else if (batch_mode) {
     std::cout << "rj_waitcheck: scanned inputs=" << totals.inputs << " skipped=" << totals.skipped
               << " code-objects=" << totals.code_objects
               << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated)
               << "\n";
   }
+
+  if (options.exhaustive && (totals.analysis_errors != 0 || totals.code_objects_discovered == 0 ||
+                             totals.code_objects != totals.code_objects_discovered ||
+                             totals.kernels_analyzed != totals.kernels_discovered))
+    return kInputError;
 
   if (totals.hazards && !options.no_fail)
     return kHazardDetected;

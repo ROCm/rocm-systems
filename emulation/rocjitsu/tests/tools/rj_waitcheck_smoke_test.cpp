@@ -651,6 +651,157 @@ TEST(RjWaitcheck, SummaryOnlyRecursiveSweepReportsLowerBoundTotals) {
   EXPECT_FALSE(contains(stdout_text, "missing s_wait_loadcnt")) << stdout_text;
 }
 
+TEST(RjWaitcheck, ExhaustiveSweepReportsCompletedKernelTotals) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto corpus = temp_dir.path / "corpus";
+  const auto missing = corpus / "missing_wait_gfx1200.co";
+  const auto correct = corpus / "correct_wait_gfx1200.co";
+  const auto unrelated = corpus / "unrelated.txt";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  std::filesystem::create_directories(corpus);
+
+  ASSERT_TRUE(write_binary_file(missing,
+                                rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object()));
+  ASSERT_TRUE(write_binary_file(correct,
+                                rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object()));
+  {
+    std::ofstream out(unrelated);
+    out << "not an ELF";
+  }
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(corpus.string()) +
+                              " --exhaustive --target gfx1200 --summary-only > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_exited_with(status, 4)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text,
+                       "rj_waitcheck: exhaustive files=3 ignored=1 code-objects=2/2 kernels=2/2 "
+                       "instructions=5 memory-events=2 diagnostics=1 analysis-errors=0"))
+      << stdout_text;
+}
+
+TEST(RjWaitcheck, ExhaustiveProgressHasKernelDenominatorWhenForced) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto corpus = temp_dir.path / "corpus";
+  const auto first = corpus / "first_gfx1200.co";
+  const auto second = corpus / "second_gfx1200.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  std::filesystem::create_directories(corpus);
+
+  ASSERT_TRUE(
+      write_binary_file(first, rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object()));
+  ASSERT_TRUE(
+      write_binary_file(second, rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object()));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(corpus.string()) +
+                              " --exhaustive --target gfx1200 --summary-only --progress > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "kernels 0/2 code-objects 0/2")) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "100% kernels 2/2 code-objects 2/2")) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "code-objects=2/2 kernels=2/2")) << stdout_text;
+}
+
+TEST(RjWaitcheck, ExhaustiveSweepFailsWhenSelectedObjectCannotBeAnalyzed) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto corpus = temp_dir.path / "corpus";
+  const auto invalid = corpus / "invalid_inst_gfx1200.co";
+  const auto correct = corpus / "correct_wait_gfx1200.co";
+  const auto unrelated = corpus / "unrelated.txt";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  std::filesystem::create_directories(corpus);
+
+  ASSERT_TRUE(write_binary_file(
+      invalid, rocjitsu::waitcheck_test::make_gfx1200_invalid_instruction_code_object()));
+  ASSERT_TRUE(write_binary_file(correct,
+                                rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object()));
+  {
+    std::ofstream out(unrelated);
+    out << "not an ELF";
+  }
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(corpus.string()) +
+                              " --exhaustive --target gfx1200 --summary-only > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_exited_with(status, 2)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(contains(stderr_text,
+                       "invalid_inst_gfx1200.co: analysis error: waitcheck analysis failed for "
+                       "gfx1200[0]: decode failed while building CFG"))
+      << stderr_text;
+  EXPECT_TRUE(contains(stdout_text,
+                       "rj_waitcheck: exhaustive files=3 ignored=1 code-objects=1/2 kernels=1/2 "
+                       "instructions=3 memory-events=1 diagnostics=0 analysis-errors=1"))
+      << stdout_text;
+}
+
+TEST(RjWaitcheck, ExhaustiveSweepRequiresTargetAndFullAnalysis) {
+  const auto output = std::filesystem::temp_directory_path() /
+                      ("rj_waitcheck_usage_" + std::to_string(static_cast<long long>(getpid())));
+  const std::string command = shell_quote(g_waitcheck_tool.string()) +
+                              " . --exhaustive > /dev/null 2> " + shell_quote(output.string());
+  int status = std::system(command.c_str());
+  std::string stderr_text = read_text_file(output);
+  EXPECT_TRUE(command_exited_with(status, 1)) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "--exhaustive requires --target")) << stderr_text;
+
+  const std::string stop_command =
+      shell_quote(g_waitcheck_tool.string()) +
+      " . --exhaustive --target gfx1200 --stop-after-first-diagnostic > /dev/null 2> " +
+      shell_quote(output.string());
+  status = std::system(stop_command.c_str());
+  stderr_text = read_text_file(output);
+  std::filesystem::remove(output);
+  EXPECT_TRUE(command_exited_with(status, 1)) << stderr_text;
+  EXPECT_TRUE(
+      contains(stderr_text, "--stop-after-first-diagnostic cannot be used with --exhaustive"))
+      << stderr_text;
+
+  const std::string progress_command = shell_quote(g_waitcheck_tool.string()) +
+                                       " . --progress > /dev/null 2> " +
+                                       shell_quote(output.string());
+  status = std::system(progress_command.c_str());
+  stderr_text = read_text_file(output);
+  std::filesystem::remove(output);
+  EXPECT_TRUE(command_exited_with(status, 1)) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "--progress requires --exhaustive")) << stderr_text;
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
     std::cerr << "usage: rj_waitcheck_smoke_test <rj_waitcheck>\n";
