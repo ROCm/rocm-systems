@@ -3,17 +3,17 @@
 
 #pragma once
 
-#include "common/defines.h"
 #include "common/static_object.hpp"
 #include "logger/debug.hpp"
 #include "utility.hpp"
 
+#include <spdlog/fmt/bundled/base.h>
+#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <atomic>
 #include <cstdint>
 #include <stdexcept>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -63,18 +63,18 @@ struct fmt::formatter<rocprofsys::process_lifecycle_state>
 : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_lifecycle_state _v, FormatContext& ctx) const
+    auto format(rocprofsys::process_lifecycle_state pl_state, FormatContext& ctx) const
     {
-        std::string_view _s = {};
-        switch(_v)
+        std::string_view str = {};
+        switch(pl_state)
         {
-            case rocprofsys::process_lifecycle_state::PreInit: _s = "PreInit"; break;
-            case rocprofsys::process_lifecycle_state::Init: _s = "Init"; break;
-            case rocprofsys::process_lifecycle_state::Active: _s = "Active"; break;
-            case rocprofsys::process_lifecycle_state::Disabled: _s = "Disabled"; break;
-            case rocprofsys::process_lifecycle_state::Finalized: _s = "Finalized"; break;
+            case rocprofsys::process_lifecycle_state::PreInit: str = "PreInit"; break;
+            case rocprofsys::process_lifecycle_state::Init: str = "Init"; break;
+            case rocprofsys::process_lifecycle_state::Active: str = "Active"; break;
+            case rocprofsys::process_lifecycle_state::Disabled: str = "Disabled"; break;
+            case rocprofsys::process_lifecycle_state::Finalized: str = "Finalized"; break;
         }
-        return fmt::formatter<std::string_view>::format(_s, ctx);
+        return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
@@ -83,17 +83,17 @@ struct fmt::formatter<rocprofsys::thread_lifecycle_state>
 : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::thread_lifecycle_state _v, FormatContext& ctx) const
+    auto format(rocprofsys::thread_lifecycle_state tl_state, FormatContext& ctx) const
     {
-        std::string_view _s = {};
-        switch(_v)
+        std::string_view str = {};
+        switch(tl_state)
         {
-            case rocprofsys::thread_lifecycle_state::Enabled: _s = "Enabled"; break;
-            case rocprofsys::thread_lifecycle_state::Internal: _s = "Internal"; break;
-            case rocprofsys::thread_lifecycle_state::Completed: _s = "Completed"; break;
-            case rocprofsys::thread_lifecycle_state::Disabled: _s = "Disabled"; break;
+            case rocprofsys::thread_lifecycle_state::Enabled: str = "Enabled"; break;
+            case rocprofsys::thread_lifecycle_state::Internal: str = "Internal"; break;
+            case rocprofsys::thread_lifecycle_state::Completed: str = "Completed"; break;
+            case rocprofsys::thread_lifecycle_state::Disabled: str = "Disabled"; break;
         }
-        return fmt::formatter<std::string_view>::format(_s, ctx);
+        return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
@@ -101,17 +101,17 @@ template <>
 struct fmt::formatter<rocprofsys::process_mode> : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_mode _v, FormatContext& ctx) const
+    auto format(rocprofsys::process_mode p_mode, FormatContext& ctx) const
     {
-        std::string_view _s = {};
-        switch(_v)
+        std::string_view str = {};
+        switch(p_mode)
         {
-            case rocprofsys::process_mode::Trace: _s = "Trace"; break;
-            case rocprofsys::process_mode::Sampling: _s = "Sampling"; break;
-            case rocprofsys::process_mode::Causal: _s = "Causal"; break;
-            case rocprofsys::process_mode::Coverage: _s = "Coverage"; break;
+            case rocprofsys::process_mode::Trace: str = "Trace"; break;
+            case rocprofsys::process_mode::Sampling: str = "Sampling"; break;
+            case rocprofsys::process_mode::Causal: str = "Causal"; break;
+            case rocprofsys::process_mode::Coverage: str = "Coverage"; break;
         }
-        return fmt::formatter<std::string_view>::format(_s, ctx);
+        return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
@@ -119,31 +119,22 @@ template <>
 struct fmt::formatter<rocprofsys::process_causal_mode> : fmt::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(rocprofsys::process_causal_mode _v, FormatContext& ctx) const
+    auto format(rocprofsys::process_causal_mode c_mode, FormatContext& ctx) const
     {
-        std::string_view _s = {};
-        switch(_v)
+        std::string_view str = {};
+        switch(c_mode)
         {
-            case rocprofsys::process_causal_mode::Line: _s = "Line"; break;
-            case rocprofsys::process_causal_mode::Function: _s = "Function"; break;
+            case rocprofsys::process_causal_mode::Line: str = "Line"; break;
+            case rocprofsys::process_causal_mode::Function: str = "Function"; break;
         }
-        return fmt::formatter<std::string_view>::format(_s, ctx);
+        return fmt::formatter<std::string_view>::format(str, ctx);
     }
 };
 
 namespace rocprofsys
 {
-class config_policy
-{
-public:
-    static bool get_debug_init();
-};
 
-// Storage is keyed on Policy (see storage() below) so basic_process_state<mock_policy>
-// in tests never shares the common::static_object<..., Policy> instance with the
-// production process_state alias.
-template <typename Policy = config_policy>
-class basic_process_state final
+class process_state final
 {
 public:
     using State         = process_lifecycle_state;
@@ -151,56 +142,48 @@ public:
     using CausalBackend = process_causal_backend;
     using CausalMode    = process_causal_mode;
 
-    basic_process_state()                                      = delete;
-    basic_process_state(const basic_process_state&)            = delete;
-    basic_process_state& operator=(const basic_process_state&) = delete;
-    basic_process_state(basic_process_state&&)                 = delete;
-    basic_process_state& operator=(basic_process_state&&)      = delete;
+    process_state()                                = delete;
+    process_state(const process_state&)            = delete;
+    process_state& operator=(const process_state&) = delete;
+    process_state(process_state&&)                 = delete;
+    process_state& operator=(process_state&&)      = delete;
+    ~process_state()                               = default;
 
     [[gnu::hot]] static State get() noexcept
     {
         return storage().load(std::memory_order_relaxed);
     }
 
-    [[gnu::cold]] static State set(State _n)
+    [[gnu::cold]] static State set(State state_to_set)
     {
-        auto is_debug_init = Policy::get_debug_init();
-        if(is_debug_init)
+        auto last_state = get();
+        if(state_to_set < last_state)
         {
-            LOG_DEBUG("Setting state :: {} -> {}", get(), _n);
+            throw std::runtime_error(
+                fmt::format("State is being assigned to a lesser value :: {} -> {}",
+                            last_state, state_to_set));
         }
-        if(_n < get())
-        {
-            throw std::runtime_error(fmt::format(
-                "State is being assigned to a lesser value :: {} -> {}", get(), _n));
-        }
-        auto _prior = get();
-        storage().store(_n, std::memory_order_relaxed);
-        return _prior;
+        storage().store(state_to_set, std::memory_order_relaxed);
+        LOG_DEBUG("Setting state :: {} -> {}", last_state, state_to_set);
+        return last_state;
     }
 
     [[gnu::cold]] static State reset()
     {
-        auto is_debug_init = Policy::get_debug_init();
-        if(is_debug_init)
-        {
-            LOG_DEBUG("Resetting state :: {} -> PreInit", get());
-        }
-        auto _prior = get();
+        auto last_state = get();
         storage().store(State::PreInit, std::memory_order_relaxed);
-        return _prior;
+        LOG_DEBUG("Resetting state :: {} -> PreInit", get());
+        return last_state;
     }
 
 private:
     static std::atomic<State>& storage() noexcept
     {
-        static auto*& _v = common::static_object<std::atomic<State>, Policy>::construct(
+        static auto*& atomic_state = common::static_object<std::atomic<State>>::construct(
             common::do_not_destroy{}, State::PreInit);
-        return *_v;
+        return *atomic_state;
     }
 };
-
-using process_state = basic_process_state<>;
 
 class thread_state final
 {
@@ -212,30 +195,37 @@ public:
     thread_state& operator=(const thread_state&) = delete;
     thread_state(thread_state&&)                 = delete;
     thread_state& operator=(thread_state&&)      = delete;
+    ~thread_state()                              = default;
 
     [[gnu::hot]] static State get() noexcept { return current(); }
 
-    [[gnu::hot]] static State set(State _n) noexcept
+    [[gnu::hot]] static State set(State state_to_set) noexcept
     {
-        auto _prior = current();
-        current()   = _n;
-        return _prior;
+        auto last_state = current();
+        current()       = state_to_set;
+        return last_state;
     }
 
-    [[gnu::hot]] static State push(State _v)
+    [[gnu::hot]] static State push(State state_to_push)
     {
-        if(get() >= State::Completed) return get();
-        return history().emplace_back(set(_v));
+        if(get() >= State::Completed)
+        {
+            return get();
+        }
+        return history().emplace_back(set(state_to_push));
     }
 
     [[gnu::hot]] static State pop()
     {
-        if(get() >= State::Completed) return get();
-        auto& _hist = history();
-        if(!_hist.empty())
+        if(get() >= State::Completed)
         {
-            set(_hist.back());
-            _hist.pop_back();
+            return get();
+        }
+        auto& state_history = history();
+        if(!state_history.empty())
+        {
+            set(state_history.back());
+            state_history.pop_back();
         }
         return get();
     }
@@ -243,7 +233,10 @@ public:
     class [[nodiscard]] scoped_guard
     {
     public:
-        [[gnu::always_inline]] explicit scoped_guard(State _v) { thread_state::push(_v); }
+        [[gnu::always_inline]] explicit scoped_guard(State state_to_push)
+        {
+            thread_state::push(state_to_push);
+        }
 
         [[gnu::always_inline]] ~scoped_guard() { thread_state::pop(); }
 
@@ -253,32 +246,34 @@ public:
         scoped_guard& operator=(scoped_guard&&)      = delete;
     };
 
-    [[nodiscard]] [[gnu::hot]] static scoped_guard scoped(State _v)
+    [[nodiscard]] [[gnu::hot]] static scoped_guard scoped(State state_to_set)
     {
-        return scoped_guard{ _v };
+        return scoped_guard{ state_to_set };
     }
 
 private:
     static State& current() noexcept
     {
-        static thread_local auto _v = State::Enabled;
-        return _v;
+        static thread_local auto current_state = State::Enabled;
+        return current_state;
     }
 
     static std::vector<State>& history()
     {
-        auto _idx = utility::get_thread_index();
+        auto thread_index = utility::get_thread_index();
 
-        static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
-            []() { return utility::get_reserved_vector<State>(32); });
+        static auto state_history_array =
+            utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
+                []() { return utility::get_reserved_vector<State>(32); });
 
-        if(_idx >= ROCPROFSYS_MAX_THREADS)
+        if(thread_index >= ROCPROFSYS_MAX_THREADS)
         {
-            static thread_local auto _tl_v = utility::get_reserved_vector<State>(32);
-            return _tl_v;
+            static thread_local auto local_vector =
+                utility::get_reserved_vector<State>(32);
+            return local_vector;
         }
 
-        return _v.at(_idx);
+        return state_history_array.at(thread_index);
     }
 };
 }  // namespace rocprofsys
