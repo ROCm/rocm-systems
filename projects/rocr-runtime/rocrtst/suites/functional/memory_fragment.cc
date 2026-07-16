@@ -5,7 +5,6 @@
  */
 
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -161,9 +160,8 @@ void MemoryFragment::FragmentOverlapTest(void) {
   if (FragmentAllocatorDisabled()) {
     // The vendored gtest predates GTEST_SKIP(), so emit the conventional
     // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
-    fprintf(stdout,
-            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
-            "sub-allocator disabled.\n");
+    std::cout << "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+                 "sub-allocator disabled." << std::endl;
     return;
   }
 
@@ -310,9 +308,8 @@ void MemoryFragment::FragmentZeroInitTest(void) {
   if (FragmentAllocatorDisabled()) {
     // The vendored gtest predates GTEST_SKIP(), so emit the conventional
     // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
-    fprintf(stdout,
-            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
-            "sub-allocator disabled.\n");
+    std::cout << "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+                 "sub-allocator disabled." << std::endl;
     return;
   }
 
@@ -538,9 +535,8 @@ void MemoryFragment::FragmentCoherenceTest(void) {
   if (FragmentAllocatorDisabled()) {
     // The vendored gtest predates GTEST_SKIP(), so emit the conventional
     // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
-    fprintf(stdout,
-            "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
-            "sub-allocator disabled.\n");
+    std::cout << "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+                 "sub-allocator disabled." << std::endl;
     return;
   }
 
