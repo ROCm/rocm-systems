@@ -1142,8 +1142,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
               amd::Image* img = mem->asImage();
 
               // Copy memory from the original image buffer into the backing store image
-              blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(), true,
-                                          img->getRowPitch(), img->getSlicePitch());
+              (void)blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
+                                                true, img->getRowPitch(), img->getSlicePitch());
               // Make sure the copy operation is done
               setAqlHeader(dispatchPacketHeader_);
               // Use backing store SRD as the replacment
@@ -4106,8 +4106,6 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
-    dev().getRocMemory(dstMemory);
-
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
 
@@ -4857,8 +4855,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(), true,
-                                  image->getRowPitch(), image->getSlicePitch());
+      (void)blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(), true,
+                                        image->getRowPitch(), image->getSlicePitch());
     }
   }
   return true;

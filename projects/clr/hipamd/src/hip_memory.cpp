@@ -4889,7 +4889,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   CHECK_STREAM_CAPTURE_SUPPORTED();
 
   auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  (void)buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {mipmapDesc->extent.width,
                                           mipmapDesc->extent.height,

@@ -194,7 +194,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
         event = nullptr;
       } else {
         // Make sure runtime sends a notification to the worker thread
-        event->ready();
+        (void)event->ready();
       }
     }
 
