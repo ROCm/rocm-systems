@@ -91,6 +91,9 @@ jobs:
         run: python -m pip install --quiet pyyaml
       - id: cfg
         env:
+          # Optional: point at a ci_targets.yml hosted elsewhere so the target list can
+          # change without a code PR. Empty = use the in-repo .github/scripts/ci_targets.yml.
+          CI_TARGETS_URL: ${{ vars.CI_TARGETS_URL }}
           INPUT_WORKLOAD: ${{ inputs.workload }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_CLUSTER: ${{ inputs.cluster }}
