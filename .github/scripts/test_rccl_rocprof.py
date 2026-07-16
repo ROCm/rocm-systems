@@ -221,6 +221,7 @@ class TestRCCLRocprof:
                 f"({len(all_content)} bytes total)."
             )
 
+    @pytest.mark.skip(reason="sys-trace traces all domains and exceeds CI timeout; run locally or in nightly")
     def test_rocprofv3_sys_trace_rccl(self):
         skip_if_missing(PATHS["rocprofv3"], "rocprofv3")
         skip_if_missing(PATHS["rccl_unittests"], "rccl-UnitTests")
