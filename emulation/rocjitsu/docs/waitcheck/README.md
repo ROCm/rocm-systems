@@ -67,6 +67,22 @@ build/tools/rj_waitcheck /path/to/site-packages/torch \
   --exhaustive --target gfx950 --summary-only -j16 --slowest-kernels 10
 ```
 
+Preserve every diagnostic from an exhaustive sweep as machine-readable JSONL:
+
+```sh
+build/tools/rj_waitcheck /path/to/site-packages/torch \
+  --exhaustive --target gfx942 --summary-only --no-fail -j12 \
+  --diagnostics-jsonl gfx942-diagnostics.raw.jsonl
+```
+
+`--diagnostics-jsonl` schedules one kernel per work item so each record carries
+the exact input, code-object index, kernel name and entry point, producer and
+consumer instructions, and a replay command. It disables diagnostic retention
+limits rather than silently truncating the sampling population, and therefore
+cannot be combined with `--max-diagnostics` or
+`--stop-after-first-diagnostic`. The option requires `--all-code-objects` or
+`--exhaustive`.
+
 `--exhaustive` implies `--recursive --all-code-objects`. Files that do not
 contain the selected target are ignored, while a selected code object that
 cannot be decoded or fully analyzed is counted as an analysis error and makes
@@ -103,6 +119,7 @@ Useful options:
 | `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
 | `-j N`, `--jobs N` | Analyze up to N kernels concurrently. The default is 1 and the maximum is 16. |
 | `--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
+| `--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `--all-code-objects` or `--exhaustive`. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |
