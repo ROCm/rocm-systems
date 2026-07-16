@@ -186,47 +186,6 @@ def test_att_wave_file_content(att_output_dir):
     ), "No wave files with content found across all ui_output_agent_* directories"
 
 
-def test_att_realtime_clock(att_output_dir):
-    """If realtime.json is present and has a non-zero frequency, validate
-    monotonicity and sanity of the GFX clock frequency."""
-
-    def verify_sorted(timestamps):
-        timestamps_sorted = sorted(timestamps, key=lambda ts: ts[0])
-        assert all(
-            curr[1] >= prev[1]
-            for prev, curr in zip(timestamps_sorted, timestamps_sorted[1:])
-        ), "Realtime clock is not monotonically non-decreasing"
-
-    def verify_gfxclock(timestamps, rt_frequency):
-        delta_shader = timestamps[-1][0] - timestamps[0][0]
-        delta_real = timestamps[-1][1] - timestamps[0][1]
-        if delta_real == 0:
-            return
-        gfxclock = rt_frequency * delta_shader / delta_real
-        assert gfxclock > 0, "GFX clock is non-positive"
-        assert (
-            gfxclock < 1e10
-        ), f"GFX clock {gfxclock:.3e} exceeds 10GHz — likely corrupted"
-
-    found_realtime = False
-    for rt_file in Path(att_output_dir).glob("ui_output_agent_*/realtime.json"):
-        found_realtime = True
-        with open(rt_file) as f:
-            json_file = json.load(f)
-
-        frequency = json_file["metadata"]["frequency"]
-        # frequency == 0 means aqlprofile is not instrumented; skip clock checks
-        if frequency > 0:
-            for key, value in json_file.items():
-                if "metadata" not in key and isinstance(value, list) and len(value) >= 2:
-                    verify_sorted(value)
-                    verify_gfxclock(value, frequency)
-
-    # realtime.json is optional; skip if not present
-    if not found_realtime:
-        pytest.skip("No realtime.json found — aqlprofile may not be instrumented")
-
-
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

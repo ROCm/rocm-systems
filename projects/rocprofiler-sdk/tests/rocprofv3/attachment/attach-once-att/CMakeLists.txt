@@ -26,30 +26,13 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-# Locate the ATT decoder library (rocprof-trace-decoder). The test is skipped (disabled)
-# when the library is not found because ATT decode will not produce ui_output_agent_*
-# directories without it.
 find_library(
     attdecoder_LIBRARY
     NAMES rocprof-trace-decoder
     HINTS ${ROCM_PATH}
     PATH_SUFFIXES lib)
 
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-    set(ATT_LIB_FOUND TRUE)
-else()
-    set(ATT_LIB_FOUND FALSE)
-    message(
-        STATUS
-            "rocprof-trace-decoder not found — rocprofv3-test-attachment-attach-once-att will be disabled"
-        )
-endif()
-
-# Also disable when the ATT decoder library is missing
-if(NOT ATT_LIB_FOUND)
-    set(IS_DISABLED ON)
-endif()
+cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
 
 set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
@@ -75,8 +58,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once-att)
 
 # Validate phase: check the standard profiling output (agent info, kernel dispatch, memory
-# copy, HSA API) and the ATT-specific output (filenames manifest, wave files, realtime
-# clock).
+# copy, HSA API) and the ATT-specific output (filenames manifest, wave files).
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-att
     TEST_PATHS validate.py
