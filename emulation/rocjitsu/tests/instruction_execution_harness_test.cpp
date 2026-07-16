@@ -621,17 +621,18 @@ TEST(ScalarSccTest, ScalarCvtPreservesScc) {
   run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cases.data(), cases.size());
 }
 
-struct ScalarScanSccCase {
+struct ScalarUnarySccCase {
   uint32_t op;
   const char *mnemonic;
   uint64_t src;
-  uint32_t expected;
+  uint64_t expected;
+  bool result_is_64_bit = false;
 };
 
-void run_scalar_scan_preserves_scc(rj_code_arch_t arch, std::string_view arch_name,
-                                   const ScalarScanSccCase *cases, size_t num_cases) {
-  amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_scalar_scan_scc_mem");
-  amdgpu::L2Cache l2(std::string(arch_name) + "_scalar_scan_scc_l2");
+void run_scalar_unary_preserves_scc(rj_code_arch_t arch, std::string_view arch_name,
+                                    const ScalarUnarySccCase *cases, size_t num_cases) {
+  amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_scalar_unary_scc_mem");
+  amdgpu::L2Cache l2(std::string(arch_name) + "_scalar_unary_scc_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = arch;
   cfg.num_wf_slots = 1;
@@ -649,6 +650,7 @@ void run_scalar_scan_preserves_scc(rj_code_arch_t arch, std::string_view arch_na
   ASSERT_NE(wf, nullptr) << arch_name;
 
   const uint32_t sb = wf->sgpr_alloc().base;
+  constexpr uint32_t kHighDestinationSentinel = 0xA5A55A5Au;
 
   for (size_t i = 0; i < num_cases; ++i) {
     const auto &tc = cases[i];
@@ -661,10 +663,18 @@ void run_scalar_scan_preserves_scc(rj_code_arch_t arch, std::string_view arch_na
       cu->write_sgpr(sb + 0, static_cast<uint32_t>(tc.src));
       cu->write_sgpr(sb + 1, static_cast<uint32_t>(tc.src >> 32));
       cu->write_sgpr(sb + 2, 0u);
+      cu->write_sgpr(sb + 3, kHighDestinationSentinel);
       wf->write_scc(initial_scc);
       cu->execute_instruction(inst.get(), *wf);
 
-      EXPECT_EQ(cu->read_sgpr(sb + 2), tc.expected) << arch_name << " " << tc.mnemonic;
+      uint64_t actual = cu->read_sgpr(sb + 2);
+      if (tc.result_is_64_bit) {
+        actual |= static_cast<uint64_t>(cu->read_sgpr(sb + 3)) << 32;
+      } else {
+        EXPECT_EQ(cu->read_sgpr(sb + 3), kHighDestinationSentinel)
+            << arch_name << " " << tc.mnemonic;
+      }
+      EXPECT_EQ(actual, tc.expected) << arch_name << " " << tc.mnemonic;
       EXPECT_EQ(wf->read_scc(), initial_scc)
           << arch_name << " " << tc.mnemonic << " initial_scc=" << initial_scc;
     }
@@ -674,7 +684,7 @@ void run_scalar_scan_preserves_scc(rj_code_arch_t arch, std::string_view arch_na
 }
 
 TEST(ScalarSccTest, ScalarScanPreservesScc) {
-  constexpr std::array<ScalarScanSccCase, 8> cdna_cases{{
+  constexpr std::array<ScalarUnarySccCase, 8> cdna_cases{{
       {14u, "s_ff0_i32_b32", 0x0000000FULL, 4u},
       {15u, "s_ff0_i32_b64", 0x00000000FFFFFFFFULL, 32u},
       {16u, "s_ff1_i32_b32", 0x00000100ULL, 8u},
@@ -684,7 +694,7 @@ TEST(ScalarSccTest, ScalarScanPreservesScc) {
       {20u, "s_flbit_i32", 0x40000000ULL, 1u},
       {21u, "s_flbit_i32_i64", 0x0000000100000000ULL, 31u},
   }};
-  constexpr std::array<ScalarScanSccCase, 8> rdna1_cases{{
+  constexpr std::array<ScalarUnarySccCase, 8> rdna1_cases{{
       {17u, "s_ff0_i32_b32", 0x0000000FULL, 4u},
       {18u, "s_ff0_i32_b64", 0x00000000FFFFFFFFULL, 32u},
       {19u, "s_ff1_i32_b32", 0x00000100ULL, 8u},
@@ -694,39 +704,95 @@ TEST(ScalarSccTest, ScalarScanPreservesScc) {
       {23u, "s_flbit_i32", 0x40000000ULL, 1u},
       {24u, "s_flbit_i32_i64", 0x0000000100000000ULL, 31u},
   }};
-  constexpr std::array<ScalarScanSccCase, 6> rdna3_cases{{
+  constexpr std::array<ScalarUnarySccCase, 10> rdna3_cases{{
       {8u, "s_ctz_i32_b32", 0x00000100ULL, 8u},
       {9u, "s_ctz_i32_b64", 0x0000000100000000ULL, 32u},
       {10u, "s_clz_i32_u32", 0x00F00000ULL, 8u},
       {11u, "s_clz_i32_u64", 0x0000000100000000ULL, 31u},
-      {12u, "s_cls_i32", 0x40000000ULL, 0u},
-      {13u, "s_cls_i32_i64", 0x0000000100000000ULL, 31u},
+      {12u, "s_cls_i32", 0x40000000ULL, 1u},
+      {12u, "s_cls_i32", 0u, 0xFFFFFFFFu},
+      {12u, "s_cls_i32", 0xFFFFFFFFULL, 0xFFFFFFFFu},
+      {13u, "s_cls_i32_i64", 0x0000010080000000ULL, 23u},
+      {13u, "s_cls_i32_i64", 0u, 0xFFFFFFFFu},
+      {13u, "s_cls_i32_i64", 0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFu},
   }};
 
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna_cases.data(),
-                                cdna_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna_cases.data(),
-                                cdna_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna_cases.data(),
-                                cdna_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna_cases.data(),
-                                cdna_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_cases.data(),
-                                rdna1_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_cases.data(),
-                                rdna1_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_cases.data(),
-                                rdna3_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_cases.data(),
-                                rdna3_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna3_cases.data(),
-                                rdna3_cases.size());
-  run_scalar_scan_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", rdna3_cases.data(),
-                                rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_cases.data(),
+                                 rdna1_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_cases.data(),
+                                 rdna1_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", rdna3_cases.data(),
+                                 rdna3_cases.size());
 }
 
-void run_scalar_scan_carry_chain(rj_code_arch_t arch, std::string_view arch_name,
-                                 uint32_t scan_op, std::string_view scan_mnemonic) {
+TEST(ScalarSccTest, ScalarMiscUnaryPreservesScc) {
+  constexpr std::array<ScalarUnarySccCase, 2> cdna_cases{{
+      {8u, "s_brev_b32", 1u, 0x80000000u},
+      {9u, "s_brev_b64", 1u, 0x8000000000000000ULL, true},
+  }};
+  constexpr std::array<ScalarUnarySccCase, 2> rdna1_cases{{
+      {11u, "s_brev_b32", 1u, 0x80000000u},
+      {12u, "s_brev_b64", 1u, 0x8000000000000000ULL, true},
+  }};
+  constexpr std::array<ScalarUnarySccCase, 2> rdna3_cases{{
+      {4u, "s_brev_b32", 1u, 0x80000000u},
+      {5u, "s_brev_b64", 1u, 0x8000000000000000ULL, true},
+  }};
+  constexpr std::array<ScalarUnarySccCase, 8> rounding_cases{{
+      {96u, "s_ceil_f32", 0x3FC00000u, 0x40000000u},
+      {97u, "s_floor_f32", 0x3FC00000u, 0x3F800000u},
+      {98u, "s_trunc_f32", 0x3FC00000u, 0x3F800000u},
+      {99u, "s_rndne_f32", 0x3FC00000u, 0x40000000u},
+      {107u, "s_ceil_f16", 0x3E00u, 0x4000u},
+      {108u, "s_floor_f16", 0x3E00u, 0x3C00u},
+      {109u, "s_trunc_f16", 0x3E00u, 0x3C00u},
+      {110u, "s_rndne_f16", 0x3E00u, 0x4000u},
+  }};
+
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna_cases.data(),
+                                 cdna_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_cases.data(),
+                                 rdna1_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_cases.data(),
+                                 rdna1_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", rdna3_cases.data(),
+                                 rdna3_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rounding_cases.data(),
+                                 rounding_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rounding_cases.data(),
+                                 rounding_cases.size());
+  run_scalar_unary_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", rounding_cases.data(),
+                                 rounding_cases.size());
+}
+
+void run_scalar_scan_carry_chain(rj_code_arch_t arch, std::string_view arch_name, uint32_t scan_op,
+                                 std::string_view scan_mnemonic) {
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_scalar_scan_carry_mem");
   amdgpu::L2Cache l2(std::string(arch_name) + "_scalar_scan_carry_l2");
 
@@ -766,48 +832,40 @@ void run_scalar_scan_carry_chain(rj_code_arch_t arch, std::string_view arch_name
               addc_mnemonic == "s_add_co_ci_u32")
       << arch_name << " " << addc_mnemonic;
 
-  cu->write_sgpr(sb + 0, 0u);
+  cu->write_sgpr(sb + 0, 1u);
   cu->write_sgpr(sb + 1, 0u);
-  cu->write_sgpr(sb + 4, 0x00C00000u);
+  cu->write_sgpr(sb + 4, 0xFFFFFFFFu);
   cu->write_sgpr(sb + 5, 0x54u);
   cu->write_sgpr(sb + 10, 0u);
   cu->write_sgpr(sb + 12, 1u);
-  wf->write_scc(true);
+  wf->write_scc(false);
 
   cu->execute_instruction(add.get(), *wf);
-  ASSERT_EQ(cu->read_sgpr(sb + 0), 0x00C00000u);
-  ASSERT_FALSE(wf->read_scc());
+  ASSERT_EQ(cu->read_sgpr(sb + 0), 0u);
+  ASSERT_TRUE(wf->read_scc());
 
   cu->execute_instruction(scan.get(), *wf);
   ASSERT_EQ(cu->read_sgpr(sb + 10), 0u);
-  ASSERT_FALSE(wf->read_scc());
+  ASSERT_TRUE(wf->read_scc());
 
   cu->execute_instruction(addc.get(), *wf);
-  EXPECT_EQ(cu->read_sgpr(sb + 1), 0x54u);
+  EXPECT_EQ(cu->read_sgpr(sb + 1), 0x55u);
   EXPECT_FALSE(wf->read_scc());
 
   cu->reset_all_wf();
 }
 
 TEST(ScalarSccTest, ScalarScanDoesNotBreakAddcCarryChain) {
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA1, "cdna1", /*scan_op=*/16,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA2, "cdna2", /*scan_op=*/16,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA3, "cdna3", /*scan_op=*/16,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA4, "cdna4", /*scan_op=*/16,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", /*scan_op=*/19,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", /*scan_op=*/19,
-                              "s_ff1_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA3, "rdna3", /*scan_op=*/8,
-                              "s_ctz_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA1, "cdna1", /*scan_op=*/16, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA2, "cdna2", /*scan_op=*/16, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA3, "cdna3", /*scan_op=*/16, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_CDNA4, "cdna4", /*scan_op=*/16, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", /*scan_op=*/19, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", /*scan_op=*/19, "s_ff1_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA3, "rdna3", /*scan_op=*/8, "s_ctz_i32_b32");
   run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", /*scan_op=*/8,
                               "s_ctz_i32_b32");
-  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", /*scan_op=*/8,
-                              "s_ctz_i32_b32");
+  run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", /*scan_op=*/8, "s_ctz_i32_b32");
   run_scalar_scan_carry_chain(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", /*scan_op=*/8,
                               "s_ctz_i32_b32");
 }

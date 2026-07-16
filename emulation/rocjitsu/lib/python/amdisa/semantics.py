@@ -243,13 +243,12 @@ _SOP1_SCC_NONE_OPS = frozenset(
     {
         'bitset0',
         'bitset1',
-        # SOP1 scan/convert operations below have no implicit SCC output in
-        # the MR ISA. Other bit/count unary operations, such as S_NOT and
-        # S_BCNT*, do explicitly write SCC.
+        # These SOP1 operations have no implicit SCC output in the MR ISA.
+        # Other bit/count unary operations, such as S_NOT and S_BCNT*, do.
+        'brev',
+        'ceil',
         'clz',
         'clz64',
-        'cls',
-        'cls64',
         'ctz',
         'cvt_f16_f32',
         'cvt_f32_f16',
@@ -263,6 +262,9 @@ _SOP1_SCC_NONE_OPS = frozenset(
         'flbit',
         'flbit_i32',
         'flbit_i32_i64',
+        'floor',
+        'rndne',
+        'trunc',
     }
 )
 
@@ -410,8 +412,8 @@ _SOP1_SPECIAL = {
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
     'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
     'S_CLZ_I32_U64': ('scalar_unary', 'clz64', 'u64'),
-    'S_CLS_I32': ('scalar_unary', 'cls'),
-    'S_CLS_I32_I64': ('scalar_unary', 'cls64', 'i64'),
+    'S_CLS_I32': None,  # handled specially below
+    'S_CLS_I32_I64': None,
     'S_MOVRELSD2': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD2_B32': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
@@ -455,8 +457,8 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             name, 'scalar_wrexec', operation=op, data_type=m.group(2).lower()
         )
 
-    # S_FLBIT_I32 (the one without further suffix) is a special case
-    if name == 'S_FLBIT_I32':
+    # S_CLS is the newer spelling of the signed S_FLBIT operation.
+    if name in ('S_FLBIT_I32', 'S_CLS_I32'):
         return InstructionSemantics(
             name,
             'scalar_unary',
@@ -475,21 +477,12 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             name, 'scalar_unary', operation='sext16', data_type='i32', sets_scc='none'
         )
 
-    # S_FLBIT_I32_I64 - special: reads 64-bit, finds leading bit of signed
-    if name == 'S_FLBIT_I32_I64':
+    # The I64 forms read a full SGPR pair and return a 32-bit count.
+    if name in ('S_FLBIT_I32_I64', 'S_CLS_I32_I64'):
         return InstructionSemantics(
             name,
             'scalar_unary',
             operation='flbit_i32_i64',
-            data_type='i64',
-            sets_scc='none',
-        )
-
-    if name == 'S_CLS_I32_I64':
-        return InstructionSemantics(
-            name,
-            'scalar_unary',
-            operation='cls',
             data_type='i64',
             sets_scc='none',
         )

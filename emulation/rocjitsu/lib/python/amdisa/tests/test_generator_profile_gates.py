@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from amdisa import xml_schema as xs
 from amdisa.__main__ import (
     _collect_shared_execute_body_variants,
     _run_multi,
@@ -31,8 +32,12 @@ from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
+    Cdna1Profile,
+    Cdna2Profile,
     CdnaProfile,
     Gfx1250Profile,
+    Rdna1Profile,
+    Rdna2Profile,
     Rdna3_5Profile,
     Rdna3Profile,
     Rdna4Profile,
@@ -113,6 +118,77 @@ def _parse_cdna_specs(*names: str):
         sem = derive_all_semantics(spec)
         specs.append((name, spec, sem))
     return specs
+
+
+def _sop1_mrisa_scc_outputs(parser: Parser) -> dict[str, bool]:
+    outputs = {}
+    for inst_node in parser.insts_node:
+        inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+        encodings = xs.get_node(inst_node, xs.INST_ENCODINGS)
+        for enc_node in encodings:
+            enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
+            if enc_name != 'ENC_SOP1':
+                continue
+            operands = xs.get_node(enc_node, xs.OPERANDS)
+            outputs[inst_name] = any(
+                opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
+                and opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true'
+                and xs.get_node_text(xs.get_node(opnd, xs.OPERAND_TYPE))
+                == 'OPR_SSRC_SPECIAL_SCC'
+                for opnd in operands
+            )
+    return outputs
+
+
+@pytest.mark.parametrize(
+    'isa_name,profile_type',
+    [
+        ('cdna1', Cdna1Profile),
+        ('cdna2', Cdna2Profile),
+        ('cdna3', CdnaProfile),
+        ('cdna4', CdnaProfile),
+        ('rdna1', Rdna1Profile),
+        ('rdna2', Rdna2Profile),
+        ('rdna3', Rdna3Profile),
+        ('rdna3_5', Rdna3_5Profile),
+        ('rdna4', Rdna4Profile),
+        ('gfx1250', Gfx1250Profile),
+    ],
+)
+def test_scalar_unary_sop1_scc_matches_mrisa(isa_name, profile_type):
+    isa_xml = _mrisa_dir() / f'amdgpu_isa_{isa_name}.xml'
+    if isa_name == 'gfx1250' and not isa_xml.is_file():
+        pytest.skip('gfx1250 MR ISA XML is NPI and unavailable in public checkouts')
+    assert isa_xml.is_file(), f'missing tracked MR ISA XML: {isa_xml}'
+
+    parser = Parser(str(isa_xml), profile_type())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    mrisa_scc_outputs = _sop1_mrisa_scc_outputs(parser)
+    mismatches = []
+    checked = 0
+
+    for enc in spec.inst_encodings:
+        if enc.enc_name != 'ENC_SOP1':
+            continue
+        for inst in enc.insts:
+            if inst.name not in semantics:
+                continue
+            sem = semantics[inst.name]
+            if sem.semantic_class != 'scalar_unary':
+                continue
+
+            checked += 1
+            mrisa_writes_scc = mrisa_scc_outputs[inst.name]
+            derived_writes_scc = sem.sets_scc != 'none'
+            if derived_writes_scc != mrisa_writes_scc:
+                mismatches.append(
+                    f'{inst.name}: derived sets_scc={sem.sets_scc!r}, '
+                    f'MR ISA writes SCC={mrisa_writes_scc}'
+                )
+
+    assert checked > 0, f'{isa_name}: no scalar-unary SOP1 instructions checked'
+    assert not mismatches, f'{isa_name}:\n' + '\n'.join(mismatches)
 
 
 def _execute_impl_body(source: str, signature: str, next_ctor: str) -> str:

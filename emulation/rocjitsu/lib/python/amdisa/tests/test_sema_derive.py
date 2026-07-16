@@ -155,11 +155,37 @@ class TestDeriveScalarUnary:
             ('S_CTZ_I32_B64', 'ctz'),
             ('S_CLZ_I32_U32', 'clz'),
             ('S_CLZ_I32_U64', 'clz64'),
-            ('S_CLS_I32', 'cls'),
-            ('S_CLS_I32_I64', 'cls'),
+            ('S_CLS_I32', 'flbit_i32'),
+            ('S_CLS_I32_I64', 'flbit_i32_i64'),
         ],
     )
     def test_scalar_scan_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_BREV_B32', 'brev'),
+            ('S_BREV_B64', 'brev'),
+            ('S_CEIL_F16', 'ceil'),
+            ('S_CEIL_F32', 'ceil'),
+            ('S_FLOOR_F16', 'floor'),
+            ('S_FLOOR_F32', 'floor'),
+            ('S_TRUNC_F16', 'trunc'),
+            ('S_TRUNC_F32', 'trunc'),
+            ('S_RNDNE_F16', 'rndne'),
+            ('S_RNDNE_F32', 'rndne'),
+        ],
+    )
+    def test_scalar_misc_unary_preserves_scc(self, name, operation):
         sem = derive_semantics(name, 'ENC_SOP1')
         assert sem is not None
         assert sem.semantic_class == 'scalar_unary'
