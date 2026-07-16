@@ -994,5 +994,30 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+  const auto& properties = gpu_agent.properties();
+
+  std::string status_path =
+  "/sys/class/drm/renderD" + std::to_string(properties.DrmRenderMinor) + "/device/ualink/accel_state";
+  FILE* file = fopen(status_path.c_str(), "r");
+  if (!file) {
+    return HSA_STATUS_ERROR;
+  }
+  char status[10];
+  if (fscanf(file, "%9s", status) != 1) {
+    fclose(file);
+    return HSA_STATUS_ERROR;
+  }
+  fclose(file);
+  if (!strcmp(status, "ready") || !strcmp(status, "active")) {
+    *ready = true;
+  } else {
+    *ready = false;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

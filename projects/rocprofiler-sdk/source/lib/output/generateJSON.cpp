@@ -201,7 +201,8 @@ write_json(
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
     const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
     const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
-    const generator<tool_spm_counter_record_t>&                        spm_gen)
+    const generator<tool_spm_counter_record_t>&                        spm_gen,
+    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&    graph_launch_gen)
 {
     // summary
     {
@@ -247,6 +248,7 @@ write_json(
         json_ar(cereal::make_nvp("rocjpeg_api", rocjpeg_api_gen));
         json_ar(cereal::make_nvp("pc_sample_host_trap", pc_sampling_host_trap_gen));
         json_ar(cereal::make_nvp("pc_sample_stochastic", pc_sampling_stochastic_gen));
+        json_ar(cereal::make_nvp("hip_graph", graph_launch_gen));
         json_ar.finishNode();
     }
 }

@@ -3621,21 +3621,18 @@ template <typename Inst, typename Op>
   return false;
 }
 
-/// VOP3P v_pk_mov_b32 SIMD fast path. Default packing only (op_sel == 0,
-/// op_sel_hi == 3): the result is a 64-bit pair `(src0_lo, src1_hi)`,
-/// where the per-source pair is the consecutive {base, base+1} VGPRs
-/// when the encoding points at the VGPR range. SGPR / literal sources
-/// broadcast both halves identically (handled by read_simd64's
-/// broadcast64 fallback). Reads each src as a 64-bit pair, picks the low
-/// half of src0 and the high half of src1 via mask, packs, writes via
-/// write_simd64. Functorless / fixed-op.
+/// VOP3P v_pk_mov_b32 SIMD fast path. Each src is a 64-bit SGPR or VGPR pair.
+/// SGPR pairs are broadcast across lanes by read_simd64's broadcast64 fallback.
+/// op_sel[0] selects the low output dword from src0, and op_sel[1] selects the
+/// high output dword from src1. The fast path is limited to the assembler's
+/// default op_sel_hi value. Functorless / fixed-op.
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &inst, Wavefront &wf) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+  if (inst.inst_.op_sel_hi != 3u)
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3649,7 +3646,9 @@ template <typename Inst>
       continue;
     const U64 s0 = read_simd64<uint64_t>(inst.src0, wf, base);
     const U64 s1 = read_simd64<uint64_t>(inst.src1, wf, base);
-    const U64 out = (s0 & kLoMask) | (s1 & kHiMask);
+    const U64 out_lo = (inst.inst_.op_sel & 1u) ? ((s0 >> 32) & kLoMask) : (s0 & kLoMask);
+    const U64 out_hi = (inst.inst_.op_sel & 2u) ? (s1 & kHiMask) : ((s1 & kLoMask) << 32);
+    const U64 out = out_lo | out_hi;
     write_simd64<uint64_t>(inst.vdst, wf, base, out, chunk);
   }
   return true;

@@ -4,8 +4,8 @@
 #include "dynamic_library.hpp"
 #include "common.hpp"
 
+#include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -36,7 +36,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(const std::string& itr : _env_vars)
     {
         auto _env_val = get_env(itr.c_str(), std::string{});
-        for(auto vitr : tim::delimit(_env_val, ":"))
+        for(auto vitr : rocprofsys::delimit(_env_val, ":"))
             if(!vitr.empty()) _paths.emplace_back(vitr);
     }
 

@@ -2824,7 +2824,7 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
   auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
   arrive_inst->execute_impl(*wf);
-  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  amdgpu::LocalMemPipeline local_pipeline;
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
@@ -2854,7 +2854,7 @@ TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) 
   state->store_data.resize(static_cast<size_t>(wf->wf_size()) * sizeof(decrement));
   std::memcpy(state->store_data.data(), &decrement, sizeof(decrement));
 
-  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  amdgpu::LocalMemPipeline local_pipeline;
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t expected =
@@ -3393,61 +3393,58 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_TRUE(sim.cu()->wf(0)->is_halted());
 }
 
-TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
-  Gfx1250Sim sim;
+TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
-  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
-                                            false, false, 0, 0, 0, 0, 1);
 
-  test::AqlQueue queue(sim.memory, sim.cp());
-  hsa_kernel_dispatch_packet_t pkt{};
-  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-  pkt.setup = 2;
-  pkt.workgroup_size_x = 32;
-  pkt.workgroup_size_y = 4;
-  pkt.workgroup_size_z = 1;
-  pkt.grid_size_x = 32;
-  pkt.grid_size_y = 4;
-  pkt.grid_size_z = 1;
-  pkt.kernel_object = kernel_object;
-  queue.submit(pkt);
-  step_until_xcd_halted(sim);
+  for (uint32_t component_count = 0; component_count <= 1; ++component_count) {
+    SCOPED_TRACE("component_count=" + std::to_string(component_count));
+    Gfx1250Sim sim;
+    uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
+                                              false, false, 0, 0, 0, 0, component_count);
 
-  std::vector<uint32_t> lane0_values;
-  std::vector<uint32_t> lane31_values;
-  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
-    auto *se = sim.xcd()->shader_engine(se_idx);
-    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
-      auto *cu = se->compute_unit(cu_idx);
-      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
-        auto *wf = cu->wf(wf_idx);
-        if (!wf || wf->sgpr_alloc().count == 0)
-          continue;
-        const uint32_t vbase = wf->vgpr_alloc().base;
-        lane0_values.push_back(cu->read_vgpr(vbase, 0));
-        lane31_values.push_back(cu->read_vgpr(vbase, 31));
+    test::AqlQueue queue(sim.memory, sim.cp());
+    hsa_kernel_dispatch_packet_t pkt{};
+    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    pkt.setup = 2;
+    pkt.workgroup_size_x = 32;
+    pkt.workgroup_size_y = 4;
+    pkt.workgroup_size_z = 1;
+    pkt.grid_size_x = 32;
+    pkt.grid_size_y = 4;
+    pkt.grid_size_z = 1;
+    pkt.kernel_object = kernel_object;
+    queue.submit(pkt);
+    step_until_xcd_halted(sim);
+
+    std::vector<uint32_t> lane0_values;
+    std::vector<uint32_t> lane31_values;
+    for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+      auto *se = sim.xcd()->shader_engine(se_idx);
+      for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+        auto *cu = se->compute_unit(cu_idx);
+        for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+          auto *wf = cu->wf(wf_idx);
+          if (!wf || wf->sgpr_alloc().count == 0)
+            continue;
+          const uint32_t vbase = wf->vgpr_alloc().base;
+          lane0_values.push_back(cu->read_vgpr(vbase, 0));
+          lane31_values.push_back(cu->read_vgpr(vbase, 31));
+        }
       }
     }
-  }
 
-  std::sort(lane0_values.begin(), lane0_values.end());
-  std::sort(lane31_values.begin(), lane31_values.end());
-  const std::vector<uint32_t> expected_lane0{0u, 1u << 10, 2u << 10, 3u << 10};
-  const std::vector<uint32_t> expected_lane31{31u, 31u | (1u << 10), 31u | (2u << 10),
-                                              31u | (3u << 10)};
-  EXPECT_EQ(lane0_values, expected_lane0);
-  EXPECT_EQ(lane31_values, expected_lane31);
+    std::sort(lane0_values.begin(), lane0_values.end());
+    std::sort(lane31_values.begin(), lane31_values.end());
+    const uint32_t y_scale = component_count >= 1 ? 1u << 10 : 0;
+    const std::vector<uint32_t> expected_lane0{0u, y_scale, 2 * y_scale, 3 * y_scale};
+    const std::vector<uint32_t> expected_lane31{31u, 31u | y_scale, 31u | (2 * y_scale),
+                                                31u | (3 * y_scale)};
+    EXPECT_EQ(lane0_values, expected_lane0);
+    EXPECT_EQ(lane31_values, expected_lane31);
+  }
 }
 
-TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
-  Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
-
-  test::AqlQueue queue(sim.memory, sim.cp());
-  queue.dispatch(kernel_object, 33, 33);
-  step_until_xcd_halted(sim);
-
+std::vector<uint64_t> collect_active_exec_masks(Gfx1250Sim &sim) {
   std::vector<uint64_t> exec_masks;
   for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
     auto *se = sim.xcd()->shader_engine(se_idx);
@@ -3460,10 +3457,22 @@ TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
       }
     }
   }
-
   std::sort(exec_masks.begin(), exec_masks.end());
+  return exec_masks;
+}
+
+TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 33, 33);
+  step_until_xcd_halted(sim);
+
+  // One 33-thread workgroup exercises the intra-workgroup tail wave.
   const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
-  EXPECT_EQ(exec_masks, expected);
+  EXPECT_EQ(collect_active_exec_masks(sim), expected);
 }
 
 // Count the distinct workgroup ids across all wavefronts activated for the
@@ -3522,6 +3531,44 @@ TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount2D) {
   step_until_xcd_halted(sim);
 
   EXPECT_EQ(count_dispatched_workgroups(sim), 9u);
+}
+
+TEST(Gfx1250SimulationTest, PartialGridTailMasksFinalWorkgroupExec) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 33, 32);
+  step_until_xcd_halted(sim);
+
+  // Unlike PartialWorkgroupMasksTailWaveExec, this uses two full-size
+  // workgroups and exercises the grid-bounds mask on the final workgroup.
+  const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
+  EXPECT_EQ(collect_active_exec_masks(sim), expected);
+}
+
+TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 2;
+  pkt.workgroup_size_x = 8;
+  pkt.workgroup_size_y = 2;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 13;
+  pkt.grid_size_y = 2;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = kernel_object;
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  const std::vector<uint64_t> expected{0x1F1FULL, 0xFFFFULL};
+  EXPECT_EQ(collect_active_exec_masks(sim), expected);
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
@@ -3588,7 +3635,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args[2]);
 }
 
-TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
+TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -3596,7 +3643,8 @@ TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
   constexpr uint32_t kExpected = 0x12345678u;
 
   std::vector<uint32_t> code;
-  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 1));
+  // s_load_b32 s4, s[0:1], 0x4 scale_offset
+  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 4));
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, S_ENDPGM_GFX12);
 

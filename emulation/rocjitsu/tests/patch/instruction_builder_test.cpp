@@ -177,5 +177,71 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
             sop2[0]);
 }
 
+TEST(InstructionBuilder, BuildSGetpcB64) {
+  // SOP1; opcode is arch-specific: 0x1C (GFX9), 0x1F (GFX10), 0x47 (GFX11+).
+  EXPECT_EQ(build_s_getpc_b64(/*sdst_pair_base=*/0, ROCJITSU_CODE_ARCH_CDNA2), 0xBE801C00u);
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA2), 0xBE801F00u);
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE804700u);
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE804700u);
+  // gfx1250 renames the family (s_get_pc_i64) but keeps opcode 0x47.
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE804700u);
+}
+
+TEST(InstructionBuilder, BuildSAddU32) {
+  // SOP2 opcode 0 (all gens); ssrc1 = inline literal 16.
+  EXPECT_EQ(build_s_add_u32(/*sdst=*/0, /*ssrc0=*/0, scalar_positive_inline_u32(16),
+                            ROCJITSU_CODE_ARCH_CDNA2),
+            0x80009000u);
+}
+
+TEST(InstructionBuilder, BuildSAddcU32) {
+  // SOP2 opcode 4 (all gens); ssrc1 = inline literal 0.
+  EXPECT_EQ(build_s_addc_u32(/*sdst=*/1, /*ssrc0=*/1, scalar_positive_inline_u32(0),
+                             ROCJITSU_CODE_ARCH_CDNA2),
+            0x82018001u);
+}
+
+TEST(InstructionBuilder, BuildSSwappcB64) {
+  // SOP1; opcode is arch-specific: 0x1E (GFX9), 0x21 (GFX10), 0x49 (GFX11+).
+  // link pair s[30:31], target pair s[0:1].
+  EXPECT_EQ(
+      build_s_swappc_b64(/*sdst_link_base=*/30, /*ssrc0_target_base=*/0, ROCJITSU_CODE_ARCH_CDNA2),
+      0xBE9E1E00u);
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA2), 0xBE9E2100u);
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE9E4900u);
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE9E4900u);
+  // gfx1250: s_swap_pc_i64, opcode 0x49
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE9E4900u);
+}
+
+TEST(InstructionBuilder, BuildSCselectB32) {
+  // SOP2; opcode 0x0A on GFX9/GFX10, 0x30 on GFX11+. ssrc0 = inline 1, ssrc1 = inline 0.
+  EXPECT_EQ(build_s_cselect_b32(/*sdst=*/2, scalar_positive_inline_u32(1),
+                                scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA2),
+            0x85028081u);
+  EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                                ROCJITSU_CODE_ARCH_RDNA3),
+            0x98028081u);
+  EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                                ROCJITSU_CODE_ARCH_RDNA4),
+            0x98028081u);
+  // gfx1250 uses the GFX11+ opcode 0x30.
+  EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                                ROCJITSU_CODE_ARCH_GFX1250),
+            0x98028081u);
+}
+
+TEST(InstructionBuilder, BuildSCmpLgU32) {
+  // SOPC prefix (0x17E) << 23 | opcode 7 << 16; ssrc1 = inline literal 0.
+  EXPECT_EQ(
+      build_s_cmp_lg_u32(/*ssrc0=*/2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA2),
+      0xBF078002u);
+  // Opcode 7 is invariant across gens, including gfx1250.
+  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
+            0xBF078002u);
+  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250),
+            0xBF078002u);
+}
+
 } // namespace
 } // namespace rocjitsu
