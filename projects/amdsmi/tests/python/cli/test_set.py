@@ -41,13 +41,6 @@ class TestSet(TestCliBase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
-        # TODO allow set commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs input"
-                # self.common.print(msg)
-                self.skipTest(msg)
-
         # Get current settings
         power_profile = {}
         for index, gpu in enumerate(self.common.processors):
@@ -99,7 +92,7 @@ class TestSet(TestCliBase):
             if clock_sys != "N/A":
                 num = len(clock_sys["frequency_levels"])
                 level = f"Level {num - 1}"
-                clock_freq = int(clock_sys["frequency_levels"][level].split()[0].strip())
+                clock_freq = int(clock_sys["frequency_levels"][level]["value"])
                 cmds.append(
                     (f"amd-smi set --perf-determinism {clock_freq} --gpu {index}", self.PASS)
                 )

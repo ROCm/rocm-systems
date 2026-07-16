@@ -836,13 +836,13 @@ class StaticCommands:
                     e.get_error_info(),
                 )
             try:
-                mem_alloc_mode = amdsmi_interface.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
-                    args.gpu
+                mem_alloc_mode = (
+                    amdsmi_interface.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(args.gpu)
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 mem_alloc_mode = "N/A"
                 logging.debug(
-                    "Failed to get compute partition mem alloc mode for gpu %s | %s",
+                    "Failed to get accelerator partition mem alloc mode for gpu %s | %s",
                     gpu_id,
                     e.get_error_info(),
                 )

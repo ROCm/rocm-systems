@@ -1242,6 +1242,7 @@ def run_tests():
         lambda: amdsmi.amdsmi_get_gpu_memory_partition(gpu_handle),
     )
 
+    # amdsmi_set_gpu_memory_partition deprecated, use amdsmi_set_gpu_memory_partition_mode instead
     test_api(
         "amdsmi_set_gpu_memory_partition",
         None,

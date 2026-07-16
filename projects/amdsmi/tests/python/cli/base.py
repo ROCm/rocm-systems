@@ -88,6 +88,10 @@ class TestCliBase(unittest.TestCase):
         TestCliBase.sub_args = baseline["sub_args"]
         TestCliBase._initialized = True
 
+        # TODO: Remove this condition when CLI supports User automated input
+        # Commands that need User permission to run
+        cls.cmds_need_permission = {"set": ["--fan", "--memory-partition", "--compute-partition"]}
+
     @classmethod
     def _build_baseline(cls):
         baseline = {}
@@ -182,12 +186,12 @@ class TestCliBase(unittest.TestCase):
             "DETERMINISM",
         ]
         self.profile_levels = [
-            "CUSTOM_MASK",
-            "VIDEO_MASK",
-            "POWER_SAVING_MASK",
-            "COMPUTE_MASK",
-            "VR_MASK",
-            "THREE_D_FULL_SCR_MASK",
+            "CUSTOM",
+            "VIDEO",
+            "POWER_SAVING",
+            "COMPUTE",
+            "VR",
+            "3D_FULL_SCREEN",
             "BOOTUP_DEFAULT",
         ]
         self.compute_partition_modes = ["SPX", "DPX", "TPX", "QPX", "CPX"]
@@ -538,7 +542,7 @@ class TestCliBase(unittest.TestCase):
                     if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
                         num = len(clock_sys["frequency_levels"])
                         level = f"Level {num - 1}"
-                        clock_freq = int(clock_sys["frequency_levels"][level].split()[0].strip())
+                        clock_freq = int(clock_sys["frequency_levels"][level]["value"])
                         cmd = cmd.replace(
                             "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
                         )
@@ -706,6 +710,21 @@ class TestCliBase(unittest.TestCase):
                                 cmd = ""
                                 break
 
+                cmds[index] = (cmd, cond)
+
+        # Remove commands requiring input
+        for index, cmd_cond in enumerate(cmds):
+            cmd, cond = cmd_cond
+            if not cmd:
+                continue
+            items = cmd.split()
+            if len(items) < 3:
+                continue
+            if items[1] == "set":
+                if items[2] in self.cmds_need_permission["set"]:
+                    cmd = ""
+            # Update cmds when cmd has changed
+            if not cmd:
                 cmds[index] = (cmd, cond)
 
         # Remove empty (cmd,cond) arguments
