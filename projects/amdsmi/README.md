@@ -9,7 +9,11 @@ documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/p
 
 >[!NOTE]
 >This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
+>and [esmi_ib_library](https://github.com/amd/esmi_ib_library). AMD SMI consolidates their
+>functionality under a single API and library; the `esmi_ib_library` sources are vendored and
+>compiled into `libamd_smi.so`. CPU/APU features still depend on the ESMI stack at runtime
+>(the `amd_hsmp` kernel module with HSMP enabled in BIOS), just as GPU features depend on the
+>`amdgpu` driver. Without it, CPU discovery is skipped (non-fatal) and CPU queries are unavailable.
 >This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
 ## Supported platforms
