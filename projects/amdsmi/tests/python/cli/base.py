@@ -121,12 +121,16 @@ class TestCliBase(unittest.TestCase):
                 gpus.append(entry["uuid"])
         baseline["gpus"] = gpus
 
-        # When parsing, expand each arg with array element
+        # When parsing, expand each arg with its value(s).
+        # CPU/Core are given default values because their sub-arguments require a value.
+        # Otherwise, tests will populate the args incorrectly on CPU/APU-capable systems.
         baseline["sub_args"] = {
             "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
+            "CPU": ["all", "0"],
+            "CORE": ["all", "0"],
             "FILE": [
                 cls.TMP_FILENAME,
                 f"{cls.TMP_FILENAME} --overwrite",
@@ -746,6 +750,12 @@ class TestCliBase(unittest.TestCase):
                 print(f"cmd={cmd}")
             if self.PrintCmdsOnly:
                 continue
+            # Remove any stale output file so amd-smi does not block on its
+            # interactive "file exists, overwrite?" prompt (e.g. a leftover
+            # from a previously interrupted run).
+            if "--file" in cmd and os.path.exists(self.tmp_filename):
+                os.chmod(self.tmp_filename, stat.S_IWRITE)
+                os.remove(self.tmp_filename)
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
             error_code = rc
             if rc and std_err:
@@ -765,16 +775,15 @@ class TestCliBase(unittest.TestCase):
                         error_code = "Bad loglevel"
 
             msg = f"{cmd:{msg_len}s}:"
+            file_error = None
             if "--file" in cmd:
                 if not os.path.exists(self.tmp_filename):
-                    _msg = f"{msg} Failure: File {self.tmp_filename} does not exist"
-                    errors.append(_msg)
+                    file_error = f"File {self.tmp_filename} does not exist"
                 else:
                     with open(self.tmp_filename, "r") as fin:
                         std_out = fin.read()
                     if not len(std_out):
-                        _msg = f"{msg} Failure: File {self.tmp_filename} was empty"
-                        errors.append(_msg)
+                        file_error = f"File {self.tmp_filename} was empty"
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
@@ -783,6 +792,9 @@ class TestCliBase(unittest.TestCase):
                 errors.append(msg)
             elif not rc and cond != self.PASS:
                 msg += " Failure: Received PASS (0), expected FAIL (!0)"
+                errors.append(msg)
+            elif file_error is not None and cond == self.PASS:
+                msg += f" Failure: {file_error}"
                 errors.append(msg)
             else:
                 if not rc:
