@@ -35,11 +35,18 @@ if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER S
   endif()
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+  # GCC <= 11 ignores [[maybe_unused]] on non-static data members and emits
+  # -Wattributes ("attribute ignored"), which -Werror promotes to an error. The
+  # attribute is still required for Clang's -Wunused-private-field, so silence the
+  # spurious GCC diagnostic. (GCC 12+ handles the attribute correctly.)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-attributes")
+  endif()
 endif()
 
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
