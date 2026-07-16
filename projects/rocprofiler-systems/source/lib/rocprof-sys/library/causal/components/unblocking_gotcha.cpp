@@ -83,7 +83,7 @@ Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
-    auto _active = thread_state::get() < ::rocprofsys::thread_state::State::Internal;
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
     {
@@ -110,7 +110,7 @@ int
 unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
-    auto _active = thread_state::get() < ::rocprofsys::thread_state::State::Internal;
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active && _pid == process::get_id()) causal::delay::process();
 

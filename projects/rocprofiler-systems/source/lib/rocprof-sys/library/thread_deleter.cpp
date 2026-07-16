@@ -27,14 +27,14 @@ thread_deleter<void>::operator()() const
         auto _tid = _info->index_data->sequent_value;
 
         if(!is_child_process()) component::pthread_create_gotcha::shutdown(_tid);
-        thread_state::set(thread_state::State::Completed);
-        if(process_state::get() < process_state::State::Finalized &&
-           !is_child_process() && _tid == 0)
+        state::thread::set(state::thread::Completed);
+        if(state::process::get() < state::process::Finalized && !is_child_process() &&
+           _tid == 0)
             rocprofsys_finalize_hidden();
     }
     else
     {
-        thread_state::set(thread_state::State::Completed);
+        state::thread::set(state::thread::Completed);
     }
 }
 

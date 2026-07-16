@@ -25,7 +25,7 @@ write_perfetto_counter_track(std::uint64_t _val)
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
     if(rocprofsys::get_use_perfetto() &&
-       rocprofsys::process_state::get() == rocprofsys::process_state::State::Active)
+       rocprofsys::state::process::get() == rocprofsys::state::process::Active)
     {
         auto _emplace = [](const size_t _idx) {
             if(!counter_track::exists(_idx))

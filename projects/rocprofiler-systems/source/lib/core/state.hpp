@@ -142,23 +142,24 @@ struct fmt::formatter<rocprofsys::mode::process_causal> : fmt::formatter<std::st
     }
 };
 
-namespace rocprofsys
+namespace rocprofsys::state
 {
 
-class process_state final
+class process final
 {
 public:
-    using State         = state::process_lifecycle;
+    using State         = process_lifecycle;
     using Mode          = mode::process;
     using CausalBackend = backend::causal;
     using CausalMode    = mode::process_causal;
+    using enum process_lifecycle;
 
-    process_state()                                = delete;
-    process_state(const process_state&)            = delete;
-    process_state& operator=(const process_state&) = delete;
-    process_state(process_state&&)                 = delete;
-    process_state& operator=(process_state&&)      = delete;
-    ~process_state()                               = default;
+    process()                          = delete;
+    process(const process&)            = delete;
+    process& operator=(const process&) = delete;
+    process(process&&)                 = delete;
+    process& operator=(process&&)      = delete;
+    ~process()                         = default;
 
     [[gnu::hot]] static State get() noexcept
     {
@@ -182,7 +183,7 @@ public:
     [[gnu::cold]] static State reset()
     {
         auto last_state = get();
-        storage().store(State::PreInit, std::memory_order_relaxed);
+        storage().store(PreInit, std::memory_order_relaxed);
         LOG_DEBUG("Resetting state :: {} -> PreInit", get());
         return last_state;
     }
@@ -191,22 +192,23 @@ private:
     static std::atomic<State>& storage() noexcept
     {
         static auto*& atomic_state = common::static_object<std::atomic<State>>::construct(
-            common::do_not_destroy{}, State::PreInit);
+            common::do_not_destroy{}, PreInit);
         return *atomic_state;
     }
 };
 
-class thread_state final
+class thread final
 {
 public:
-    using State = state::thread_lifecycle;
+    using State = thread_lifecycle;
+    using enum thread_lifecycle;
 
-    thread_state()                               = delete;
-    thread_state(const thread_state&)            = delete;
-    thread_state& operator=(const thread_state&) = delete;
-    thread_state(thread_state&&)                 = delete;
-    thread_state& operator=(thread_state&&)      = delete;
-    ~thread_state()                              = default;
+    thread()                         = delete;
+    thread(const thread&)            = delete;
+    thread& operator=(const thread&) = delete;
+    thread(thread&&)                 = delete;
+    thread& operator=(thread&&)      = delete;
+    ~thread()                        = default;
 
     [[gnu::hot]] static State get() noexcept { return current(); }
 
@@ -219,7 +221,7 @@ public:
 
     [[gnu::hot]] static State push(State state_to_push)
     {
-        if(get() >= State::Completed)
+        if(get() >= Completed)
         {
             return get();
         }
@@ -228,7 +230,7 @@ public:
 
     [[gnu::hot]] static State pop()
     {
-        if(get() >= State::Completed)
+        if(get() >= Completed)
         {
             return get();
         }
@@ -246,10 +248,10 @@ public:
     public:
         [[gnu::always_inline]] explicit scoped_guard(State state_to_push)
         {
-            thread_state::push(state_to_push);
+            thread::push(state_to_push);
         }
 
-        [[gnu::always_inline]] ~scoped_guard() { thread_state::pop(); }
+        [[gnu::always_inline]] ~scoped_guard() { thread::pop(); }
 
         scoped_guard(const scoped_guard&)            = delete;
         scoped_guard& operator=(const scoped_guard&) = delete;
@@ -265,7 +267,7 @@ public:
 private:
     static State& current() noexcept
     {
-        static thread_local auto current_state = State::Enabled;
+        static thread_local auto current_state = Enabled;
         return current_state;
     }
 
@@ -287,4 +289,4 @@ private:
         return state_history_array.at(thread_index);
     }
 };
-}  // namespace rocprofsys
+}  // namespace rocprofsys::state

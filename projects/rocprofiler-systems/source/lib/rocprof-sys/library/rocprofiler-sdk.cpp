@@ -134,13 +134,13 @@ std::atomic<bool> tool_init_done{ false };
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 {
-    thread_state::push(thread_state::State::Internal);
+    state::thread::push(state::thread::Internal);
 }
 
 void
 thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 {
-    thread_state::pop();
+    state::thread::pop();
 }
 
 #if(ROCPROFILER_VERSION < 700)
@@ -282,8 +282,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
                 LOG_CRITICAL("invalid device qualifier format (':device=N) "
                              "where N is the GPU id: {}",
                              itr);
-                ::rocprofsys::process_state::set(
-                    ::rocprofsys::process_state::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
 
@@ -1373,7 +1373,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
 
-    if(rocprofsys::process_state::get() != rocprofsys::process_state::State::Active)
+    if(rocprofsys::state::process::get() != rocprofsys::state::process::Active)
     {
         LOG_WARNING("Callback called when tool is not active. {}", info.str().c_str());
         return;
@@ -1465,8 +1465,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
-                    ::rocprofsys::process_state::set(
-                        ::rocprofsys::process_state::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1475,8 +1475,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::process_state::set(
-                        ::rocprofsys::process_state::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1574,8 +1574,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
-                    ::rocprofsys::process_state::set(
-                        ::rocprofsys::process_state::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1584,8 +1584,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::process_state::set(
-                        ::rocprofsys::process_state::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1695,7 +1695,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         LOG_CRITICAL("unhandled callback record phase: {}",
                      static_cast<int>(record.phase));
-        ::rocprofsys::process_state::set(::rocprofsys::process_state::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         ::std::abort();
     }
 }
@@ -2269,8 +2269,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             {
                 LOG_CRITICAL("unable to find tool agent for agent (id={})",
                              _agent_id.handle);
-                ::rocprofsys::process_state::set(
-                    ::rocprofsys::process_state::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 ::std::abort();
             }
             if(!_info)
@@ -2278,8 +2278,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 LOG_CRITICAL("unable to find counter info for counter (id={}) on "
                              "agent (id={})",
                              itr.first.handle, _agent_id.handle);
-                ::rocprofsys::process_state::set(
-                    ::rocprofsys::process_state::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 ::std::abort();
             }
 
@@ -2451,7 +2451,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     else
     {
         LOG_CRITICAL("Unknown operation for hip_stream_callback!");
-        ::rocprofsys::process_state::set(::rocprofsys::process_state::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         ::std::exit(1);
     }
 }
@@ -2616,8 +2616,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
             LOG_CRITICAL("Failed to create memory allocation buffer");
-            ::rocprofsys::process_state::set(
-                ::rocprofsys::process_state::State::Finalized);
+            ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
         auto _ops =
@@ -2778,7 +2777,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
-        pmc::set_state(process_state::State::Active);
+        pmc::set_state(state::process::Active);
     }
 
     // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
@@ -3035,7 +3034,7 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
             ::rocprofsys::process_sampler::setup();
         }
 
-        ::rocprofsys::process_state::set(::rocprofsys::process_state::State::Active);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Active);
     }
 
     // Start all contexts provided by the SDK
@@ -3078,7 +3077,7 @@ sdk_tool_configure(std::uint32_t version, const char* runtime_version,
 
     // Ensure tooling is initialized and state is Active
     if(!rocprofsys::config::settings_are_configured() ||
-       rocprofsys::process_state::get() < rocprofsys::process_state::State::Active)
+       rocprofsys::state::process::get() < rocprofsys::state::process::Active)
     {
         rocprofsys_init_tooling_hidden();
     }

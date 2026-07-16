@@ -78,7 +78,7 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -147,7 +147,7 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     m_index                  = causal::experiment::get_index();
     m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 

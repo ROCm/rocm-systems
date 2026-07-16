@@ -128,7 +128,7 @@ main(int argc, char** argv)
     (void) timemory_hash_aliases;  //
 
     tim::unwind::set_bfd_verbose(3);
-    rocprofsys::process_state::set(rocprofsys::process_state::State::Init);
+    rocprofsys::state::process::set(rocprofsys::state::process::Init);
     rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();

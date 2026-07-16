@@ -47,15 +47,15 @@ struct default_pthread_mutex_policy
 
     static bool inactive_state()
     {
-        return process_state::get() != process_state::State::Active;
+        return state::process::get() != state::process::Active;
     }
 
     static bool is_disabled_check()
     {
         static thread_local const auto& t_info = thread_info::get();
         return (!t_info || t_info->is_offset ||
-                process_state::get() != ::rocprofsys::process_state::State::Active ||
-                thread_state::get() != thread_state::State::Enabled);
+                state::process::get() != ::rocprofsys::state::process::Active ||
+                state::thread::get() != state::thread::Enabled);
     }
 
     static uintptr_t get_thread_id() { return threading::get_id(); }

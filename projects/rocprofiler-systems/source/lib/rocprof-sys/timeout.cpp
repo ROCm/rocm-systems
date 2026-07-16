@@ -73,7 +73,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     _ci_timeout_ready.set_value();
 
     thread_info::init(true);
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Disabled);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Disabled);
 
     auto _factor = 3.0;
     while(_ci_timeout_seconds <= _factor)
@@ -84,7 +84,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
     const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
-    while(process_state::get() < process_state::State::Finalized &&
+    while(state::process::get() < state::process::Finalized &&
           _ci_timeout_nitr < _ci_timeout_total_count)
     {
         // sleep until timeout reached
@@ -186,8 +186,7 @@ setup()
             ci_timeout_active = true;
             _lk.unlock();
 
-            auto _thread_state_guard =
-                thread_state::scoped(thread_state::State::Internal);
+            auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             // enable the signal handler for when the timeout is reached

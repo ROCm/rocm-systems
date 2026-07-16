@@ -135,7 +135,7 @@ grow_data(std::int64_t _tid)
     // and _tid >= max_supported_threads returns above. Retained for future use.
     if(_tid >= peak_num_threads)
     {
-        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+        auto        _thread_state_guard = state::thread::scoped(state::thread::Internal);
         auto_lock_t _lk{ type_mutex<data_growth>() };
 
         // check again after locking
@@ -203,7 +203,7 @@ thread_info::init(bool _offset)
                                       ? &causal::delay::get_local(_sequent_tid)
                                       : &offset_causal_count;
 
-        if(_info->is_offset) thread_state::set(thread_state::State::Disabled);
+        if(_info->is_offset) state::thread::set(state::thread::Disabled);
     }
 
     return _info_data->at(_tid);

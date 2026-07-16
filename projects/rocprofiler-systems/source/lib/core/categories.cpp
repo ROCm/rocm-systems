@@ -81,20 +81,20 @@ setup()
 
         _trace_stages.init = [](const constraint::spec& _spec) {
             if(_spec.delay > 1.0e-3) disable_categories(config::get_enabled_categories());
-            return process_state::get() < process_state::State::Finalized;
+            return state::process::get() < state::process::Finalized;
         };
 
         _trace_stages.start = [](const constraint::spec&) {
             enable_categories(config::get_enabled_categories());
-            return process_state::get() < process_state::State::Finalized;
+            return state::process::get() < state::process::Finalized;
         };
 
         _trace_stages.stop = [](const constraint::spec&) {
             // only disable categories if not finalized since this might run in background
             // during finalization and disable output of data in those categories
-            if(process_state::get() < process_state::State::Finalized)
+            if(state::process::get() < state::process::Finalized)
                 disable_categories(config::get_enabled_categories());
-            return process_state::get() < process_state::State::Finalized;
+            return state::process::get() < state::process::Finalized;
         };
 
         auto _promise = std::promise<void>();

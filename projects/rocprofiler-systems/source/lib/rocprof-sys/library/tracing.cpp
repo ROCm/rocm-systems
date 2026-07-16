@@ -116,7 +116,7 @@ copy_timemory_hash_ids()
 
     // distribute the contents of that combined container to each thread-specific
     // container before finalizing
-    if(process_state::get() == process_state::State::Finalized)
+    if(state::process::get() == state::process::Finalized)
     {
         if(hash_storage)
         {
@@ -153,17 +153,17 @@ record_thread_start_time()
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
         thread_info::set_start(comp::wall_clock::record(),
-                               get_mode() != process_state::Mode::Sampling);
+                               get_mode() != state::process::Mode::Sampling);
     });
 }
 
 void
 thread_init()
 {
-    if(thread_state::get() == thread_state::State::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_dtor = scope::destructor{ []() {
-        if(process_state::get() != process_state::State::Finalized)
+        if(state::process::get() != state::process::Finalized)
         {
             if(get_use_causal())
                 causal::sampling::shutdown();
@@ -176,7 +176,7 @@ thread_init()
         }
     } };
 
-    if(thread_state::get() == thread_state::State::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_setup = []() {
         const auto& _tinfo = thread_info::init();
@@ -216,7 +216,7 @@ thread_init()
         return true;
     }();
 
-    if(thread_state::get() == thread_state::State::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _sample_setup = []() {
         auto _idx = utility::get_thread_index();

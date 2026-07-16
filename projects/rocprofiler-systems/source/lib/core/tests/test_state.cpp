@@ -10,10 +10,10 @@
 
 namespace
 {
-using rocprofsys::process_state;
-using rocprofsys::thread_state;
-using process_state_value = rocprofsys::process_state::State;
-using thread_state_value  = rocprofsys::thread_state::State;
+using process_state       = rocprofsys::state::process;
+using thread_state        = rocprofsys::state::thread;
+using process_state_value = process_state::State;
+using thread_state_value  = thread_state::State;
 
 class ProcessStateTest : public ::testing::Test
 {

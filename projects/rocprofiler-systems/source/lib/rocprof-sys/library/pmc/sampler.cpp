@@ -65,10 +65,10 @@
 namespace rocprofsys::pmc
 {
 
-std::atomic<process_state::State>&
+std::atomic<state::process::State>&
 get_state()
 {
-    static std::atomic<process_state::State> _v{ process_state::State::PreInit };
+    static std::atomic<state::process::State> _v{ state::process::PreInit };
     return _v;
 }
 
@@ -214,7 +214,7 @@ reinit_if_pending()
 }  // namespace
 
 void
-set_state(process_state::State _v)
+set_state(state::process::State _v)
 {
     pmc::get_state().store(_v);
 }
@@ -227,7 +227,7 @@ config()
         slice.config();
     }
     LOG_DEBUG("Setting PMC sampler state to active...");
-    pmc::set_state(process_state::State::Active);
+    pmc::set_state(state::process::Active);
 }
 
 void
@@ -237,7 +237,7 @@ sample()
 
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
-    if(pmc::get_state() != process_state::State::Active)
+    if(pmc::get_state() != state::process::Active)
     {
         return;
     }
@@ -332,7 +332,7 @@ pause()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
-    if(pmc::get_state() != process_state::State::Active || !is_initialized())
+    if(pmc::get_state() != state::process::Active || !is_initialized())
     {
         return;
     }
@@ -353,7 +353,7 @@ void
 postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
-    pmc::get_state().store(process_state::State::Finalized);
+    pmc::get_state().store(state::process::Finalized);
     for(auto& slice : g_collector_slices)
     {
         slice.shutdown();

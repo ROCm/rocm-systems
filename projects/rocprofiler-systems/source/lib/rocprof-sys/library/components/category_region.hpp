@@ -222,7 +222,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_name_value_pairs(Args&&... args)
     {
-        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         if constexpr(has_trace_cache_arg_pairs_v<Args...>)
         {
@@ -319,7 +319,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_annotation_args(Args&&... args)
     {
-        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string   args_str = {};
         std::uint32_t idx      = 0;
@@ -337,7 +337,7 @@ struct category_region
     template <typename T>
     static std::string serialize_return_arg(T&& value)
     {
-        auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string args_str = {};
         append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
@@ -479,13 +479,13 @@ using causal_throughput_categories_t =
 
 // define this outside of category region functions so that the
 // static thread_local is global instead of per-template instantiation
-inline thread_state::State
+inline state::thread::State
 get_thread_status()
 {
     static thread_local auto _thread_init_once = std::once_flag{};
     std::call_once(_thread_init_once, tracing::thread_init);
 
-    return thread_state::get();
+    return state::thread::get();
 }
 
 // timemory component which calls rocprof-sys functions
@@ -559,21 +559,21 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     if(tracing::category_push_disabled<CategoryT>()) return;
 
     // unconditionally return if thread is disabled or finalized
-    if(thread_state::get() == thread_state::State::Disabled) return;
-    if(process_state::get() >= process_state::State::Finalized) return;
+    if(state::thread::get() == state::thread::Disabled) return;
+    if(state::process::get() >= state::process::Finalized) return;
 
     if(name.empty()) return;
 
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
-    if(process_state::get() != process_state::State::Active &&
+    if(state::process::get() != state::process::Active &&
        !rocprofsys_init_tooling_hidden())
         return;
 
-    if(get_thread_status() == thread_state::State::Disabled) return;
+    if(get_thread_status() == state::thread::Disabled) return;
 
     // Gotcha starts pass the region name followed by ("arg-name", value) pairs.
     // Serialize those pairs into the trace-cache wire format
@@ -595,8 +595,8 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     if(tracing::debug_push)
     {
         LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_push_region({})",
-                  category_name, process::get_id(), process_state::get(),
-                  thread_state::get(), name.data());
+                  category_name, process::get_id(), state::process::get(),
+                  state::thread::get(), name.data());
     }
 
     if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
@@ -655,7 +655,7 @@ category_region<CategoryT>::append_cache_args(std::string_view name,
 {
     if(name.empty() || serialized_args.empty()) return;
 
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
@@ -671,9 +671,9 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     // skip if category is disabled
     if(tracing::category_pop_disabled<CategoryT>()) return;
 
-    if(thread_state::get() == thread_state::State::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
@@ -687,12 +687,12 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     if(tracing::debug_pop)
     {
         LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_pop_region({})",
-                  category_name, process::get_id(), process_state::get(),
-                  thread_state::get(), name.data());
+                  category_name, process::get_id(), state::process::get(),
+                  state::thread::get(), name.data());
     }
 
     // only execute when active
-    if(process_state::get() == process_state::State::Active)
+    if(state::process::get() == state::process::Active)
     {
         if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
         {
@@ -733,7 +733,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     else
     {
         LOG_DEBUG("[{}] rocprofsys_pop_region({}) ignored :: state = {}", category_name,
-                  name.data(), process_state::get());
+                  name.data(), state::process::get());
     }
 }
 
@@ -753,22 +753,22 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
-    if(process_state::get() != process_state::State::Active &&
+    if(state::process::get() != state::process::Active &&
        !rocprofsys_init_tooling_hidden())
         return;
 
     // unconditionally return if thread is disabled or finalized
-    if(thread_state::get() >= thread_state::State::Completed) return;
+    if(state::thread::get() >= state::thread::Completed) return;
 
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_use_causal())
     {
         if(tracing::debug_mark)
         {
             LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_progress({})",
-                      category_name, process::get_id(), process_state::get(),
-                      thread_state::get(), name.data());
+                      category_name, process::get_id(), state::process::get(),
+                      state::thread::get(), name.data());
         }
 
         causal::mark_progress_point(name);

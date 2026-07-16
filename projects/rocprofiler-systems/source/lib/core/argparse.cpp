@@ -105,7 +105,7 @@ init_parser(parser_data& _data)
     tim::settings::suppress_config()  = true;
     tim::settings::suppress_parsing() = true;
 
-    process_state::set(process_state::State::Init);
+    state::process::set(state::process::Init);
     config::configure_settings(false);
 
     _data.env.dl_libpath =

@@ -312,11 +312,10 @@ extern "C" void
 rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t address)
 {
     if(coverage::get_post_processed()) return;
-    if(rocprofsys::process_state::get() < rocprofsys::process_state::State::Active &&
+    if(rocprofsys::state::process::get() < rocprofsys::state::process::Active &&
        !rocprofsys_init_tooling_hidden())
         return;
-    else if(rocprofsys::process_state::get() >=
-            rocprofsys::process_state::State::Finalized)
+    else if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
         return;
 
     (*coverage::get_coverage_count())[file][func][address] += 1;

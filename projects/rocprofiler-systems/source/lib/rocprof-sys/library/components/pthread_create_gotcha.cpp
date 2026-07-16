@@ -177,14 +177,14 @@ pthread_create_gotcha::wrapper::operator()() const
         return m_routine(m_arg);
     }
 
-    thread_state::push(thread_state::State::Internal);
+    state::thread::push(state::thread::Internal);
 
     std::int64_t _tid         = -1;
     void*        _ret         = nullptr;
     auto         _is_sampling = false;
     auto         _bundle      = std::shared_ptr<bundle_t>{};
     auto         _signals     = std::set<int>{};
-    auto         _coverage    = (get_mode() == process_state::Mode::Coverage);
+    auto         _coverage    = (get_mode() == state::process::Mode::Coverage);
     const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto&  _info        = thread_info::init(m_config.offset);
     if(!_info)
@@ -193,7 +193,7 @@ pthread_create_gotcha::wrapper::operator()() const
         return m_routine(m_arg);
     }
     auto _dtor = [&]() {
-        thread_state::set(thread_state::State::Internal);
+        state::thread::set(state::thread::Internal);
         if(_is_sampling)
         {
             if(m_config.enable_causal)
@@ -211,7 +211,7 @@ pthread_create_gotcha::wrapper::operator()() const
         if(_tid >= 0)
         {
             auto _active =
-                (process_state::get() == ::rocprofsys::process_state::State::Active &&
+                (state::process::get() == ::rocprofsys::state::process::Active &&
                  bundles != nullptr && bundles_mutex != nullptr);
             if(!_active) return;
             thread_info::set_stop(comp::wall_clock::record());
@@ -227,7 +227,7 @@ pthread_create_gotcha::wrapper::operator()() const
         }
     };
 
-    auto _active = (process_state::get() == ::rocprofsys::process_state::State::Active &&
+    auto _active = (state::process::get() == ::rocprofsys::state::process::Active &&
                     bundles != nullptr && bundles_mutex != nullptr);
 
     if(m_config.offset)
@@ -291,21 +291,21 @@ pthread_create_gotcha::wrapper::operator()() const
     if(m_config.promise) m_config.promise->set_value();
 
     // Internal -> Enabled
-    thread_state::pop();
+    state::thread::pop();
 
-    thread_state::push(thread_state::State::Enabled);
+    state::thread::push(state::thread::Enabled);
 
     // execute the original function
     _ret = m_routine(m_arg);
 
-    if(process_state::get() < ::rocprofsys::process_state::State::Finalized)
+    if(state::process::get() < ::rocprofsys::state::process::Finalized)
     {
-        thread_state::pop();
+        state::thread::pop();
 
         // execute the destructor actions
         _dtor();
 
-        thread_state::set(thread_state::State::Completed);
+        state::thread::set(state::thread::Completed);
     }
 
     return _ret;
@@ -328,7 +328,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     }
 
     static thread_local auto _remover = scope::destructor{ []() {
-        if(process_state::get() >= rocprofsys::process_state::State::Finalized) return;
+        if(state::process::get() >= rocprofsys::state::process::Finalized) return;
         // remove the handle even if original function aborts
         auto _lk = locking::atomic_lock{ native_handles_mutex };
         native_handles.erase(pthread_self());
@@ -589,15 +589,14 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         warn_thread_limit_once();
         return (*m_wrappee)(thread, attr, func, arg);
     }
-    auto _thr_state    = thread_state::get();
-    auto _glob_state   = process_state::get();
+    auto _thr_state    = state::thread::get();
+    auto _glob_state   = state::process::get();
     auto _mode         = get_mode();
-    auto _disabled     = (_thr_state == thread_state::State::Disabled);
-    auto _enabled      = (_thr_state == thread_state::State::Enabled);
+    auto _disabled     = (_thr_state == state::thread::Disabled);
+    auto _enabled      = (_thr_state == state::thread::Enabled);
     auto _bundle       = std::optional<bundle_t>{};
     auto _sample_child = sampling_enabled_on_child_threads();
-    auto _active =
-        (_glob_state == ::rocprofsys::process_state::State::Active && !_disabled);
+    auto _active = (_glob_state == ::rocprofsys::state::process::Active && !_disabled);
     const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);
     if(!_info)
     {
@@ -605,9 +604,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    auto _thread_state_guard = thread_state::scoped(thread_state::State::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _coverage     = (_mode == process_state::Mode::Coverage);
+    auto _coverage     = (_mode == state::process::Mode::Coverage);
     auto _use_sampling = config::get_use_sampling();
     auto _use_causal   = config::get_use_causal();
     auto _offset       = (!_enabled || !_active || _info->is_offset);
@@ -656,13 +655,13 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         get_cpu_cid_stack();
     }
 
-    thread_state::set(thread_state::State::Disabled);
+    state::thread::set(state::thread::Disabled);
     auto _blocked = get_sampling_signals();
     auto _promise = (_active) ? std::make_shared<std::promise<void>>() : promise_t{};
     auto _config =
         wrapper_config{ _enable_causal, _enable_sampling, _offset, _tid, _promise };
     auto* _wrap = new wrapper{ func, arg, _config };
-    thread_state::set(thread_state::State::Internal);
+    state::thread::set(state::thread::Internal);
 
     // block the signals in entire process
     if(_enable_sampling && !_blocked.empty())

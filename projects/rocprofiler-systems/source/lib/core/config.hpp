@@ -150,7 +150,7 @@ get_setting_value(const std::string& _name)
 std::string
 get_config_file();
 
-process_state::Mode
+state::process::Mode
 get_mode();
 
 bool&
@@ -448,10 +448,10 @@ private:
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
 
-process_state::CausalBackend
+state::process::CausalBackend
 get_causal_backend();
 
-process_state::CausalMode
+state::process::CausalMode
 get_causal_mode();
 
 bool
