@@ -66,4 +66,22 @@ ncclResult_t ncclAllReduceDdaFabricLL(
     ncclComm* comm,
     cudaStream_t stream);
 
+// LL128-protocol fabric path (mid-message fast lane, 128B lines, no barrier).
+bool ncclAllReduceDdaFabricLL128Eligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op);
+
+ncclResult_t ncclAllReduceDdaFabricLL128(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm* comm,
+    cudaStream_t stream);
+
 #endif

@@ -138,10 +138,6 @@ RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(131072));
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(524288));
-// LL-protocol DDA all-reduce (fabric path). TODO: migrate to the common
-// DdaLL/DdaLL128 knobs in the AllReduce LL128 phase.
-RCCL_PARAM(DdaAllReduceLL, "DDA_ALLREDUCE_LL", 1);
-RCCL_PARAM(DdaAllReduceLLThreshold, "DDA_ALLREDUCE_LL_THRESHOLD", (size_t)(131072));
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -543,13 +539,30 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&  msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaAllReduceLL() &&
-          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaAllReduceLLThreshold() &&
+      if (rcclParamDdaLL() &&
+          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&
           ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL,
              "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
              comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
         NCCLCHECK(ncclAllReduceDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+      // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
+      if (rcclParamDdaLL128() &&
+          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128Threshold() &&
+          ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        INFO(NCCL_COLL,
+             "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllReduceDdaFabricLL128(
             sendbuff,
             recvbuff,
             count,
