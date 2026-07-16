@@ -64,7 +64,7 @@ tree or another release corpus:
 
 ```sh
 build/tools/rj_waitcheck /path/to/site-packages/torch \
-  --exhaustive --target gfx950 --summary-only -j16
+  --exhaustive --target gfx950 --summary-only -j16 --slowest-kernels 10
 ```
 
 `--exhaustive` implies `--recursive --all-code-objects`. Files that do not
@@ -79,9 +79,14 @@ kernels. When standard error is an interactive terminal, exhaustive mode first
 counts the selected code objects and kernel descriptors and then displays
 progress as `kernels C/D code-objects C/D`. Redirected and procedural runs are
 silent by default; use `--progress` to force the display or `--no-progress` to
-disable it. Code objects are independent analysis units, so `-j N` runs up to
-`N` of them concurrently. The default is `-j1`, and the maximum is `-j16` to
-bound memory use.
+disable it. Kernels are independent analysis units, so `-j N` dynamically
+schedules up to `N` kernels concurrently, including kernels from the same
+massive code object. A worker fetches the next kernel as soon as it finishes;
+one pathological kernel does not pin the other workers. Descriptor-less code
+objects remain single analysis units. The default is `-j1`, and the maximum is
+`-j16` to bound memory use. `--slowest-kernels N` prints a bounded top-N list
+with each kernel's wall time, input, target, code-object index, name, and entry
+offset for follow-up optimization.
 
 Useful options:
 
@@ -95,7 +100,8 @@ Useful options:
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. |
 | `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
 | `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
-| `-j N`, `--jobs N` | Analyze up to N code objects concurrently. The default is 1 and the maximum is 16. |
+| `-j N`, `--jobs N` | Analyze up to N kernels concurrently. The default is 1 and the maximum is 16. |
+| `--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |
