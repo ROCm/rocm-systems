@@ -104,10 +104,13 @@ fire application's original completion signal
 
 ## Interaction with Other Services
 
-Kernel replay is independent of all other services. During a replay pass,
+For now: Kernel replay is independent of all other services. During a replay pass,
 other services (counter collection, kernel tracing, PC sampling, ATT) fire
 their callbacks as usual. The tool coordinates which service does what on
 each pass through its own internal state management.
+
+Upcoming commits: Services will be locally-toggleable with additional function 
+callbacks tht are added to the `rocprofiler_callback_tracing_kernel_replay_data_t` structure. 
 
 ## Future Work
 
