@@ -4554,7 +4554,10 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
   auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
   if (status == AMDSMI_STATUS_SUCCESS && gpu_busy_percent != nullptr &&
       is_gfx_activity_silenced(processor_handle)) {
+    // The sole output is gfx activity; when silenced there is no valid value to
+    // return, so surface the sentinel and report that no data is available.
     *gpu_busy_percent = std::numeric_limits<uint32_t>::max();
+    return AMDSMI_STATUS_NO_DATA;
   }
   return status;
 }
@@ -4567,13 +4570,20 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
                              count, timestamp);
   if (status == AMDSMI_STATUS_SUCCESS && utilization_counters != nullptr &&
       is_gfx_activity_silenced(processor_handle)) {
+    uint32_t silenced = 0;
     for (uint32_t i = 0; i < count; ++i) {
       if (utilization_counters[i].type == AMDSMI_COARSE_GRAIN_GFX_ACTIVITY ||
           utilization_counters[i].type == AMDSMI_FINE_GRAIN_GFX_ACTIVITY) {
         utilization_counters[i].value = std::numeric_limits<uint64_t>::max();
         utilization_counters[i].fine_value[0] = std::numeric_limits<uint64_t>::max();
         utilization_counters[i].fine_value_count = 0;
+        ++silenced;
       }
+    }
+    // If every requested counter was a silenced gfx activity type, no valid data
+    // remains; report that. A mixed request still returns its non-gfx values.
+    if (count > 0 && silenced == count) {
+      return AMDSMI_STATUS_NO_DATA;
     }
   }
   return status;
