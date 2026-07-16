@@ -5690,7 +5690,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_compute_partition_mem_alloc_mode
+### amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Get the compute partition memory allocation mode from the given GPU. Controls how HBM capacity is distributed across XCPs within each memory partition.
 
@@ -5700,7 +5700,7 @@ Input parameters:
 
 Output: String of the memory allocation mode (`"CAPPING"` or `"ALL"`)
 
-Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5724,7 +5724,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            mode = amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
+            mode = amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(device)
             print(mode)
 except amdsmi.AmdSmiException as e:
     print(e)
@@ -5732,7 +5732,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_gpu_compute_partition_mem_alloc_mode
+### amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Set the compute partition memory allocation mode for the given GPU. Requires elevated privileges (sudo). Controls whether each XCP is capped to an even share of memory (`CAPPING`) or may use the full partition memory (`ALL`).
 
@@ -5743,7 +5743,7 @@ Input parameters:
 
 Output: None
 
-Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5767,7 +5767,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+            amdsmi.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
                 device, amdsmi.AmdSmiComputePartitionMemAllocModeType.CAPPING
             )
 except amdsmi.AmdSmiException as e:
@@ -5854,48 +5854,6 @@ try:
         for device in devices:
             memory_partition_type = amdsmi.amdsmi_get_gpu_memory_partition(device)
             print(memory_partition_type)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_set_gpu_memory_partition
-
-Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
-
-Input parameters:
-
-* `processor_handle` the device handle
-* `memory_partition` the type of memory_partition to set
-
-Output: `None`
-
-Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied
-- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

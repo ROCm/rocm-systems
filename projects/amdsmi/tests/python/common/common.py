@@ -314,13 +314,13 @@ def build_type_lists():
             (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
         )
 
-    compute_partition_mem_alloc_mode_types = []
-    for member in amdsmi.AmdSmiComputePartitionMemAllocModeType:
+    accelerator_partition_mem_alloc_mode_types = []
+    for member in amdsmi.AmdSmiAcceleratorPartitionMemAllocModeType:
         cond = PASS
         if member.name in ["INVALID"]:
             cond = FAIL
-        compute_partition_mem_alloc_mode_types.append(
-            (member.name, amdsmi.AmdSmiComputePartitionMemAllocModeType(member.value), cond)
+        accelerator_partition_mem_alloc_mode_types.append(
+            (member.name, amdsmi.AmdSmiAcceleratorPartitionMemAllocModeType(member.value), cond)
         )
 
     freq_inds = []
@@ -375,7 +375,7 @@ def build_type_lists():
         "counter_commands": counter_commands,
         "compute_partition_types": compute_partition_types,
         "memory_partition_types": memory_partition_types,
-        "compute_partition_mem_alloc_mode_types": compute_partition_mem_alloc_mode_types,
+        "accelerator_partition_mem_alloc_mode_types": accelerator_partition_mem_alloc_mode_types,
         "freq_inds": freq_inds,
         "power_profile_preset_masks": power_profile_preset_masks,
         "processor_types": processor_types,
@@ -406,7 +406,9 @@ EVENT_TYPES = _TYPE_LISTS["event_types"]
 COUNTER_COMMANDS = _TYPE_LISTS["counter_commands"]
 COMPUTE_PARTITION_TYPES = _TYPE_LISTS["compute_partition_types"]
 MEMORY_PARTITION_TYPES = _TYPE_LISTS["memory_partition_types"]
-COMPUTE_PARTITION_MEM_ALLOC_MODE_TYPES = _TYPE_LISTS["compute_partition_mem_alloc_mode_types"]
+ACCELERATOR_PARTITION_MEM_ALLOC_MODE_TYPES = _TYPE_LISTS[
+    "accelerator_partition_mem_alloc_mode_types"
+]
 FREQ_INDS = _TYPE_LISTS["freq_inds"]
 POWER_PROFILE_PRESET_MASKS = _TYPE_LISTS["power_profile_preset_masks"]
 PROCESSOR_TYPES = _TYPE_LISTS["processor_types"]
