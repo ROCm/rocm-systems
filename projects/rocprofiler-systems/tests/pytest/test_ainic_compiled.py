@@ -59,10 +59,10 @@ def librocprof_sys(rocprof_config: RocprofsysConfig) -> Path:
     return lib
 
 
-class TestAinicCompiledIn:
+class TestAiNic:
     """Verify AI NIC support was compiled into librocprof-sys.so."""
 
-    def test_ainic_dynamic_symbols_present(self, librocprof_sys: Path):
+    def test_symbols_present(self, librocprof_sys: Path):
         """amdsmi NIC API symbols must appear in the dynamic symbol table.
 
         These symbols are undefined references (U) in librocprof-sys.so —
