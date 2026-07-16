@@ -53,6 +53,8 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <stddef.h>
 
+#include "cachePolicy.h"   // shared CachePolicy encoding (same as asyncCopy.h)
+
 // ============================================================================
 //  AVAILABILITY
 // ----------------------------------------------------------------------------
@@ -166,11 +168,17 @@ __host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
 /// \param ldsBuffer      Per-block LDS staging area (shared memory).
 /// \param ldsBufferBytes Size of \p ldsBuffer in bytes; subdivided among warps.
 ///
+/// \tparam cp Compile-time cache policy (temporal hint + memory scope) baked into
+///            the tensor load/store as their immediate cpol operand. Build one
+///            with createCachePolicy(); see cachePolicy.h. Must be a constant
+///            because the hardware instruction takes an immediate.
+///
 /// \note For BLOCK-wide visibility, follow with __syncthreads() (and see the
 ///       visibility notes at the bottom of the file).
 /// \warning \p src and \p dst must be GLOBAL (HBM) pointers. Passing a shared /
 ///          LDS pointer compiles (it decays to void*) but is undefined at run
 ///          time -- the address is programmed into the descriptor's global field.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ TDM_API void tdmCopy(void* dst, const void* src, size_t sizeBytes,
                                 void* ldsBuffer, size_t ldsBufferBytes) TDM_DELETED;
 
@@ -180,8 +188,9 @@ __device__ TDM_API void tdmCopy(void* dst, const void* src, size_t sizeBytes,
 /// few TDM ops (bounded by the per-wave queue depth) stay in flight so they
 /// overlap with whatever the calling warp does next. Pair with tdmWait().
 ///
-/// \see tdmCopy for parameter meanings.
+/// \see tdmCopy for parameter meanings (including the \p cp cache policy).
 /// \see tdmWait to complete the copy.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ TDM_API void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes,
                                      void* ldsBuffer, size_t ldsBufferBytes) TDM_DELETED;
 
@@ -216,13 +225,15 @@ __device__ TDM_API void tdmCopyAsync(void* dst, const void* src, size_t sizeByte
 ///       /* compute -- use LDS past the team's window */;
 ///   __syncthreads();
 /// \endcode
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ TDM_API void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes,
                                       void* ldsBuffer, size_t ldsBufferBytes,
                                       uint32_t startWarpId, uint32_t stopWarpId) TDM_DELETED;
 
 /// \brief Non-blocking variant of tdmCopyByTeam(): issue and return.
-/// \see tdmCopyByTeam for parameter meanings and team semantics.
+/// \see tdmCopyByTeam for parameter meanings and team semantics (incl. \p cp).
 /// \see tdmWait to complete the copy (called by each participating warp).
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes,
                                            void* ldsBuffer, size_t ldsBufferBytes,
                                            uint32_t startWarpId, uint32_t stopWarpId) TDM_DELETED;
@@ -320,21 +331,26 @@ constexpr uint32_t TD0   = WIDTH / ELT;  // 64 elements per row
 using u32x4 = __attribute__((ext_vector_type(4))) uint32_t;   // D0, D2, D3
 using u32x8 = __attribute__((ext_vector_type(8))) uint32_t;   // D1, D4
 
+// The cache policy is baked into the instruction as its immediate cpol operand,
+// so it must be a compile-time constant -- hence a template parameter (mirroring
+// how asyncCopy.h passes its cache policy to the async builtins).
+template<CachePolicy cp>
 __device__ inline void load(const gfx1250_TDM_GROUP0& g0,
                             const gfx1250_TDM_GROUP1& g1) {
     __builtin_amdgcn_tensor_load_to_lds(
         g0.m_bitfield,               // D0  addresses
         g1.m_bitfield,               // D1  2D shape
         u32x4{}, u32x4{}, u32x8{},   // D2/D3/D4  higher dims: unused (zero)
-        /*cpol=*/0);
+        /*cpol=*/cp);
 }
+template<CachePolicy cp>
 __device__ inline void store(const gfx1250_TDM_GROUP0& g0,
                              const gfx1250_TDM_GROUP1& g1) {
     __builtin_amdgcn_tensor_store_from_lds(
         g0.m_bitfield,
         g1.m_bitfield,
         u32x4{}, u32x4{}, u32x8{},
-        /*cpol=*/0);
+        /*cpol=*/cp);
 }
 __device__ inline void waitTensor0() { __builtin_amdgcn_s_wait_tensorcnt(0); }
 
@@ -360,6 +376,7 @@ __device__ inline void warpVecCopy(const uint8_t* s, uint8_t* d, size_t n,
 //   * load -> wait: the store reads the LDS the load just wrote (RAW hazard).
 //   * store -> wait: the caller reuses this same window next iteration; the next
 //     load must not overwrite LDS the store is still draining (WAR hazard).
+template<CachePolicy cp>
 __device__ inline void issueRows(uint64_t src, uint32_t lds, uint64_t dst,
                                  uint32_t rows) {
     gfx1250_TDM_GROUP1 g1;
@@ -371,13 +388,14 @@ __device__ inline void issueRows(uint64_t src, uint32_t lds, uint64_t dst,
     // Higher dims (D2/D3/D4) are unused for this 2D tile -> passed as zero inside
     // load()/store(), matching known-good example usage.
     gfx1250_TDM_GROUP0 g0l(lds, src);
-    load(g0l, g1);   waitTensor0();          // RAW: fill LDS before store reads it
+    load<cp>(g0l, g1);   waitTensor0();       // RAW: fill LDS before store reads it
     gfx1250_TDM_GROUP0 g0s(lds, dst);
-    store(g0s, g1);  waitTensor0();          // WAR: drain store before window reuse
+    store<cp>(g0s, g1);  waitTensor0();       // WAR: drain store before window reuse
 }
 
 // ---- issue a sub-row tail (<256B) as a 1-D tile at BYTE granularity. ---------
 // Same single-buffered LDS window and the same required RAW/WAR waits as above.
+template<CachePolicy cp>
 __device__ inline void issueRow1d(uint64_t src, uint32_t lds, uint64_t dst,
                                   uint32_t nbytes) {
     gfx1250_TDM_GROUP1 g1;
@@ -387,15 +405,16 @@ __device__ inline void issueRow1d(uint64_t src, uint32_t lds, uint64_t dst,
     g1.tensorDim0Stride(nbytes);
 
     gfx1250_TDM_GROUP0 g0l(lds, src);        // unused higher dims -> zero (see load())
-    load(g0l, g1);   waitTensor0();          // RAW: fill LDS before store reads it
+    load<cp>(g0l, g1);   waitTensor0();       // RAW: fill LDS before store reads it
     gfx1250_TDM_GROUP0 g0s(lds, dst);
-    store(g0s, g1);  waitTensor0();          // WAR: drain store before window reuse
+    store<cp>(g0s, g1);  waitTensor0();       // WAR: drain store before window reuse
 }
 
 // ---- core: partition + issue the whole copy for the team [start, stop). -----
 // NO final wait. Work + LDS partition by rank within the team (warpId - start),
 // so each team indexes its own `ldsBuffer` from zero. Safe to call collectively
 // (warps outside the range return immediately) or only from the team's warps.
+template<CachePolicy cp>
 __device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
                              void* ldsBuffer, size_t ldsBufferBytes,
                              uint32_t startWarpId, uint32_t stopWarpId) {
@@ -436,8 +455,8 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
     if (rank == 0 && head) warpVecCopy(s, d, head, warpThread, warpThreads);
     if (rank == 0 && tail) {
         if (ldsBytes >= tail)                          // stage tail in rank 0's window
-            issueRow1d(reinterpret_cast<uint64_t>(s + tailOff), ldsBase,
-                       reinterpret_cast<uint64_t>(d + tailOff), tail);
+            issueRow1d<cp>(reinterpret_cast<uint64_t>(s + tailOff), ldsBase,
+                           reinterpret_cast<uint64_t>(d + tailOff), tail);
         else
             warpVecCopy(s + tailOff, d + tailOff, tail, warpThread, warpThreads);
     }
@@ -471,7 +490,7 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
         uint32_t chunkRows = (myRows - r < rowsPerChunk)
                              ? static_cast<uint32_t>(myRows - r) : rowsPerChunk;
         uint64_t off = (uint64_t)r * WIDTH;
-        issueRows(sBase + off, myLds, dBase + off, chunkRows);
+        issueRows<cp>(sBase + off, myLds, dBase + off, chunkRows);
     }
 }
 
@@ -481,27 +500,31 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
 
 __device__ inline void tdmWait() { detail::waitTensor0(); }
 
+template<CachePolicy cp>
 __device__ inline void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes,
                                     void* ldsBuffer, size_t ldsBufferBytes) {
-    detail::issue(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
 }
 
+template<CachePolicy cp>
 __device__ inline void tdmCopy(void* dst, const void* src, size_t sizeBytes,
                                void* ldsBuffer, size_t ldsBufferBytes) {
-    detail::issue(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
     tdmWait();
 }
 
+template<CachePolicy cp>
 __device__ inline void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes,
                                           void* ldsBuffer, size_t ldsBufferBytes,
                                           uint32_t startWarpId, uint32_t stopWarpId) {
-    detail::issue(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
 }
 
+template<CachePolicy cp>
 __device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes,
                                      void* ldsBuffer, size_t ldsBufferBytes,
                                      uint32_t startWarpId, uint32_t stopWarpId) {
-    detail::issue(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
     tdmWait();   // no-op on any warp that issued nothing / is off-team
 }
 

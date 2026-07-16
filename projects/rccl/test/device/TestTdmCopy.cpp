@@ -59,16 +59,17 @@ constexpr uint32_t kTeamToEnd = ~0u;
 // non-TDM device pass) while emitting the real copy for the gfx1250 device pass.
 
 // Whole-block copy of [0, n): dst <- src. Every thread calls with identical args.
-template<bool ASYNC>
+// CP is the compile-time cache policy threaded into the tensor load/store.
+template<bool ASYNC, CachePolicy CP = DEFAULT_CACHE_POLICY>
 __global__ void kTdmBlockCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
                               [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes) {
 #if TDM_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    tdm::tdmCopyAsync(dst, src, n, lds, ldsBytes);
+    tdm::tdmCopyAsync<CP>(dst, src, n, lds, ldsBytes);
     tdm::tdmWait();
   } else {
-    tdm::tdmCopy(dst, src, n, lds, ldsBytes);
+    tdm::tdmCopy<CP>(dst, src, n, lds, ldsBytes);
   }
   __syncthreads();
 #endif
@@ -371,5 +372,41 @@ protected:
 
 TEST_F(TdmTwoTeamTest, Blocking) { run<false>(8192, 2048, 256); }
 TEST_F(TdmTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
+
+// ===========================================================================
+//  Non-default cache policy still copies correctly.
+// ===========================================================================
+
+// A non-default cache policy proves the cp template argument threads all the way
+// through the tensor load/store as their immediate cpol operand.
+constexpr CachePolicy kTdmAltCachePolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
+
+class TdmCachePolicyTest : public TdmCopyTest {
+protected:
+  void run(size_t n, size_t lds, int off, int block) {
+    if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+    const size_t srcTotal  = static_cast<size_t>(off) + n;
+    const size_t dstTotal  = static_cast<size_t>(kGuard) + off + n + kGuard;
+    const size_t copyStart = static_cast<size_t>(kGuard) + off;
+
+    auto h_src = makePattern(srcTotal, 0x5EEDu);
+    DeviceBuffer<uint8_t> d_src(srcTotal);
+    d_src.copyFrom(h_src);
+
+    std::vector<uint8_t> h_dstInit(dstTotal, kSentinel);
+    DeviceBuffer<uint8_t> d_dst(dstTotal);
+    d_dst.copyFrom(h_dstInit);
+
+    kTdmBlockCopy<false, kTdmAltCachePolicy><<<1, block, lds>>>(
+        d_dst.ptr + copyStart, d_src.ptr + off, n, lds);
+    syncAndCheck();
+
+    auto h_out = d_dst.copyTo();
+    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, "alt_cache_policy");
+  }
+};
+
+TEST_F(TdmCachePolicyTest, NonDefaultPolicy) { run(6000, 2048, 64, 256); }
 
 }  // namespace RcclUnitTesting

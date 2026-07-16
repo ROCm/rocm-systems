@@ -24,8 +24,7 @@ THE SOFTWARE.
 #define __ASYNCCOPY_H
 
 #include "tdm.h"
-
-using CachePolicy = uint32_t;
+#include "cachePolicy.h"
 
 enum struct SyncPolicy : uint32_t {
     Async,
@@ -33,58 +32,6 @@ enum struct SyncPolicy : uint32_t {
 };
 
 constexpr SyncPolicy DEFAULT_SYNC_POLICY = SyncPolicy::Async;
-
-enum struct MemScope : uint32_t {
-    WGP = 0,    // Workgroup processor scope - warps running on the same WGP should be able to see the effect of the operation
-    SE,         // Shader engine a.k.a cluster scope
-    DEV,        // Device scope
-    SYS,        // System scope
-};
-
-enum struct TemporalHint : uint32_t {
-    RT = 0, // Regular temporal (nothing special)
-    NT,     // Not temporal 
-    HT,     // High temporal 
-    LU,     // Last use  
-    NT_RT,
-    RT_NT,
-    NT_HT,
-};
-
-__host__ __device__ constexpr CachePolicy createCachePolicy(TemporalHint temporal, MemScope scope) noexcept {
-    return static_cast<CachePolicy>(scope) << 3 | static_cast<CachePolicy>(temporal);
-}
-
-static_assert(createCachePolicy(TemporalHint::RT, MemScope::WGP) == 0);
-static_assert(createCachePolicy(TemporalHint::NT, MemScope::WGP) == 1);
-static_assert(createCachePolicy(TemporalHint::HT, MemScope::WGP) == 2);
-static_assert(createCachePolicy(TemporalHint::LU, MemScope::WGP) == 3);
-static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::WGP) == 4);
-static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::WGP) == 5);
-static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::WGP) == 6);
-static_assert(createCachePolicy(TemporalHint::RT, MemScope::SE) == 8);
-static_assert(createCachePolicy(TemporalHint::NT, MemScope::SE) == 9);
-static_assert(createCachePolicy(TemporalHint::HT, MemScope::SE) == 10);
-static_assert(createCachePolicy(TemporalHint::LU, MemScope::SE) == 11);
-static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::SE) == 12);
-static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::SE) == 13);
-static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SE) == 14);
-static_assert(createCachePolicy(TemporalHint::RT, MemScope::DEV) == 16);
-static_assert(createCachePolicy(TemporalHint::NT, MemScope::DEV) == 17);
-static_assert(createCachePolicy(TemporalHint::HT, MemScope::DEV) == 18);
-static_assert(createCachePolicy(TemporalHint::LU, MemScope::DEV) == 19);
-static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::DEV) == 20);
-static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::DEV) == 21);
-static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::DEV) == 22);
-static_assert(createCachePolicy(TemporalHint::RT, MemScope::SYS) == 24);
-static_assert(createCachePolicy(TemporalHint::NT, MemScope::SYS) == 25);
-static_assert(createCachePolicy(TemporalHint::HT, MemScope::SYS) == 26);
-static_assert(createCachePolicy(TemporalHint::LU, MemScope::SYS) == 27);
-static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::SYS) == 28);
-static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::SYS) == 29);
-static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SYS) == 30);
-
-constexpr CachePolicy DEFAULT_CACHE_POLICY = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
 // Used for setting TDM descriptor fields and arguments to the async load/store builtins
 using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
@@ -365,6 +312,222 @@ struct TileMover{
     __builtin_amdgcn_s_wait_tensorcnt(WAIT_CNT);
   }
 };
+
+
+// ============================================================================
+//  DROP-IN PARITY API (mirrors tdm/tdmCopy.h)
+// ----------------------------------------------------------------------------
+// The entry points below expose the EXACT same public surface as tdm/tdmCopy.h
+// -- same names, signatures, defaults, and memcpy-style semantics -- so the two
+// libraries are interchangeable. The only difference is internal: this
+// implementation stages HBM->LDS->HBM through the async-to/from-LDS builtins
+// (see warpAsyncCopy above) instead of the tensor-data-mover load/store
+// instructions.
+//
+// AVAILABILITY: the async-to/from-LDS builtins are a gfx1250 feature. As with
+// tdmCopy.h, ASYNC_COPY_SUPPORTED is 1 only for a device pass on a capable arch
+// whose compiler exposes the builtin; otherwise each entry point is `= delete`d,
+// so including the header is fine but CALLING one on an unsupported target is a
+// compile-time error at the call site. async::IsTdmCopySupported() is always
+// callable (host and device) and is the runtime/host-side guard.
+// ============================================================================
+#ifndef __has_builtin
+#  define __has_builtin(x) 0
+#endif
+
+#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+                                  /* extend: || (defined(__gfxNNNN__) && ...) */
+#  define ASYNC_COPY_SUPPORTED 1
+#else
+#  define ASYNC_COPY_SUPPORTED 0
+#endif
+
+#if ASYNC_COPY_SUPPORTED
+#  define ASYNC_API      inline
+#  define ASYNC_DELETED
+#else
+#  define ASYNC_API
+#  define ASYNC_DELETED  = delete
+#endif
+
+namespace async {
+
+/// \brief Report whether async-to/from-LDS copies are usable. Always available
+///        (never deleted), so it is safe to call on any target as a guard.
+/// \see tdm::IsTdmCopySupported for the identical query on the TDM library.
+__host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    (void)deviceId;
+    return ASYNC_COPY_SUPPORTED;              // compile-time constant for this arch pass
+#else
+    hipDeviceProp_t prop;
+    if (hipGetDeviceProperties(&prop, deviceId) != hipSuccess) return false;
+    // gcnArchName looks like "gfx1250:sramecc+:xnack-"; match the arch prefix.
+    const char* arch = prop.gcnArchName;
+    const char* p    = "gfx1250";
+    while (*p && *arch == *p) { ++arch; ++p; }
+    return (*p == '\0');
+#endif
+}
+
+#if ASYNC_COPY_SUPPORTED
+
+namespace detail {
+
+// LDS is subdivided into per-warp staging windows; each window is a multiple of
+// this many bytes (matching the widest async b128 access / 128B cache line).
+constexpr uint32_t WINDOW_GRAIN = 128;
+
+// Direct global->global byte copy by one warp, used only when the LDS staging
+// area is too small to hold even a single window (the vector fallback, mirroring
+// tdm::detail::warpVecCopy's role). Byte granularity keeps it correct for any
+// source/destination alignment.
+template<CachePolicy cp>
+__device__ inline void warpGlobalCopy(const uint8_t* s, uint8_t* d, size_t n,
+                                      uint32_t warpThread, uint32_t warpThreads) {
+    for (size_t i = warpThread; i < n; i += warpThreads) d[i] = s[i];
+}
+
+// core: partition + issue the whole copy for the team [start, stop). Work + LDS
+// partition by rank within the team (warpId - start), so each team indexes its
+// own ldsBuffer from zero. Safe to call collectively (warps outside the range
+// return immediately) or only from the team's warps. NO final wait -- each async
+// tile already drains its own load/store (RAW/WAR) inside the loop, so nothing
+// is left in flight on return; async::tdmWait() below is therefore a no-op guard
+// kept for API parity with tdm::tdmWait().
+template<CachePolicy cp>
+__device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
+                             void* ldsBuffer, size_t ldsBufferBytes,
+                             uint32_t startWarpId, uint32_t stopWarpId) {
+    const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
+    uint8_t*       d = reinterpret_cast<uint8_t*>(dst);
+    uint8_t*       lds      = reinterpret_cast<uint8_t*>(ldsBuffer);
+    const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes);   // LDS is small
+
+    const uint32_t W          = warpSize;
+    const uint32_t nThreads   = blockDim.x * blockDim.y * blockDim.z;
+    const uint32_t tid        = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x
+                                + threadIdx.x;
+    const uint32_t warpThread = tid % W;               // thread index within its warp
+    const uint32_t warpId     = tid / W;
+    const uint32_t nWarps     = (nThreads + W - 1) / W;
+
+    // --- team membership: this warp participates iff in [start, stop) --------
+    const uint32_t teamStop = (stopWarpId > nWarps) ? nWarps : stopWarpId;
+    if (startWarpId >= teamStop || warpId < startWarpId || warpId >= teamStop)
+        return;                                        // not on this team
+    const uint32_t rank      = warpId - startWarpId;    // rank within the team
+    const uint32_t teamWarps = teamStop - startWarpId;  // >= 1
+
+    // active threads in THIS warp (handles partial final warp); stride for the
+    // byte fallback below.
+    const uint32_t warpThreads = (nThreads - warpId * W < W) ? (nThreads - warpId * W) : W;
+
+    if (sizeBytes == 0) return;
+
+    // --- tiny-LDS fallback: not enough LDS for a single window ---------------
+    if (ldsBytes < WINDOW_GRAIN) {
+        if (rank == 0) warpGlobalCopy<cp>(s, d, sizeBytes, warpThread, warpThreads);
+        return;
+    }
+
+    // --- give each issuing warp a 128B-multiple LDS window -------------------
+    uint32_t maxIssuers = ldsBytes / WINDOW_GRAIN;      // #warps we can give a window
+    uint32_t issuers    = teamWarps < maxIssuers ? teamWarps : maxIssuers;
+    uint32_t window     = (ldsBytes / issuers) & ~(WINDOW_GRAIN - 1);  // per-warp 128B-multiple
+    if (rank >= issuers) return;                        // this warp doesn't issue
+
+    // distribute the byte range across issuers by team rank (contiguous blocks)
+    size_t base    = sizeBytes / issuers;
+    size_t extra   = sizeBytes % issuers;
+    size_t myBytes = base + (rank < extra ? 1u : 0u);
+    size_t myStart = rank * base + (rank < extra ? rank : extra);
+    if (myBytes == 0) return;
+
+    uint8_t* myLds = lds + static_cast<size_t>(rank) * window;
+
+    // Stage each chunk HBM->LDS->HBM through this warp's single window. The Sync
+    // policy waits after the load (RAW: store must see the filled LDS) and after
+    // the store (WAR: the next load must not overwrite LDS still being drained).
+    for (size_t o = 0; o < myBytes; o += window) {
+        const size_t chunk = (myBytes - o < window) ? (myBytes - o) : window;
+        asyncLoadToLDS<SyncPolicy::Sync, cp>(s + myStart + o, myLds, chunk);
+        asyncStoreFromLDS<SyncPolicy::Sync, cp>(myLds, d + myStart + o, chunk);
+    }
+}
+
+} // namespace detail
+
+#endif // ASYNC_COPY_SUPPORTED
+
+/// \brief Drain the CALLING WARP's outstanding async-to/from-LDS ops.
+/// \see tdm::tdmWait. The blocking copy forms already drain internally.
+__device__ ASYNC_API void tdmWait() ASYNC_DELETED;
+
+/// \brief Non-blocking block-collective copy: issue and return.
+/// \see tdm::tdmCopyAsync.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ ASYNC_API void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes,
+                                       void* ldsBuffer, size_t ldsBufferBytes) ASYNC_DELETED;
+
+/// \brief Blocking block-collective copy of [0, sizeBytes): dst <- src.
+/// \see tdm::tdmCopy.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ ASYNC_API void tdmCopy(void* dst, const void* src, size_t sizeBytes,
+                                  void* ldsBuffer, size_t ldsBufferBytes) ASYNC_DELETED;
+
+/// \brief Non-blocking WARP-SPECIALIZED copy by one contiguous warp team.
+/// \see tdm::tdmCopyAsyncByTeam.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ ASYNC_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes,
+                                             void* ldsBuffer, size_t ldsBufferBytes,
+                                             uint32_t startWarpId, uint32_t stopWarpId) ASYNC_DELETED;
+
+/// \brief Blocking WARP-SPECIALIZED copy by one contiguous warp team.
+/// \see tdm::tdmCopyByTeam.
+template<CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ ASYNC_API void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes,
+                                        void* ldsBuffer, size_t ldsBufferBytes,
+                                        uint32_t startWarpId, uint32_t stopWarpId) ASYNC_DELETED;
+
+#if ASYNC_COPY_SUPPORTED
+
+__device__ inline void tdmWait() { asyncWait<0>(); }
+
+template<CachePolicy cp>
+__device__ inline void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes,
+                                    void* ldsBuffer, size_t ldsBufferBytes) {
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
+}
+
+template<CachePolicy cp>
+__device__ inline void tdmCopy(void* dst, const void* src, size_t sizeBytes,
+                               void* ldsBuffer, size_t ldsBufferBytes) {
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
+    tdmWait();
+}
+
+template<CachePolicy cp>
+__device__ inline void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes,
+                                          void* ldsBuffer, size_t ldsBufferBytes,
+                                          uint32_t startWarpId, uint32_t stopWarpId) {
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
+}
+
+template<CachePolicy cp>
+__device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes,
+                                     void* ldsBuffer, size_t ldsBufferBytes,
+                                     uint32_t startWarpId, uint32_t stopWarpId) {
+    detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
+    tdmWait();   // no-op on any warp that issued nothing / is off-team
+}
+
+#endif // ASYNC_COPY_SUPPORTED
+
+} // namespace async
+
+#undef ASYNC_API
+#undef ASYNC_DELETED
 
 
 #endif // __ASYNCCOPY_H
