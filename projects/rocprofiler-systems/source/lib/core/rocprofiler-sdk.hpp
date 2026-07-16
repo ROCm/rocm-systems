@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -22,6 +23,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::rocprofiler_sdk
@@ -89,8 +91,8 @@ public:
 
     static void reset_tracing_names_cache() noexcept
     {
-        s_callback_names_init = false;
-        s_buffer_names_init   = false;
+        s_callback_names.reset();
+        s_buffer_names.reset();
     }
 
     static std::unordered_set<typename Wrapper::callback_tracing_kind>
@@ -150,16 +152,16 @@ public:
 
     // Cached copies used by get_operations_impl; populated on first call and
     // reset by reset_tracing_names_cache() so unit tests can pin Times(N).
-    static typename Wrapper::callback_name_info_t s_callback_names;
-    static bool                                   s_callback_names_init;
-    static typename Wrapper::buffer_name_info_t   s_buffer_names;
-    static bool                                   s_buffer_names_init;
+    static std::optional<typename Wrapper::callback_name_info_t> s_callback_names;
+    static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Wrapper::callback_tracing_kind kindv, const std::string& optname = {});
+        Wrapper::callback_tracing_kind tracing_kind,
+        const std::string&             operations_setting = {});
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Wrapper::buffer_tracing_kind kindv, const std::string& optname = {});
+        Wrapper::buffer_tracing_kind tracing_kind,
+        const std::string&           operations_setting = {});
 
     template <typename Tp>
     static auto insert_config_setting(
@@ -167,6 +169,14 @@ public:
         const std::shared_ptr<settings>& config, std::string_view env_name,
         std::string_view description, Tp initial_value,
         std::initializer_list<std::string_view> extra_categories);
+
+private:
+    template <typename TracingKind, typename TracingNameTable,
+              typename LoadTracingNamesFn>
+    static std::unordered_set<std::int32_t> operation_ids_for_tracing_kind(
+        TracingKind tracing_kind, const std::string& operations_setting,
+        std::optional<TracingNameTable>& cached_tracing_names,
+        LoadTracingNamesFn&&             load_tracing_names);
 };
 
 using core_sdk = sdk_core<backend>;
@@ -239,119 +249,111 @@ std::unordered_map<typename Wrapper::buffer_tracing_kind,
     sdk_core<Wrapper, Externals>::buffered_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
-typename Wrapper::callback_name_info_t sdk_core<Wrapper, Externals>::s_callback_names{};
+std::optional<typename Wrapper::callback_name_info_t>
+    sdk_core<Wrapper, Externals>::s_callback_names{};
 
 template <typename Wrapper, typename Externals>
-bool sdk_core<Wrapper, Externals>::s_callback_names_init{ false };
-
-template <typename Wrapper, typename Externals>
-typename Wrapper::buffer_name_info_t sdk_core<Wrapper, Externals>::s_buffer_names{};
-
-template <typename Wrapper, typename Externals>
-bool sdk_core<Wrapper, Externals>::s_buffer_names_init{ false };
+std::optional<typename Wrapper::buffer_name_info_t>
+    sdk_core<Wrapper, Externals>::s_buffer_names{};
 
 template <typename Wrapper, typename Externals>
 version_info sdk_core<Wrapper, Externals>::s_version{};
 
-// ─── Private method implementations ──────────────────────────────────────────
+// ─── get_operations_impl (tracing kind + optional setting) ───────────────────
 
 template <typename Wrapper, typename Externals>
+template <typename TracingKind, typename TracingNameTable, typename LoadTracingNamesFn>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
-                                                  const std::string&             optname)
+sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
+    TracingKind tracing_kind, const std::string& operations_setting,
+    std::optional<TracingNameTable>& cached_tracing_names,
+    LoadTracingNamesFn&&             load_tracing_names)
 {
-    if(!s_callback_names_init)
+    if(!cached_tracing_names)
     {
-        s_callback_names      = Wrapper::get_callback_tracing_names();
-        s_callback_names_init = true;
+        cached_tracing_names = load_tracing_names();
     }
-    const auto& callback_tracing_info = s_callback_names;
 
-    if(optname.empty())
+    const auto& operation_items = (*cached_tracing_names)[tracing_kind].items();
+
+    if(operations_setting.empty())
     {
-        auto _ret = std::unordered_set<std::int32_t>{};
-        for(auto iitr : callback_tracing_info[kindv].items())
+        std::unordered_set<std::int32_t> all_operation_ids{};
+        for(const auto& [operation_id, operation_name] : operation_items)
         {
-            if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
-        }
-        return _ret;
-    }
-
-    auto _val = get_setting_value<std::string>(optname);
-
-    if(!_val)
-    {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(fmt::format(
-            "sdk_core::get_operations_impl: no registered setting '{}'", optname));
-    }
-
-    if(_val->empty()) return {};
-
-    auto _ret = std::unordered_set<std::int32_t>{};
-    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
-    {
-        for(auto iitr : callback_tracing_info[kindv].items())
-        {
-            auto _re = std::regex{ itr, std::regex_constants::icase };
-            if(iitr.second && std::regex_search(iitr.second->data(), _re))
+            if(operation_name && *operation_name != "none")
             {
-                LOG_DEBUG("{} ('{}') matched: {}", optname, itr, iitr.second->data());
-                _ret.emplace(iitr.first);
+                all_operation_ids.insert(operation_id);
             }
         }
+        return all_operation_ids;
     }
 
-    return _ret;
+    auto operations_filter = get_setting_value<std::string>(operations_setting);
+    if(!operations_filter)
+    {
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        throw std::runtime_error(
+            fmt::format("sdk_core::get_operations_impl: no registered setting '{}'",
+                        operations_setting));
+    }
+    if(operations_filter->empty())
+    {
+        return {};
+    }
+
+    std::vector<std::pair<std::int32_t, std::string_view>> operations_by_name{};
+    for(const auto& [operation_id, operation_name] : operation_items)
+    {
+        if(operation_name)
+        {
+            operations_by_name.emplace_back(operation_id,
+                                            std::string_view{ *operation_name });
+        }
+    }
+
+    std::unordered_set<std::int32_t> matched_operation_ids{};
+    matched_operation_ids.reserve(operations_by_name.size());
+
+    constexpr std::string_view operation_filter_delimiters{ " ,;:\n\t" };
+    for(const auto& pattern :
+        rocprofsys::delimit(*operations_filter, operation_filter_delimiters))
+    {
+        const std::regex case_insensitive_pattern{ pattern, std::regex_constants::icase };
+        for(const auto& [operation_id, operation_label] : operations_by_name)
+        {
+            if(!std::regex_search(operation_label.begin(), operation_label.end(),
+                                  case_insensitive_pattern))
+            {
+                continue;
+            }
+
+            LOG_DEBUG("{} ('{}') matched: {}", operations_setting, pattern,
+                      operation_label);
+            matched_operation_ids.insert(operation_id);
+        }
+    }
+    return matched_operation_ids;
 }
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
-                                                  const std::string&           optname)
+sdk_core<Wrapper, Externals>::get_operations_impl(
+    Wrapper::callback_tracing_kind tracing_kind, const std::string& operations_setting)
 {
-    if(!s_buffer_names_init)
-    {
-        s_buffer_names      = Wrapper::get_buffer_tracing_names();
-        s_buffer_names_init = true;
-    }
-    const auto& buffered_tracing_info = s_buffer_names;
+    return operation_ids_for_tracing_kind(
+        tracing_kind, operations_setting, s_callback_names,
+        [] { return Wrapper::get_callback_tracing_names(); });
+}
 
-    if(optname.empty())
-    {
-        auto _ret = std::unordered_set<std::int32_t>{};
-        for(auto iitr : buffered_tracing_info[kindv].items())
-        {
-            if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
-        }
-        return _ret;
-    }
-
-    auto _val = get_setting_value<std::string>(optname);
-
-    if(!_val)
-    {
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        throw std::runtime_error(fmt::format(
-            "sdk_core::get_operations_impl: no registered setting '{}'", optname));
-    }
-
-    if(_val->empty()) return {};
-
-    auto _ret = std::unordered_set<std::int32_t>{};
-    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
-    {
-        for(auto iitr : buffered_tracing_info[kindv].items())
-        {
-            auto _re = std::regex{ itr, std::regex_constants::icase };
-            if(iitr.second && std::regex_search(iitr.second->data(), _re))
-            {
-                LOG_DEBUG("{} ('{}') matched: {}", optname, itr, iitr.second->data());
-                _ret.emplace(iitr.first);
-            }
-        }
-    }
-    return _ret;
+template <typename Wrapper, typename Externals>
+std::unordered_set<std::int32_t>
+sdk_core<Wrapper, Externals>::get_operations_impl(
+    Wrapper::buffer_tracing_kind tracing_kind, const std::string& operations_setting)
+{
+    return operation_ids_for_tracing_kind(
+        tracing_kind, operations_setting, s_buffer_names,
+        [] { return Wrapper::get_buffer_tracing_names(); });
 }
 
 template <typename Wrapper, typename Externals>
