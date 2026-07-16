@@ -144,11 +144,10 @@ class PersistentCache:
 
     def __init__(self, path: Path):
         self.path = path
-        # Locking must happen on a file that is never replaced. Writers swap the
-        # data file in via ``os.replace`` (changing its inode), so a lock held on
-        # the data file would stop serializing concurrent writers after the first
-        # swap. Named ``<stem>.lock<suffix>`` so it still matches the suite's
-        # ``rocprofsys-*.tmp`` cleanup glob.
+        # Lock a separate sidecar file, not the cache file itself: _atomic_write
+        # swaps the cache file's inode via os.replace and flock locks the inode,
+        # so locking the cache file would not serialize concurrent writers
+        # (lost writes in CTest parallel mode).
         self.lock_path = path.with_name(f"{path.stem}.lock{path.suffix}")
         self._entries: dict[str, Any] = {}
         self._load()
@@ -206,11 +205,8 @@ class PersistentCache:
 
     @contextlib.contextmanager
     def _exclusive_lock(self):
-        """Hold an exclusive lock on the stable sidecar file for a whole RMW.
-
-        The lock is taken on ``self.lock_path`` (never replaced), not on the data
-        file: ``_atomic_write`` swaps the data file's inode via ``os.replace``, so
-        a lock on the data file would not serialize concurrent writers.
+        """Hold an exclusive lock on the stable sidecar file for a whole
+        read-modify-write operation.
         """
         # 0o700: the cache files are 0o600, so keep the per-user dir owner-only
         # too (defense-in-depth on shared /tmp; no effect if it already exists).
@@ -346,12 +342,7 @@ def persistent_cache(
 
     - ``method=False`` (default) -- a free (module-level) function: every
       argument is part of the key.
-    - ``method=True`` -- an instance method that takes arguments: the first
-      positional argument (``self``) is dropped from the key, so different
-      instances calling with the same arguments share one entry. E.g.
-      ``target_support_mpi(self, target_path)`` keys only on ``target_path``
-      (self is dropped because a binary's MPI linkage does not depend on which
-      instance asked, and self's repr would otherwise vary per instance).
+    - ``method=True`` -- drops the first argument (``self`` for instance methods)
 
     For a no-argument property, use ``persistent_cached_property`` instead of
     this decorator.
@@ -389,11 +380,10 @@ def persistent_cache(
 class persistent_cached_property:
     """``functools.cached_property`` that also persists across processes.
 
-    Read order: instance ``__dict__`` (this process) -> shared file cache
-    (another process) -> compute. The computed value is written back to both.
-    A cache *read* failure falls back to plain computation, but writing back an
-    unserializable value raises (see ``PersistentCache.set``): it can never be
-    cached, so it is a bug the developer should see.
+    When reading, it looks up the value in the following order:
+     - instance ``__dict__`` (this process)
+     - shared file cache (another process)
+     - compute (if necessary, then written to shared file)
     """
 
     def __init__(self, func: Callable):

@@ -1271,55 +1271,8 @@ def _ctest_generate_tests(
 
 
 # ----------------------------------------------------------------------------
-# Other helpers
+# Cache warmup
 # ----------------------------------------------------------------------------
-
-
-def _standardize_test_name(
-    item: pytest.Item, config: pytest.Config, verbose: bool = False
-) -> None:
-
-    # Strip test prefix from the test method name
-    test_name = item.name
-    if test_name.startswith("test"):
-        test_name = test_name[4:]
-        if test_name.startswith(("_", "-")):
-            test_name = test_name[1:]
-
-    class_name = None
-    name_marker = item.get_closest_marker("class_name")
-    if name_marker and name_marker.args:
-        class_name = str(name_marker.args[0]).strip()
-
-    if class_name:
-        full_name = f"{class_name}-{test_name}"
-    elif item.cls:
-        py_class = item.cls.__name__
-        if py_class.startswith("Test"):
-            py_class = py_class[4:]
-        full_name = f"{py_class}-{test_name}"
-    else:
-        full_name = test_name
-
-    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    formatted_name = formatted_name.replace("_", "-")
-    while "--" in formatted_name:
-        formatted_name = formatted_name.replace("--", "-")
-    formatted_name = formatted_name.strip("-")
-    formatted_name = formatted_name.lower()
-
-    item.stash[_original_nodeid_key] = item.nodeid
-    # nodeid is what is used to display the test name in the terminal
-    # By default, it groups it by module. In verbose, it shows the full path + class + method
-    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
-    # This avoids breaking the default grouping by module in non-verbose mode
-    if verbose:
-        item._nodeid = formatted_name
-    item.name = formatted_name
-
-    # Allow -k filtering by the formatted name
-    item.extra_keyword_matches.add(formatted_name)
-    item.extra_keyword_matches.add(formatted_name.lower())
 
 
 def _seed_object_cached_properties(obj: object) -> None:
@@ -1394,6 +1347,58 @@ def _seed_capability_cache() -> None:
         cap = None
     if cap is not None:
         _seed_object_cached_properties(cap)
+
+
+# ----------------------------------------------------------------------------
+# Other helpers
+# ----------------------------------------------------------------------------
+
+
+def _standardize_test_name(
+    item: pytest.Item, config: pytest.Config, verbose: bool = False
+) -> None:
+
+    # Strip test prefix from the test method name
+    test_name = item.name
+    if test_name.startswith("test"):
+        test_name = test_name[4:]
+        if test_name.startswith(("_", "-")):
+            test_name = test_name[1:]
+
+    class_name = None
+    name_marker = item.get_closest_marker("class_name")
+    if name_marker and name_marker.args:
+        class_name = str(name_marker.args[0]).strip()
+
+    if class_name:
+        full_name = f"{class_name}-{test_name}"
+    elif item.cls:
+        py_class = item.cls.__name__
+        if py_class.startswith("Test"):
+            py_class = py_class[4:]
+        full_name = f"{py_class}-{test_name}"
+    else:
+        full_name = test_name
+
+    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
+    formatted_name = formatted_name.replace("_", "-")
+    while "--" in formatted_name:
+        formatted_name = formatted_name.replace("--", "-")
+    formatted_name = formatted_name.strip("-")
+    formatted_name = formatted_name.lower()
+
+    item.stash[_original_nodeid_key] = item.nodeid
+    # nodeid is what is used to display the test name in the terminal
+    # By default, it groups it by module. In verbose, it shows the full path + class + method
+    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
+    # This avoids breaking the default grouping by module in non-verbose mode
+    if verbose:
+        item._nodeid = formatted_name
+    item.name = formatted_name
+
+    # Allow -k filtering by the formatted name
+    item.extra_keyword_matches.add(formatted_name)
+    item.extra_keyword_matches.add(formatted_name.lower())
 
 
 def _generate_rocprofsys_config_header() -> list[str]:
