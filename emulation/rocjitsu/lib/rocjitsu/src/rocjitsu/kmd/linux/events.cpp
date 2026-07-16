@@ -38,16 +38,24 @@ EventState::~EventState() {
 void EventState::adopt_page(void *ptr, size_t size) {
   assert(ptr && "adopt_page called with null pointer");
   assert(size > 0 && "adopt_page called with zero size");
+  std::lock_guard<std::mutex> lock(mutex_);
   if (page)
     return;
   page = ptr;
   page_size = size;
-
-  std::lock_guard<std::mutex> lock(mutex_);
   for (const auto &[id, ev] : events_) {
     if (ev.signaled)
       write_event_slot(page, page_size, id, ev.event_age);
   }
+}
+
+bool EventState::release_page(void *ptr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (page != ptr)
+    return false;
+  page = nullptr;
+  page_size = 0;
+  return true;
 }
 
 /// @brief Signal event(s) from the CP's interrupt callback.

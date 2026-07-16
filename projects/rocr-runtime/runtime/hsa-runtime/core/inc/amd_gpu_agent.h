@@ -304,20 +304,17 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
 
-  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // @brief Pick the k-th engine (wrapping) from a preferred-engine mask.
   // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
-  // if mask is empty. When advance=true (default) the counter is incremented so
-  // successive body assignments spread across engines. Pass advance=false to
-  // peek at the current position without consuming a slot — used when selecting
-  // a coordinator engine so it rotates independently of body assignments.
-  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+  // if mask is empty. Rotation is driven by the caller-supplied index (e.g. the
+  // per-entry index of a fan-out copy), so engine assignment stays *within* a
+  // single copy and is deterministic per call -- it does not march across
+  // successive API calls.
+  inline uint32_t NthSdmaEngine(uint32_t engine_mask, uint32_t k) {
     if (!engine_mask) return 0;
-    int count = rocr::os::Popcount(engine_mask);
-    if (count == 1) return rocr::os::Ffs(engine_mask);
-    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
-                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    const int count = rocr::os::Popcount(engine_mask);
     uint32_t m = engine_mask;
-    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+    for (uint32_t i = 0, pick = k % count; i < pick; ++i)
       m &= m - 1;
     return rocr::os::Ffs(m);
   }
@@ -576,6 +573,10 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
 
+  /// @brief Check if the accelerator is ready to be used.
+  /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
+  hsa_status_t CheckAcceleratorReadiness();
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -813,13 +814,6 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
-  // (different src/dst/size per entry) sharing a single completion signal.
-  // Uses prologue/body/epilogue fan-out across available SDMA engines.
-  hsa_status_t DmaCopyMulti(
-      const hsa_amd_memory_copy_op_t& op,
-      std::vector<core::Signal*>& dep_signals);
-
   // Linear swap: exchanges the contents of src and dst buffers.
   // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
   // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
@@ -838,7 +832,7 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyBatch,
   // swap and indirect operations.  Submits prologue, per-entry bodies
   // (selected by @p op), and epilogue with one signal.
   // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
@@ -853,7 +847,9 @@ class GpuAgent : public GpuAgentInt {
       const void* const* src_list,
       void* const* dst_list,
       const hsa_agent_t* dst_agent_list,
-      const size_t* size_list);
+      const size_t* size_list,
+      uint32_t coord_engine = 0,
+      uint32_t max_engines = 0);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -1065,9 +1061,6 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
-  // Round-robin index for spreading SDMA work across engines (gfx1250+).
-  std::atomic<uint32_t> sdma_rr_index_{0};
-
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
@@ -1091,6 +1084,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  std::atomic<bool> accelerator_ready_{false};
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };

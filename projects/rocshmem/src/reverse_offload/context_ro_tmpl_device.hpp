@@ -358,7 +358,7 @@ __device__ int ROContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
+__device__ void ROContext::alltoall_wg(rocshmem_team_t team, T *dest,
                                     const T *source, int nelems) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -375,6 +375,16 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
 
   __syncthreads();
 }
+
+template <typename T>
+__device__ int ROContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team, 
+                                            [[maybe_unused]] T* dest, 
+                                            [[maybe_unused]] const T* source, 
+                                            [[maybe_unused]] int nelems) {
+  LOGD_WARN("Alltoall_wave not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 
 template <typename T>
 __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,

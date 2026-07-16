@@ -65,6 +65,7 @@ class SSetregB32Sopk : public Sopk {
 public:
   SSetregB32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand sdst;
 };
@@ -73,6 +74,7 @@ class SSetregImm32B32Sopk : public Sopk {
 public:
   SSetregImm32B32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand simm16;
   Operand literal;
 };

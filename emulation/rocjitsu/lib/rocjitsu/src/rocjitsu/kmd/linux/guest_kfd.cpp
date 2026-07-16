@@ -612,10 +612,37 @@ int GuestKfd::open() {
   }
 }
 
-void GuestKfd::retain_local_open() {
+bool GuestKfd::retain_local_open() {
   std::lock_guard lock(mutex_);
-  if (ready_.load(std::memory_order_acquire) && real_kfd_fd_.load(std::memory_order_acquire) >= 0)
+  if (ready_.load(std::memory_order_acquire) && real_kfd_fd_.load(std::memory_order_acquire) >= 0) {
     ++open_refs_;
+    return true;
+  }
+  return false;
+}
+
+LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
+  if (fd < 0)
+    return PrimaryInvalidation::kNotPrimary;
+  std::lock_guard lock(mutex_);
+  // Compare-and-clear the hidden real fd number. Do NOT close it: dup2/dup3
+  // already atomically replaced whatever this number named, so closing it here
+  // would close the app's replacement. A concurrent overwrite that already
+  // cleared it is reported as kNotPrimary.
+  int expected = fd;
+  if (!real_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
+    return PrimaryInvalidation::kNotPrimary;
+  // Also drop out of the ready state (mirroring close()'s teardown, minus the
+  // fd close / overlay cleanup / ref decrement). This matters because GuestKfd
+  // forwards every ioctl/mmap through real_kfd_fd_: with the number now cleared,
+  // forward paths fail safe (ENODEV) instead of routing to whatever the app's
+  // dup2 installed, and the next ensure_ready() lazily reopens a fresh real
+  // /dev/kfd fd. KFD binds one process context per mm, so the reopened fd rejoins
+  // the same context and existing app-facing dup fds keep working transparently.
+  ready_.store(false, std::memory_order_release);
+  // The hidden real fd is kept alive by app-facing dup references, not by a
+  // counted "primary" reference, so the caller must NOT drop an open reference.
+  return PrimaryInvalidation::kClearedKeepRefs;
 }
 
 int GuestKfd::close() {
@@ -1005,8 +1032,8 @@ std::string GuestKfd::topology_path() const {
 }
 
 int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const {
-  util::Logger::debug_print("rocjitsu guest gpu: rejecting ", LinuxKfd::ioctl_name(request),
-                            " for guest gpu_id=", guest_.gpu_id);
+  util::Logger::driver("rocjitsu guest gpu: rejecting ", LinuxKfd::ioctl_name(request),
+                       " for guest gpu_id=", guest_.gpu_id);
   errno = ENODEV;
   return -1;
 }

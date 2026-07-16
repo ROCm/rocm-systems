@@ -179,7 +179,9 @@ if(BUILD_TESTS)
     AllReduceTests.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
+    AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -265,7 +267,9 @@ if(BUILD_TESTS)
       ParamTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
+      DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
@@ -352,6 +356,7 @@ if(BUILD_TESTS)
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
       SymmetricKernelMPITests.cpp
+      SymmetricWindowMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})

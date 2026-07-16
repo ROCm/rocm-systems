@@ -1756,6 +1756,8 @@ class Device : public RuntimeObject {
     kHostNumaCurrent = 0x4
   };
 
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
+
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
   static constexpr size_t kP2PStagingSize = 4 * Mi;
@@ -2154,10 +2156,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**

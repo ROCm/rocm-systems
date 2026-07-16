@@ -303,6 +303,27 @@ __device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const
   DISPATCH(broadcastmem_wg(team, dest, source, nelement, PE_root));
 }
 
+__device__ void Context::alltoallmem_wg(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems) {
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH(alltoallmem_wg(team, dest, source, nelems));
+}
+
+__device__ int Context::alltoallmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems){
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH_RET(alltoallmem_wave(team, dest, source, nelems));
+}
+
 #define CONTEXT_PUTMEM_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)                                           \
   __device__ void Context::putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
                                                  uint64_t *sig_addr, uint64_t signal, int sig_op, \
