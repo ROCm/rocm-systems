@@ -24,7 +24,10 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
-from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
+from utils.file_io import (
+    load_pc_sampling_results,
+    process_pc_sampling_kernel_trace,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -394,22 +397,25 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[str, orm.Kernel],
     ) -> None:
         """Insert the normalized PC-sampling rows for one workload."""
-        tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
-        if tool_data is None:
+        tool_data_records = self._pc_sampling_tool_data_per_workload.get(
+            workload_path, []
+        )
+        if not tool_data_records:
             return
 
-        pid = tool_data.get("metadata", {}).get("pid")
+        for tool_data in tool_data_records:
+            pid = tool_data.get("metadata", {}).get("pid")
 
-        for code_object in load_aggregated_pc_sampling(tool_data):
-            code_object_store = orm.CodeObjectStore(
-                pid=pid,
-                code_object_id=code_object.code_object_id,
-                load_base=code_object.load_base,
-                workload=workload_obj,
-            )
-            Database.get_session().add(code_object_store)
-            for line in code_object.instruction_lines:
-                self._add_instruction_line(line, code_object_store, kernel_objs)
+            for code_object in load_aggregated_pc_sampling(tool_data):
+                code_object_store = orm.CodeObjectStore(
+                    pid=pid,
+                    code_object_id=code_object.code_object_id,
+                    load_base=code_object.load_base,
+                    workload=workload_obj,
+                )
+                Database.get_session().add(code_object_store)
+                for line in code_object.instruction_lines:
+                    self._add_instruction_line(line, code_object_store, kernel_objs)
 
     @staticmethod
     def _add_instruction_line(
@@ -469,28 +475,10 @@ class db_analysis(OmniAnalyze_Base):
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
-        tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
-        # load_base is known only for the surviving ps_file pid, and
-        # code_object_id collides across pids, so scope ISA to that pid.
-        surviving_pid = (tool_data or {}).get("metadata", {}).get("pid")
-        load_base_by_id = {
-            code_object["code_object_id"]: code_object.get("load_base")
-            for code_object in (tool_data or {}).get("code_objects", [])
-        }
-        # The disassembly carries the mangled ELF symbol; kernel_objs is keyed by
-        # the demangled name. kernel_symbols bridges the two per code object.
-        kernel_by_symbol = {
-            (
-                symbol["code_object_id"],
-                symbol["kernel_name"].removesuffix(".kd"),
-            ): kernel
-            for symbol in (tool_data or {}).get("kernel_symbols", [])
-            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
-        }
-        # A code object is worth storing only if one of its symbols was dispatched.
-        invoked_code_object_ids = {
-            code_object_id for code_object_id, _ in kernel_by_symbol
-        }
+        tool_data_records = self._pc_sampling_tool_data_per_workload.get(
+            workload_path, []
+        )
+        tool_data_by_pid = self._pc_sampling_tool_data_by_pid(tool_data_records)
         # Reuse an existing code object instead of creating a duplicate.
         existing_code_objects = {
             (store.pid, store.code_object_id): store
@@ -498,8 +486,16 @@ class db_analysis(OmniAnalyze_Base):
         }
 
         for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
-            if pid != surviving_pid:
+            tool_data = tool_data_by_pid.get(pid)
+            if tool_data is None:
                 continue
+
+            load_base_by_id = self._load_base_by_code_object_id(tool_data)
+            kernel_by_symbol = self._kernel_by_symbol(tool_data, kernel_objs)
+            invoked_code_object_ids = {
+                code_object_id for code_object_id, _ in kernel_by_symbol
+            }
+
             for disassembly in disassemblies:
                 if disassembly.code_object_id not in invoked_code_object_ids:
                     continue
@@ -973,22 +969,17 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_dispatch_data(
         self,
-        tool_data_per_workload: dict[str, Optional[dict[str, Any]]],
+        tool_data_per_workload: dict[str, list[dict[str, Any]]],
     ) -> dict[str, pd.DataFrame]:
         dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             if self.pc_sampling_only():
-                tool_data = tool_data_per_workload.get(workload_path)
-                trace_df = process_pc_sampling_kernel_trace(tool_data)
-                trace_df = pd.DataFrame({
-                    "dispatch_id": trace_df["Dispatch_Id"],
-                    "kernel_name": trace_df["Kernel_Name"],
-                    "gpu_id": trace_df["GPU_ID"],
-                    "start_timestamp": trace_df["Start_Timestamp"],
-                    "end_timestamp": trace_df["End_Timestamp"],
-                })
-                dispatch_data_per_workload[workload_path] = trace_df
+                dispatch_data_per_workload[workload_path] = (
+                    self._build_pc_sampling_dispatch_data(
+                        tool_data_per_workload.get(workload_path, [])
+                    )
+                )
             else:
                 dispatch_data_per_workload[workload_path] = pd.DataFrame([
                     {
@@ -1005,6 +996,72 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Calculated dispatch data")
 
         return dispatch_data_per_workload
+
+    @staticmethod
+    def _pc_sampling_tool_data_by_pid(
+        tool_data_records: list[dict[str, Any]],
+    ) -> dict[Any, dict[str, Any]]:
+        return {
+            tool_data["metadata"]["pid"]: tool_data
+            for tool_data in tool_data_records
+            if "pid" in tool_data.get("metadata", {})
+        }
+
+    @staticmethod
+    def _load_base_by_code_object_id(
+        tool_data: dict[str, Any],
+    ) -> dict[Any, Any]:
+        return {
+            code_object["code_object_id"]: code_object.get("load_base")
+            for code_object in tool_data.get("code_objects", [])
+        }
+
+    @staticmethod
+    def _kernel_by_symbol(
+        tool_data: dict[str, Any],
+        kernel_objs: dict[str, orm.Kernel],
+    ) -> dict[tuple[Any, str], orm.Kernel]:
+        return {
+            (
+                symbol["code_object_id"],
+                symbol["kernel_name"].removesuffix(".kd"),
+            ): kernel
+            for symbol in tool_data.get("kernel_symbols", [])
+            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
+        }
+
+    @staticmethod
+    def _build_pc_sampling_dispatch_data(
+        tool_data_records: list[dict[str, Any]],
+    ) -> pd.DataFrame:
+        columns = [
+            "dispatch_id",
+            "kernel_name",
+            "gpu_id",
+            "start_timestamp",
+            "end_timestamp",
+        ]
+        if not tool_data_records:
+            return pd.DataFrame(columns=columns)
+
+        trace_df = pd.concat(
+            [
+                process_pc_sampling_kernel_trace(tool_data)
+                for tool_data in tool_data_records
+            ],
+            ignore_index=True,
+        )
+        if trace_df.empty:
+            return pd.DataFrame(columns=columns)
+
+        dispatch_df = pd.DataFrame({
+            "dispatch_id": trace_df["Dispatch_Id"],
+            "kernel_name": trace_df["Kernel_Name"],
+            "gpu_id": trace_df["GPU_ID"],
+            "start_timestamp": trace_df["Start_Timestamp"],
+            "end_timestamp": trace_df["End_Timestamp"],
+        })
+        return dispatch_df.drop_duplicates("kernel_name").reset_index(drop=True)
 
     def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload = self._pmc_df_per_workload.copy()
