@@ -363,7 +363,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(0);
@@ -371,7 +371,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   int canAccess = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, 0, 1));
   if (!canAccess) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 
