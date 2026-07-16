@@ -161,13 +161,11 @@ def artifact_name(path: Path) -> str:
 
 
 def build_group_from_artifact(artifact: str) -> str:
+    if "-system-deps-" in artifact:
+        return "system-deps"
     for group in ("ubuntu-22.04", "ubuntu-24.04", "debian", "rhel"):
         if artifact.startswith(f"junit-build-{group}-"):
             return group
-        if artifact.startswith(f"junit-{group}-"):
-            return group
-    if artifact.startswith("junit-system-deps-"):
-        return "system-deps"
     if artifact.startswith("junit-build-"):
         return "build"
     return "other"
@@ -188,7 +186,7 @@ def testcase_name(testcase: ET.Element) -> str:
     return name or classname or "<unnamed test>"
 
 
-def parse_junit(path: Path, mode: str) -> JUnitResult:
+def parse_junit(path: Path, mode: str) -> Optional[JUnitResult]:
     artifact = artifact_name(path)
     if mode == "sanitizer":
         group_key = sanitizer_from_artifact(artifact)
@@ -197,7 +195,11 @@ def parse_junit(path: Path, mode: str) -> JUnitResult:
         group_key = build_group_from_artifact(artifact)
         group_label = BUILD_GROUP_LABELS.get(group_key, group_key.title())
 
-    root = ET.parse(path).getroot()
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        print(f"warning: skipping unparseable JUnit XML {path}: {exc}", file=sys.stderr)
+        return None
     suites = suites_from_root(root)
     tests = sum(int_attr(suite, "tests") for suite in suites)
     skipped = sum(int_attr(suite, "skipped") for suite in suites)
@@ -366,7 +368,13 @@ def normalize_status(status: str) -> str:
 def read_statuses(paths: Iterable[Path]) -> Dict[str, SanitizerStatus]:
     statuses: Dict[str, SanitizerStatus] = {}
     for path in paths:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(
+                f"warning: skipping unreadable status file {path}: {exc}", file=sys.stderr
+            )
+            continue
         sanitizer = str(data.get("sanitizer", "")).strip().lower()
         status = str(data.get("status", "")).strip()
         if sanitizer:
@@ -411,7 +419,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     junit_paths = collect_paths(args.junit_glob)
     status_paths = collect_paths(args.status_glob)
-    results = [parse_junit(path, args.mode) for path in junit_paths]
+    results = [
+        result
+        for result in (parse_junit(path, args.mode) for path in junit_paths)
+        if result is not None
+    ]
 
     if args.mode == "build":
         markdown = render_build_summary(results, args.commit_sha, args.commit_url)

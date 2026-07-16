@@ -355,7 +355,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+          name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
             projects/rocprofiler-systems/build/*.log
 
@@ -365,7 +365,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: data-${{ github.job }}-${{ strategy.job-index }}-files
+          name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |
             projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
             projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
