@@ -45,10 +45,26 @@ if(ROCSHMEM4PY_IS_TOP_LEVEL)
   project(rocshmem4py LANGUAGES CXX)
 endif()
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-find_program(PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+# Single Python discovery for the whole file.  nanobind's CMake config
+# requires the modern FindPython module with the Development.Module component
+# (Development.Module is sufficient for building extension modules and avoids
+# pulling in the embed/libpython requirement of the full Development component).
+#
+# Honor an explicitly provided interpreter so downstream builds pin the right
+# Python: setuptools passes -DPYTHON_EXECUTABLE, and the TheRock super-build
+# passes -DPython3_EXECUTABLE.  FindPython only consults Python_EXECUTABLE, so
+# seed it from whichever hint was given.
+if(NOT DEFINED Python_EXECUTABLE)
+  if(DEFINED PYTHON_EXECUTABLE)
+    set(Python_EXECUTABLE "${PYTHON_EXECUTABLE}")
+  elseif(DEFINED Python3_EXECUTABLE)
+    set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
+  endif()
+endif()
+find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
+set(PYTHON_EXECUTABLE "${Python_EXECUTABLE}" CACHE FILEPATH "Python interpreter" FORCE)
 
-message(STATUS "Python3_VERSION: ${Python3_VERSION}")
+message(STATUS "Python_VERSION: ${Python_VERSION}")
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -94,21 +110,32 @@ else()
   link_directories(${HIP_ROOT_DIR}/lib)
 endif()
 
-# Find pybind11
+# Binding backend: nanobind.  It builds the `_rocshmem4py` module whose module
+# name, function names, argument behavior, and return types are the stable
+# public API contract.  (Python was already located above with the
+# Development.Module component nanobind needs.)
+#
+# nanobind discovery is two-tiered:
+#   1. Standalone (pip) builds: nanobind is pip-installed, so ask the Python
+#      module for its CMake config directory and add it to the prefix path.
+#   2. TheRock super-build: nanobind is provided as a CMake subproject
+#      (therock-nanobind), so `python -m nanobind` is unavailable -- the
+#      execute_process fails harmlessly and find_package resolves the
+#      subproject-provided package config instead.
 execute_process(
-  COMMAND ${PYTHON_EXECUTABLE} -c 
-          "from __future__ import print_function; import os; import pybind11; print(os.path.dirname(pybind11.__file__), end='')"
-  RESULT_VARIABLE _PYTHON_SUCCESS
-  OUTPUT_VARIABLE PYBIND11_DIR
+  COMMAND ${Python_EXECUTABLE} -m nanobind --cmake_dir
+  RESULT_VARIABLE _NB_CMAKE_DIR_OK
+  OUTPUT_VARIABLE _NB_CMAKE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
 )
-
-if(NOT _PYTHON_SUCCESS MATCHES 0)
-  message(FATAL_ERROR "pybind11 not found. Install with: pip install pybind11")
+if(_NB_CMAKE_DIR_OK EQUAL 0 AND _NB_CMAKE_DIR)
+  message(STATUS "nanobind CMake dir (pip): ${_NB_CMAKE_DIR}")
+  list(APPEND CMAKE_PREFIX_PATH ${_NB_CMAKE_DIR})
 endif()
 
-message(STATUS "pybind11 directory: ${PYBIND11_DIR}")
-list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_DIR})
-find_package(pybind11 REQUIRED)
+find_package(nanobind CONFIG REQUIRED)
+message(STATUS "nanobind found: ${nanobind_DIR}")
 
 # Sub-project: the parent CMake exposes the in-tree rocshmem target.
 # Standalone: locate an installed rocSHMEM via ROCSHMEM_HOME.
@@ -168,7 +195,21 @@ endif()
 # Build Extension Module
 ###############################################################################
 
-pybind11_add_module(_rocshmem4py src/rocshmem4py.cc)
+nanobind_add_module(_rocshmem4py NB_STATIC src/rocshmem4py.cc)
+# rocSHMEM bindings throw std::runtime_error (translated to RuntimeError)
+# and the team-config caster relies on RTTI.  nanobind defaults to
+# -fno-rtti/-fno-exceptions, so re-enable them here and undo any global
+# compile options that would otherwise disable exceptions on the static
+# nanobind helper library.
+target_compile_options(_rocshmem4py PRIVATE -frtti -fexceptions)
+if(TARGET nanobind-static)
+  get_target_property(_NB_OPTS nanobind-static COMPILE_OPTIONS)
+  if(_NB_OPTS)
+    list(REMOVE_ITEM _NB_OPTS "-fno-rtti" "-fno-exceptions")
+    set_target_properties(nanobind-static PROPERTIES COMPILE_OPTIONS "${_NB_OPTS}")
+  endif()
+  target_compile_options(nanobind-static PRIVATE -frtti -fexceptions)
+endif()
 
 set_target_properties(_rocshmem4py PROPERTIES
   POSITION_INDEPENDENT_CODE ON
@@ -176,7 +217,7 @@ set_target_properties(_rocshmem4py PROPERTIES
 
 target_include_directories(_rocshmem4py PRIVATE
   ${ROCSHMEM_INCLUDE_DIRS}
-  ${Python3_INCLUDE_DIRS}
+  ${Python_INCLUDE_DIRS}
   ${ROCM_PATH}/include
 )
 if(THEROCK_TOOLCHAIN_ROOT)

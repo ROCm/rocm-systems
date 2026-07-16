@@ -35,7 +35,7 @@ Host-facing symbols are exported directly from the compiled extension module
 - rocSHMEM library (built with RO, IPC, or GDA backend)
 - Python 3.8+
 - CMake 3.20+
-- pybind11 2.13.1+
+- nanobind 2.12.0+ (binding backend)
 - Distributed launcher: `torchrun` (for `init_with_torch()`, IPC/GDA
   backends) **or** `mpirun` (for `init_with_mpi()`, and required by the RO
   backend regardless of init path &mdash; see [*RO backend requires `mpirun`*](#ro-backend-requires-mpirun) below).
@@ -50,11 +50,25 @@ export ROCM_PATH=/opt/rocm
 export ROCSHMEM_HOME=/path/to/rocshmem/build
 export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
 
-pip install pybind11 cmake
 pip install -e .
 ```
 
+The build requirements (`nanobind`, `cmake`) are declared in
+`pyproject.toml`, so a standard `pip install -e .` pulls them into the build
+isolation environment automatically. If you build with
+`--no-build-isolation`, install them into your environment first:
+`pip install nanobind cmake`.
+
 > Note: this package is not published to PyPI yet; install from source only.
+
+### Binding backend
+
+`rocshmem4py` uses **nanobind** to build the compiled extension module
+(`_rocshmem4py`). The public Python contract &mdash; module name, function
+names, argument behavior, and return types &mdash; is stable and independent
+of the binding framework. Framework-independent rocSHMEM glue lives in
+`src/rocshmem4py_common.hpp`; the thin `m.def(...)` registration layer lives in
+`src/rocshmem4py.cc`.
 
 ## Quick Start
 
