@@ -136,11 +136,18 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
-  // The launcher writes the config-path handoff file into its per-PID invocation
-  // directory. The DBT HSA hook runs inside the exec'd app, which inherits the
-  // launcher's PID via execvp, so it locates the file with getpid(). Fall back to
-  // the well-known location for attach / daemon-only scenarios that use it.
-  std::string handoff = rocjitsu::rpc_invocation_config_file_path(getpid());
+  // The launcher writes the config-path handoff file into its per-invocation
+  // directory and exports that directory via $ROCJITSU_INVOCATION_DIR before
+  // execvp. Prefer that env var: every descendant (including grandchildren
+  // spawned through wrappers like ctest, whose PID differs from the launcher's)
+  // inherits the exact directory holding config_path. Fall back to this process's
+  // PID-scoped path (execvp preserves the launcher's PID for the direct child),
+  // then to the well-known location for attach / daemon-only scenarios.
+  std::string handoff;
+  if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv))
+    handoff = std::string(dir) + "/config_path";
+  else
+    handoff = rocjitsu::rpc_invocation_config_file_path(getpid());
   std::ifstream file(handoff);
   if (!file.is_open()) {
     file.open(rocjitsu::rpc_default_config_file_path());

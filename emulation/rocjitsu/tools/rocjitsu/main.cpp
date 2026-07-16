@@ -413,6 +413,11 @@ void reap_stale_runtime_dirs() {
   std::filesystem::directory_iterator it(rpc_default_runtime_dir(), ec);
   const std::filesystem::directory_iterator end;
   for (; !ec && it != end; it.increment(ec)) {
+    // Only per-PID directories are reapable; a numeric plain file/symlink under the
+    // runtime root is not one of ours, so never remove_all it.
+    std::error_code dir_ec;
+    if (!it->is_directory(dir_ec) || dir_ec)
+      continue;
     const std::string name = it->path().filename().string();
     if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
       continue;

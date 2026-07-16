@@ -631,7 +631,9 @@ public:
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
+      last_quantum_executed_ = 0;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+        ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
       }
@@ -657,11 +659,17 @@ public:
   }
 
 private:
-  simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                             [this](simdojo::Tick now, simdojo::Message *) {
-                               if (execute_quantum())
-                                 this->schedule_event(&tick_event_, now + kFunctionalQuantum);
-                             }};
+  // Advance time by the work actually executed, not the full quantum: a wavefront
+  // that requests a yield after k<kFunctionalQuantum instructions (e.g. s_sleep,
+  // vendor-dep retry) must resume at now+k so a peer component's published state is
+  // observed promptly, rather than leaping a full quantum ahead. max(1,...) keeps
+  // the event strictly in the future so re-entries never collapse onto one tick.
+  simdojo::Event tick_event_{
+      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
+        if (execute_quantum())
+          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
+      }};
+  uint64_t last_quantum_executed_ = 0;
   bool executing_ = false;
 };
 
