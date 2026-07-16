@@ -167,7 +167,7 @@ class Event {
     return hipErrorInvalidConfiguration;
   }
   virtual bool awaitEventCompletion();
-  virtual bool ready();
+  [[nodiscard]] virtual bool ready();
   virtual int64_t time(bool getStartTs) const;
 
  protected:
@@ -197,7 +197,7 @@ class EventDD : public Event {
   ~EventDD() override = default;
 
   bool awaitEventCompletion() override;
-  bool ready() override;
+  [[nodiscard]] bool ready() override;
   int64_t time(bool getStartTs) const override;
 };
 
