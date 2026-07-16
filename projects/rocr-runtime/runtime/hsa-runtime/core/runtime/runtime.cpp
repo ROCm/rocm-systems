@@ -1005,7 +1005,11 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   });
 
   for (uint32_t i = 0; i < num_agents; i++) {
-    if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD) {
+    // DRM (UKI) agents derive from KfdDriver and inherit its residency path, and
+    // interop import still uses the libhsakmt KFD ioctls in enable_drm mode, so
+    // accept both KFD and DRM driver types here.
+    if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD &&
+        agents[i]->driver().kernel_driver_type_ != DriverType::DRM) {
       return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
@@ -1049,7 +1053,12 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
-  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
+  // In enable_drm (UKI) mode the registered memory driver is DRM-type (it
+  // derives from KfdDriver and inherits MakeMemoryUnresident/DeregisterMemory),
+  // and there is no KFD-type driver to look up. Select the type that exists.
+  const DriverType drv_type =
+      flag().enable_drm() ? DriverType::DRM : DriverType::KFD;
+  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(drv_type);
 
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
