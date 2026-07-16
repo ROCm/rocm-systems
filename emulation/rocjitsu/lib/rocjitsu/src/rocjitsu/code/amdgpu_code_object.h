@@ -19,6 +19,26 @@
 
 namespace rocjitsu {
 
+struct AmdGpuKernelInfo {
+  std::string name;
+  uint64_t descriptor_file_offset = 0;
+  uint64_t entry_text_offset = 0;
+  uint64_t text_file_offset = 0;
+  uint64_t text_size = 0;
+  uint64_t code_size = 0;
+  bool has_text_range = false;
+  std::optional<bool> uses_dynamic_stack;
+  std::optional<uint16_t> sgpr_count;
+};
+
+struct AmdGpuFunctionInfo {
+  std::string name;
+  uint64_t entry_text_offset = 0;
+  uint64_t text_file_offset = 0;
+  uint64_t text_size = 0;
+  uint64_t code_size = 0;
+};
+
 /// @brief Represents a single AMD GPU HSA ELF code object.
 ///
 /// A code object is a device ELF containing GPU machine code (.text sections),
@@ -60,6 +80,12 @@ public:
   /// @returns Reference to the target triple string.
   const std::string &target_triple() const { return target_triple_; }
 
+  /// @brief Kernel descriptor/function symbols discovered in this code object.
+  const std::vector<AmdGpuKernelInfo> &kernels() const { return kernels_; }
+
+  /// @brief All `.text` function symbols discovered in this code object.
+  const std::vector<AmdGpuFunctionInfo> &functions() const { return functions_; }
+
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
 
   /// @brief Smallest per-wavefront SGPR allocation across this object's kernels.
@@ -81,6 +107,8 @@ private:
   std::string offload_kind_;
   std::string target_triple_;
   std::unordered_map<std::string, uint64_t> kd_offsets_; ///< kernel_name -> .kd symbol offset
+  std::vector<AmdGpuKernelInfo> kernels_;
+  std::vector<AmdGpuFunctionInfo> functions_;
 };
 
 } // namespace rocjitsu

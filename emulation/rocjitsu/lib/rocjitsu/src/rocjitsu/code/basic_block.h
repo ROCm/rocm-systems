@@ -28,6 +28,12 @@ class Decoder;
 /// at a branch, conditional branch, or program terminator instruction.
 class BasicBlock : public util::IListNode<BasicBlock> {
 public:
+  /// @brief Half-open byte range in `.text` known to contain instructions.
+  struct CodeRange {
+    uint64_t start_offset = 0;
+    uint64_t size = 0;
+  };
+
   /// @brief Kind of call-like edge recorded outside the local CFG successor list.
   enum class CallEdgeKind {
     DirectCall,
@@ -121,10 +127,13 @@ public:
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
   /// @param[in] extra_leaders Byte offsets that must start a basic block.
+  /// @param[in] code_ranges Optional symbol-backed instruction ranges. When
+  /// empty, decode the complete text section. Supplying ranges excludes
+  /// alignment padding and embedded data from instruction decoding.
   /// @returns Ordered list of basic blocks with their decoded instructions.
   static std::vector<std::unique_ptr<BasicBlock>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-        std::span<const uint64_t> extra_leaders = {});
+        std::span<const uint64_t> extra_leaders = {}, std::span<const CodeRange> code_ranges = {});
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);

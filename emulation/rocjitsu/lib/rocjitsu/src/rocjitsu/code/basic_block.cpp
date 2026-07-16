@@ -14,6 +14,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -116,28 +117,61 @@ void BasicBlock::add_static_indirect_call_fixup(IndirectCallFixup fixup) {
   static_indirect_call_fixups_.push_back(fixup);
 }
 
-std::vector<std::unique_ptr<BasicBlock>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> extra_leaders) {
+std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder,
+                                                           rj_code_arch_t arch,
+                                                           std::span<const uint64_t> extra_leaders,
+                                                           std::span<const CodeRange> code_ranges) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
-    std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    uint64_t pc = 0;
-    uint64_t byte_offset = 0;
-
     std::vector<std::unique_ptr<Instruction>> decoded;
 
-    while (pc < inst_data_size) {
-      auto *raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      std::unique_ptr<Instruction> inst(raw_inst);
-      uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
-      uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
+    std::vector<CodeRange> section_ranges;
+    if (code_ranges.empty()) {
+      section_ranges.push_back({.start_offset = 0, .size = sec->size()});
+    } else {
+      section_ranges.reserve(code_ranges.size());
+      for (const CodeRange &range : code_ranges) {
+        if (range.start_offset >= sec->size() || range.size == 0)
+          continue;
+        if (range.start_offset % sizeof(uint32_t) != 0 || range.size % sizeof(uint32_t) != 0) {
+          throw std::runtime_error("Declared code range is not dword aligned");
+        }
+        const uint64_t available = sec->size() - range.start_offset;
+        section_ranges.push_back(
+            {.start_offset = range.start_offset, .size = std::min(range.size, available)});
+      }
+      std::ranges::sort(section_ranges, {}, &CodeRange::start_offset);
+      std::vector<CodeRange> merged_ranges;
+      for (const CodeRange &range : section_ranges) {
+        if (merged_ranges.empty() ||
+            merged_ranges.back().start_offset + merged_ranges.back().size < range.start_offset) {
+          merged_ranges.push_back(range);
+          continue;
+        }
+        CodeRange &merged = merged_ranges.back();
+        const uint64_t merged_end = merged.start_offset + merged.size;
+        const uint64_t range_end = range.start_offset + range.size;
+        merged.size = std::max(merged_end, range_end) - merged.start_offset;
+      }
+      section_ranges = std::move(merged_ranges);
+    }
 
-      decoded.push_back(std::move(inst));
-      pc += inst_words;
-      byte_offset += inst_size_bytes;
+    for (const CodeRange &range : section_ranges) {
+      uint64_t byte_offset = range.start_offset;
+      const uint64_t range_end = range.start_offset + range.size;
+      while (byte_offset < range_end) {
+        const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
+        auto *raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+        std::unique_ptr<Instruction> inst(raw_inst);
+        const uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
+        if (inst_size_bytes == 0 || inst_size_bytes > range_end - byte_offset)
+          throw std::runtime_error("Instruction extends past declared code range");
+
+        decoded.push_back(std::move(inst));
+        byte_offset += inst_size_bytes;
+      }
     }
 
     if (decoded.empty())
@@ -148,7 +182,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     for (const auto &inst : decoded)
       decoded_insts.push_back(inst.get());
 
-    const uint64_t section_end = byte_offset;
+    const uint64_t section_end = sec->size();
     // Indirect target discovery belongs with block construction because
     // recovered branch targets must become leaders before instructions are
     // moved into final BasicBlock storage. The discovery pass first walks the
@@ -208,7 +242,9 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         current->add_instruction(std::move(decoded[i]));
         ++i;
 
-        if (terminates || (i < decoded.size() && leaders.contains(next_offset)))
+        const bool discontinuity = i < decoded.size() && decoded[i]->src_loc() != next_offset;
+        if (terminates || discontinuity ||
+            (i < decoded.size() && leaders.contains(decoded[i]->src_loc())))
           break;
       }
       section_blocks.push_back(std::move(current));
