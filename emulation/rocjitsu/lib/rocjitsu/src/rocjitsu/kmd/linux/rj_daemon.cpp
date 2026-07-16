@@ -93,6 +93,10 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
                !checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
                                 &inline_size)) {
       return false;
+    } else if (args->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT &&
+               !checked_product(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size,
+                                &inline_size)) {
+      return false;
     }
     break;
   }
