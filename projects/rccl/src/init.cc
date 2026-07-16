@@ -444,8 +444,11 @@ static ncclResult_t commFree(ncclComm_t comm) {
   NCCLCHECK(ncclCeFinalize(comm));
 
   if (comm->nNodes == 1) {
-    NCCLCHECK(ncclCudaFree((void *)comm->localSizes, comm->memManager));
-    hipFree(comm->gatheredSizes);
+    NCCLCHECK(ncclMemFree(comm->localSizes));
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes))    
+	  
+    comm->localSizes = nullptr;
+    comm->gatheredSizes = nullptr;
   }
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
   // It is owned by the communicator; free it during communicator teardown.
@@ -2685,9 +2688,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     const size_t nLocal = 4 * (size_t)comm->nRanks;
     const size_t nGather = nLocal * (size_t)comm->nRanks;
 
-    NCCLCHECK(ncclCudaMalloc(&comm->localSizes, nLocal * sizeof(size_t), comm->memManager));
-    CUDACHECK(hipMallocManaged(&comm->gatheredSizes, nGather * sizeof(size_t)));
-
+    NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
+    NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
 
   // Initialize hierarchical sub-communicators and temp buffer
