@@ -1148,7 +1148,89 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
   EXPECT_EQ(disable(), 0); // A tears down its session (closes the notifier)
 }
 
-// --- RemoteDriver DBG_TRAP GET_DEVICE_SNAPSHOT response copy-back ---
+TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesErrors) {
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kGpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = 0x100000;
+  queue.ring_size = 4096;
+  queue.read_pointer_address = 0x200000;
+  queue.write_pointer_address = 0x200040;
+  queue.ctx_save_restore_address = 0x300000;
+  queue.ctx_save_restore_size = 0x8000;
+  ASSERT_EQ(execute(AMDKFD_IOC_CREATE_QUEUE, &queue, sizeof(queue), -1, nullptr), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+  ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
+
+  std::array<uint8_t, sizeof(kfd_ioctl_dbg_trap_args) + sizeof(kfd_queue_snapshot_entry)> payload{};
+  auto *snap = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(payload.data());
+  snap->pid = static_cast<uint32_t>(kClientPid);
+  snap->op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap->queue_snapshot.num_queues = 1;
+  snap->queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  snap->queue_snapshot.snapshot_buf_ptr = 0xDEADBEEF; // daemon must replace this client pointer
+  ASSERT_EQ(execute(AMDKFD_IOC_DBG_TRAP, payload.data(), payload.size(), -1, nullptr), 0);
+
+  const auto *entry = reinterpret_cast<const kfd_queue_snapshot_entry *>(
+      payload.data() + sizeof(kfd_ioctl_dbg_trap_args));
+  EXPECT_EQ(snap->queue_snapshot.num_queues, 1u);
+  EXPECT_EQ(entry->queue_id, queue.queue_id);
+  EXPECT_EQ(entry->gpu_id, kGpuId);
+  EXPECT_EQ(entry->ctx_save_restore_address, queue.ctx_save_restore_address);
+  EXPECT_EQ(entry->exception_status, KFD_EC_MASK(EC_QUEUE_NEW));
+
+  constexpr uint8_t kSentinel = 0xAB;
+  std::array<uint8_t, sizeof(kfd_ioctl_dbg_trap_args) + sizeof(kfd_queue_snapshot_entry)>
+      null_queue_payload;
+  null_queue_payload.fill(kSentinel);
+  auto *null_queue = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(null_queue_payload.data());
+  *null_queue = {};
+  null_queue->pid = static_cast<uint32_t>(kClientPid);
+  null_queue->op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  null_queue->queue_snapshot.num_queues = 1;
+  null_queue->queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(execute(AMDKFD_IOC_DBG_TRAP, null_queue_payload.data(), null_queue_payload.size(), -1,
+                    nullptr),
+            -EFAULT);
+  EXPECT_EQ(null_queue->queue_snapshot.snapshot_buf_ptr, 0u);
+  EXPECT_TRUE(std::all_of(null_queue_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
+                          null_queue_payload.end(),
+                          [](uint8_t byte) { return byte == kSentinel; }));
+
+  std::array<uint8_t, sizeof(kfd_ioctl_dbg_trap_args) + sizeof(kfd_dbg_device_info_entry)>
+      null_device_payload;
+  null_device_payload.fill(kSentinel);
+  auto *null_device = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(null_device_payload.data());
+  *null_device = {};
+  null_device->pid = static_cast<uint32_t>(kClientPid);
+  null_device->op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  null_device->device_snapshot.num_devices = 1;
+  null_device->device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry);
+  ASSERT_EQ(execute(AMDKFD_IOC_DBG_TRAP, null_device_payload.data(), null_device_payload.size(), -1,
+                    nullptr),
+            -EFAULT);
+  EXPECT_EQ(null_device->device_snapshot.snapshot_buf_ptr, 0u);
+  EXPECT_TRUE(std::all_of(null_device_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
+                          null_device_payload.end(),
+                          [](uint8_t byte) { return byte == kSentinel; }));
+
+  kfd_ioctl_dbg_trap_args missing_inline{};
+  missing_inline.pid = static_cast<uint32_t>(kClientPid);
+  missing_inline.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  missing_inline.queue_snapshot.num_queues = 1;
+  missing_inline.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &missing_inline, sizeof(missing_inline), -1, nullptr),
+            -EINVAL);
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(execute(AMDKFD_IOC_DESTROY_QUEUE, &destroy, sizeof(destroy), -1, nullptr), 0);
+  EXPECT_EQ(disable(), 0);
+}
+
+// --- RemoteDriver DBG_TRAP snapshot response copy-back ---
 //
 // The client saves the caller's snapshot buffer pointer and capacity
 // (num_devices * entry_size) before serialization, then on the response only
@@ -1160,7 +1242,8 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
 // and a response whose inline tail (after the echoed arg struct) is
 // `extra_bytes` of `poison`. Does not close `server_fd` (caller owns it).
 void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size,
-                           size_t extra_bytes, uint8_t poison) {
+                           size_t extra_bytes, uint8_t poison,
+                           uint32_t returned_snapshot_entry_size = 0) {
   rocjitsu::RpcHeader hdr{};
   int in_fds[1] = {-1};
   size_t num_in = 1;
@@ -1177,6 +1260,13 @@ void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size
   // inline snapshot data to write into the caller's snapshot buffer.
   std::vector<uint8_t> out(arg_struct_size + extra_bytes);
   std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
+  if (returned_snapshot_entry_size != 0) {
+    auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(out.data());
+    if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+      dbg->device_snapshot.entry_size = returned_snapshot_entry_size;
+    else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+      dbg->queue_snapshot.entry_size = returned_snapshot_entry_size;
+  }
   std::memset(out.data() + arg_struct_size, poison, extra_bytes);
 
   rocjitsu::RpcHeader resp{};
@@ -1267,6 +1357,97 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   })) << "snapshot copy overran the caller's declared capacity";
 
   server.join();
+}
+
+TEST(RemoteDriverDbgQueueSnapshotTest, FailedSnapshotLeavesCallerBufferUntouched) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr size_t kCap = 2 * sizeof(kfd_queue_snapshot_entry);
+  std::array<uint8_t, kCap> caller_buf;
+  caller_buf.fill(0xAB);
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_ioctl_reply(server_fd, -EFAULT, sizeof(kfd_ioctl_dbg_trap_args), kCap, 0xCD);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.num_queues = 2;
+  snap.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EFAULT);
+  EXPECT_TRUE(
+      std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t byte) { return byte == 0xAB; }));
+  server.join();
+}
+
+TEST(RemoteDriverDbgQueueSnapshotTest, SuccessfulReplyWithNullBufferReturnsEfault) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr size_t kCap = sizeof(kfd_queue_snapshot_entry);
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_ioctl_reply(server_fd, 0, sizeof(kfd_ioctl_dbg_trap_args), kCap, 0xCD);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.num_queues = 1;
+  snap.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EFAULT);
+  EXPECT_EQ(snap.queue_snapshot.snapshot_buf_ptr, 0u);
+  server.join();
+}
+
+TEST(RemoteDriverDbgQueueSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr size_t kStride = sizeof(kfd_queue_snapshot_entry) + 16;
+  constexpr size_t kCap = kStride;
+  constexpr size_t kGuard = 32;
+  std::array<uint8_t, kCap + kGuard> caller_buf;
+  caller_buf.fill(0xAB);
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_ioctl_reply(server_fd, 0, sizeof(kfd_ioctl_dbg_trap_args), caller_buf.size(), 0xCD,
+                          sizeof(kfd_queue_snapshot_entry));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.num_queues = 1;
+  snap.queue_snapshot.entry_size = kStride;
+  snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + sizeof(kfd_queue_snapshot_entry),
+                          [](uint8_t byte) { return byte == 0xCD; }));
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + sizeof(kfd_queue_snapshot_entry), caller_buf.end(),
+                          [](uint8_t byte) { return byte == 0xAB; }));
+  server.join();
+}
+
+TEST(RemoteDriverDbgQueueSnapshotTest, OversizedCapacityIsRejectedBeforeTransport) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.num_queues = UINT32_MAX;
+  snap.queue_snapshot.entry_size = UINT32_MAX;
+  snap.queue_snapshot.snapshot_buf_ptr = 1;
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -E2BIG);
+
+  ::close(sv[1]);
 }
 
 // A closed but positive notifier fd cannot be transferred over SCM_RIGHTS:
@@ -1460,6 +1641,137 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+}
+
+// rocm-dbgapi enumerates the target's compute queues to locate each queue's
+// CWSR area (from which it walks wave save state). GET_QUEUE_SNAPSHOT must
+// report the ctx_save_restore address/size captured at CREATE_QUEUE.
+TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // No queues yet: the count call reports zero.
+  kfd_ioctl_dbg_trap_args count0{};
+  count0.pid = static_cast<uint32_t>(getpid());
+  count0.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count0.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count0), 0);
+  EXPECT_EQ(count0.queue_snapshot.num_queues, 0u);
+
+  kfd_ioctl_dbg_trap_args zero_size{};
+  zero_size.pid = static_cast<uint32_t>(getpid());
+  zero_size.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_size), -EINVAL);
+
+  // Create two compute queues with distinct geometry.
+  std::vector<uint8_t> ring1(4096, 0), ring2(8192, 0), rw(4096, 0);
+  constexpr uint64_t kCwsrVa = 0x123400000ULL;
+  constexpr uint32_t kCwsrSize = 0x8000;
+  kfd_ioctl_create_queue_args q1{};
+  q1.gpu_id = kGpuId;
+  q1.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  q1.ring_base_address = reinterpret_cast<uint64_t>(ring1.data());
+  q1.ring_size = static_cast<uint32_t>(ring1.size());
+  q1.read_pointer_address = reinterpret_cast<uint64_t>(rw.data());
+  q1.write_pointer_address = reinterpret_cast<uint64_t>(rw.data() + 64);
+  q1.ctx_save_restore_address = kCwsrVa;
+  q1.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &q1), 0);
+
+  kfd_ioctl_create_queue_args q2 = q1;
+  q2.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  q2.ring_base_address = reinterpret_cast<uint64_t>(ring2.data());
+  q2.ring_size = static_cast<uint32_t>(ring2.size());
+  q2.read_pointer_address = reinterpret_cast<uint64_t>(rw.data() + 128);
+  q2.write_pointer_address = reinterpret_cast<uint64_t>(rw.data() + 192);
+  q2.ctx_save_restore_address += kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &q2), 0);
+
+  // Count reports the total, independent of caller capacity.
+  kfd_ioctl_dbg_trap_args count1{};
+  count1.pid = static_cast<uint32_t>(getpid());
+  count1.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count1.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count1), 0);
+  ASSERT_EQ(count1.queue_snapshot.num_queues, 2u);
+  EXPECT_EQ(count1.queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+
+  // A larger input stride is preserved for addressing while entry_size(OUT) is
+  // clamped. Only one entry is written and the stride tail remains untouched.
+  constexpr size_t kStride = sizeof(kfd_queue_snapshot_entry) + 16;
+  std::array<uint8_t, kStride> partial_buf;
+  partial_buf.fill(0xA5);
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = static_cast<uint32_t>(getpid());
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.entry_size = kStride;
+  snap.queue_snapshot.num_queues = 1;
+  snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(partial_buf.data());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(snap.queue_snapshot.num_queues, 2u);
+  EXPECT_EQ(snap.queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+  const auto *partial = reinterpret_cast<const kfd_queue_snapshot_entry *>(partial_buf.data());
+  EXPECT_EQ(partial->queue_id, q1.queue_id);
+  EXPECT_TRUE(std::all_of(partial_buf.begin() + sizeof(*partial), partial_buf.end(),
+                          [](uint8_t byte) { return byte == 0xA5; }));
+
+  // UPDATE_QUEUE changes the live ring geometry reported by the kernel ABI.
+  kfd_ioctl_update_queue_args update{};
+  update.queue_id = q1.queue_id;
+  update.ring_base_address = reinterpret_cast<uint64_t>(ring2.data());
+  update.ring_size = static_cast<uint32_t>(ring2.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+
+  std::array<kfd_queue_snapshot_entry, 2> entries{};
+  snap.queue_snapshot.entry_size = sizeof(entries[0]);
+  snap.queue_snapshot.num_queues = entries.size();
+  snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(entries.data());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  const auto &entry = entries[0];
+  EXPECT_EQ(entry.queue_id, q1.queue_id);
+  EXPECT_EQ(entry.gpu_id, kGpuId);
+  EXPECT_EQ(entry.ctx_save_restore_address, kCwsrVa);
+  EXPECT_EQ(entry.ctx_save_restore_area_size, kCwsrSize);
+  EXPECT_EQ(entry.ring_base_address, reinterpret_cast<uint64_t>(ring2.data()));
+  EXPECT_EQ(entry.ring_size, ring2.size());
+  EXPECT_EQ(entry.read_pointer_address, q1.read_pointer_address);
+  EXPECT_EQ(entry.write_pointer_address, q1.write_pointer_address);
+  EXPECT_EQ(entry.queue_type, static_cast<uint32_t>(KFD_IOC_QUEUE_TYPE_COMPUTE_AQL));
+  EXPECT_EQ(entry.exception_status, KFD_EC_MASK(EC_QUEUE_NEW));
+  EXPECT_EQ(entry.reserved, 0u);
+  EXPECT_EQ(entries[1].queue_id, q2.queue_id);
+  EXPECT_EQ(entries[1].queue_type, static_cast<uint32_t>(KFD_IOC_QUEUE_TYPE_COMPUTE));
+
+  snap.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(entries[0].exception_status, KFD_EC_MASK(EC_QUEUE_NEW));
+  snap.queue_snapshot.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(entries[0].exception_status, 0u);
+  EXPECT_EQ(entries[1].exception_status, 0u);
+
+  kfd_ioctl_dbg_trap_args null_buffer = snap;
+  null_buffer.queue_snapshot.snapshot_buf_ptr = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buffer), -EFAULT);
+  EXPECT_EQ(null_buffer.queue_snapshot.num_queues, 2u);
+
+  // Destroying queues removes their metadata without disturbing creation order.
+  kfd_ioctl_destroy_queue_args dq{};
+  dq.queue_id = q1.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &dq), 0);
+  kfd_ioctl_dbg_trap_args count2{};
+  count2.pid = static_cast<uint32_t>(getpid());
+  count2.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count2.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count2), 0);
+  EXPECT_EQ(count2.queue_snapshot.num_queues, 1u);
+  dq.queue_id = q2.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &dq), 0);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count2), 0);
+  EXPECT_EQ(count2.queue_snapshot.num_queues, 0u);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {

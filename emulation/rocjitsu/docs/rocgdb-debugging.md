@@ -77,7 +77,7 @@ changes and tracked below.
 | Debug sessions keyed by inferior pid (attach before connect) | done |
 | SET_EXCEPTIONS_ENABLED / SET_FLAGS / launch-mode/override (accept) | done |
 | Attach/detach lifecycle (including exited-inferior cleanup) | done |
-| GET_QUEUE_SNAPSHOT (real queues) | pending |
+| GET_QUEUE_SNAPSHOT (real queues) | done |
 | Wave stop on `s_trap` + CWSR serialization | pending |
 | Debug events + register write-back + single-step | pending |
 | Watchpoints / illegal-instruction / memory-violation | pending |

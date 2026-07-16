@@ -714,6 +714,7 @@ int SimulatedKfd::close(uint32_t process_id) {
     std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
     queue_ids.assign(proc.active_queue_ids_.begin(), proc.active_queue_ids_.end());
     proc.active_queue_ids_.clear();
+    proc.queue_snapshot_map_.clear();
 
     if (trace_enabled)
       leaked_handles.reserve(proc.allocations_.size());
@@ -1664,6 +1665,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // ioctl can observe the partially-registered queue in the window between the
   // unlock and register_queue().
   amdgpu::HwQueue hw{};
+  uint32_t queue_id = 0;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
 
@@ -1677,7 +1679,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         map_to_gpu(proc, wptr_page, reinterpret_cast<void *>(wptr_page), 4096, amdgpu::Mtype::UC);
     }
 
-    uint32_t queue_id = proc.next_queue_id_++;
+    queue_id = proc.next_queue_id_++;
     uint32_t ord = gpu_ordinal(args->gpu_id);
     auto &gs = proc.gpu(ord);
     uint32_t db_offset;
@@ -1755,6 +1757,24 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
   // Register with the CP OUTSIDE alloc_mutex_ (see note above).
   target_cp->register_queue(std::move(hw));
+
+  // Publish debug metadata only after CP registration. A cross-process debugger
+  // does not hold the target's op_mutex_, so publishing it earlier could expose
+  // a queue that the command processor cannot service yet.
+  {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    proc.queue_snapshot_map_[queue_id] = {
+        .ring_base_address = args->ring_base_address,
+        .write_pointer_address = args->write_pointer_address,
+        .read_pointer_address = args->read_pointer_address,
+        .ctx_save_restore_address = args->ctx_save_restore_address,
+        .ctx_save_restore_area_size = args->ctx_save_restore_size,
+        .ring_size = args->ring_size,
+        .queue_type = args->queue_type,
+        .gpu_id = args->gpu_id,
+        .exception_status = KFD_EC_MASK(EC_QUEUE_NEW),
+    };
+  }
   return 0;
 }
 
@@ -1766,6 +1786,14 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
         cp->update_queue(args->queue_id, proc.process_id(), args->ring_base_address,
                          args->ring_size);
       });
+  {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    if (auto it = proc.queue_snapshot_map_.find(args->queue_id);
+        it != proc.queue_snapshot_map_.end()) {
+      it->second.ring_base_address = args->ring_base_address;
+      it->second.ring_size = args->ring_size;
+    }
+  }
   return 0;
 }
 
@@ -1779,6 +1807,7 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
     std::erase(proc.active_queue_ids_, args->queue_id);
+    proc.queue_snapshot_map_.erase(args->queue_id);
     auto it = proc.queue_doorbell_map_.find(args->queue_id);
     if (it != proc.queue_doorbell_map_.end()) {
       auto &gs = proc.gpu(it->second.gpu_ordinal);
@@ -2462,10 +2491,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
     return -EAGAIN;
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
-    args->queue_snapshot.entry_size =
-        std::min<uint32_t>(args->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
-    args->queue_snapshot.num_queues = 0;
-    return 0;
+    return debug_queue_snapshot(target_proc, args->queue_snapshot);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
     return 0;
   case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
@@ -2530,6 +2556,58 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
 
     std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
   }
+  return 0;
+}
+
+int SimulatedKfd::debug_queue_snapshot(KfdProcess *target,
+                                       kfd_ioctl_dbg_trap_queue_snapshot_args &args) {
+  // Mirrors pqm_get_queue_snapshot(): report the total queue count, fill only
+  // the caller's capacity, and use the input entry size as the output stride.
+  const uint32_t in_num = args.num_queues;
+  const uint32_t in_entry_size = args.entry_size;
+
+  args.num_queues = 0;
+  if (in_entry_size == 0)
+    return -EINVAL;
+  args.entry_size = std::min<uint32_t>(in_entry_size, sizeof(kfd_queue_snapshot_entry));
+
+  std::vector<kfd_queue_snapshot_entry> entries;
+  if (target != nullptr) {
+    std::lock_guard<std::mutex> lk(target->alloc_mutex_);
+    entries.reserve(std::min<size_t>(in_num, target->active_queue_ids_.size()));
+    for (uint32_t qid : target->active_queue_ids_) {
+      auto it = target->queue_snapshot_map_.find(qid);
+      if (it == target->queue_snapshot_map_.end())
+        continue;
+      if (args.num_queues < in_num) {
+        KfdProcess::QueueSnapshotInfo &q = it->second;
+        entries.push_back({
+            .exception_status = q.exception_status,
+            .ring_base_address = q.ring_base_address,
+            .write_pointer_address = q.write_pointer_address,
+            .read_pointer_address = q.read_pointer_address,
+            .ctx_save_restore_address = q.ctx_save_restore_address,
+            .queue_id = qid,
+            .gpu_id = q.gpu_id,
+            .ring_size = q.ring_size,
+            .queue_type = q.queue_type,
+            .ctx_save_restore_area_size = q.ctx_save_restore_area_size,
+            .reserved = 0,
+        });
+        q.exception_status &= ~args.exception_mask;
+      }
+      ++args.num_queues;
+    }
+  }
+
+  if (entries.empty())
+    return 0;
+  if (args.snapshot_buf_ptr == 0)
+    return -EFAULT;
+
+  auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
+  for (size_t i = 0; i < entries.size(); ++i)
+    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &entries[i], args.entry_size);
   return 0;
 }
 

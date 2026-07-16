@@ -221,6 +221,10 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
         break;
       }
       auto *ioctl_request = reinterpret_cast<RpcIoctlRequest *>(payload.data());
+      if (ioctl_request->args_bytes > payload.size() - sizeof(RpcIoctlRequest)) {
+        connected = false;
+        break;
+      }
 
       rj_vm_cmd_t cmd{};
       cmd.cmd = ioctl_request->ioctl_cmd;

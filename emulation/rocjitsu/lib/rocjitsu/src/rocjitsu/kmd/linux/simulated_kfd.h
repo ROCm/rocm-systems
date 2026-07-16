@@ -271,6 +271,7 @@ private:
   int debug_trap_ioctl(KfdProcess &caller, void *arg);
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
+  int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
 
   /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
   /// @details Each further ordinal shifts the per-GPU LDS/scratch windows by
