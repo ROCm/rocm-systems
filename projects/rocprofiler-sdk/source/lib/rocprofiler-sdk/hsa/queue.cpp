@@ -28,6 +28,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -104,7 +105,7 @@ context_filter(const context::context* ctx, DomainT domain, Args... args)
 }
 
 bool
-context_filter(const context::context* ctx)
+full_packet_instrumentation_context_filter(const context::context* ctx)
 {
     return (context_filter(ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
@@ -302,9 +303,13 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
-    // We have no packets or no one who needs to be notified, do nothing.
-    if(pkt_count == 0 ||
-       (queue.get_notifiers() == 0 && context::get_active_contexts(context_filter).empty()))
+    auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
+    const bool graph_launch_active = (gls != nullptr);
+    const bool no_real_consumers =
+        (queue.get_notifiers() == 0 &&
+         context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
+
+    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
     {
         writer(packets, pkt_count);
         return;
@@ -336,6 +341,17 @@ WriteInterceptor(const void* packets,
 
     if(num_dispatch_packets == 0)
     {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    // Fast path: graph_launch is the only reason we're here. Increment the per-launch
+    // dispatch count and write the original packets without allocating signals or rewriting
+    // packets. Large graph launches in summary-only mode would otherwise pay the full
+    // tracing overhead and exhaust the HSA signal pool.
+    if(graph_launch_active && no_real_consumers)
+    {
+        gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
         return;
     }
@@ -533,6 +549,13 @@ WriteInterceptor(const void* packets,
                           "failed to compute size field based on offset of reserved_padding field");
 
             auto dispatch_id = ++sequence_counter;
+
+            // Always feed HIP_GRAPH summary's kernel_dispatch_count (independent of
+            // subscription).
+            if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
+               graph_launch_state != nullptr)
+                ++graph_launch_state->dispatch_count;
+
             _packet_data.callback_record =
                 callback_record_t{sizeof(callback_record_t),
                                   rocprofiler_timestamp_t{0},
