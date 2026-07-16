@@ -20,7 +20,6 @@ from rocprofsys import RocprofsysConfig
 # check on builds against older AMD SMI, where AI-NIC is legitimately disabled.
 pytestmark = [
     pytest.mark.rocprof_binary,
-    pytest.mark.network,
     pytest.mark.amdsmi_min_version("26.3"),
 ]
 
