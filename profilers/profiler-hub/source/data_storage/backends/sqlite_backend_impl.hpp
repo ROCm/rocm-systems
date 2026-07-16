@@ -62,6 +62,7 @@ void
 load_schema_cb(rocpd_sql_engine_t /*unused*/,
                rocpd_sql_schema_kind_t /*unused*/,
                rocpd_sql_options_t /*unused*/,
+               rocpd_version_triplet_t /*unused*/,
                const rocpd_sql_schema_jinja_variables_t* /*unused*/,
                const char* /*unused*/,
                const char* schema_content,
@@ -91,10 +92,12 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
         sizeof(rocpd_sql_schema_jinja_variables_t), uuid.c_str(), uuid.c_str()
     };
 
-    std::string query;
-    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+    std::string             query;
+    rocpd_version_triplet_t schema_version{ 0, 0, 0 };  // 0,0,0 = latest available schema
+    auto                    status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                         schema_kind,
                                         ROCPD_SQL_OPTIONS_NONE,
+                                        schema_version,
                                         &info,
                                         load_schema_cb,
                                         nullptr,
