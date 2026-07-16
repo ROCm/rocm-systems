@@ -202,7 +202,7 @@ __FP4_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp4_to_halfraw(
   union {
     __amd_fp16x8_storage_t fp16x8;
     __amd_fp16x2_storage_t fp16x2[4];
-  } uhalf;
+  } uhalf{};
   union {
     unsigned int ui32;
     __amd_fp4x2_storage_t fp4x2[4];
@@ -234,7 +234,7 @@ __FP4_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp4x2_to_halfraw2(
   union {
     __amd_fp16x8_storage_t fp16x8;
     __amd_fp16x2_storage_t fp16x2[4];
-  } uhalf;
+  } uhalf{};
   union {
     unsigned int ui32;
     __amd_fp4x2_storage_t fp4x2[4];
@@ -361,7 +361,7 @@ struct __hip_fp4_e2m1 {
     union {
       __hip_bfloat16_raw bf16_raw[2];
       __amd_bf16x2_storage_t bf16x2;
-    } u;
+    } u{};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_bf16_fp4))
       u.bf16x2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(__x, 1.0f /* scale */, 0);
@@ -446,7 +446,7 @@ struct __hip_fp4x2_e2m1 {
     union {
       __hip_bfloat162_raw bf162_raw;
       __amd_bf16x2_storage_t bf16x2;
-    } u;
+    } u{};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_bf16_fp4))
       u.bf16x2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(__x, 1.0f /* scale */, 0);
