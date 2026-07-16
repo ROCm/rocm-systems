@@ -519,8 +519,18 @@ ComgrApi* GetComgrApi() {
 
       if (ResolveComgrApi(lib, &api)) {
         ready = true;
-        g_comgr_lib_path = name;
-        HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", name);
+        // Resolve the absolute path the loader actually mapped. `name` may be a
+        // bare soname (the LD_LIBRARY_PATH/rpath fallback in
+        // GetComgrLibraryCandidates), which the salt's stat() cannot find,
+        // silently disabling the disk tier. dladdr on a resolved symbol yields
+        // the real file; fall back to `name` only if that fails.
+        Dl_info info;
+        g_comgr_lib_path =
+            (dladdr(reinterpret_cast<void*>(api.create_data), &info) != 0 &&
+             info.dli_fname && info.dli_fname[0] != '\0')
+                ? info.dli_fname
+                : name;
+        HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", g_comgr_lib_path.c_str());
         return true;
       }
 
@@ -618,16 +628,16 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
 // is promoted into the in-memory tier.
 //
 // Design invariants:
-//  - Immutable: entries are written once (atomic temp-file + rename) and never
-//    modified or deleted at runtime. No disk-space cap; users clear the cache
-//    directory manually. This removes all cross-process eviction/race hazards:
-//    a file, once published, is always valid and always present.
+//  - Effectively immutable: a (salt, key) maps to deterministic bytes, so a
+//    re-publish atomically replaces with identical content (temp-file + rename).
+//    Entries are never deleted at runtime; no disk-space cap (users clear the
+//    directory manually). A published file is always valid and always present.
 //  - Namespaced by a COMGR-identity salt (resolved lib path + size + mtime +
 //    format version) so a toolchain change starts a fresh subdirectory rather
 //    than reusing stale retarget output.
-//  - Best-effort: every disk failure is logged and ignored, never fatal. A
-//    read miss/failure falls through to COMGR; a write failure just means the
-//    result is not persisted for next time.
+//  - Best-effort, never fatal: a read miss/failure falls through silently to
+//    COMGR (the common case is simply a not-yet-present file); write failures
+//    are logged and just mean the result is not persisted for next time.
 //  - POSIX only; a no-op on Windows.
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -705,6 +715,8 @@ uint64_t ComgrIdentitySalt() {
   }
   struct stat st;
   if (stat(g_comgr_lib_path.c_str(), &st) != 0) {
+    HOTSWAP_LOG("hotswap: disk cache disabled (cannot stat COMGR lib %s)\n",
+                g_comgr_lib_path.c_str());
     return 0;
   }
   uint64_t salt = static_cast<uint64_t>(kDiskCacheFormatVersion) * 1000003ULL;
