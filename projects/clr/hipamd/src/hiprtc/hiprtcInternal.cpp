@@ -19,6 +19,16 @@
 
 namespace hiprtc {
 
+namespace {
+void crashWithMessage(std::string message) {
+#ifdef HIPRTC_USE_EXCEPTIONS
+  throw std::runtime_error(message);
+#else
+  guarantee(false, message.c_str());
+#endif
+}
+}  // namespace
+
 // RTC Compile Program Member Functions
 RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_), fgpu_rdc_(false) {
   if ((compile_input_.Create() != AMD_COMGR_STATUS_SUCCESS) ||
