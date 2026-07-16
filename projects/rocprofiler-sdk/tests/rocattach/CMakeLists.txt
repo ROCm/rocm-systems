@@ -54,78 +54,85 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
-function(rocattach_add_symbol_lookup_fixture NAME VALUE HASH_STYLE)
-    add_library(${NAME} SHARED)
-    target_sources(${NAME} PRIVATE symbol_lookup_fixture.cpp)
-    target_compile_definitions(${NAME} PRIVATE ROCATTACH_FIXTURE_VALUE=${VALUE})
-    target_link_libraries(${NAME} PRIVATE rocprofiler-sdk::tests-build-flags)
-    set_target_properties(${NAME} PROPERTIES OUTPUT_NAME
-                                             "rocprofiler-register.so.${NAME}")
-    if(HASH_STYLE)
-        target_link_options(${NAME} PRIVATE "LINKER:--hash-style=${HASH_STYLE}")
+if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
+   AND TARGET rocprofiler-sdk::rocprofiler-sdk-common-library)
+    set(ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../source")
+    set(ROCATTACH_SYMBOL_LOOKUP_SOURCE
+        "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}/lib/rocprofiler-sdk-rocattach/symbol_lookup.cpp"
+        )
+
+    if(NOT EXISTS "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}")
+        message(
+            FATAL_ERROR
+                "Missing rocattach symbol lookup source: ${ROCATTACH_SYMBOL_LOOKUP_SOURCE}"
+            )
     endif()
-endfunction()
 
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-normal 1 "")
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-gnu 2 "gnu")
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-sysv 3 "sysv")
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-shifted 6 "")
-target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
-                           PRIVATE ROCATTACH_FIXTURE_PADDED=1)
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
-rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
+    function(rocattach_add_symbol_lookup_fixture NAME VALUE HASH_STYLE)
+        add_library(${NAME} SHARED)
+        target_sources(${NAME} PRIVATE symbol_lookup_fixture.cpp)
+        target_compile_definitions(${NAME} PRIVATE ROCATTACH_FIXTURE_VALUE=${VALUE})
+        target_link_libraries(${NAME} PRIVATE rocprofiler-sdk::tests-build-flags)
+        set_target_properties(${NAME} PROPERTIES OUTPUT_NAME
+                                                 "rocprofiler-register.so.${NAME}")
+        if(HASH_STYLE)
+            target_link_options(${NAME} PRIVATE "LINKER:--hash-style=${HASH_STYLE}")
+        endif()
+    endfunction()
 
-set(ROCATTACH_SYMBOL_LOOKUP_SOURCE
-    "${CMAKE_CURRENT_LIST_DIR}/../../source/lib/rocprofiler-sdk-rocattach/symbol_lookup.cpp"
-    )
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-normal 1 "")
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-gnu 2 "gnu")
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-sysv 3 "sysv")
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-shifted 6 "")
+    target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
+                               PRIVATE ROCATTACH_FIXTURE_PADDED=1)
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
 
-if(NOT EXISTS "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}")
-    set(ROCATTACH_SYMBOL_LOOKUP_SOURCE "${CMAKE_CURRENT_LIST_DIR}/symbol_lookup.cpp")
+    add_executable(rocattach-symbol-lookup-test)
+    target_sources(rocattach-symbol-lookup-test
+                   PRIVATE symbol_lookup_test.cpp "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}")
+    target_include_directories(
+        rocattach-symbol-lookup-test
+        PRIVATE "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}"
+                "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}/lib/rocprofiler-sdk-rocattach")
+    target_link_libraries(
+        rocattach-symbol-lookup-test
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+                rocprofiler-sdk::rocprofiler-sdk-headers
+                rocprofiler-sdk::rocprofiler-sdk-build-flags
+                rocprofiler-sdk::rocprofiler-sdk-common-library
+                ${CMAKE_DL_LIBS})
+    add_dependencies(
+        rocattach-symbol-lookup-test
+        rocattach-symbol-lookup-fixture-normal
+        rocattach-symbol-lookup-fixture-gnu
+        rocattach-symbol-lookup-fixture-sysv
+        rocattach-symbol-lookup-fixture-shifted
+        rocattach-symbol-lookup-fixture-ambiguous-a
+        rocattach-symbol-lookup-fixture-ambiguous-b)
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-symbol-lookup-test-execute
+        TARGET rocattach-symbol-lookup-test
+        ARGS $<TARGET_FILE:rocattach-symbol-lookup-fixture-normal>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-gnu>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-sysv>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-shifted>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-a>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-b>
+        TIMEOUT 30
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION
+            "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected ambiguous and malformed mappings"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+else()
+    message(
+        STATUS
+            "Skipping rocattach-symbol-lookup-test: internal rocprofiler-sdk targets are unavailable"
+        )
 endif()
-
-install(
-    FILES "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}"
-    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-sdk/tests/rocattach"
-    COMPONENT tests)
-
-add_executable(rocattach-symbol-lookup-test)
-target_sources(rocattach-symbol-lookup-test PRIVATE symbol_lookup_test.cpp
-                                                    "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}")
-target_include_directories(
-    rocattach-symbol-lookup-test
-    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../source
-            ${CMAKE_CURRENT_LIST_DIR}/../../source/lib/rocprofiler-sdk-rocattach)
-target_link_libraries(
-    rocattach-symbol-lookup-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
-            rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            ${CMAKE_DL_LIBS})
-add_dependencies(
-    rocattach-symbol-lookup-test
-    rocattach-symbol-lookup-fixture-normal
-    rocattach-symbol-lookup-fixture-gnu
-    rocattach-symbol-lookup-fixture-sysv
-    rocattach-symbol-lookup-fixture-shifted
-    rocattach-symbol-lookup-fixture-ambiguous-a
-    rocattach-symbol-lookup-fixture-ambiguous-b)
-
-rocprofiler_add_integration_execute_test(
-    rocattach-symbol-lookup-test-execute
-    TARGET rocattach-symbol-lookup-test
-    ARGS $<TARGET_FILE:rocattach-symbol-lookup-fixture-normal>
-         $<TARGET_FILE:rocattach-symbol-lookup-fixture-gnu>
-         $<TARGET_FILE:rocattach-symbol-lookup-fixture-sysv>
-         $<TARGET_FILE:rocattach-symbol-lookup-fixture-shifted>
-         $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-a>
-         $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-b>
-    TIMEOUT 30
-    LABELS "attachment"
-    ENVIRONMENT "${rocattach-test-env}"
-    PASS_REGULAR_EXPRESSION
-        "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected ambiguous and malformed mappings"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Utilize rocattach to use a generic C tool in a basic app
 rocprofiler_add_integration_execute_test(
