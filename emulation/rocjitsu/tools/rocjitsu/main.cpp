@@ -496,11 +496,11 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
 /// the config to name the shared KFD gpu_id so every layer routes to the same
 /// physical GPU.
 bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
-  if (dbt_guest.host_gpu_id != 0)
+  if (dbt_guest.host.gpu_id != 0)
     return true;
 
   std::optional<uint32_t> target_version =
-      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
   if (!target_version)
     return true;
 
@@ -514,7 +514,7 @@ bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest)
 
   std::cerr << std::format(
       "rocjitsu: dbt_guest.host_isa '{}' matches {} host GPUs; set host_gpu_id to one of:",
-      dbt_guest.host_isa, matching_gpu_ids.size());
+      dbt_guest.host.isa, matching_gpu_ids.size());
   for (uint32_t gpu_id : matching_gpu_ids)
     std::cerr << ' ' << gpu_id;
   std::cerr << '\n';
@@ -550,16 +550,16 @@ void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &d
     return;
 
   uint32_t host_ordinal = 0;
-  if (dbt_guest.host_gpu_id != 0) {
+  if (dbt_guest.host.gpu_id != 0) {
     auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
-      return gpu.gpu_id == dbt_guest.host_gpu_id;
+      return gpu.gpu_id == dbt_guest.host.gpu_id;
     });
     if (match == gpus.end())
       return;
     host_ordinal = match->ordinal;
   } else {
     std::optional<uint32_t> target_version =
-        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
     if (!target_version)
       return;
 
@@ -703,7 +703,7 @@ int main(int argc, char *argv[]) {
 
   std::string hooks_path;
   if (dbt_guest_mode) {
-    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host_isa.empty()) {
+    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host.isa.empty()) {
       std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
       return 1;
     }
