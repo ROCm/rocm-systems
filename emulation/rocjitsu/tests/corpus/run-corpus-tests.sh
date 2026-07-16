@@ -46,7 +46,7 @@ while (( $# )); do
   esac
 done
 
-corpus_test_status=0
+corpus_test_status=1
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
   echo "::group::pytest (${name})"
@@ -55,7 +55,6 @@ for target in "${targets[@]}"; do
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
   artifact_dir=".pytest-artifacts/${name}"
   cache_dir=".pytest-cache/${name}"
-  target_failed=0
 
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
@@ -67,24 +66,29 @@ for target in "${targets[@]}"; do
     -vv
     -o "cache_dir=${cache_dir}"
     --tb=no
+    -n "${worker_count}"
+    -o "timeout_func_only=true"
   )
 
-  if "${pytest_cmd[@]}" -n "${worker_count}" -o "timeout_func_only=true" --timeout "${soft_timeout_seconds}"; then
-    status_message="All (${name}) tests passed."
-  elif [[ "${rerun_failed}" == true ]] && "${pytest_cmd[@]}" --last-failed --timeout "${hard_timeout_seconds}"; then
-    status_message="Retried (${name}) tests passed."
-  else
-    corpus_test_status=1
-    status_message="::warning::Some (${name}) tests failed."
-    target_failed=1
-  fi
-  echo "::endgroup::"
-  echo "${status_message}"
-  if (( target_failed )); then
-    echo "::group::pytest last-failed summary (${name})"
-    pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
+  if "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}"; then
+    corpus_test_status=0
     echo "::endgroup::"
+    echo "All (${name}) tests passed."
+    continue
   fi
+
+  if [[ "${rerun_failed}" == true ]] && "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}"; then
+    corpus_test_status=0
+    echo "::endgroup::"
+    echo "Retried (${name}) tests passed."
+    continue
+  fi
+
+  echo "::endgroup::"
+  echo "::warning::Some (${name}) tests failed."
+  echo "::group::pytest last-failed summary (${name})"
+  pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
+  echo "::endgroup::"
 done
 
 exit "${corpus_test_status}"
