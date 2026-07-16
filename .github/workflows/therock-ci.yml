@@ -17,7 +17,7 @@ on:
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/clr projects/rocminfo'"
       linux_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx950"
+        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx950, gfx125x"
         default: ""
       windows_amdgpu_families:
         type: string
@@ -124,7 +124,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125x' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
