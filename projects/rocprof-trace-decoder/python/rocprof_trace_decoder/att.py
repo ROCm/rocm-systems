@@ -149,11 +149,10 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             codeobj, marker_id, kind = int(row[0]), int(row[1]), str(row[2])
         except (IndexError, TypeError, ValueError):
             continue
-        if codeobj in layouts and kind.lower() not in {"k", "kernel"} and marker_id >= 0:
+        if kind.lower() not in {"k", "kernel"} and marker_id >= 0:
             marker_ids[codeobj].add(marker_id)
 
     payloads: dict[tuple[int, int], int] = {}
-    multi_payload_codeobjs: set[int] = set()
     for row in document.get("sqtt_funcmap_payloads", []):
         try:
             codeobj, marker_id, count = map(int, row[:3])
@@ -161,8 +160,7 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
             continue
         if marker_id in marker_ids.get(codeobj, ()) and count > 0:
             payloads[codeobj, marker_id] = count
-            if count > 1:
-                multi_payload_codeobjs.add(codeobj)
+    payload_codeobjs = {codeobj for codeobj, _marker_id in payloads}
 
     shaderdata: dict[tuple[int, int, int, int], list[object]] = defaultdict(list)
     occupancy: dict[tuple[int, int, int, int], list[object]] = defaultdict(list)
@@ -172,17 +170,14 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         for record in records.occupancy:
             occupancy[se, record.cu, record.simd, record.wave_id].append(record)
 
-    headers: dict[tuple[int, int, int, int, int], list[tuple[object, int, int, list[object]]]] = defaultdict(list)
+    headers: dict[tuple[int, int, int, int, int], list[tuple[object, int, int]]] = defaultdict(list)
     for location, stream in shaderdata.items():
         stream.sort(key=lambda record: record.time)
         intervals = _active_codeobj_intervals(occupancy.get(location, ()))
         interval = 0
         payload_remaining = 0
-        header_payloads: list[object] | None = None
         for record in stream:
             if payload_remaining:
-                if header_payloads is not None:
-                    header_payloads.append(record)
                 payload_remaining -= 1
                 continue
             if record.flags & ((1 << ShaderDataFlags.IMM) | (1 << ShaderDataFlags.PRIV)):
@@ -209,18 +204,15 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
                 continue
 
             record.value = (marker_id << 2) | (raw & 3)
-            header_payloads = []
             if marker_id in known_ids:
                 payload_remaining = payloads.get((codeobj, marker_id), 0)
-            # New producers disable clock packing for multi-payload protocols.
-            # Keep old traces readable by normalizing their headers, but do
-            # not shift timestamps: sorting corrected headers independently
-            # can break the declared header/payload record adjacency.
-            if codeobj in multi_payload_codeobjs:
+            # New producers forbid clock packing with payload protocols. Keep
+            # old packed traces readable by normalizing their headers only.
+            if codeobj in payload_codeobjs:
                 continue
             sampled = ((raw >> (32 - bits)) & ((1 << bits) - 1)) << shift
             clock_domain = (*location[:3], bits, shift)
-            headers[clock_domain].append((record, int(record.time), sampled, header_payloads))
+            headers[clock_domain].append((record, int(record.time), sampled))
 
     changed = False
     for clock_domain, domain_headers in headers.items():
@@ -230,26 +222,24 @@ def _correct_marker_timestamps(decoded: list[tuple[int, object]], document: dict
         half_window = window_size // 2
         bucket_size = 1 << shift
         # A constant field cannot establish a relative issue-time delta.
-        if len({sampled for _record, _time, sampled, _payloads in domain_headers}) == 1:
+        if len({sampled for _record, _time, sampled in domain_headers}) == 1:
             continue
         # This is an arbitrary coordinate origin, not a time/minimum anchor.
         # Comparing deltas cancels the fixed phase between the two clocks.
-        _origin, origin_time, origin_clock, _payloads = domain_headers[0]
+        _origin, origin_time, origin_clock = domain_headers[0]
         delays = [
             (((time - origin_time) - (clock - origin_clock) + half_window) & window_mask) - half_window
-            for _record, time, clock, _payloads in domain_headers
+            for _record, time, clock in domain_headers
         ]
         minimum = min(delays)
-        for (record, _time, _clock, header_payloads), delay in zip(domain_headers, delays):
+        for (record, _time, _clock), delay in zip(domain_headers, delays):
             correction = max(0, delay - minimum - (bucket_size - 1))
             if correction:
                 record.time -= correction
-                # TODO: sort one-payload blocks atomically; a final per-record
-                # sort can still interleave another header with this block.
-                for payload in header_payloads:
-                    payload.time -= correction
                 changed = True
-    if changed:
+    # Payload order is semantic. Old traces may mix a no-clock payload code
+    # object with a packed one, so do not split their blocks by re-sorting.
+    if changed and not payloads:
         for _se, records in decoded:
             records.shaderdata.sort(key=lambda record: record.time)
 

@@ -179,11 +179,12 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
         if (!hadEarlyPass && Config.FunctionThreshold > 0 && !IsKernel) Changed |= instrumentFunctionDirect(F, Gen);
     }
 
-    // Address records have R:extra_payload_count > 1. Do not create a packed
-    // header layout whose JSON timestamp correction could split those blocks.
-    if (!AddrTraceEntries.empty() && Config.ShaderClockBits != 0)
+    bool HasPayloadMarkers = false;
+    for (const auto& Entry : UserMarkers) HasPayloadMarkers |= Entry.ExtraPayloadCount != 0;
+    for (const auto& Entry : AddrTraceEntries) HasPayloadMarkers |= Entry.ExtraPayloadCount != 0;
+    if (HasPayloadMarkers && Config.ShaderClockBits != 0)
         report_fatal_error(
-            "SQTT_TRACE_ADDRESSES emits multi-payload records; set SQTT_SHADER_CLOCK_BITS=0"
+            "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
         );
 
     // Packing must happen after the address decision for the entire module.

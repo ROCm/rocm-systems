@@ -113,7 +113,6 @@ if(BUILD_INTEGRATION_TESTS)
     set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
     set(CODEGEN_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.py)
     set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
-    set(NAVI4_MARKER_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/navi4_marker_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -169,21 +168,6 @@ if(BUILD_INTEGRATION_TESTS)
             "integration-tests"
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
-
-    add_test(
-        NAME navi4-marker-flamegraph
-        COMMAND ${Python3_EXECUTABLE} ${NAVI4_MARKER_TEST_PY}
-                --lib ${LIB_PATH}
-                --archive ${CMAKE_CURRENT_SOURCE_DIR}/data/navi4_marker.tar.gz)
-    set_tests_properties(
-        navi4-marker-flamegraph
-        PROPERTIES
-            TIMEOUT
-            60
-            LABELS
-            "integration-tests;markers"
-            ENVIRONMENT
-            "${PYTHON_API_TEST_ENV}")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)

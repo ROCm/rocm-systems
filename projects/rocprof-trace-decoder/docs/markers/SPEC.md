@@ -124,10 +124,9 @@ gfx12 uses the no-clock full-ID layout and may use `s_ttracedata_imm`.
 A nonzero `shader_clock_bits` value requires `shader_clock_shift`; a malformed
 packed row uses the no-clock full-ID layout.
 
-Address trace blocks have `R:extra_payload_count > 1`. Clock packing is
-disabled by default; an explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an error
-when a module emits such a block. A named `sqtt_marker_data()` record has
-exactly one payload (`R:...=1`) and remains eligible for clock packing.
+Any marker with `R:extra_payload_count > 0`, including address traces and
+named `sqtt_marker_data()` records, requires `SQTT_SHADER_CLOCK_BITS=0`.
+Clock packing is disabled by default; an explicit nonzero setting is an error.
 
 The sampled window lets a decoder compensate for the variable delay between
 the trace instruction issuing and its shaderdata record appearing in SQTT.
@@ -156,7 +155,7 @@ headers retroactively.
 `att_tool.py` applies this correction while writing JSON by default;
 `--no-decode-markers` preserves the packed values and arrival timestamps. It
 rewrites each corrected header to the legacy `(id << 2) | flags` form. For an
-externally produced packed multi-payload block, JSON output may normalize a
+externally produced packed payload block, JSON output may normalize a
 recognized header but does not apply timestamp correction.
 
 ### Semantic rules
@@ -338,7 +337,7 @@ All variables are read at **compile time** by the pass plugin.
 | `SQTT_INSTRUMENT_FUNCTIONS`| `0`     | Function entry/exit threshold (0=disabled)     |
 | `SQTT_INSTRUMENT_MEMORY`   | off     | Memory op markers. Format: `N:M` (N=ops per marker, M=max gap) |
 | `SQTT_MEM_BARRIER`         | `fence` | Reordering boundary around markers (`none`/`asm`/`fence` or `0`/`1`/`2`) |
-| `SQTT_SHADER_CLOCK_BITS`   | `0`     | Gfx12 shader clock bits. Set a nonzero value to enable packing; it is invalid with address blocks. |
+| `SQTT_SHADER_CLOCK_BITS`   | `0`     | Gfx12 shader clock bits. Set a nonzero value to enable packing; it is invalid with any payload-bearing marker. |
 | `SQTT_SHADER_CLOCK_SHIFT`  | `4`     | Source bit offset in the shader-clock low word for packing |
 
 ### Marker reorder boundary (`SQTT_MEM_BARRIER`)

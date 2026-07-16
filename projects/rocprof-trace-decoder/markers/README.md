@@ -177,11 +177,9 @@ to report only active lanes. The parser demultiplexes interleaved records from
 concurrent waves by grouping on `(cu, simd, wave_id)` before parsing each
 wave's address block.
 
-Address blocks always have `extra_payload_count > 1`. Shader-clock packing is
-disabled by default, and an explicit nonzero `SQTT_SHADER_CLOCK_BITS` is an
-error when an address block is emitted.
-This does not apply to `sqtt_marker_data()`, whose single raw payload remains
-eligible for clock packing.
+Any marker with `extra_payload_count > 0`, including address blocks and
+`sqtt_marker_data()`, requires `SQTT_SHADER_CLOCK_BITS=0`. Shader-clock
+packing is disabled by default; an explicit nonzero setting is an error.
 
 ### Everything together
 
@@ -288,7 +286,7 @@ directly via `getenv()`.
 | `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
 | `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = flat/global (AS=0/1) and buffer, `lds` = LDS (AS=3). Expensive. |
 | `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
-| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | `0` | Number of gfx12 marker header high bits reserved for shader clock. Set a nonzero value to enable packing; it is invalid with address blocks. |
+| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | `0` | Number of gfx12 marker header high bits reserved for shader clock. Set a nonzero value to enable packing; it is invalid with any payload-bearing marker. |
 | `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in the shader-clock low word for the packed field. |
 
 ## Examples
@@ -481,6 +479,7 @@ and leaves 18 marker ID bits plus the two low flags. gfx1250 uses
 `SQTT_SHADER_CLOCK_BITS` and `SQTT_SHADER_CLOCK_SHIFT`; it defaults to `0`,
 which uses the no-clock full-ID layout. The funcmap emits
 `M:shader_clock_bits=N;shader_clock_shift=S` whenever clock packing is active.
+Clock packing cannot be combined with any marker that has an `R:` payload row.
 Numeric point and enter markers keep their legacy values; bare exits use the
 packed form because their value is indistinguishable from a generated exit.
 
@@ -497,8 +496,8 @@ full-width ID layout.
 `att_tool.py` applies that correction by default and masks each recognized
 header to its ordinary legacy-form marker value for existing viewers. Use
 `--no-decode-markers` to preserve packed values and arrival timestamps.
-For externally packed multi-payload blocks it may normalize a recognized
-header, but does not apply timestamp correction.
+For externally packed payload blocks it may normalize a recognized header,
+but does not apply timestamp correction.
 
 For packed code objects, `att_tool.py` adds six-column `sqtt_funcmap` rows and
 packed-layout/payload tables to `code.json`. Readers that do not know them

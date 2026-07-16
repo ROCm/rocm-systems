@@ -746,7 +746,7 @@ TEST(MarkerPass, AddressTraceBlocksKeepDefaultGfx12ClockPackingDisabledAndUseBlo
     EXPECT_EQ(countIntrinsicCalls(*function, Intrinsic::amdgcn_sched_barrier), 2u);
 }
 
-TEST(MarkerPass, ForcedGfx12ClockPackingFailsForAddressTraceBlocks)
+TEST(MarkerPass, ForcedGfx12ClockPackingFailsForPayloadMarkers)
 {
     EXPECT_DEATH(
         {
@@ -774,39 +774,39 @@ TEST(MarkerPass, ForcedGfx12ClockPackingFailsForAddressTraceBlocks)
             SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
             pass.run(*module, analysisManager);
         },
-        "SQTT_TRACE_ADDRESSES emits multi-payload records"
+        "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
     );
 }
 
-TEST(MarkerPass, OnePayloadNamedDataRemainsEligibleForGfx12ClockPacking)
+TEST(MarkerPass, ForcedGfx12ClockPackingFailsForNamedData)
 {
-    LLVMContext ctx;
-    auto module = makeModule(ctx);
-    Type* i32 = Type::getInt32Ty(ctx);
-    Type* voidTy = Type::getVoidTy(ctx);
-    Function* data = Function::Create(
-        FunctionType::get(voidTy, {PointerType::get(ctx, 0), i32}, false),
-        GlobalValue::ExternalLinkage,
-        "__sqtt_named_marker_data",
-        module.get()
+    EXPECT_DEATH(
+        {
+            LLVMContext ctx;
+            auto module = makeModule(ctx);
+            Type* i32 = Type::getInt32Ty(ctx);
+            Type* voidTy = Type::getVoidTy(ctx);
+            Function* data = Function::Create(
+                FunctionType::get(voidTy, {PointerType::get(ctx, 0), i32}, false),
+                GlobalValue::ExternalLinkage,
+                "__sqtt_named_marker_data",
+                module.get()
+            );
+            GlobalVariable* name = makeMarkerString(*module, "one_payload");
+            Function* function = makeVoidFunction(*module, "gfx12_named_data", "gfx1200");
+            IRBuilder<> builder(function->getEntryBlock().getTerminator());
+            builder.CreateCall(data, {name, ConstantInt::get(i32, 17)});
+
+            SQTTConfig config;
+            useFullScopeMasks(config);
+            config.ShaderClockBits = 12;
+
+            ModuleAnalysisManager analysisManager;
+            SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
+            pass.run(*module, analysisManager);
+        },
+        "SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0"
     );
-    GlobalVariable* name = makeMarkerString(*module, "one_payload");
-    Function* function = makeVoidFunction(*module, "gfx12_named_data", "gfx1200");
-    IRBuilder<> builder(function->getEntryBlock().getTerminator());
-    builder.CreateCall(data, {name, ConstantInt::get(i32, 17)});
-
-    SQTTConfig config;
-    useFullScopeMasks(config);
-    config.ShaderClockBits = 12;
-
-    ModuleAnalysisManager analysisManager;
-    SQTTInstrumentPass pass(config, SQTTInstrumentPass::Mode::Late);
-    pass.run(*module, analysisManager);
-
-    const std::string funcMap = getFuncMap(*module);
-    expectContains(funcMap, "M:shader_clock_bits=12;shader_clock_shift=4");
-    expectPointEntryWithPayload(funcMap, "one_payload", 1);
-    EXPECT_EQ(countIntrinsicCalls(*function, Intrinsic::amdgcn_s_getreg), 1u);
 }
 
 TEST(MarkerPass, Gfx9BufferAndPermuteAddressTracesUseInlineAsmExecProtocol)
