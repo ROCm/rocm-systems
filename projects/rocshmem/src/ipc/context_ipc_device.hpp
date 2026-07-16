@@ -159,8 +159,11 @@ class IPCContext : public Context {
                                 void *dest, const void *source, int nelement, int PE_root);
 
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems);
 
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
@@ -170,9 +173,25 @@ class IPCContext : public Context {
                             const size_t source_displs[]);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems);
+
+  template <typename T>
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
@@ -404,15 +423,23 @@ class IPCContext : public Context {
   __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
 
   template <typename T>
-  __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
+  __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
+                                  
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
+  __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_wg_linear(rocshmem_team_t team, void *dest,
+                                        const void *source, int nelems);
+
+  __device__ void alltoallmem_wg_linear_thread_puts(rocshmem_team_t team, void *dest,
+                                                    const void *source, int nelems);
+
+  __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
                                 int64_t *pSync);
@@ -456,6 +483,15 @@ class IPCContext : public Context {
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
                                       size_t nelems, int pe);
+
+  __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+      void *dst, const void *src, int nelems);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

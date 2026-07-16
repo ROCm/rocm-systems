@@ -1152,7 +1152,6 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
     if (graphExec != this && graphExec->captureDeviceId_ == -1) {
       graphExec->captureDeviceId_ = captureDeviceId_;
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
     }
 
     for (const auto& [level, segment_ids] : graphExec->segments_per_level_) {
@@ -1547,7 +1546,6 @@ hipError_t GraphExecClassic::Init() {
 
     if (max_streams_dev_.size() == 1) {
       captureDeviceId_ = max_streams_dev_.begin()->first;
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
     } else if (max_streams_dev_.size() > 1) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
               "[hipGraph] Multi-device graph is not supported for classic scheduling path");
@@ -1728,7 +1726,6 @@ hipError_t GraphExecSegmented::Init() {
     }
   }
 
-  static_cast<ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
   return status;
 }
 
@@ -2021,13 +2018,8 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
     if (segment.child_graph_ptr != nullptr) {
       auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
       if (childGraphExec != nullptr) {
-        // Propagate instantiation device ID so BuildSyncPlan can
-        // access the device for barrier packet creation.
-        // Retain balances the release in ~Graph destructor.
         if (childGraphExec->captureDeviceId_ == -1) {
           childGraphExec->captureDeviceId_ = captureDeviceId_;
-          static_cast<amd::ReferenceCountedObject*>(
-              g_devices[captureDeviceId_])->retain();
         }
 
         // Child graphs share the same kernel arg manager as parent
