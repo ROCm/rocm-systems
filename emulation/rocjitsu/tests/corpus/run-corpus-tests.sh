@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Run the ROCjitsu pytest corpus under simulated GPU targets.
+#
+# Usage:
+#   ROCM_PATH=<rocm-root> ROCJITSU_SOURCE_DIR=<rocjitsu-source> \
+#     ./tests/corpus/run-corpus-tests.sh [options]
+#
+# Options:
+#   --workers N          Number of pytest-xdist workers (default: 8)
+#   --soft-timeout N     Per-test timeout for the first run (default: 30)
+#   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
+#   --rerun-failed       Rerun only tests that failed the first pass
+#
+# Environment variables:
+#   ROCM_PATH            Required ROCm installation root
+#   ROCJITSU_SOURCE_DIR  Required rocjitsu source directory
+
 set -euo pipefail
 
 : "${ROCM_PATH:?ROCM_PATH must be set}"
@@ -46,7 +66,7 @@ while (( $# )); do
   esac
 done
 
-corpus_test_status=1
+corpus_test_status=0
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
   echo "::group::(${name}) pytest"
@@ -71,26 +91,30 @@ for target in "${targets[@]}"; do
   )
 
   if "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}"; then
-    corpus_test_status=0
     echo "::endgroup::"
     echo "All (${name}) tests passed."
     continue
   fi
 
+  corpus_test_status=1
   echo "::endgroup::"
   echo "::error::Some (${name}) tests failed."
   echo "::group::(${name}) pytest last-failed summary"
   pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
   echo "::endgroup::"
 
-  if [[ "${rerun_failed}" == false ]]
-  continue
+  if [[ "${rerun_failed}" == false ]]; then
+    continue
+  fi
 
+  # Retry success does not turn CI green.
   echo "::group::(${name}) pytest rerun failed tests"
-  if "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}";
+  if "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}"; then
+    echo "::endgroup::"
+    echo "::warning::Retried (${name}) tests passed."
+    continue
+  fi
   echo "::endgroup::"
-  echo "::warning::Retried (${name}) tests passed."
-  continue
 done
 
 exit "${corpus_test_status}"
