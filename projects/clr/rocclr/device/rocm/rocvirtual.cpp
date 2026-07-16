@@ -98,10 +98,10 @@ static constexpr uint16_t kBarrierVendorPacketNopScopeHeader =
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
+[[maybe_unused]] static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
     kBarrierPacketAcquireHeader, 0, 0, {{0}}, 0, {0}};
 
-static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
+[[maybe_unused]] static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
     kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
 
 static constexpr uint16_t kBarrierBit = 1 << HSA_PACKET_HEADER_BARRIER;
@@ -4693,7 +4693,6 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
 
   return true;
 }
-
 
 void VirtualGPU::HiddenHeapInit() {
   // We don't really need its id, just want to ensure the queue is created.

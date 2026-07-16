@@ -120,7 +120,7 @@ CL_TYPES_DO(DEFINE_CL_TRAITS);
 
 struct ICDDispatchedObject {
 #ifdef __HIP_PLATFORM_AMD__
-  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
+  static inline cl_icd_dispatch icdVendorDispatch_[] = {{}};
 #else
   static cl_icd_dispatch icdVendorDispatch_[];
 #endif

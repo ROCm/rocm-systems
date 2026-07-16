@@ -3263,7 +3263,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN(hipErrorInvalidValue);
   }
   hipGraphNodeType nodeType = nodeParams->type;
-  hip::GraphNode* node;
+  hip::GraphNode* node = nullptr;
   hipError_t status = hipSuccess;
   hip::GraphMemAllocNode* mem_alloc_node;
   amd::Memory* memory;
