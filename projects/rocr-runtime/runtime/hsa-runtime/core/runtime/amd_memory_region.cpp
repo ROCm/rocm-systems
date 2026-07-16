@@ -134,7 +134,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 MemoryRegion::~MemoryRegion() {}
 
 hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   return AllocateImpl(size, alloc_flags, mem, agent_node_id);
 }
 
@@ -164,7 +164,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   return FreeImpl(address, size);
 }
 
@@ -176,7 +176,7 @@ hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }

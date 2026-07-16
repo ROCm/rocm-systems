@@ -236,10 +236,6 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() && (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress = !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
 
@@ -467,12 +463,10 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                                 core::ShareType type, uint32_t flags, void* export_handle,
-                                                 uint64_t* export_offset) {
+hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent,
+                                                 const core::DriverMemoryHandle& handle,
+                                                 core::ShareType type, void* export_handle) {
   (void)agent;
-  (void)flags;
-  (void)export_offset;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
@@ -525,11 +519,6 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyMemoryHandle(handle);
 }
 
 hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
@@ -631,6 +620,12 @@ hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** 
   *size = queue_info.SaveAreaSizeInBytes;
 
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  (void)agent;
+  (void)ready;
+  return HSA_STATUS_ERROR;
 }
 
 }  // namespace AMD

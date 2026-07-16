@@ -41,6 +41,8 @@ template <nic_backend_contract Backend>
 class device
 {
 public:
+    using backend_type = Backend;
+
     /**
      * @brief Construct a NIC device wrapper.
      *

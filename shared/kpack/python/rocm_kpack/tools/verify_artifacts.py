@@ -150,9 +150,11 @@ class ArtifactVerifier:
             VerificationResult(
                 "Artifact Manifests",
                 all_passed,
-                "All manifests present and valid"
-                if all_passed
-                else "Some manifests missing or invalid",
+                (
+                    "All manifests present and valid"
+                    if all_passed
+                    else "Some manifests missing or invalid"
+                ),
                 details,
             )
         )
@@ -190,9 +192,7 @@ class ArtifactVerifier:
                 size_mb = file_size / (1024 * 1024)
                 rel_path = binary_path.relative_to(artifact)
 
-                inspection, is_binary = self._inspect_fat_binary_conversion(
-                    binary_path
-                )
+                inspection, is_binary = self._inspect_fat_binary_conversion(binary_path)
                 if inspection is None:
                     if is_binary:
                         host_only_binaries.append((rel_path, size_mb))
@@ -257,9 +257,11 @@ class ArtifactVerifier:
             VerificationResult(
                 "Fat Binary Conversion",
                 all_passed,
-                "All fat binaries are kpack-transformed"
-                if all_passed
-                else "Some binaries are not kpack-transformed",
+                (
+                    "All fat binaries are kpack-transformed"
+                    if all_passed
+                    else "Some binaries are not kpack-transformed"
+                ),
                 details,
             )
         )
@@ -335,9 +337,11 @@ class ArtifactVerifier:
             VerificationResult(
                 "Architecture Separation",
                 all_passed,
-                "All archs separated"
-                if all_passed
-                else "Architecture cross-contamination detected",
+                (
+                    "All archs separated"
+                    if all_passed
+                    else "Architecture cross-contamination detected"
+                ),
                 details,
             )
         )
@@ -439,9 +443,11 @@ class ArtifactVerifier:
             VerificationResult(
                 "Kpack Archives",
                 all_passed,
-                "All kpack archives valid"
-                if all_passed
-                else "Some kpack archives invalid",
+                (
+                    "All kpack archives valid"
+                    if all_passed
+                    else "Some kpack archives invalid"
+                ),
                 details,
             )
         )
@@ -473,9 +479,7 @@ class ArtifactVerifier:
                     FatBinaryInspection(
                         binary_format="ELF",
                         fatbin_section=".hip_fatbin",
-                        section_state=self._elf_section_state(
-                            fatbin.header.sh_type
-                        ),
+                        section_state=self._elf_section_state(fatbin.header.sh_type),
                         has_kpack_ref=surgery.find_section(".rocm_kpack_ref")
                         is not None,
                         hipf_magic=ELF_HIPF_MAGIC,
@@ -554,7 +558,12 @@ class ArtifactVerifier:
 
         logical_size = getattr(section, "virtual_size", None)
         if logical_size is not None:
-            section_data = section_data[:logical_size]
+            if len(section_data) < logical_size:
+                section_data = section_data + b"\x00" * (
+                    logical_size - len(section_data)
+                )
+            else:
+                section_data = section_data[:logical_size]
 
         if len(section_data) % wrapper_size != 0:
             return (
@@ -580,16 +589,12 @@ class ArtifactVerifier:
 
         failures = []
 
-        if (
-            inspection.binary_format == "ELF"
-            and inspection.section_state != "NOBITS"
-        ):
+        if inspection.binary_format == "ELF" and inspection.section_state != "NOBITS":
             failures.append(
                 f"still has {inspection.section_state} {inspection.fatbin_section}"
             )
-        elif (
-            inspection.binary_format == "COFF"
-            and inspection.section_state.startswith("unstripped")
+        elif inspection.binary_format == "COFF" and inspection.section_state.startswith(
+            "unstripped"
         ):
             failures.append(
                 f"still has {inspection.section_state} {inspection.fatbin_section}"
@@ -597,9 +602,7 @@ class ArtifactVerifier:
 
         if not inspection.has_kpack_ref:
             marker = (
-                ".rocm_kpack_ref"
-                if inspection.binary_format == "ELF"
-                else ".kpackrf"
+                ".rocm_kpack_ref" if inspection.binary_format == "ELF" else ".kpackrf"
             )
             failures.append(f"missing {marker} marker")
 

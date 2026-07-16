@@ -7,18 +7,25 @@ set(TEST_SRC
     copy_coherency.cc
 )
 if (HIP_PLATFORM MATCHES "amd")
-  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
-                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp
+                  COMMENT "Compiling memcpyInt.hsaco")
 else()
-  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
-                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp
+                  COMMENT "Compiling memcpyInt.hsaco")
 endif()
+add_custom_target(memcpyInt_hsaco DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
@@ -37,4 +44,4 @@ hip_add_exe_to_target(NAME synchronizationTests
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++14)
 
-add_dependencies(synchronizationTests memcpyInt.hsaco)
+add_dependencies(synchronizationTests memcpyInt_hsaco)

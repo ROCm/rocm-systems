@@ -816,12 +816,10 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                            core::ShareType type, uint32_t flags, void* export_handle,
-                                            uint64_t* export_offset) {
+hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent,
+                                            const core::DriverMemoryHandle& handle,
+                                            core::ShareType type, void* export_handle) {
   (void)agent;
-  (void)flags;
-  (void)export_offset;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
@@ -879,11 +877,6 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Nothing to do for XDNA since we have a single, non-ref counted handle.
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
@@ -1437,6 +1430,12 @@ hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addre
 }
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
+
+hsa_status_t XdnaDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  (void)agent;
+  (void)ready;
+  return HSA_STATUS_ERROR;
+}
 
 }  // namespace AMD
 }  // namespace rocr

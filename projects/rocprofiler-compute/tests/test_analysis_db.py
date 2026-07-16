@@ -228,19 +228,19 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     ]
 
     for expr in cases:
-        with (
-            patch(
-                "rocprof_compute_analyze.analysis_db.console_warning"
-            ) as mock_warning,
-            patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug,
-        ):
-            result = db_analysis.evaluate(
-                "test_metric",
-                expr,
-                pmc_df,
-                sys_info,
-                parse=False,
-            )
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as mock_warning:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.console_debug"
+            ) as mock_debug:
+                result = db_analysis.evaluate(
+                    "test_metric",
+                    expr,
+                    pmc_df,
+                    sys_info,
+                    parse=False,
+                )
 
         assert result is None, f"Expected None for '{expr}', got {result}"
 
@@ -275,23 +275,21 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         "DERIVED_VAR": "$PER_XCD_VAR + 5",  # Depends on PER_XCD_VAR -> 25
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        db_analysis.calc_builtin_vars(
-            pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
-        )
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+                )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
@@ -313,23 +311,21 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         "SCALED_TOTAL": "$TOTAL_COUNT * $multiplier",  # 120
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        db_analysis.calc_builtin_vars(
-            pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
-        )
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+                )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -387,25 +383,105 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ],
     })
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                result = db_analysis.calc_dataframe_expressions(
+                    pmc_df, sys_info, expression_df
+                )
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+def test_calc_dataframe_expressions_empty_returns_assignable_series():
+    """An empty expression_df returns an empty Series, not a DataFrame."""
+    expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])
+
+    result = db_analysis.calc_dataframe_expressions(
+        pd.DataFrame({"Counter1": [1, 2, 3]}),
+        {"gpu_arch": "gfx942"},
+        expression_df,
+    )
+
+    assert isinstance(result, pd.Series)
+    assert result.empty
+    # Reproduces the call site: assigning the result as a single column must
+    # not raise "Columns must be same length as key".
+    expression_df["value"] = result
+
+
+# =============================================================================
+# calc_metrics_data tests
+# =============================================================================
+
+
+def test_calc_metrics_data_builds_rows_and_preserves_schema():
+    """Metric tables expand into rows with table-level fields resolved once;
+    non-metric tables are skipped and the output frames keep their columns."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Grid Size"],
+            "Avg": [" 10 "],
+            "Min": [" 5 "],
+            "Max": [" 20 "],
+            "Unit": ["Work items"],
+            "Description": ["Grid size desc"],
+        },
+        index=pd.Index(["7.1.0"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # panel 700 (table_name) and sub-table 701 (sub_table_name).
+    arch_config.dfs = {
+        1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
+        701: metric_df,
+    }
+    arch_config.panel_configs = {
+        700: {
+            "id": 700,
+            "title": "Wavefront",
+            "data source": [
+                {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert "pct_of_peak" in info.columns
+    assert list(info["metric_id"]) == ["7.1.0"]
+    assert list(info["name"]) == ["Grid Size"]
+    assert list(info["table_name"]) == ["Wavefront"]
+    assert list(info["sub_table_name"]) == ["Wavefront Launch Stats"]
+    assert not bool(info["pct_of_peak"].iloc[0])
+
+    exprs = expressions[workload_path]
+    assert list(exprs.columns) == ["metric_id", "value_name", "value"]
+    # Metric/Unit/Description are non-expression columns, so only Avg/Min/Max
+    # expand into expression rows, stripped and in dataframe-column order.
+    assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
+    assert list(exprs["value"]) == ["10", "5", "20"]
+    assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
 # =============================================================================
@@ -489,17 +565,17 @@ def test_calc_expressions_noise_clamp():
 
     # calc_expressions per-workload bracket.
     clear_noise_clamp_warnings()
-    with (
-        patch("rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}),
-        patch(
-            "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as console_warning_mock,
-        patch(
-            "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-        ) as print_noise_clamp_summary_mock,
-        patch.object(db_analysis, "validate_dual_issue_metrics"),
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
     ):
-        analyzer.calc_expressions()
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as console_warning_mock:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
+            ) as print_noise_clamp_summary_mock:
+                with patch.object(db_analysis, "validate_dual_issue_metrics"):
+                    analyzer.calc_expressions()
 
     variance_warning_calls = [
         warning_call
@@ -513,12 +589,12 @@ def test_calc_expressions_noise_clamp():
 
 
 # =============================================================================
-# _derive_pop_values tests
+# _derive_pct_of_peak_values tests
 # =============================================================================
 
 
-class TestDerivePopValues:
-    """Tests for db_analysis._derive_pop_values."""
+class TestDerivePctOfPeakValues:
+    """Tests for db_analysis._derive_pct_of_peak_values."""
 
     def _make_values_df(
         self,
@@ -537,20 +613,20 @@ class TestDerivePopValues:
             data["kernel_name"] = kernel_names
         return pd.DataFrame(data)
 
-    def test_pop_true_metric_appends_pct_of_peak_row(self):
-        """A pop-enabled metric produces one new Pct of Peak row."""
+    def test_pct_of_peak_true_metric_appends_percent_of_peak_row(self):
+        """A pct_of_peak-enabled metric produces one new Percent of Peak row."""
         values_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
             values=[50.0, 200.0],
         )
-        new_rows = db_analysis._derive_pop_values({"1.1"}, values_df)
+        new_rows = db_analysis._derive_pct_of_peak_values({"1.1"}, values_df)
         assert len(new_rows) == 1
-        assert new_rows[0]["value_name"] == "Pct of Peak"
+        assert new_rows[0]["value_name"] == "Percent of Peak"
         assert new_rows[0]["value"] == pytest.approx(25.0)
 
     def test_multi_kernel_produces_one_row_per_kernel(self):
-        """Calling once per kernel produces one Pct of Peak row per kernel."""
+        """Calling once per kernel produces one Percent of Peak row per kernel."""
         kernel_a_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
@@ -563,21 +639,21 @@ class TestDerivePopValues:
             values=[60.0, 300.0],
             kernel_names=["kernel_b", "kernel_b"],
         )
-        rows_a = db_analysis._derive_pop_values({"1.1"}, kernel_a_df)
-        rows_b = db_analysis._derive_pop_values({"1.1"}, kernel_b_df)
+        rows_a = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_a_df)
+        rows_b = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_b_df)
         assert len(rows_a) == 1
         assert rows_a[0]["value"] == pytest.approx(50.0)  # 100/200*100
         assert len(rows_b) == 1
         assert rows_b[0]["value"] == pytest.approx(20.0)  # 60/300*100
 
-    def test_pop_false_metric_produces_no_pct_row(self):
-        """A metric not in pop_metric_ids produces no Pct of Peak row."""
+    def test_pct_of_peak_false_metric_produces_no_pct_row(self):
+        """A metric not in pct_of_peak_metric_ids produces no Percent of Peak row."""
         values_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
             values=[50.0, 100.0],
         )
-        new_rows = db_analysis._derive_pop_values(set(), values_df)
+        new_rows = db_analysis._derive_pct_of_peak_values(set(), values_df)
         assert new_rows == []
 
     def test_incomplete_data_skips_metric(self):
@@ -593,7 +669,9 @@ class TestDerivePopValues:
             ),
         ]
         for incomplete_values in incomplete_cases:
-            new_rows = db_analysis._derive_pop_values({"1.1"}, incomplete_values)
+            new_rows = db_analysis._derive_pct_of_peak_values(
+                {"1.1"}, incomplete_values
+            )
             assert new_rows == []
 
 

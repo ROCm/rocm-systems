@@ -22,11 +22,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <utility>
 #include <vector>
-#ifdef SQTT_LOGGING
-#    include <iostream>
-#endif
 #include "gfx10wave.h"
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
@@ -40,16 +39,10 @@ typedef gfx10::Token Token;
 
 #define MAX_ACCUM_RECORDS 65536
 
-#ifdef SQTT_LOGGING
-#    define DEBUGPRINT(_decoded)                                                                                       \
-        do {                                                                                                           \
-            auto _d = (_decoded);                                                                                      \
-            std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;                  \
-        }                                                                                                              \
-        while (0)
-#else
-#    define DEBUGPRINT(_decoded)
-#endif
+const bool SQTT_LOGGING = std::getenv("SQTT_LOGGING") ? (*std::getenv("SQTT_LOGGING") != '0') : false;
+
+#define DEBUGPRINT(_d)                                                                                                 \
+    if (SQTT_LOGGING) std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;
 
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
@@ -537,12 +530,14 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::REG_INIT:
             {
                 gfx10::reg_init_type reg{.raw = token.contents};
+                DEBUGPRINT(reg);
                 if (reg.type == 2 && (reg.data & 1) == 1) stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe);
                 break;
             }
             case RdnaType::EVENT:
             {
                 gfx10::event_type event{.raw = token.contents};
+                DEBUGPRINT(event);
 
                 rocprofiler_thread_trace_decoder_event_type_t type{};
 

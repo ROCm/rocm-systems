@@ -7,6 +7,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_type:
+        type: string
+        default: "standard"
       package_version:
         type: string
         required: true
@@ -20,7 +23,6 @@ on:
         type: string
         default: "azure-linux-scale-rocm"
 
-
 permissions:
   contents: read
 
@@ -31,7 +33,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -50,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: f1e3fc2311fde45bf3e17b0e3349200be9caa4b4 # 2026-06-23
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
       - name: Install python deps
         run: |
@@ -134,11 +136,13 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
+      test_type: ${{ inputs.test_type }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

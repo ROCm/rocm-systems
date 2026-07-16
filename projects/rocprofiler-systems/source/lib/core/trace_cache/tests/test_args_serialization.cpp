@@ -60,6 +60,75 @@ TEST(args_serialization_test, get_args_string_roundtrips_through_parser)
     }
 }
 
+// --- delimiter-safe / lossless field encoding -------------------------------
+
+TEST(args_serialization_test, value_containing_delimiter_roundtrips)
+{
+    // A value that embeds the raw delimiter ";;" must not split into extra records.
+    function_args_t args{ { 0U, "string", "path", "a;;b" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_name, "path");
+    EXPECT_EQ(parsed[0].arg_value, "a;;b");
+}
+
+TEST(args_serialization_test, escape_character_and_semicolons_are_lossless)
+{
+    function_args_t args{ { 0U, "string", "name;with;semis", "50% off ;; today" },
+                          { 1U, "string", "already_escaped", "x%3By" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+
+    ASSERT_EQ(parsed.size(), 2u);
+    EXPECT_EQ(parsed[0].arg_name, "name;with;semis");
+    EXPECT_EQ(parsed[0].arg_value, "50% off ;; today");
+    EXPECT_EQ(parsed[1].arg_name, "already_escaped");
+    EXPECT_EQ(parsed[1].arg_value, "x%3By");
+}
+
+// Every escapable field (type, name, value) is encoded independently, so a record whose
+// type and name also carry delimiters/escape chars must still round-trip intact.
+TEST(args_serialization_test, all_escapable_fields_roundtrip)
+{
+    function_args_t args{ { 7U, "ns::T<;;>%", "n;%ame", "v;;%val" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_number, 7u);
+    EXPECT_EQ(parsed[0].arg_type, "ns::T<;;>%");
+    EXPECT_EQ(parsed[0].arg_name, "n;%ame");
+    EXPECT_EQ(parsed[0].arg_value, "v;;%val");
+}
+
+// An empty value is a legal field and must survive as an empty string (not get dropped
+// or merged into the trailing delimiter).
+TEST(args_serialization_test, empty_value_roundtrips)
+{
+    function_args_t args{ { 0U, "string", "name", "" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_name, "name");
+    EXPECT_TRUE(parsed[0].arg_value.empty());
+}
+
+// Decoder robustness: a '%' that is not the start of a recognized %25/%3B escape (an
+// unknown code, or one truncated by the end of the field) is copied verbatim rather
+// than consumed. This input did not come from the encoder.
+TEST(args_serialization_test, unescape_leaves_unrecognized_escapes_verbatim)
+{
+    // %41 is not a code we emit; the trailing '%' has no following code bytes.
+    auto parsed = process_arguments_string("0;;string;;a%41b;;ends-with-%;;");
+
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_name, "a%41b");
+    EXPECT_EQ(parsed[0].arg_value, "ends-with-%");
+}
+
 // --- instrumentor producer pattern (module_function::operator()) ------------
 
 TEST(args_serialization_test, source_object_present_serializes)
