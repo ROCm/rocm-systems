@@ -260,56 +260,14 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
-    bool already_enabled = true;
     CHECK_NOTNULL(controller)->enable_serialization();
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
+        enabled = true;
     });
 
-    if(!already_enabled)
-    {
-        // Insert our callbacks into HSA Interceptor. This
-        // turns on counter instrumentation.
-        for(auto& cb : ctx->dispatch_spm->callbacks)
-        {
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                hsa::queue_callbacks_t{
-                    .batch_packets = []() { return false; },
-                    .write_interceptor =
-                        [=](const hsa::Queue&              q,
-                            const hsa::rocprofiler_packet& kern_pkt,
-                            rocprofiler_kernel_id_t        kernel_id,
-                            rocprofiler_dispatch_id_t      dispatch_id,
-                            rocprofiler_user_data_t*       user_data,
-                            const hsa::queue_info_session_t::external_corr_id_map_t&
-                                                           extern_corr_ids,
-                            const context::correlation_id* correlation_id) {
-                            return pre_kernel_call(ctx,
-                                                   cb,
-                                                   q,
-                                                   kern_pkt,
-                                                   kernel_id,
-                                                   dispatch_id,
-                                                   user_data,
-                                                   extern_corr_ids,
-                                                   correlation_id);
-                        },
-                    .signal_completion =
-                        [=](const hsa::Queue& /* q */,
-                            const hsa::rocprofiler_packet& /* kern_pkt */,
-                            std::shared_ptr<hsa::queue_info_session_t>& session,
-                            hsa::packet_data_t& /* pkt_data */,
-                            inst_pkt_t&                     aql,
-                            kernel_dispatch::profiling_time dispatch_time) {
-                            post_kernel_call(ctx, cb, session, aql, dispatch_time);
-                        }});
-        }
-    }
-
+    // #8586: per-queue callback registration removed; SPM instrumentation now flows
+    // through spm::write_hook / spm::signal_completion_hook in the HSA write interceptor.
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -334,14 +292,8 @@ stop_context(const context::context* ctx)
     {
         hsa::queue_controller_sync();
         controller->disable_serialization();
-        for(auto& cb : ctx->dispatch_spm->callbacks)
-        {
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
-            {
-                controller->remove_callback(cb->queue_id);
-                cb->queue_id = rocprofiler::hsa::ClientID{-1};
-            }
-        }
+        // #8586: per-queue callback teardown removed; spm::write_hook no-ops once
+        // dispatch_spm is disabled above.
     }
 }
 

@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -171,6 +172,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                           packet,
                                                           packet.instrumentation_packets,
                                                           dispatch_time);
+
+        rocprofiler::spm::signal_completion_hook(queue_info_session.queue,
+                                                 packet.kernel_packet,
+                                                 _session,
+                                                 packet,
+                                                 packet.instrumentation_packets,
+                                                 dispatch_time);
 
         rocprofiler::pc_sampling::signal_completion_hook(queue_info_session.queue,
                                                          packet.kernel_packet,
@@ -316,10 +324,20 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // #8586 removed the per-queue callback registry, so queue.get_notifiers() no longer
-    // exists; "any real consumer" reduces to an active full-instrumentation context.
-    const bool no_real_consumers =
-        context::get_active_contexts(full_packet_instrumentation_context_filter).empty();
+
+    // #8586 removed the per-queue callback registry (and queue.get_notifiers()); detect real
+    // consumers explicitly. full_packet_instrumentation_context_filter only covers kernel-dispatch
+    // tracing, so counters / ATT / SPM / PC-sampling are checked separately.
+    const bool kernel_tracing_active =
+        !context::get_active_contexts(full_packet_instrumentation_context_filter).empty();
+    const bool counters_active     = rocprofiler::counters::is_any_active();
+    const bool thread_trace_active = rocprofiler::thread_trace::is_any_active();
+    const bool spm_active          = rocprofiler::spm::is_any_active();
+    const bool pc_sampling_configured =
+        rocprofiler::pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id);
+
+    const bool no_real_consumers = !kernel_tracing_active && !counters_active &&
+                                   !thread_trace_active && !spm_active && !pc_sampling_configured;
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
     {
@@ -627,6 +645,17 @@ WriteInterceptor(const void* packets,
                 _packet_data.instrumentation_packets,
                 _packet_data.is_serialized);
 
+            rocprofiler::spm::write_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
             // PC sampling marker is spliced separately below (maybe_marker_packet).
 
             bool inserted_before = false;
@@ -749,8 +778,9 @@ WriteInterceptor(const void* packets,
     };
 
     // Counters and ATT both require per-packet mode; pc_sampling allows batching.
-    bool should_batch_packets =
-        !rocprofiler::counters::is_any_active() && !rocprofiler::thread_trace::is_any_active();
+    bool should_batch_packets = !rocprofiler::counters::is_any_active() &&
+                                !rocprofiler::thread_trace::is_any_active() &&
+                                !rocprofiler::spm::is_any_active();
 
     if(should_batch_packets)
     {
