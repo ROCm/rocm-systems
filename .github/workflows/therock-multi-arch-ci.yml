@@ -122,6 +122,8 @@ jobs:
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Pass changed_projects so TheRock can compute affected_stages
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: users/geomin12/selection-workflow-checkin
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
@@ -160,6 +162,7 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      affected_stages: ${{ needs.setup.outputs.affected_stages }}
       repository: ROCm/TheRock
       ref: users/geomin12/selection-workflow-checkin
     permissions:
