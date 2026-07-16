@@ -80,6 +80,7 @@
 #include "team_split_2d_tester.hpp"
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
+#include "alltoall_wave_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -103,6 +104,7 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEPutTestType:
     case WAVEPutNBITestType:
     case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -158,6 +160,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
+      case AllToAllWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -340,6 +343,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
+      break;
+    case AllToAllWaveTestType:
+      test_name = "AllToAll Wave Test";
+      testers.push_back(new AlltoallWaveTester<float>(args));
+      testers.push_back(new AlltoallWaveTester<char>(args));
+      testers.push_back(new AlltoallWaveTester<int>(args));
       break;
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
@@ -1051,6 +1060,7 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

@@ -48,6 +48,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -2558,6 +2560,156 @@ void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(void) {
         hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
     if (gpu_pool.handle == 0) continue;
     ImportedShareableHandleSetAccessAfterFdClose(gpus[i], gpu_pool);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(hsa_agent_t gpu_agent,
+                                                               hsa_amd_memory_pool_t pool) {
+  const auto read_accel_state = [](int32_t drm_render_minor, char* state_out) {
+    char path[256];
+    snprintf(path, sizeof(path), "/sys/class/drm/renderD%d/device/ualink/accel_state",
+             drm_render_minor);
+
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      return false;
+    }
+
+    const bool read_ok = fscanf(file, "%255s", state_out) == 1;
+    fclose(file);
+    return read_ok;
+  };
+
+  const auto accel_state_expects_export_success = [](const char* state) {
+    return strcmp(state, "ready") == 0 || strcmp(state, "active") == 0;
+  };
+
+  rocrtst::pool_info_t pool_i;
+  hsa_device_type_t ag_type;
+  uint32_t driver_node_id = 0;
+  int32_t drm_render_minor = 0;
+  char accel_state[256] = {};
+
+  ASSERT_SUCCESS(hsa_agent_get_info(gpu_agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) {
+    return;
+  }
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) {
+    return;
+  }
+
+  ASSERT_SUCCESS(hsa_agent_get_info(
+      gpu_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+      &driver_node_id));
+  if (!rocrtst::ReadDrmRenderMinor(driver_node_id, &drm_render_minor)) {
+    if (verbosity() > 0) {
+      std::cout << "    Unable to read drm_render_minor for node " << driver_node_id
+                << " - Skipping GPU." << std::endl;
+    }
+    return;
+  }
+
+  if (!read_accel_state(drm_render_minor, accel_state)) {
+    if (verbosity() > 0) {
+      std::cout << "    Unable to read ualink accel_state for renderD" << drm_render_minor
+                << " - Skipping GPU." << std::endl;
+    }
+    return;
+  }
+
+  const bool expect_export_success = accel_state_expects_export_success(accel_state);
+  if (verbosity() > 0) {
+    std::cout << "    renderD" << drm_render_minor << " accel_state=" << accel_state
+              << " expect_export_success=" << (expect_export_success ? "true" : "false")
+              << std::endl;
+  }
+
+  const size_t alloc_size = pool_i.alloc_granule;
+  hsa_amd_vmem_alloc_handle_t mem_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_PINNED, 0, &mem_handle));
+
+  hsa_fabric_handle_t fabric_handle = {};
+  const hsa_status_t export_status =
+      hsa_amd_vmem_export_fabric_handle(&fabric_handle, mem_handle, 0);
+  const hsa_status_t resource_not_ready =
+      static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY);
+
+  if (expect_export_success) {
+    ASSERT_EQ(export_status, HSA_STATUS_SUCCESS);
+    const auto fabric_handle_is_zero = [](const hsa_fabric_handle_t& handle) {
+      for (uint8_t byte : handle.handle) {
+        if (byte != 0) {
+          return false;
+        }
+      }
+      return true;
+    };
+    ASSERT_FALSE(fabric_handle_is_zero(fabric_handle));
+
+    hsa_amd_vmem_alloc_handle_t imported_handle;
+    ASSERT_SUCCESS(hsa_amd_vmem_import_fabric_handle(fabric_handle, &imported_handle));
+    ASSERT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  } else {
+    ASSERT_EQ(export_status, resource_not_ready);
+  }
+
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+}
+
+void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(void) {
+  std::vector<hsa_agent_t> gpus;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Fabric Export Accelerator Readiness Test");
+  }
+
+  bool vmem_supported = false;
+  ASSERT_SUCCESS(
+      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported));
+  if (!vmem_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  bool fabric_supported = false;
+  ASSERT_SUCCESS(
+      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED, &fabric_supported));
+  if (!fabric_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Fabric handle export not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (gpus.empty()) {
+    if (verbosity() > 0) {
+      std::cout << "    No GPU agents available - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  for (hsa_agent_t gpu : gpus) {
+    hsa_amd_memory_pool_t gpu_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(gpu, rocrtst::GetGlobalMemoryPool, &gpu_pool));
+    if (gpu_pool.handle == 0) {
+      continue;
+    }
+    TestFabricExportAcceleratorReadiness(gpu, gpu_pool);
   }
 
   if (verbosity() > 0) {

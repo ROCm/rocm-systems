@@ -878,10 +878,16 @@ class Parser:
                     )
                     order = int(opnd.attrib[xs.OPERAND_ATTR_ORDER])
                     field_name_node = opnd.find(xs.FIELD_NAME)
+                    data_format_name_node = opnd.find(xs.DATA_FORMAT_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
                     if field_name_node is not None:
                         field_name = xs.get_node_text(field_name_node).lower()
+                        data_format_name = (
+                            xs.get_node_text(data_format_name_node)
+                            if data_format_name_node is not None
+                            else ''
+                        )
                         opnds.append(
                             Operand(
                                 field_name,
@@ -892,6 +898,7 @@ class Parser:
                                 is_implicit,
                                 is_bin_ucode_required,
                                 order,
+                                data_format_name,
                             )
                         )
                 opnds.sort(key=lambda x: x.order)

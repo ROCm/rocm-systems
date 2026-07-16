@@ -2402,6 +2402,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
         fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
       else if (amd::coredump::dump_gpu_core())
         fprintf(stderr, "GPU core dump failed\n");
+      // Process will abort - no need to resume queues
     }
     assert(false && "GPU memory access fault.");
     std::abort();
@@ -4527,6 +4528,15 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
   auto agentOwner = memoryHandle->region->owner();
+
+  if (agentOwner->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  hsa_status_t status = static_cast<AMD::GpuAgent*>(agentOwner)->CheckAcceleratorReadiness();
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::FABRIC_HANDLE, fabric_handle);
