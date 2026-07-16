@@ -271,6 +271,11 @@ void append_v_sub_co_ci_u32_v1_null_v1_v12_s0(std::vector<uint32_t> &program) {
   program.push_back(0x00021901u);
 }
 
+void append_v_div_scale_f32_v5_s2_s8_s9_s8(std::vector<uint32_t> &program) {
+  program.push_back(0xD6FC0205u);
+  program.push_back(0x00201208u);
+}
+
 void append_v_cmp_gt_u32_s2_s5_v12(std::vector<uint32_t> &program) {
   program.push_back(0xD44C0002u);
   program.push_back(0x02021805u);
@@ -2429,6 +2434,65 @@ TEST(WaitcheckTest, Gfx1201ReportsPendingVop3CarryOutSgpr) {
   EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 0, 1}));
 }
 
+TEST(WaitcheckTest, Gfx1201DivScaleDoesNotDefineAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsPendingDivScaleMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 16));
+  append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1201Wave32CodeObjectDivScaleDoesNotDefineAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  const auto kernels = waitcheck_kernels(code_object);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_EQ(kernels.size(), 1u);
+  EXPECT_EQ(kernels[0].wavefront_size, 32u);
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201Wave64DivScaleDefinesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 3, 1}));
+}
+
 TEST(WaitcheckTest, Gfx1201Vop3CarryInDoesNotReadAdjacentSgpr) {
   std::vector<uint32_t> program;
   append_inst(program, s_load_b32(1, 16));
@@ -3752,6 +3816,41 @@ TEST(WaitcheckTest, Gfx950ResolvedSwappcHelperWaitAppliesBeforeContinuation) {
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
   AmdGpuCodeObject code_object(image.data(), image.size());
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ResolvedSwappcPreservesCanonicalizedPcHighHalf) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+
+  // PyTorch's gfx1201 address builder canonicalizes the upper 16 bits of the
+  // getpc result before applying its PC-relative delta. The helper entry wait
+  // must still flow back to the continuation that consumes v0.
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));                                    // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4)); // 0x0c.
+  program.push_back(0xBE890F09u); // 0x10: s_sext_i32_i16 s9, s9.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_RDNA4)); // 0x14.
+  program.push_back(28);                                        // Base 0x10 -> helper 0x2c.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_RDNA4)); // 0x1c.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4)); // 0x20.
+  append_inst(program, v_mov_b32(1, 0));                                       // 0x24.
+  append_inst(program, s_endpgm());                                            // 0x28.
+  append_inst(program, sopp(64, 0));                                           // 0x2c helper.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_RDNA4, 0x48, 0,
+                                        kReturnSreg)); // 0x30 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);

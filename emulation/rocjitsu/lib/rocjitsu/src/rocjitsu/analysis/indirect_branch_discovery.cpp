@@ -770,6 +770,25 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return ((word >> 16) & 0x7fu) == sreg && (word & 0xffu) == sreg;
 }
 
+[[nodiscard]] bool apply_high_pc_canonicalization(const Instruction &inst, uint32_t word,
+                                                  uint16_t pair_lo, PcValue &value) {
+  // LLVM canonicalizes the high half of a getpc result before applying some
+  // negative PC-relative deltas:
+  //
+  //   s_getpc_b64       pair
+  //   s_sext_i32_i16    pair_hi, pair_hi
+  //   s_add_co_u32      pair_lo, pair_lo, literal
+  //   s_add_co_ci_u32   pair_hi, pair_hi, -1
+  //
+  // GPU virtual addresses are canonical 48-bit values, so sign-extending the
+  // already-known PC high half preserves the local text offset tracked here.
+  const uint16_t pair_hi = static_cast<uint16_t>(pair_lo + 1);
+  if (!sop1_same_sreg(inst, word, "s_sext_i32_i16", pair_hi))
+    return false;
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] bool apply_low_literal_update(const Instruction &inst, uint32_t word,
                                             std::span<const uint8_t> text, rj_code_arch_t arch,
                                             uint16_t pair_lo, PcValue &value) {
@@ -1191,7 +1210,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
-    if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+    if (!apply_high_pc_canonicalization(inst, word, pair_lo, updated) &&
+        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
 
