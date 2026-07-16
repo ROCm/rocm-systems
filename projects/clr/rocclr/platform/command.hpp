@@ -1043,8 +1043,8 @@ class BatchMemoryOperationCommand : public Command {
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
-        paramArray_(paramArray),
         flags_(flags),
+        paramArray_(paramArray),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -2227,8 +2227,8 @@ class SvmPrefetchAsyncCommand : public Command {
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
-        dev_(dev),
-        numa_id_(numa_id) {}
+        numa_id_(numa_id),
+        dev_(dev) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 
@@ -2312,7 +2312,7 @@ class VirtualMapCommand : public Command {
   //! Construct a new VirtualMapCommand
   VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* ptr, size_t size,
                     Memory* memory)
-      : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
+      : Command(queue, 1, eventWaitList), ptr_(ptr), memory_(memory), size_(size) {
     // Sanity checks
     assert(size > 0 && "invalid");
     if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {

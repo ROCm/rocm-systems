@@ -80,8 +80,6 @@ Memory::~Memory() {
 bool Memory::allocateMapMemory(size_t allocationSize) {
   assert(mapMemory_ == nullptr);
 
-  void* mapData = nullptr;
-
   amd::Memory* mapMemory = dev().findMapTarget(owner()->getSize());
   if (mapMemory == nullptr) {
     // Create buffer object to contain the map target.
@@ -371,7 +369,6 @@ void Memory::destroyInteropBuffer() {
 }
 
 bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
-  size_t pinAllocSize;
   const static bool SysMem = true;
   amd::Memory* amdMemory = nullptr;
   amd::Memory* amdParent = owner()->parent();
@@ -676,7 +673,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }
@@ -1586,7 +1583,7 @@ bool Image::createView(const Memory& parent) {
         // There are corner cases which still need workaround.
         const size_t kAlignments[] = {16, 32, 64, 128, 256};
         size_t tryPitch;
-        for (int i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
+        for (size_t i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
           tryPitch = amd::alignUp(ownerImage.getWidth(), kAlignments[i]) * elementSize;
           if (tryPitch >= rowPitch) {
             break;

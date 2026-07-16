@@ -131,20 +131,20 @@ bool NullDevice::create(const amd::Isa& isa) {
 Device::Device(hsa_agent_t bkendDevice)
     : mapCacheOps_(nullptr),
       mapCache_(nullptr),
+      preferred_numa_node_(0),
       bkendDevice_(bkendDevice),
       pciDeviceId_(0),
+      cpu_agent_info_(nullptr),
       gpuvm_segment_max_alloc_(0),
       alloc_granularity_(0),
       xferQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
-      numOfVgpus_(0),
-      preferred_numa_node_(0),
       maxSdmaReadMask_(0),
       maxSdmaWriteMask_(0),
+      numHwPipes_(4),
       sdma_engine_allocator_(*this),
-      cpu_agent_info_(nullptr),
-      numHwPipes_(4) {
+      numOfVgpus_(0) {
   for (uint i = 0; i < QueuePriority::Total; ++i) {
     queuePool_.emplace_back();
   }
@@ -234,7 +234,6 @@ Device::~Device() {
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
-      auto& qInfo = qIter->second;
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
@@ -407,7 +406,7 @@ bool Device::init() {
       // Uuid is an Ascii string with a maximum of 21 chars including NULL
       // The string value is in the format GPU-<body>, <body> encodes UUID as a 16 chars hex
       if (str_id.find("GPU-") != std::string::npos) {
-        for (int i = 0; i < gpu_agents_.size(); i++) {
+        for (size_t i = 0; i < gpu_agents_.size(); i++) {
           auto agent = gpu_agents_[i];
           char unique_id[32] = {0};
           if (HSA_STATUS_SUCCESS ==
@@ -3505,7 +3504,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     if (settings().enableWgpMode_) {
       final_mask.resize(mask.size() * 2, 0);
 
-      for (int i = 0; i < mask.size(); i++) {
+      for (size_t i = 0; i < mask.size(); i++) {
         for (int j = 0; j < 16; j++) {
           // Convert least significant 16 bits
           if (((mask[i] >> j) & 0x1) == 0x1) {
@@ -4099,8 +4098,9 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
   }
 
   if (ptr_info->type != HSA_EXT_POINTER_TYPE_UNKNOWN) {
-    if ((size != 0) && ((reinterpret_cast<const_address>(dev_ptr) -
-                         reinterpret_cast<const_address>(ptr_info->agentBaseAddress)) > size)) {
+    if ((size != 0) &&
+        (static_cast<size_t>(reinterpret_cast<const_address>(dev_ptr) -
+                             reinterpret_cast<const_address>(ptr_info->agentBaseAddress)) > size)) {
       return false;
     }
     return true;
@@ -4315,7 +4315,7 @@ ProfilingSignal::~ProfilingSignal() {
 // ================================================================================================
 cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
   cl_int cl_error = CL_SUCCESS;
-  switch (hsa_status) {
+  switch (static_cast<int>(hsa_status)) {
     case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
       cl_error = CL_OUT_OF_RESOURCES;
       break;

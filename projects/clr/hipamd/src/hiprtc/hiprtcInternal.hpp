@@ -94,7 +94,7 @@ static amd::Monitor g_hiprtcInitlock{};
 
 namespace hiprtc {
 
-static void crashWithMessage(std::string message) {
+[[maybe_unused]] static void crashWithMessage(std::string message) {
 #ifdef HIPRTC_USE_EXCEPTIONS
   throw std::runtime_error(message);
 #else

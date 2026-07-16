@@ -220,13 +220,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
  public:
   GraphNode(hipGraphNodeType type, const char* style = "", const char* shape = "",
             const char* label = "")
-      : type_(type),
-        visited_(false),
+      : hipGraphNodeDOTAttribute(style, shape, label),
         id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        type_(type),
+        visited_(false),
         parentGraph_(nullptr),
         isEnabled_(1),
-        dev_id_(ihipGetDevice()),
-        hipGraphNodeDOTAttribute(style, shape, label) {
+        dev_id_(ihipGetDevice()) {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
   }
@@ -557,7 +557,6 @@ class GraphEventWaitNode : public GraphNode {
 
   void EnqueueCommands(hip::Stream* stream) override {
     if (!commands_.empty()) {
-      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
       commands_[0]->enqueue();
       commands_[0]->release();
     }
@@ -636,11 +635,11 @@ class Graph {
       // Graph is destorying so remove it from user object's graph list.
       userobj.first->owning_graphs_.erase(this);
       // Bypass if graph owned refcount is more then actual refcount of user object
-      if (userobj.second > userobj.first->referenceCount()) {
+      if (static_cast<uint>(userobj.second) > userobj.first->referenceCount()) {
         continue;
       }
       // User object is about to die and hence remove it.
-      if (userobj.first->referenceCount() == userobj.second) {
+      if (userobj.first->referenceCount() == static_cast<uint>(userobj.second)) {
         RemoveUserObjectFromOwingGraphs(userobj.first);
       }
       // Release user object = # of times it is owned by this graph.
@@ -1793,7 +1792,7 @@ class GraphKernelNode : public GraphNode {
 
       // need to check against accessPolicyMaxWindowSize from device
       // accessPolicyMaxWindowSize not implemented on the device side yet
-      if (params->accessPolicyWindow.num_bytes > accessPolicyMaxWindowSize) {
+      if (params->accessPolicyWindow.num_bytes > static_cast<size_t>(accessPolicyMaxWindowSize)) {
         return hipErrorInvalidValue;
       }
 
@@ -2250,7 +2249,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       }
 
       amd::Command::EventWaitList waitList;
-      amd::Command* depdentMarker = nullptr;
       amd::Command* cmd = stream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
@@ -2301,11 +2299,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
   static hipError_t ValidateParams(void* dst, const void* src, size_t count, hipMemcpyKind kind);
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
-    size_t sOffsetOrig = 0;
-    amd::Memory* origSrcMemory = getMemoryObjectForCurrentDevice(src_, sOffsetOrig);
-    size_t dOffsetOrig = 0;
-    amd::Memory* origDstMemory = getMemoryObjectForCurrentDevice(dst_, dOffsetOrig);
-
     size_t sOffset = 0;
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
     size_t dOffset = 0;
@@ -2354,8 +2347,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    hip::MemcpyType type = hipHostToHost;
-
     size_t dOffset, sOffset;
     amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
@@ -2665,12 +2656,6 @@ class GraphMemsetNode : public GraphNode {
     depth_ = depth;
     arrWidth_ = arrWidth;
     arrHeight_ = arrHeight;
-    size_t sizeBytes = 0;
-    if (memsetParams_.height == 1) {
-      sizeBytes = memsetParams_.width * memsetParams_.elementSize;
-    } else {
-      sizeBytes = memsetParams_.width * memsetParams_.height * depth_ * memsetParams_.elementSize;
-    }
   }
 
   ~GraphMemsetNode() {}
@@ -2728,8 +2713,6 @@ class GraphMemsetNode : public GraphNode {
       status = ihipMemsetCommand(commands_, memObj, memsetParams_.value, memsetParams_.elementSize,
                                  sizeBytes, stream, offset);
     } else {
-      auto sizeBytes =
-          memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
       size_t offset = 0;
       amd::Memory* memObj = getMemoryObjectForCurrentDevice(memsetParams_.dst, offset);
       if (memObj == nullptr) {
@@ -3201,7 +3184,7 @@ class GraphMemAllocNode final : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      auto ptr = Execute(stream_);
+      Execute(stream_);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {

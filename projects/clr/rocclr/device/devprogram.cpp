@@ -1579,8 +1579,6 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_DYN: {
-      char* sect = nullptr;
-      size_t sz = 0;
       if (clBinary()->elfIn()->isHsaCo()) {
         setType(TYPE_EXECUTABLE);
       } else {
@@ -1991,10 +1989,8 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
 
 amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData) {
   size_t nlen = 0;
-  size_t* userDataInfo = nullptr;
   amd_comgr_status_t status;
   amd_comgr_symbol_type_t type;
-  std::vector<std::string>* var_names = nullptr;
 
   /* Unpack the user data */
   SymbolInfo* sym_info = reinterpret_cast<SymbolInfo*>(userData);

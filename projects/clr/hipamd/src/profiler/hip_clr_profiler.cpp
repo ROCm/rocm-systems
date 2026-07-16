@@ -1252,13 +1252,12 @@ static void EmitFlowEventSorted(SortedPktList& pkts, uint64_t uuid, uint64_t ts_
 
 // ================================================================================================
 // name_iid / cat_iid / ann_key_iid: interned string IDs (0 = not interned, use direct string)
-static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
-                       uint64_t ts_ns, uint64_t dur_ns,
-                       const std::string& name, uint64_t name_iid,
-                       uint64_t cat_iid,
-                       const std::vector<std::pair<uint64_t,std::string>>& anns,
-                       const std::vector<uint64_t>& out_flows = {},
-                       const std::vector<uint64_t>& in_flows  = {}) {
+[[maybe_unused]] static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
+                                       uint64_t ts_ns, uint64_t dur_ns, const std::string& name,
+                                       uint64_t name_iid, uint64_t cat_iid,
+                                       const std::vector<std::pair<uint64_t, std::string>>& anns,
+                                       const std::vector<uint64_t>& out_flows = {},
+                                       const std::vector<uint64_t>& in_flows = {}) {
   // BEGIN
   {
     ProtoMsg evt;
@@ -2805,10 +2804,8 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
 // ================================================================================================
 hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
   if (!cb) return hipErrorInvalidValue;
-  bool first;
   {
     std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
-    first = g_chunk_clients.empty();
     g_chunk_clients.push_back({cb, user_data});
   }
   // Start the delivery thread only if not already running (pftrace env-var

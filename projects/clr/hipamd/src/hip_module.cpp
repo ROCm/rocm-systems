@@ -205,7 +205,7 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
 inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
   hipFunction_t h_func = nullptr;
 
-  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
+  (void)PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
     if (PlatformState::Instance().IsValidDynFunc(func)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
@@ -236,7 +236,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 
   hipFunction_t h_func = nullptr;
 
-  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
+  (void)PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
     if (PlatformState::Instance().IsValidDynFunc((func))) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
@@ -254,9 +254,8 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
-    if ((value < 0) ||
-        (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
-                  d_kernel->workGroupInfo()->localMemSize_))) {
+    if ((value < 0) || (static_cast<size_t>(value) > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                                                      d_kernel->workGroupInfo()->localMemSize_))) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
@@ -746,7 +745,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
   hipError_t result = hipSuccess;
   result = ihipDeviceGetCount(&numActiveGPUs);
 
-  if ((numDevices == 0) || (numDevices > numActiveGPUs)) {
+  if ((numDevices == 0) || (numDevices > static_cast<uint32_t>(numActiveGPUs))) {
     return hipErrorInvalidValue;
   }
 
@@ -758,7 +757,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
   uint64_t allGridSize = 0;
   std::vector<const amd::Device*> mgpu_list(numDevices);
 
-  for (int i = 0; i < numDevices; ++i) {
+  for (uint32_t i = 0; i < numDevices; ++i) {
     uint32_t blockDims = 0;
     const hipFunctionLaunchParams& launch = launchParamsList[i];
     blockDims = launch.blockDimX * launch.blockDimY * launch.blockDimZ;
@@ -772,7 +771,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
       // Validate devices to make sure it dosn't have duplicates
       hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launch.hStream);
       auto device = &hip_stream->vdev()->device();
-      for (int j = 0; j < numDevices; ++j) {
+      for (uint32_t j = 0; j < numDevices; ++j) {
         if (mgpu_list[j] == device) {
           return hipErrorInvalidDevice;
         }
@@ -787,7 +786,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
 
   // Sync the execution streams on all devices
   if ((flags & hipCooperativeLaunchMultiDeviceNoPreSync) == 0) {
-    for (int i = 0; i < numDevices; ++i) {
+    for (uint32_t i = 0; i < numDevices; ++i) {
       hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
       hip_stream->finish();
     }
@@ -809,7 +808,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     }
   }
 
-  for (int i = 0; i < numDevices; ++i) {
+  for (uint32_t i = 0; i < numDevices; ++i) {
     const hipFunctionLaunchParams& launch = launchParamsList[i];
     hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launch.hStream);
 
@@ -845,7 +844,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
 
   // Sync the execution streams on all devices
   if ((flags & hipCooperativeLaunchMultiDeviceNoPostSync) == 0) {
-    for (int i = 0; i < numDevices; ++i) {
+    for (uint32_t i = 0; i < numDevices; ++i) {
       hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
       hip_stream->finish();
     }
@@ -864,7 +863,7 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
   }
 
   // Validate all streams passed by user
-  for (int i = 0; i < numDevices; ++i) {
+  for (uint32_t i = 0; i < numDevices; ++i) {
     if (!hip::isValid(launchParamsList[i].hStream)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -997,7 +996,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
   if (launchParamsList == nullptr) {
     return hipErrorInvalidValue;
   }
-  if (numDevices > g_devices.size()) {
+  if (static_cast<size_t>(numDevices) > g_devices.size()) {
     return hipErrorInvalidDevice;
   }
 
@@ -1195,7 +1194,7 @@ hipError_t hipLinkCreate(unsigned int num_options, hipJitOption* options_ptr,
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    for (int i = 0; i < num_options; ++i) {
+    for (uint32_t i = 0; i < num_options; ++i) {
       switch (options_ptr[i]) {
         // CUDA only options
         case hipJitOptionMaxRegisters:

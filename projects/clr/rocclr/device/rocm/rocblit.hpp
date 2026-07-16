@@ -650,17 +650,26 @@ class KernelBlitManager : public DmaBlitManager {
   mutable std::recursive_mutex lockXferOps_;  //!< Lock transfer operation
 };
 
-static const char* BlitName[KernelBlitManager::BlitTotal] = {
-    "__amd_rocclr_fillBufferUnAligned",  "__amd_rocclr_fillBufferAligned2D",
-    "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferAligned",
-    "__amd_rocclr_copyBufferRect",     "__amd_rocclr_copyBufferRectAligned",
-    "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",
-    "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
-    "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
-    "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
+[[maybe_unused]] static const char* BlitName[KernelBlitManager::BlitTotal] = {
+    "__amd_rocclr_fillBufferUnAligned",
+    "__amd_rocclr_fillBufferAligned2D",
+    "__amd_rocclr_copyBuffer",
+    "__amd_rocclr_copyBufferAligned",
+    "__amd_rocclr_copyBufferRect",
+    "__amd_rocclr_copyBufferRectAligned",
+    "__amd_rocclr_streamOpsWrite",
+    "__amd_rocclr_streamOpsWait",
+    "__amd_rocclr_scheduler",
+    "__amd_rocclr_gwsInit",
+    "__amd_rocclr_initHeap",
+    "__amd_rocclr_batchMemOp",
+    "__amd_rocclr_streamOpsIncrement",
+    "__amd_rocclr_streamOpsDecrement",
     "__amd_rocclr_copyBufferBatch",
-    "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
-    "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
+    "__amd_rocclr_fillImage",
+    "__amd_rocclr_copyImage",
+    "__amd_rocclr_copyImage1DA",
+    "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,
