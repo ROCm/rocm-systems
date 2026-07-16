@@ -21,6 +21,7 @@ typedef enum {
   NCCL_NET_DEVICE_GIN_PROXY=2,
   NCCL_NET_DEVICE_GIN_GDAKI=3,
   NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA=4,
+  NCCL_NET_DEVICE_GIN_ANVIL_SDMA=5,
 } ncclNetDeviceType;
 
 typedef struct {

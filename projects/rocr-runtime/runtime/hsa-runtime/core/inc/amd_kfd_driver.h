@@ -157,6 +157,8 @@ public:
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
   enum ExportMemoryFlags : uint32_t {

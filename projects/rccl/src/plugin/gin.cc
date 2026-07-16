@@ -12,6 +12,7 @@
 #include "nccl_gin.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"
+#include "gin/gin_host_anvil_sdma.h"
 #endif
 
 #include <string.h>
@@ -35,7 +36,7 @@ getNcclGin_t* getNcclRma[NCCL_GIN_VERSION_COUNT] = {getNcclRma_v13, getNcclGin_v
 extern ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12);
 
 #ifdef ENABLE_ROCSHMEM_GIN
-#define NCCL_GIN_NUM_INTERNAL_PLUGINS 2
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
 #else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 #endif
@@ -127,6 +128,8 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     else if (comm->ginContext &&
              pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
       ncclGinRocshmemSetInitContext(comm->ginContext, comm);
+    } else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
+      ncclGinAnvilSetInitContext(comm->ginContext, comm);
     }
 #endif
   }
@@ -269,6 +272,13 @@ static void initPluginLibsOnceFunc() {
   {
     extern ncclGin_t ncclGinRocshmemGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+    pluginCounter++;
+  }
+  // Add internal SDMA Anvil plugin (GIN_TYPE=5)
+  {
+    extern ncclGin_t ncclGinAnvilSdmaPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinAnvilSdmaPlugin;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }

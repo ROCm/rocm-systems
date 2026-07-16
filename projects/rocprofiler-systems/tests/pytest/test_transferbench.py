@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for GPU connectivity
+Tests for the transferBench example (GPU connectivity / XGMI bandwidth).
 """
 
 from __future__ import annotations

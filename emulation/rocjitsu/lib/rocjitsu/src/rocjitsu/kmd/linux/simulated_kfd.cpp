@@ -148,8 +148,22 @@ const SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) const {
 }
 
 SimulatedKfd::~SimulatedKfd() {
-  while (!processes_.empty())
-    close(processes_.begin()->first);
+  std::vector<uint32_t> pids;
+  {
+    std::lock_guard<std::mutex> lk(process_mutex_);
+    pids.reserve(processes_.size());
+    for (auto &[id, proc] : processes_)
+      pids.push_back(id);
+  }
+  // close() only tears a process down on the LAST open reference (release_open()
+  // returns true at zero); a process opened more than once (dup/daemon reuse)
+  // would otherwise survive with its allocations, queues, and CP callbacks still
+  // live past this driver. Keep closing each snapshotted pid until it is actually
+  // removed from the table, so destruction always fully drains every process.
+  for (auto pid : pids) {
+    while (find_process(pid))
+      close(pid);
+  }
 }
 
 void SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
@@ -180,11 +194,21 @@ bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
   auto p = find_process(local_process_id_);
   if (!p)
     return false;
-  auto &gs = p->gpu(0);
-  if (!gs.doorbell_page || gs.doorbell_page_size == 0 || !addr || length == 0)
+  // Snapshot the doorbell page/size under alloc_mutex_ so a concurrent
+  // dispatch_mmap/dispatch_munmap (which mutate these under the same lock) cannot
+  // tear the pointer/size read.
+  void *doorbell_page;
+  size_t doorbell_page_size;
+  {
+    std::lock_guard<std::mutex> lock(p->alloc_mutex_);
+    auto &gs = p->gpu(0);
+    doorbell_page = gs.doorbell_page;
+    doorbell_page_size = gs.doorbell_page_size;
+  }
+  if (!doorbell_page || doorbell_page_size == 0 || !addr || length == 0)
     return false;
-  auto base = reinterpret_cast<uintptr_t>(gs.doorbell_page);
-  auto end = base + gs.doorbell_page_size;
+  auto base = reinterpret_cast<uintptr_t>(doorbell_page);
+  auto end = base + doorbell_page_size;
   auto query_base = reinterpret_cast<uintptr_t>(addr);
   auto query_end = query_base + length;
   return query_base < end && query_end > base;
@@ -205,46 +229,7 @@ bool SimulatedKfd::ensure_fd_created() {
   return true;
 }
 
-int SimulatedKfd::open() {
-  static std::once_flag raise_nofile_flag;
-  std::call_once(raise_nofile_flag, [] {
-    struct rlimit rl {};
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < 8192) {
-      rl.rlim_cur = std::min<rlim_t>(rl.rlim_max, 65536);
-      setrlimit(RLIMIT_NOFILE, &rl);
-    }
-  });
-
-  // Hold process_mutex_ across fd creation, process selection/retain, and the
-  // returned fd load so a racing dup2 (which invalidates fd_ via
-  // invalidate_primary_fd, also under process_mutex_) cannot clear fd_ between
-  // publishing it and returning it. Either open() completes and returns a valid
-  // fd, or invalidation wins first and ensure_fd_created() re-mints one below.
-  std::lock_guard<std::mutex> lk(process_mutex_);
-  if (!ensure_fd_created())
-    return -1;
-  if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
-    processes_[local_process_id_]->retain_open();
-    return fd_.load(std::memory_order_acquire);
-  }
-  uint32_t pid = next_process_id_++;
-  auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
-  proc->event_state_.reset();
-  for (auto &g : gpus_) {
-    if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
-      if (!daemon_mode_)
-        mem->set_passthrough(true);
-    }
-  }
-  processes_[pid] = proc;
-  local_process_id_ = pid;
-
-  {
-    std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-    event_dispatch_[pid] = &proc->event_state_;
-  }
-
+void SimulatedKfd::init_command_processors_locked() {
   for (size_t i = 0; i < gpus_.size(); ++i) {
     auto &g = gpus_[i];
     if (g.cps_initialized)
@@ -287,6 +272,55 @@ int SimulatedKfd::open() {
     });
     g.cps_initialized = true;
   }
+}
+
+int SimulatedKfd::open() {
+  static std::once_flag raise_nofile_flag;
+  std::call_once(raise_nofile_flag, [] {
+    struct rlimit rl {};
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < 8192) {
+      rl.rlim_cur = std::min<rlim_t>(rl.rlim_max, 65536);
+      setrlimit(RLIMIT_NOFILE, &rl);
+    }
+  });
+
+  // Hold process_mutex_ across fd creation, process selection/retain, and the
+  // returned fd load so a racing dup2 (which invalidates fd_ via
+  // invalidate_primary_fd, also under process_mutex_) cannot clear fd_ between
+  // publishing it and returning it. Either open() completes and returns a valid
+  // fd, or invalidation wins first and ensure_fd_created() re-mints one below.
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  if (!ensure_fd_created())
+    return -1;
+  if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
+    processes_[local_process_id_]->retain_open();
+    return fd_.load(std::memory_order_acquire);
+  }
+  uint32_t pid = next_process_id_++;
+  auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+  // client_pid_ caches getpid() at open() time; DBG_TRAP uses it to resolve a
+  // self-debug target, so it must match the caller's live pid. A fork() child
+  // inherits this cache stale, but the interposer's reset_after_fork() drops the
+  // driver so the child re-open()s (and re-caches here) before any ioctl —
+  // DBG_TRAP self-resolution therefore requires a post-fork re-open.
+  proc->set_client_pid(static_cast<pid_t>(getpid()));
+  proc->event_state_.reset();
+  for (auto &g : gpus_) {
+    if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
+      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+      if (!daemon_mode_)
+        mem->set_passthrough(true);
+    }
+  }
+  processes_[pid] = proc;
+  local_process_id_ = pid;
+
+  {
+    std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+    event_dispatch_[pid] = &proc->event_state_;
+  }
+
+  init_command_processors_locked();
 
   return fd_.load(std::memory_order_acquire);
 }
@@ -345,49 +379,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
       std::lock_guard<std::mutex> ilk(interrupt_mutex_);
       event_dispatch_[pid] = &proc->event_state_;
     }
-  }
 
-  for (size_t i = 0; i < gpus_.size(); ++i) {
-    auto &g = gpus_[i];
-    if (g.cps_initialized)
-      continue;
-    if (!g.soc)
-      continue;
-    uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
-    uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
-    g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
-                         scratch_base + 0xFFFFFFFFULL);
-    g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
-      cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
-        std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-        auto it = event_dispatch_.find(process_id);
-        if (it != event_dispatch_.end()) {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=true");
-          it->second->signal_interrupt(event_id);
-        } else {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=false");
-        }
-      });
-      cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
-        std::lock_guard<std::mutex> plk(process_mutex_);
-        for (auto &[fd, proc] : processes_) {
-          if (proc->process_id() == process_id) {
-            for (auto &gs : proc->gpu_state_) {
-              if (gs.scratch_backing_va != 0)
-                return gs.scratch_backing_va << 16;
-            }
-          }
-        }
-        return 0;
-      });
-      cp->set_scratch_backing_allocator(
-          [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
-            return allocate_scratch_backing(process_id, gpu_va, size);
-          });
-    });
-    g.cps_initialized = true;
+    init_command_processors_locked();
   }
 
   return pid;
@@ -445,6 +438,37 @@ int SimulatedKfd::close(uint32_t process_id) {
     processes_.erase(it);
   }
 
+  auto &proc = *extracted;
+
+  // Serialize ALL teardown against any in-flight ioctl on this process. ioctl()
+  // only snapshots a shared_ptr via find_process() and does NOT retain an open
+  // reference, so an ioctl that started before this close() removed the process
+  // from the table can still be running (or about to run) under proc.op_mutex_.
+  // Acquire op_mutex_ BEFORE any teardown step — including event_dispatch_ erase
+  // and mem->unregister_process() — so those cannot overlap an active
+  // op_mutex_-guarded ioctl handler and break CP interrupt routing / memory
+  // translation mid-ioctl. notify_closing() (below, still under op_mutex_) sets
+  // the closing flag that dispatch_ioctl checks right after it takes op_mutex_,
+  // so any ioctl that was blocked on op_mutex_ behind this close() will observe
+  // is_closing() and bail instead of operating on a torn-down process.
+  //
+  // The process was already erased from processes_ above, so no NEW ioctl can
+  // find it. Ordering is safe: process_mutex_ was released before taking
+  // op_mutex_, so this does not nest against dispatch_ioctl's op_mutex_ ->
+  // process_mutex_ order. WAIT_EVENTS does not take op_mutex_, so notify_closing()
+  // / signal_page_shutdown() below still wake any parked waiter.
+  //
+  // NOTE: the mmap/munmap/is_doorbell_range family is NOT dispatched through
+  // op_mutex_ — it synchronizes on alloc_mutex_. So the allocation and doorbell
+  // teardown below additionally takes alloc_mutex_ to serialize against those
+  // paths; op_mutex_ alone does not cover them.
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+
+  // Set the closing flag first, under op_mutex_, so the dispatch_ioctl guard sees
+  // it before any state is dismantled.
+  proc.event_state_.notify_closing();
+  proc.event_state_.signal_page_shutdown();
+
   {
     std::lock_guard<std::mutex> ilk(interrupt_mutex_);
     event_dispatch_.erase(process_id);
@@ -455,14 +479,11 @@ int SimulatedKfd::close(uint32_t process_id) {
       mem->unregister_process(process_id);
   }
 
-  auto &proc = *extracted;
   const bool trace_enabled = vm_trace_enabled();
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
   size_t leaked_queues = 0;
   std::vector<uint64_t> leaked_handles;
-  proc.event_state_.notify_closing();
-  proc.event_state_.signal_page_shutdown();
 
   {
     std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
@@ -501,9 +522,23 @@ int SimulatedKfd::close(uint32_t process_id) {
         });
   }
 
+  // Tear down doorbell pages under alloc_mutex_ (the lock the doorbell readers
+  // use — is_doorbell_range/dispatch_mmap/dispatch_munmap), not op_mutex_ (those
+  // readers do not take op_mutex_). Snapshot and clear the fields under the lock,
+  // then munmap outside it so the syscall does not run while alloc_mutex_ is held.
   for (auto &gs : proc.gpu_state_) {
-    if (gs.doorbell_page && gs.doorbell_page_size)
-      syscall(SYS_munmap, gs.doorbell_page, gs.doorbell_page_size);
+    void *doorbell_page;
+    size_t doorbell_page_size;
+    {
+      std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
+      doorbell_page = gs.doorbell_page;
+      doorbell_page_size = gs.doorbell_page_size;
+      gs.doorbell_page = nullptr;
+      gs.doorbell_gpu_va = 0;
+      gs.doorbell_page_size = 0;
+    }
+    if (doorbell_page && doorbell_page_size)
+      syscall(SYS_munmap, doorbell_page, doorbell_page_size);
   }
 
   leaked_queues = queue_ids.size();
@@ -527,10 +562,23 @@ int SimulatedKfd::close(uint32_t process_id) {
     }
   }
 
-  for (auto &[handle, dmabuf] : proc.imported_dmabufs_) {
-    [[maybe_unused]] auto &_ = handle;
-    if (dmabuf.fd >= 0)
-      syscall(SYS_close, dmabuf.fd);
+  // Guard the dmabuf teardown under alloc_mutex_ for consistency with the
+  // import_dmabuf_ioctl/get_dmabuf_info_ioctl accessors: although this process was
+  // already erased from the table under process_mutex_ and its last open reference
+  // released, an ioctl that took a shared_ptr snapshot before the erase could still
+  // be touching imported_dmabufs_ under alloc_mutex_.
+  {
+    std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
+    for (auto &[handle, dmabuf] : proc.imported_dmabufs_) {
+      [[maybe_unused]] auto &_ = handle;
+      if (dmabuf.fd >= 0)
+        syscall(SYS_close, dmabuf.fd);
+    }
+    proc.imported_dmabufs_.clear();
+    // Clear the reverse fd->handle map too, so it stays consistent with
+    // imported_dmabufs_ (both are maintained together under alloc_mutex_ by
+    // import_dmabuf_ioctl/free_memory_ioctl); its fds were just closed above.
+    proc.fd_to_import_handle_.clear();
   }
 
   return 0;
@@ -548,9 +596,26 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg) {
 }
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
-  util::Logger::cp("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
+  util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
-  switch (canonical_ioctl_request(request)) {
+  unsigned long dispatch_request = canonical_ioctl_request(request);
+
+  if (dispatch_request == AMDKFD_IOC_WAIT_EVENTS)
+    return wait_events_ioctl(proc, arg);
+
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+  // A concurrent close() may have snapshotted-then-erased this process and be
+  // tearing it down under op_mutex_. ioctl() holds only a shared_ptr (no open
+  // reference), so an ioctl that raced close() can end up here AFTER teardown
+  // ran (allocations/queues cleared, event_dispatch_ removed, memory
+  // unregistered). close() sets the closing flag under op_mutex_ before any
+  // teardown, so once we hold op_mutex_, is_closing() means the process is
+  // logically gone — reject rather than operate on dismantled state. WAIT_EVENTS
+  // is handled above and is intentionally exempt (it must observe the closing
+  // signal to wake).
+  if (proc.event_state_.is_closing())
+    return -ESRCH;
+  switch (dispatch_request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
   case AMDKFD_IOC_GET_CLOCK_COUNTERS:
@@ -581,8 +646,9 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     return set_event_ioctl(proc, arg);
   case AMDKFD_IOC_RESET_EVENT:
     return reset_event_ioctl(proc, arg);
-  case AMDKFD_IOC_WAIT_EVENTS:
-    return wait_events_ioctl(proc, arg);
+  // WAIT_EVENTS is handled before op_mutex_ above (it blocks on a condition
+  // variable and must not hold the per-process op lock), so it never reaches
+  // this switch.
   case AMDKFD_IOC_SET_XNACK_MODE:
     return set_xnack_mode_ioctl(arg);
   case AMDKFD_IOC_SET_MEMORY_POLICY:
@@ -591,10 +657,15 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     return get_available_memory_ioctl(proc, arg);
   case AMDKFD_IOC_RUNTIME_ENABLE:
     return runtime_enable_ioctl(proc, arg);
+  case AMDKFD_IOC_DBG_TRAP:
+    return debug_trap_ioctl(proc, arg);
   case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
     auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
     uint32_t ord = gpu_ordinal(a->gpu_id);
-    proc.gpu(ord).scratch_backing_va = a->va_addr;
+    {
+      std::lock_guard<std::mutex> plk(process_mutex_);
+      proc.gpu(ord).scratch_backing_va = a->va_addr;
+    }
     util::Logger::vm([&](auto &os) {
       os << "SET_SCRATCH_BACKING_VA pid=" << proc.process_id() << " gpu_id=" << a->gpu_id
          << " va=" << std::hex << a->va_addr << std::dec;
@@ -604,8 +675,16 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
   case AMDKFD_IOC_SET_TRAP_HANDLER: {
     auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
     uint32_t ord = gpu_ordinal(a->gpu_id);
-    proc.gpu(ord).trap_tba_addr = a->tba_addr;
-    proc.gpu(ord).trap_tma_addr = a->tma_addr;
+    {
+      // Held under process_mutex_ for symmetry with SET_SCRATCH_BACKING_VA and to
+      // be race-free once the trap handler is wired into the SoC. NOTE: as of now
+      // trap_tba_addr/trap_tma_addr have no reader anywhere (the CP does not yet
+      // consume them), so this lock currently guards against a non-existent
+      // concurrent access — kept for forward-compatibility.
+      std::lock_guard<std::mutex> plk(process_mutex_);
+      proc.gpu(ord).trap_tba_addr = a->tba_addr;
+      proc.gpu(ord).trap_tma_addr = a->tma_addr;
+    }
     return 0;
   }
   case AMDKFD_IOC_GET_TILE_CONFIG:
@@ -713,11 +792,35 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       // processes the submission.
       std::memset(ptr, 0xFF, length);
 
-      auto &gs = proc.gpu(ord);
-      gs.doorbell_page = ptr;
-      gs.doorbell_page_size = length;
-      gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
-      map_to_gpu(proc, gs.doorbell_gpu_va, ptr, length, amdgpu::Mtype::UC);
+      // Hold op_mutex_ across the whole publish -> map_to_gpu -> set_doorbell_base
+      // sequence so a concurrent close() (which tears down doorbells under
+      // op_mutex_) cannot clear+munmap this page between publishing it and handing
+      // it to the CP, which would leave the CP with a dangling doorbell_base.
+      // op_mutex_ is the outer lock (op_mutex_ -> alloc_mutex_, matching close());
+      // set_doorbell_base takes hw_queue_mutex_, which is never held while taking
+      // op_mutex_, so there is no inversion. alloc_mutex_ is taken only for the
+      // field publish and released before set_doorbell_base (hw_queue_mutex_).
+      std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+      {
+        std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+        // If close() has begun tearing this process down, do NOT publish a new
+        // doorbell page: it would never be reclaimed (leaked) and would hand the
+        // CP a base for a dying process. Fail the mmap instead. is_closing() is
+        // set by close() under op_mutex_, which we now hold, so this check is
+        // race-free against teardown.
+        if (proc.event_state_.is_closing()) {
+          syscall(SYS_munmap, ptr, length);
+          errno = ENODEV;
+          return MAP_FAILED;
+        }
+        auto &gs = proc.gpu(ord);
+        gs.doorbell_page = ptr;
+        gs.doorbell_page_size = length;
+        gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
+      }
+      // Use the local ptr (== the doorbell_gpu_va just written) rather than
+      // re-reading gs.doorbell_gpu_va without alloc_mutex_.
+      map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC);
       if (gpu && gpu->soc)
         gpu->soc->for_each_cp(
             [&](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(proc.process_id(), ptr); });
@@ -870,24 +973,34 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
-  for (auto &gs : proc.gpu_state_) {
-    if (gs.doorbell_page == addr) {
-      if (!proc.event_state_.is_closing()) {
-        errno = EPERM;
-        return -1;
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    for (auto &gs : proc.gpu_state_) {
+      if (gs.doorbell_page == addr) {
+        if (!proc.event_state_.is_closing()) {
+          errno = EPERM;
+          return -1;
+        }
+        uint64_t gpu_va = gs.doorbell_gpu_va;
+        size_t page_size = gs.doorbell_page_size;
+        gs.doorbell_page = nullptr;
+        gs.doorbell_gpu_va = 0;
+        gs.doorbell_page_size = 0;
+        if (gpu_va && page_size)
+          unmap_from_gpu(proc, gpu_va, page_size);
+        // Unmap the exact page we mapped: use the recorded doorbell page size,
+        // not the caller-provided length. A length that differs from the tracked
+        // mapping would otherwise partially unmap the CPU page and leave it
+        // inconsistent with the GPU page-table unmap above.
+        syscall(SYS_munmap, addr, page_size ? page_size : length);
+        return 0;
       }
-      if (gs.doorbell_gpu_va && gs.doorbell_page_size)
-        unmap_from_gpu(proc, gs.doorbell_gpu_va, gs.doorbell_page_size);
-      gs.doorbell_page = nullptr;
-      gs.doorbell_gpu_va = 0;
-      gs.doorbell_page_size = 0;
-      syscall(SYS_munmap, addr, length);
-      return 0;
     }
   }
-  if (addr == proc.event_state_.page) {
-    proc.event_state_.page = nullptr;
-    proc.event_state_.page_size = 0;
+  // release_page() clears page/page_size under EventState::mutex_, the same lock
+  // the CP interrupt thread holds when reading them in signal_interrupt, so the
+  // munmap below cannot race a concurrent signal writing into the mapping.
+  if (proc.event_state_.release_page(addr)) {
     syscall(SYS_munmap, addr, length);
     return 0;
   }
@@ -1247,73 +1360,93 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!gpu || !gpu->soc)
     return -EINVAL;
 
-  std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
-
-  if (!daemon_mode_) {
-    map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-               args->ring_size, amdgpu::Mtype::UC);
-    uint64_t rptr_page = args->read_pointer_address & ~0xFFFULL;
-    uint64_t wptr_page = args->write_pointer_address & ~0xFFFULL;
-    map_to_gpu(proc, rptr_page, reinterpret_cast<void *>(rptr_page), 4096, amdgpu::Mtype::UC);
-    if (wptr_page != rptr_page)
-      map_to_gpu(proc, wptr_page, reinterpret_cast<void *>(wptr_page), 4096, amdgpu::Mtype::UC);
-  }
-
-  uint32_t queue_id = proc.next_queue_id_++;
-  uint32_t ord = gpu_ordinal(args->gpu_id);
-  auto &gs = proc.gpu(ord);
-  uint32_t db_offset;
-  if (!gs.free_doorbell_offsets.empty()) {
-    db_offset = gs.free_doorbell_offsets.back();
-    gs.free_doorbell_offsets.pop_back();
-  } else {
-    if (gs.doorbell_page_size > 0 &&
-        gs.next_doorbell_offset + sizeof(uint64_t) > gs.doorbell_page_size)
-      return -ENOSPC;
-    db_offset = static_cast<uint32_t>(gs.next_doorbell_offset);
-    gs.next_doorbell_offset += sizeof(uint64_t);
-  }
-
-  amdgpu::HwQueue hw{};
-  hw.process_id = proc.process_id();
-  hw.queue_id = queue_id;
-  hw.ring_base_va = args->ring_base_address;
-  hw.ring_size = args->ring_size;
-  hw.read_ptr_va = args->read_pointer_address;
-  hw.write_ptr_va = args->write_pointer_address;
-  hw.doorbell_offset = db_offset;
-  hw.doorbell_base = gs.doorbell_page;
-  hw.last_doorbell = ~uint64_t(0);
-  hw.host_accessible = true;
-  hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
-                args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
-                args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
-  // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-  if (!hw.is_sdma)
-    hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
-  if (hw.is_sdma && !daemon_mode_) {
-    auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
-    auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
-    util::Logger::vm("SDMA wptr before init: addr=0x", std::hex, args->write_pointer_address,
-                     " val=", std::dec, *wptr, " rptr val=", *rptr);
-    *wptr = 0;
-    *rptr = 0;
-  } else if (hw.is_sdma && daemon_mode_) {
-    auto *mem = gpu->soc ? gpu->soc->memory() : nullptr;
-    if (mem) {
-      mem->write64(args->write_pointer_address, 0, proc.process_id());
-      mem->write64(args->read_pointer_address, 0, proc.process_id());
-    }
-  }
+  // Select the target CP before reserving any per-process state, so a null CP
+  // cannot leave a doorbell offset / queue-id bookkeeping entry orphaned.
   auto *target_cp = gpu->soc->assign_queue_cp();
   if (!target_cp)
     return -EINVAL;
-  target_cp->register_queue(std::move(hw));
 
-  args->queue_id = queue_id;
-  args->doorbell_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(gpu->gpu_id) | db_offset;
-  proc.active_queue_ids_.push_back(queue_id);
-  proc.queue_doorbell_map_[queue_id] = {ord, db_offset};
+  // Build the HW queue and reserve all per-process state under alloc_mutex_, then
+  // register it with the CommandProcessor with the lock RELEASED. The CP thread
+  // takes alloc_mutex_ under hw_queue_mutex_ (allocate_scratch_backing), so holding
+  // alloc_mutex_ across register_queue() — which takes hw_queue_mutex_ — would be
+  // an alloc_mutex_->hw_queue_mutex_ inversion against that thread and can deadlock.
+  // op_mutex_ already serializes all ioctls for this process, so no concurrent
+  // ioctl can observe the partially-registered queue in the window between the
+  // unlock and register_queue().
+  amdgpu::HwQueue hw{};
+  {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+
+    if (!daemon_mode_) {
+      map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
+                 args->ring_size, amdgpu::Mtype::UC);
+      uint64_t rptr_page = args->read_pointer_address & ~0xFFFULL;
+      uint64_t wptr_page = args->write_pointer_address & ~0xFFFULL;
+      map_to_gpu(proc, rptr_page, reinterpret_cast<void *>(rptr_page), 4096, amdgpu::Mtype::UC);
+      if (wptr_page != rptr_page)
+        map_to_gpu(proc, wptr_page, reinterpret_cast<void *>(wptr_page), 4096, amdgpu::Mtype::UC);
+    }
+
+    uint32_t queue_id = proc.next_queue_id_++;
+    uint32_t ord = gpu_ordinal(args->gpu_id);
+    auto &gs = proc.gpu(ord);
+    uint32_t db_offset;
+    if (!gs.free_doorbell_offsets.empty()) {
+      db_offset = gs.free_doorbell_offsets.back();
+      gs.free_doorbell_offsets.pop_back();
+    } else {
+      if (gs.doorbell_page_size > 0 &&
+          gs.next_doorbell_offset + sizeof(uint64_t) > gs.doorbell_page_size)
+        return -ENOSPC;
+      db_offset = static_cast<uint32_t>(gs.next_doorbell_offset);
+      gs.next_doorbell_offset += sizeof(uint64_t);
+    }
+
+    hw.process_id = proc.process_id();
+    hw.queue_id = queue_id;
+    hw.ring_base_va = args->ring_base_address;
+    hw.ring_size = args->ring_size;
+    hw.read_ptr_va = args->read_pointer_address;
+    hw.write_ptr_va = args->write_pointer_address;
+    hw.doorbell_offset = db_offset;
+    // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
+    // after the lock is released. This is stable because ROCr maps the doorbell
+    // page before creating queues, and queue creation for a process is single-
+    // threaded (serialized by op_mutex_), so no concurrent dispatch_mmap re-maps
+    // the doorbell in the unlock->register window.
+    hw.doorbell_base = gs.doorbell_page;
+    hw.last_doorbell = ~uint64_t(0);
+    hw.host_accessible = true;
+    hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
+                  args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
+                  args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    // amd_queue_t base: write_pointer_address points to write_dispatch_id.
+    if (!hw.is_sdma)
+      hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    if (hw.is_sdma && !daemon_mode_) {
+      auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
+      auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
+      util::Logger::vm("SDMA wptr before init: addr=0x", std::hex, args->write_pointer_address,
+                       " val=", std::dec, *wptr, " rptr val=", *rptr);
+      *wptr = 0;
+      *rptr = 0;
+    } else if (hw.is_sdma && daemon_mode_) {
+      auto *mem = gpu->soc ? gpu->soc->memory() : nullptr;
+      if (mem) {
+        mem->write64(args->write_pointer_address, 0, proc.process_id());
+        mem->write64(args->read_pointer_address, 0, proc.process_id());
+      }
+    }
+
+    args->queue_id = queue_id;
+    args->doorbell_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(gpu->gpu_id) | db_offset;
+    proc.active_queue_ids_.push_back(queue_id);
+    proc.queue_doorbell_map_[queue_id] = {ord, db_offset};
+  }
+
+  // Register with the CP OUTSIDE alloc_mutex_ (see note above).
+  target_cp->register_queue(std::move(hw));
   return 0;
 }
 
@@ -1392,20 +1525,20 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.dmabuf_fd = dupfd;
     alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
     proc.allocations_[handle] = alloc;
+
+    KfdProcess::ImportedDmabuf info{};
+    info.handle = handle;
+    info.fd = dupfd;
+    info.size = size;
+    info.va = args->va_addr;
+    info.gpu_id = args->gpu_id;
+    proc.imported_dmabufs_[handle] = info;
+    proc.fd_to_import_handle_[dupfd] = handle;
   }
 
   if (args->va_addr)
     map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
                amdgpu::Mtype::UC);
-
-  KfdProcess::ImportedDmabuf info{};
-  info.handle = handle;
-  info.fd = dupfd;
-  info.size = size;
-  info.va = args->va_addr;
-  info.gpu_id = args->gpu_id;
-  proc.imported_dmabufs_[handle] = info;
-  proc.fd_to_import_handle_[dupfd] = handle;
 
   args->handle = handle;
   return 0;
@@ -1642,13 +1775,16 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   uint32_t gpu_id = gpus_.empty() ? 0 : gpus_[0].gpu_id;
 
   bool found = false;
-  for (const auto &[handle, info] : proc.imported_dmabufs_) {
-    [[maybe_unused]] auto &_ = handle;
-    if (info.fd >= 0 && static_cast<uint32_t>(info.fd) == args->dmabuf_fd) {
-      size = info.size;
-      gpu_id = info.gpu_id;
-      found = true;
-      break;
+  {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    for (const auto &[handle, info] : proc.imported_dmabufs_) {
+      [[maybe_unused]] auto &_ = handle;
+      if (info.fd >= 0 && static_cast<uint32_t>(info.fd) == args->dmabuf_fd) {
+        size = info.size;
+        gpu_id = info.gpu_id;
+        found = true;
+        break;
+      }
     }
   }
 
@@ -1739,6 +1875,170 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
   proc.runtime_state_ = KfdProcess::RuntimeState{};
   args->capabilities_mask = 0;
   return 0;
+}
+
+std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) const {
+  if (pid == 0)
+    return nullptr;
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  for (auto &[id, proc] : processes_)
+    if (proc->client_pid() == pid)
+      return proc;
+  return nullptr;
+}
+
+// in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
+int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
+  auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+  util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
+
+  KfdProcess *target = nullptr;
+  std::shared_ptr<KfdProcess> target_ref;
+  if (caller.client_pid() != 0 && static_cast<pid_t>(args->pid) == caller.client_pid()) {
+    target = &caller; // self-debug (local mode)
+  } else {
+    target_ref = find_process_by_client_pid(static_cast<pid_t>(args->pid));
+    target = target_ref.get();
+  }
+  if (target == nullptr)
+    return -ESRCH;
+
+  const bool self_debug = (target == &caller);
+
+  std::lock_guard<std::mutex> lk(target->debug_mutex_);
+  auto &sess = target->debug_session_;
+
+  // Cross-process authorization is by-pid only: a non-self caller is admitted
+  // solely when it is the debugger already attached to this session
+  // (sess.debugger_pid, set by a prior successful ENABLE). This gate therefore
+  // only re-admits re-entrant ops from an already-attached debugger. Because a
+  // fresh session has debugger_pid == 0, it structurally rejects the *first*
+  // cross-process ENABLE with EPERM: cross-process attach is intentionally
+  // closed until it is implemented (#8364). Self-debug (local mode, the only
+  // supported path today) and DISABLE are exempt. The real kernel instead gates
+  // the first attach on a live ptrace relationship, which is deferred with the
+  // rest of cross-process support.
+  if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
+      sess.debugger_pid != caller.client_pid())
+    return -EPERM;
+
+  // Non-ENABLE ops require an active debug session (kernel: EINVAL).
+  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !sess.enabled)
+    return -EINVAL;
+
+  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE.
+  const bool runtime_enabled = [&] {
+    std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
+    return target->runtime_state_.enabled;
+  }();
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3132-L3142
+  switch (args->op) {
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_SET_FLAGS:
+    if (!runtime_enabled)
+      return -EPERM;
+    break;
+  default:
+    break;
+  }
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3144
+  if (args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH ||
+      args->op == KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH) {
+    const uint32_t gpu_id = args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH
+                                ? args->set_node_address_watch.gpu_id
+                                : args->clear_node_address_watch.gpu_id;
+    if (find_gpu(gpu_id) == nullptr)
+      return -ENODEV;
+  }
+
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3158
+  switch (args->op) {
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_debug.c#L788-L847
+  case KFD_IOC_DBG_TRAP_ENABLE: {
+    if (sess.enabled)
+      return -EALREADY; // target process is already debug enabled
+
+    const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
+    // Validate the notifier before trusting it. In daemon mode the fd was
+    // received via SCM_RIGHTS and already substituted into our fd space; in
+    // local mode it is the debugger's own descriptor. Either way the driver
+    // *writes* to it to wake the debugger, so it must be a live, writable
+    // descriptor. fcntl(F_GETFL) both proves the fd is open (EBADF otherwise)
+    // and reports its access mode, so a read-only or otherwise unusable fd —
+    // e.g. one a client passed over SCM_RIGHTS that is not a real event target —
+    // is rejected instead of being stored on the session.
+    const int fl = fcntl(dbg_fd, F_GETFL);
+    if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
+      return -EBADF;
+
+    sess.enabled = true;
+    sess.debugger_pid = caller.client_pid();
+    sess.dbg_fd = dbg_fd;
+    // In daemon mode the session owns the transferred fd and releases it via
+    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
+    // debugger's own descriptor, left for the debugger to close.
+    if (daemon_mode_)
+      sess.owned_dbg_fd = UniqueFd(dbg_fd);
+    sess.exception_enable_mask = args->enable.exception_mask;
+
+    // Snapshot the runtime-enable state under a single lock so the marshaled
+    // runtime_state, r_debug and ttmp_setup stay mutually consistent: a
+    // concurrent RUNTIME_ENABLE/DISABLE must not change them between reads.
+    // Lock order debug_mutex_ -> runtime_mutex_ is already held that way.
+    // Kernel: kfd_dbg_trap_enable copies the saved runtime info and returns its
+    // size.
+    kfd_runtime_info info{};
+    {
+      std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
+      const auto &rt = target->runtime_state_;
+      sess.runtime_state = rt.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
+      info.r_debug = rt.r_debug;
+      info.ttmp_setup = (rt.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
+    }
+    info.runtime_state = sess.runtime_state;
+    size_t copy_size = std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(info));
+    if (args->enable.rinfo_ptr != 0 && copy_size > 0)
+      std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
+                  copy_size);
+    args->enable.rinfo_size = sizeof(info);
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_DISABLE:
+    // Resetting the session releases the debugger notifier: in daemon mode the
+    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
+    // mode nothing is owned, so the debugger's own fd is left untouched.
+    sess = KfdProcess::DebugSession{};
+    return 0;
+
+  // Recognized ops whose handlers are not wired up yet. The kernel dispatches
+  // each to a real implementation; the skeleton reports ENOSYS ("not
+  // implemented") so a debugger can tell a stubbed-but-valid op apart from a
+  // genuinely unknown one (EINVAL below). Each case graduates out of this group
+  // as its handler lands.
+  case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
+  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_SET_FLAGS:
+  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
+  case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return -ENOSYS;
+  default:
+    return -EINVAL;
+  }
 }
 
 int SimulatedKfd::set_xnack_mode_ioctl(void *arg) {
