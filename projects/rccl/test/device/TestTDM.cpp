@@ -194,8 +194,8 @@ TEST_F(TestTileApiTDM, Double) {
 // Same tile-copy kernel as TDMTestTileApi, but driven by the AsyncDataCopier tile mover.
 TEST_F(TestAsyncDataCopierTileApi, Byte) {
   const int N = 314159;
-  std::vector<char> h_in(N);
-  for (int i = 0; i < N; i++) h_in[i] = 1.0f / (i + 1);
+  std::vector<uint8_t> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = rand() % 256;
   TestRoundTrip(h_in);
 }
 
