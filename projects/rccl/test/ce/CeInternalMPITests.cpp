@@ -605,6 +605,7 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce,  ncclDevSum, ncclFloat32));
 }
 
 // ===========================================================================

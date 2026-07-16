@@ -506,8 +506,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
   rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+  bool useCeAllReduce = rcclUseCeAllReduce(comm, count, datatype, op);
   if (ceArGraphAllowed &&
-      rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
+      useCeAllReduce && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d",
          count, (int)datatype, (int)op, comm->rank, comm->nRanks);
@@ -518,7 +519,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.ceArGraphAllowed = ceArGraphAllowed;
   info.ceGraphDecisionValid = true;
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&  msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) {
+  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) && !useCeAllReduce && !ceArGraphAllowed) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaAllReduceLL() &&

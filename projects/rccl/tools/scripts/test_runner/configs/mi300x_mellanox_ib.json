@@ -559,6 +559,11 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "CeAllReduceEligibilityTests",
+          "description": "CE AllReduce eligibility tests",
+          "test_filter": "CeAllReduceEligibilityTests.*"
+        },
+        {
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
