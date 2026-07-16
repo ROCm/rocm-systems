@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/comm_data.hpp"
+#include "common/units.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
@@ -10,8 +11,6 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>
-
-#include <timemory/units.hpp>
 
 namespace rocprofsys
 {
@@ -377,7 +376,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, sendcount * _send_size);
             tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
-            add(fmt::format("{}/send={}/tag={}", _name, sendtag), sendcount * _send_size);
+            add(fmt::format("{}/send/tag={}", _name, sendtag), sendcount * _send_size);
             add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
                 sendcount * _send_size);
         }
@@ -386,7 +385,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, recvcount * _recv_size);
             tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
-            add(fmt::format("{}/recv={}/tag={}", _name, recvtag), recvcount * _recv_size);
+            add(fmt::format("{}/recv/tag={}", _name, recvtag), recvcount * _recv_size);
             add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
                 recvcount * _recv_size);
         }

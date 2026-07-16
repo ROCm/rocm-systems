@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "core.h"
 #include "nccl_net.h"
@@ -11,12 +12,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/syscall.h>
 #include <chrono>
 #include "param.h"
+#include "compiler.h"
 #include <mutex>
+#include "os.h"
 #include "env.h"
+#include <cinttypes>
 
 #define NCCL_DEBUG_RESET_TRIGGERED (-2)
 
@@ -36,13 +38,31 @@ static pthread_mutex_t ncclDebugLock = PTHREAD_MUTEX_INITIALIZER;
 static std::chrono::steady_clock::time_point ncclEpoch;
 static bool ncclWarnSetDebugInfo = false;
 
-static __thread int tid = -1;
+static thread_local int tid = -1;
 
 typedef const char* (*ncclGetEnvFunc_t)(const char*);
 
+static ncclResult_t getHostNameForLog(char* hostname, int maxlen, const char delim) {
+  ncclResult_t ret = getHostName(hostname, maxlen, delim);
+  if (ret != ncclSuccess) return ret;
+
+  for (int i = 0; i < maxlen-1 && hostname[i]; ++i) {
+    // Replace special characters in hostnames with dashes
+    switch (hostname[i]) {
+    case '%':
+    case '/':
+      hostname[i] = '-';
+      break;
+    default:
+      break;
+    }
+  }
+  return ncclSuccess;
+}
+
 // This function must be called with ncclDebugLock locked!
 static void ncclDebugInit() {
-  ncclGetEnvFunc_t getEnvFunc = ncclEnvPluginInitialized() ? ncclGetEnv : (ncclGetEnvFunc_t)getenv;
+  ncclGetEnvFunc_t getEnvFunc = ncclEnvPluginInitialized() ? ncclGetEnv : (ncclGetEnvFunc_t)std::getenv;
   const char* nccl_debug = getEnvFunc("NCCL_DEBUG");
   int tempNcclDebugLevel = -1;
   uint64_t tempNcclDebugMask = NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV; // Default debug sub-system mask
@@ -115,6 +135,8 @@ static void ncclDebugInit() {
         mask = NCCL_RAS;
       } else if (strcasecmp(subsys, "VERBS") == 0) {
         mask = NCCL_VERBS;
+      } else if (strcasecmp(subsys, "DESTROY") == 0) {
+        mask = NCCL_DESTROY;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }
@@ -218,8 +240,8 @@ static void ncclDebugInit() {
   }
 
   // Cache pid and hostname
-  getHostName(hostname, 1024, '.');
-  pid = getpid();
+  getHostNameForLog(hostname, 1024, '.');
+  pid = ncclOsGetPid();
 
   /* Parse and expand the NCCL_DEBUG_FILE path and
    * then create the debug file. But don't bother unless the
@@ -263,7 +285,11 @@ static void ncclDebugInit() {
     if (debugFn[0] != '\0') {
       FILE *file = fopen(debugFn, "w");
       if (file != nullptr) {
+#if defined(NCCL_OS_LINUX)
         setlinebuf(file); // disable block buffering
+#elif defined(NCCL_OS_WINDOWS)
+        setvbuf(file, NULL, _IOLBF, 0); // disable block buffering
+#endif
         ncclDebugFile = file;
       }
     }
@@ -271,7 +297,7 @@ static void ncclDebugInit() {
 
   ncclEpoch = std::chrono::steady_clock::now();
   ncclDebugMask = tempNcclDebugMask;
-  __atomic_store_n(&ncclDebugLevel, tempNcclDebugLevel, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevel, tempNcclDebugLevel, std::memory_order_release);
 }
 
 /* Common logging function used by the INFO, WARN and TRACE macros
@@ -280,7 +306,7 @@ static void ncclDebugInit() {
  */
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *filefunc, int line, const char *fmt, ...) {
   bool locked = false; // Keeps track of the ncclDebugLock state.
-  int gotLevel = __atomic_load_n(&ncclDebugLevel, __ATOMIC_ACQUIRE);
+  int gotLevel = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire);
 
   if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) { level = NCCL_LOG_INFO; flags = ncclDebugNoWarn; }
 
@@ -313,7 +339,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   }
 
   if (tid == -1) {
-    tid = syscall(SYS_gettid);
+    tid = ncclOsGetTid();
   }
 
   char buffer[1024];
@@ -328,9 +354,11 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   if (ncclDebugTimestampLevels & (1<<level)) {
     if (ncclDebugTimestampFormat[0] != '\0') {
       struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);   // clock_gettime failure should never happen
+      clockRealtime(&ts);
+      time_t nowTimeT = ts.tv_sec;
+      long nowNs = ts.tv_nsec;
       std::tm nowTm;
-      localtime_r(&ts.tv_sec, &nowTm);
+      ncclOsLocaltime(&nowTimeT, &nowTm);
 
       // Add the subseconds portion if it is part of the format.
       char localTimestampFormat[sizeof(ncclDebugTimestampFormat)];
@@ -340,8 +368,8 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
         memcpy(localTimestampFormat, ncclDebugTimestampFormat, ncclDebugTimestampSubsecondsStart);
         snprintf(localTimestampFormat + ncclDebugTimestampSubsecondsStart,
                  ncclDebugTimestampSubsecondDigits+1,
-                 "%0*ld", ncclDebugTimestampSubsecondDigits,
-                 ts.tv_nsec / (1000000000UL/ncclDebugTimestampMaxSubseconds));
+                 "%0*" PRIu64, ncclDebugTimestampSubsecondDigits,
+                 (uint64_t)(nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds)));
         strcpy(    localTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits,
                ncclDebugTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits);
       }
@@ -371,7 +399,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   // Add level specific formatting.
   if (level == NCCL_LOG_WARN) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] %s:%d NCCL WARN ", cudaDev, filefunc, line);
-    if (ncclWarnSetDebugInfo) __atomic_store_n(&ncclDebugLevel, NCCL_LOG_INFO, __ATOMIC_RELEASE);
+    if (ncclWarnSetDebugInfo) COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_LOG_INFO), std::memory_order_release);
   } else if (level == NCCL_LOG_INFO) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] NCCL INFO ", cudaDev);
   } else if (level == NCCL_LOG_TRACE && flags == NCCL_CALL) {
@@ -401,21 +429,65 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   pthread_mutex_unlock(&ncclDebugLock);
 }
 
-NCCL_API(void, ncclResetDebugInit);
-void ncclResetDebugInit() {
+// Non-deprecated version for internal use.
+extern "C"
+#if !defined(NCCL_OS_WINDOWS)
+__attribute__ ((visibility("default")))
+#endif
+void ncclResetDebugInitInternal() {
   // Cleans up from a previous ncclDebugInit() and reruns.
   // Use this after changing NCCL_DEBUG and related parameters in the environment.
   pthread_mutex_lock(&ncclDebugLock);
   // Let ncclDebugInit() know to complete the reset.
-  __atomic_store_n(&ncclDebugLevel, NCCL_DEBUG_RESET_TRIGGERED, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_DEBUG_RESET_TRIGGERED), std::memory_order_release);
   pthread_mutex_unlock(&ncclDebugLock);
 }
 
+// In place of: NCCL_API(void, ncclResetDebugInit);
+#ifdef pncclResetDebugInit
+#undef pncclResetDebugInit
+#endif
+#if defined(NCCL_OS_LINUX) && !defined(__HIP_DEVICE_COMPILE__)
+// Doesn't work on device
+__attribute__ ((visibility("default")))
+__attribute__ ((alias("ncclResetDebugInit")))
+#endif
+void pncclResetDebugInit();
+extern "C"
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__ ((visibility("default")))
+__attribute__ ((weak))
+__attribute__ ((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
+#endif
+void ncclResetDebugInit();
+
+extern "C" void ncclResetDebugInit() {
+  // This is now deprecated as part of the NCCL API. It will be removed
+  // from the API in the future. It is still available as an
+  // exported symbol.
+  ncclResetDebugInitInternal();
+}
+
+
 NCCL_PARAM(SetThreadName, "SET_THREAD_NAME", 0);
 
-void ncclSetThreadName(pthread_t thread, const char *fmt, ...) {
+void ncclSetThreadName(std::thread& thread, const char *fmt, ...) {
   // pthread_setname_np is nonstandard GNU extension
   // needs the following feature test macro
+#ifdef _GNU_SOURCE
+  if (ncclParamSetThreadName() != 1) return;
+  char threadName[NCCL_THREAD_NAMELEN];
+  va_list vargs;
+  va_start(vargs, fmt);
+  vsnprintf(threadName, NCCL_THREAD_NAMELEN, fmt, vargs);
+  va_end(vargs);
+  pthread_setname_np(thread.native_handle(), threadName);
+#endif
+}
+
+// [RCCL] Overload for legacy pthread_t-managed threads (net_ib*). Same body
+// as the std::thread version but takes the pthread handle directly.
+void ncclSetThreadName(pthread_t thread, const char *fmt, ...) {
 #ifdef _GNU_SOURCE
   if (ncclParamSetThreadName() != 1) return;
   char threadName[NCCL_THREAD_NAMELEN];

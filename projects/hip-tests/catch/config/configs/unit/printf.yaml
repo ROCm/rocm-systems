@@ -3,11 +3,11 @@ printf:
   Unit_Printf_flags_Sanity_Positive:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Printf_length_Sanity_Positive:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Printf_specifier_Sanity_Positive: *level_2
   Unit_Printf_Negative_Parameters_RTC: *level_2
   Unit_Buffered_Printf_Flags: *level_2

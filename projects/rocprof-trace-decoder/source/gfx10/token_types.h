@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include "trace_decoder_types.h"
+#include <sstream>
+#include "rocprof_trace_decoder/trace_decoder_types.h"
 
 inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
 {
@@ -10,7 +11,22 @@ inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
 
 enum RdnaType
 {
-    UNKNOWN = 0,
+    // Rare-token cluster (positions 0..4). The mi400 fast scanner pushes any
+    // token whose type id is < 5 into a side vector with full contents — this
+    // is by far the simplest predicate (single unsigned compare) and saves a
+    // sub on every hot-loop iteration.
+    //
+    // UNKNOWN sits in the cluster on purpose: it should never appear in a real
+    // trace, but if it ever does we'd rather capture it than silently drop it.
+    //
+    // EVENT / EVENT_SYNC / REG / REG_INIT are the four token types whose 64-bit
+    // contents downstream consumers want preserved alongside the type tag.
+    UNKNOWN,
+    EVENT,
+    EVENT_SYNC,
+    REG,
+    REG_INIT,
+
     VALU_INST,
     IMM_ONE,
     IMMEDIATE,
@@ -26,10 +42,6 @@ enum RdnaType
     TIME,
     NOP,
     MISC_GFX10,
-    EVENT,
-    EVENT_SYNC,
-    REG,
-    REG_INIT,
     TIMESTAMP,
     HEADER,
     INST,
@@ -66,7 +78,6 @@ struct wstart_type_common
     uint64_t SACU() const { return get_sa_wgp(sa, wgp); }
     uint64_t getGPULocation() const { return (SACU() << 7) | (simd << 5) | wid; };
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -74,5 +85,4 @@ struct wstart_type_common
         return ss;
     }
     const char* typestr() const { return "WAVE_START"; };
-#endif
 };

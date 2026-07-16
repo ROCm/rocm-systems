@@ -137,6 +137,7 @@ static const char* kDevAvailableMemoryPartitionFName = "available_memory_partiti
 static const char* kDevSupportedXcpConfigsFName = "compute_partition_config/supported_xcp_configs";
 static const char* kDevSupportedNpsConfigsFName = "compute_partition_config/supported_nps_configs";
 static const char* kDevXcpConfigFName = "compute_partition_config/xcp_config";
+static const char* kDevComputePartitionMemAllocModeFName = "compute_partition_mem_alloc_mode";
 
 // XCP config resource files - not every file will exist in all ASICs (ex. Decoders vs Encoders)
 static const char* kDevDecoderInstFName = "compute_partition_config/dec/num_inst";
@@ -349,6 +350,7 @@ static const std::map<DevInfoTypes, const char*> kDevAttribNameMap = {
     {kDevSupportedXcpConfigs, kDevSupportedXcpConfigsFName},
     {kDevSupportedNpsConfigs, kDevSupportedNpsConfigsFName},
     {kDevXcpConfig, kDevXcpConfigFName},
+    {kDevComputePartitionMemAllocMode, kDevComputePartitionMemAllocModeFName},
 
     // XCP config resource files
     {kDevDecoderInst, kDevDecoderInstFName},
@@ -1053,6 +1055,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevComputePartition:
     case kDevMemoryPartition:
     case kDevXcpConfig:
+    case kDevComputePartitionMemAllocMode:
     case kDevSocPstate:
     case kDevXgmiPlpd:
       return writeDevInfoStr(type, val, true);
@@ -1472,6 +1475,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string* val) {
     case kDevSupportedXcpConfigs:
     case kDevSupportedNpsConfigs:
     case kDevXcpConfig:
+    case kDevComputePartitionMemAllocMode:
     case kDevDecoderInst:
     case kDevDecoderShared:
     case kDevEncoderInst:

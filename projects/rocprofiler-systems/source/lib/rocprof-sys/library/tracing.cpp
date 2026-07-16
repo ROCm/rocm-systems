@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/tracing.hpp"
+#include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/emitter.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
+
+#include <unistd.h>
 
 #include "logger/debug.hpp"
 
@@ -39,24 +46,11 @@ get_timemory_hash_aliases(std::int64_t _tid)
 }
 }  // namespace
 
-bool debug_push = tim::get_env("ROCPROFSYS_DEBUG_PUSH", false) || get_debug_env();
-bool debug_pop  = tim::get_env("ROCPROFSYS_DEBUG_POP", false) || get_debug_env();
-bool debug_mark = tim::get_env("ROCPROFSYS_DEBUG_MARK", false) || get_debug_env();
-bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_debug_env();
-
-std::unordered_map<hash_value_t, std::string>&
-get_perfetto_track_uuids()
-{
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
-}
-
-std::mutex&
-get_perfetto_track_uuids_mutex()
-{
-    static auto _mtx = std::mutex{};
-    return _mtx;
-}
+bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
+bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
+bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
+bool debug_user =
+    rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
 
 void
 copy_timemory_hash_ids()

@@ -46,6 +46,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
     "${SRC_DIR}/amd_smi_system.cc"
+    "${SRC_DIR}/amd_smi_ualoe.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
     "${SRC_DIR}/scoped_fd.cc"
@@ -54,7 +55,9 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
-file(GLOB IMPL_HEADERS "${INC_DIR}/impl/*.h")
+# CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
+# impl header triggers a regenerate instead of going unnoticed until a clean build.
+file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
 set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
@@ -93,6 +96,14 @@ list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
 
+# Include UALOE library - always required
+set(UALOE_LIB "ualoe_lib")
+set(UALOE_LIB_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${UALOE_LIB}")
+set(UALOE_LIB_INC_DIR "${PROJECT_SOURCE_DIR}/include/${UALOE_LIB}")
+add_subdirectory("ualoe_lib")
+set(SRC_LIST ${SRC_LIST} ${UALOE_SOURCES})
+set(INC_LIST ${INC_LIST} ${UALOE_HEADERS})
+
 if(ENABLE_ESMI_LIB)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)
@@ -126,8 +137,9 @@ endif()
 foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
     target_link_libraries(
         ${_TARGET}
-        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB}
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
+
     target_include_directories(
         ${_TARGET}
         PRIVATE
@@ -139,14 +151,16 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
             ${DRM_INCLUDE_DIRS}
             ${DRM_AMDGPU_INCLUDE_DIRS}
             ${NIC_INCLUDE_DIRS}
+            ${UALOE_INCLUDE_DIR}
     )
+
     target_include_directories(
         ${_TARGET}
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     )
+
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
 endforeach()
 
@@ -180,6 +194,16 @@ if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
     set_property(TARGET ${AMD_SMI} APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
 endif()
 
+# Add UALOE compile flags for netlink dependencies (e.g. -I.../libnl3 for
+# <netlink/*.h>). Must apply to every amd_smi target: with BUILD_BOTH_LIBS the
+# static library is built separately and would otherwise miss these includes.
+if(UALOE_COMPILE_FLAGS)
+    separate_arguments(UALOE_FLAGS NATIVE_COMMAND "${UALOE_COMPILE_FLAGS}")
+    foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
+        target_compile_options(${_TARGET} PRIVATE ${UALOE_FLAGS})
+    endforeach()
+endif()
+
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
 set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
@@ -205,12 +229,20 @@ install(
     COMPONENT dev
 )
 
-install(FILES ${IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
+# Test-only impl headers (those with "_test" in the name: the CPER read seam and
+# the internal test helpers/flags) are build-only. Production and the unit tests
+# include them from the source tree, but their symbols are hidden from
+# libamd_smi.so by the version script (cper_set_read_fn_for_testing has no
+# amdsmi_ prefix; amdsmi_test_sleep is a C++ symbol the amdsmi_* export glob does
+# not match), so a dev-package consumer that included them would hit a link
+# error. Build them, but keep them out of the installed dev headers.
+set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 
-set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h)
-install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
+set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/include/amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h)
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface

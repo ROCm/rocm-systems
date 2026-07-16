@@ -18,6 +18,8 @@ pytestmark = [
     pytest.mark.xnack,
     pytest.mark.hip,
     pytest.mark.unified_memory,
+    # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+    pytest.mark.rocprofiler_sdk_min_version("1.2.2"),
 ]
 
 
@@ -40,6 +42,8 @@ def unified_memory_environment() -> dict[str, str]:
 class TestUnifiedMemory(RocprofsysTest):
     """Validate unified-memory reports generated from the HIP example."""
 
+    UM_DEFAULT_TEST_PASS_REGEX = ["9 tests completed"]
+
     run_args = ["-s", "32", "-p", "256", "-i", "4"]
 
     @pytest.mark.timeout(120)
@@ -57,7 +61,7 @@ class TestUnifiedMemory(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"6 tests completed"],
+            pass_regex=self.UM_DEFAULT_TEST_PASS_REGEX,
         )
 
         self.assert_unified_memory_output(

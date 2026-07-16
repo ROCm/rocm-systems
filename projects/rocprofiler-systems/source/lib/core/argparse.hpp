@@ -40,6 +40,27 @@ default_environ_filter(std::string_view, const parser_data&);
 bool
 default_grouping_filter(std::string_view, const parser_data&);
 
+struct output_format_selection
+{
+    bool perfetto = false;  // ROCPROFSYS_TRACE
+    bool rocpd    = false;  // ROCPROFSYS_USE_ROCPD
+    bool json     = false;  // ROCPROFSYS_JSON_OUTPUT
+    bool text     = false;  // ROCPROFSYS_TEXT_OUTPUT
+
+    // ROCPROFSYS_PROFILE: derived — any Timemory profile sub-format implies profiling.
+    [[nodiscard]] bool profile() const { return json || text; }
+};
+
+/**
+ * Map selected --output-format tokens to the authoritative backend/sub-format set.
+ * Unlisted formats resolve to false so the returned selection fully defines the
+ * active outputs, which is required because ROCPROFSYS_TRACE and ROCPROFSYS_PROFILE
+ * otherwise derive their defaults from each other.
+ * @param tokens proto | rocpd | json | text | txt (txt aliases text)
+ */
+[[nodiscard]] output_format_selection
+resolve_output_format(const strset_t& tokens);
+
 struct env_snapshot
 {
     std::unordered_set<std::string> initial = {};
@@ -100,7 +121,7 @@ parser_data&
 add_ld_library_path(parser_data&);
 
 parser_data&
-add_torch_library_path(parser_data&, bool verbose = false);
+add_torch_library_path(parser_data&);
 
 parser_data&
 add_core_arguments(parser_t&, parser_data&);

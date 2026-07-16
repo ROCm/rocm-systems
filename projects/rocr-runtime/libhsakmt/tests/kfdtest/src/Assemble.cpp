@@ -349,7 +349,11 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
 
     // Set up the MCContext for creating symbols and MCExpr's
 #if LLVM_VERSION_MAJOR > 12
+#if LLVM_MAIN_REVISION >= 577912 // commit # when createMCAsmParser API changed
+    MCContext Ctx(TheTriple, *MAI, *MRI, *STI, &SrcMgr, &MCOptions);
+#else
     MCContext Ctx(TheTriple, MAI.get(), MRI.get(), STI.get(), &SrcMgr, &MCOptions);
+#endif
 #else
     MCObjectFileInfo MOFI;
     MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr, &MCOptions);
@@ -391,8 +395,13 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
             createMCAsmParser(SrcMgr, Ctx, *Streamer, *MAI));
 
     // Set parser to target parser and run
+#if LLVM_MAIN_REVISION >= 577912 // commit # when createMCAsmParser API changed
+    std::unique_ptr<MCTargetAsmParser> TAP(
+            TheTarget->createMCAsmParser(*STI, *Parser, *MCII));
+#else
     std::unique_ptr<MCTargetAsmParser> TAP(
             TheTarget->createMCAsmParser(*STI, *Parser, *MCII, MCOptions));
+#endif
     if (!TAP) {
         outs() << "ASM Error: no assembly parsing support for target " << MCPU << "\n";
         return -1;

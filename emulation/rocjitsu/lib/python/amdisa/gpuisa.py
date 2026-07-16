@@ -40,6 +40,7 @@ class Operand:
         is_binary_ucode_required: True if the operand is missing from the
             encoding but implied by the type of the operand.
         order: Order of the operand.
+        data_format_name: ISA data format name from the XML operand signature.
     """
 
     name: str
@@ -50,6 +51,7 @@ class Operand:
     is_implicit: bool
     is_binary_ucode_required: bool
     order: int
+    data_format_name: str = ''
 
 
 @dataclass
@@ -108,9 +110,7 @@ class InstBase:
             name back to the parent encoding format.
     """
 
-    def __init__(
-        self, enc_name: str, is_implied_literal_enc: bool = False
-    ) -> None:
+    def __init__(self, enc_name: str, is_implied_literal_enc: bool = False) -> None:
         self.enc_name = enc_name
         self.is_implied_literal_enc = is_implied_literal_enc
 
@@ -118,9 +118,7 @@ class InstBase:
     def fmt_enc_name(self) -> str:
         """Encoding name formatted to C++ PascalCase style."""
         if self.enc_name.split('_')[0] == 'ENC':
-            return ''.join(
-                x.capitalize() for x in self.enc_name.split('_')[1:]
-            )
+            return ''.join(x.capitalize() for x in self.enc_name.split('_')[1:])
         return ''.join(x.capitalize() for x in self.enc_name.split('_'))
 
     @cached_property
@@ -264,9 +262,7 @@ class IsaSpec:
             ``is_implied_literal_encoding()`` method.
     """
 
-    def __init__(
-        self, arch_name: str, version: str, profile: IsaProfile
-    ) -> None:
+    def __init__(self, arch_name: str, version: str, profile: IsaProfile) -> None:
         self.profile = profile
         self.arch_name = arch_name
         self.version = version
@@ -274,9 +270,9 @@ class IsaSpec:
         self.inst_encodings: list[InstEncoding] = []
         self.operand_types: list[str] = []
         self.opnd_selectors: list[OperandSelector] = []
-        self.primary_decode_table: list[DecodeTableEntry | None] = [
-            None
-        ] * pow(2, profile.max_enc_bits)
+        self.primary_decode_table: list[DecodeTableEntry | None] = [None] * pow(
+            2, profile.max_enc_bits
+        )
         self.alt_encs_with_implied_literal: set[str] = set()
         if self.version not in profile.supported_versions:
             raise ValueError(

@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 #ifndef _NCCL_GIN_DEVICE_API_H_
 #define _NCCL_GIN_DEVICE_API_H_
 
@@ -13,6 +14,12 @@
 #endif
 #if NCCL_GIN_PROXY_ENABLE
 #include "proxy/gin_proxy.h"
+#endif
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE
+#include "rocshmem_gda/gin_rocshmem_gda.h"
+#endif
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+#include "anvil_sdma/gin_anvil_sdma.h"
 #endif
 
 #endif

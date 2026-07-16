@@ -309,7 +309,18 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 track_record_end_timestamp(_extcid->internal_corr_id, record->end_timestamp);
             }
 
-            auto info = std::stringstream{};
+            auto info       = std::stringstream{};
+            auto kernel_itr = client_kernels->find(record->dispatch_info.kernel_id);
+            if(kernel_itr == client_kernels->end())
+            {
+                std::cerr << "missing kernel_id=" << record->dispatch_info.kernel_id
+                          << ", kernel_map_size=" << client_kernels->size()
+                          << ", queue_id=" << record->dispatch_info.queue_id.handle
+                          << ", dispatch_id=" << record->dispatch_info.dispatch_id
+                          << ", corr_id=" << record->correlation_id.internal << "\n"
+                          << std::flush;
+                throw std::runtime_error{"kernel dispatch record referenced missing kernel_id"};
+            }
 
             info << "tid=" << record->thread_id << ", context=" << context.handle
                  << ", buffer_id=" << buffer_id.handle
@@ -319,8 +330,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", queue_id=" << record->dispatch_info.queue_id.handle
                  << ", dispatch_id=" << record->dispatch_info.dispatch_id
                  << ", kernel_id=" << record->dispatch_info.kernel_id
-                 << ", kernel=" << client_kernels->at(record->dispatch_info.kernel_id).kernel_name
-                 << ", extern_corr_id={" << _extern_corr_id << "}";
+                 << ", kernel=" << kernel_itr->second.kernel_name << ", extern_corr_id={"
+                 << _extern_corr_id << "}";
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
                 source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});

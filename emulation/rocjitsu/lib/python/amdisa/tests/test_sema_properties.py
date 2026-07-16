@@ -38,14 +38,14 @@ def _assign(lhs, rhs):
 
 
 def _cast(inner, target):
-    return SemaNode(SemaNodeKind.CAST, ty=target, cast_target=target,
-                    children=(inner,))
+    return SemaNode(SemaNodeKind.CAST, ty=target, cast_target=target, children=(inner,))
 
 
 class TestDeriveEmpty:
     def test_empty_block(self):
-        block = SemaBlock('NOP', ExecModel.UNKNOWN,
-                          SemaNode(SemaNodeKind.SEQ, children=()))
+        block = SemaBlock(
+            'NOP', ExecModel.UNKNOWN, SemaNode(SemaNodeKind.SEQ, children=())
+        )
         props = derive_properties(block)
         assert props == InstructionProperty.NONE
 
@@ -81,9 +81,14 @@ class TestDeriveWritesScc:
 class TestDeriveWritesVcc:
     def test_vcc_arrayderef(self):
         body = _assign(
-            SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1, children=(
-                _id('VCC', SemaType.U64), _id('laneId', SemaType.U32),
-            )),
+            SemaNode(
+                SemaNodeKind.ARRAYDEREF,
+                ty=SemaType.U1,
+                children=(
+                    _id('VCC', SemaType.U64),
+                    _id('laneId', SemaType.U32),
+                ),
+            ),
             _lit('1', SemaType.U1),
         )
         block = SemaBlock('V_CMP', ExecModel.VECTOR, body)
@@ -100,9 +105,14 @@ class TestDeriveWritesExec:
 
     def test_exec_arrayderef(self):
         body = _assign(
-            SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1, children=(
-                _id('EXEC', SemaType.U64), _id('laneId', SemaType.U32),
-            )),
+            SemaNode(
+                SemaNodeKind.ARRAYDEREF,
+                ty=SemaType.U1,
+                children=(
+                    _id('EXEC', SemaType.U64),
+                    _id('laneId', SemaType.U32),
+                ),
+            ),
             _lit('1', SemaType.U1),
         )
         block = SemaBlock('V_CMPX', ExecModel.VECTOR, body)
@@ -112,28 +122,39 @@ class TestDeriveWritesExec:
 
 class TestDeriveCrossLane:
     def test_permlane_call(self):
-        body = SemaNode(SemaNodeKind.CALL, ty=SemaType.U32,
-                        call_name='v_permlane16',
-                        children=(_id('v_permlane16'), _id('src')))
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U32,
+            call_name='v_permlane16',
+            children=(_id('v_permlane16'), _id('src')),
+        )
         block = SemaBlock('V_PERMLANE16', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.CROSS_LANE in props
 
     def test_ds_bpermute(self):
-        body = SemaNode(SemaNodeKind.CALL, ty=SemaType.U32,
-                        call_name='ds_bpermute',
-                        children=(_id('ds_bpermute'), _id('addr'), _id('src')))
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U32,
+            call_name='ds_bpermute',
+            children=(_id('ds_bpermute'), _id('addr'), _id('src')),
+        )
         block = SemaBlock('DS_BPERMUTE', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.CROSS_LANE in props
-        assert InstructionProperty.DS_PERMUTE not in props  # ds_bpermute != ds_permute flag
+        assert (
+            InstructionProperty.DS_PERMUTE not in props
+        )  # ds_bpermute != ds_permute flag
 
 
 class TestDeriveMatrix:
     def test_mfma(self):
-        body = SemaNode(SemaNodeKind.CALL, ty=SemaType.F32,
-                        call_name='mfma_compute',
-                        children=(_id('mfma_compute'), _id('a'), _id('b'), _id('c')))
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.F32,
+            call_name='mfma_compute',
+            children=(_id('mfma_compute'), _id('a'), _id('b'), _id('c')),
+        )
         block = SemaBlock('V_MFMA', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_MATRIX in props
@@ -141,17 +162,25 @@ class TestDeriveMatrix:
 
 class TestDeriveMemory:
     def test_mem_arrayderef(self):
-        body = _assign(_id('data'),
-                       SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.B32, children=(
-                           _id('MEM'), _id('addr'))))
+        body = _assign(
+            _id('data'),
+            SemaNode(
+                SemaNodeKind.ARRAYDEREF,
+                ty=SemaType.B32,
+                children=(_id('MEM'), _id('addr')),
+            ),
+        )
         block = SemaBlock('LOAD', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_MEMORY in props
 
     def test_addr_calc_call(self):
-        body = SemaNode(SemaNodeKind.CALL, ty=SemaType.U32,
-                        call_name='CalcBufferAddr',
-                        children=(_id('CalcBufferAddr'), _id('base')))
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U32,
+            call_name='CalcBufferAddr',
+            children=(_id('CalcBufferAddr'), _id('base')),
+        )
         block = SemaBlock('BUFFER', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_MEMORY in props
@@ -159,8 +188,11 @@ class TestDeriveMemory:
 
 class TestDeriveBranch:
     def test_branch_pragma(self):
-        body = SemaNode(SemaNodeKind.CALL, call_name='branch',
-                        children=(_id('branch'), _id('target')))
+        body = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='branch',
+            children=(_id('branch'), _id('target')),
+        )
         block = SemaBlock('S_BRANCH', ExecModel.BRANCH, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_BRANCH in props
@@ -169,8 +201,9 @@ class TestDeriveBranch:
 
 class TestDeriveBarrier:
     def test_barrier(self):
-        body = SemaNode(SemaNodeKind.CALL, call_name='barrier',
-                        children=(_id('barrier'),))
+        body = SemaNode(
+            SemaNodeKind.CALL, call_name='barrier', children=(_id('barrier'),)
+        )
         block = SemaBlock('S_BARRIER', ExecModel.SCALAR, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_BARRIER in props
@@ -178,8 +211,9 @@ class TestDeriveBarrier:
 
 class TestDeriveWaitcnt:
     def test_waitcnt(self):
-        body = SemaNode(SemaNodeKind.CALL, call_name='waitcnt',
-                        children=(_id('waitcnt'),))
+        body = SemaNode(
+            SemaNodeKind.CALL, call_name='waitcnt', children=(_id('waitcnt'),)
+        )
         block = SemaBlock('S_WAITCNT', ExecModel.SCALAR, body)
         props = derive_properties(block)
         assert InstructionProperty.IS_WAITCNT in props
@@ -187,9 +221,14 @@ class TestDeriveWaitcnt:
 
 class TestDeriveReadsVcc:
     def test_vcc_read(self):
-        body = _assign(_id('tmp'),
-                       SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1, children=(
-                           _id('VCC', SemaType.U64), _id('laneId'))))
+        body = _assign(
+            _id('tmp'),
+            SemaNode(
+                SemaNodeKind.ARRAYDEREF,
+                ty=SemaType.U1,
+                children=(_id('VCC', SemaType.U64), _id('laneId')),
+            ),
+        )
         block = SemaBlock('V_CNDMASK', ExecModel.VECTOR, body)
         props = derive_properties(block)
         assert InstructionProperty.READS_VCC in props
@@ -200,6 +239,7 @@ class TestSemaXmlProperties:
     @pytest.fixture(scope='class')
     def blocks(self):
         from amdisa.sema_parser import parse_semantics_xml
+
         return parse_semantics_xml(SEMA_XML_PATH)
 
     def test_summary_counts(self, blocks):

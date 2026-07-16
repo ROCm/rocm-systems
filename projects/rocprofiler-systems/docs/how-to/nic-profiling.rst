@@ -165,6 +165,10 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 * TX unicast bytes
 * RX unicast packets
 * TX unicast packets
+* TX ACK timeout (the count of local ACK timeout errors)
+* RESP TX PKT SEQ ERROR (the count of packet sequence errors detected by responder)
+* REQ RX PKT SEQ ERROR (the count of packet sequence errors detected by requester)
+* REQ RX IMPL NAK SEQ ERROR (the count of ACK packets with invalid PSN detected by requester)
 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------

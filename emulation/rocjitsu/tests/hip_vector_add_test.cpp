@@ -5,7 +5,7 @@
 /// @brief HIP vector_add kernel launch through real ROCR on simulated GPU.
 ///
 /// Compiled with hipcc (HIP language support for __global__ kernels). Requires
-/// LD_PRELOAD=librocjitsu_kmd.so and RJ_CONFIG/RJ_SCHEMA env vars.
+/// LD_PRELOAD=librocjitsu.so.
 
 #include <cmath>
 #include <cstdlib>
@@ -18,8 +18,7 @@ int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
   (void)hipDeviceReset();
-  _exit(rc); // HIP atexit handlers call hsa_shut_down() which hangs without a
-             // real GPU; device state is already reset above.
+  return rc;
 }
 
 #define HIP_ASSERT(call)                                                                           \

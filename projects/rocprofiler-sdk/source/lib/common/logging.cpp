@@ -125,11 +125,15 @@ init_logging(std::string_view env_prefix, logging_config cfg)
         else if(!loglvl.empty())
         {
             if(env_opts.find(loglvl) == env_opts.end())
-                throw std::runtime_error{fmt::format(
-                    "invalid specifier for {}_LOG_LEVEL: {}. Supported: {}",
-                    env_prefix,
-                    loglvl,
-                    fmt::format("{}", fmt::join(supported.begin(), supported.end(), ", ")))};
+            {
+                // Write directly to stderr: absl logging is not yet initialized at this point.
+                fmt::print(stderr,
+                           "[rocprofiler-sdk][warning] invalid specifier for {}_LOG_LEVEL: "
+                           "{}. Supported: {}. Falling back to default log level.\n",
+                           env_prefix,
+                           loglvl,
+                           fmt::join(supported.begin(), supported.end(), ", "));
+            }
             else
             {
                 loglvl_v   = env_opts.at(loglvl).severity_level;

@@ -7,16 +7,31 @@ if(BUILD_TESTS)
 
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
-  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
+  #Automatically enabled when MPI-based tests available
+  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" ON)
+  option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
     message("MPI-based tests are enabled")
   endif()
 
+  # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
+  # codegen in src/device/generate.py. Needs no GPU and no built library.
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(
+    NAME rccl-generate-device-table
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
-    set(HIPCC_COMPILE_FLAGS "${HIPCC_COMPILE_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
+    add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
+    # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
+    # explicitly before _exit() so child-process coverage data is flushed.
+    add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
 
   find_package(hsa-runtime64 PATHS /opt/rocm )
@@ -118,8 +133,16 @@ if(BUILD_TESTS)
     if(RCCL_HAS_GIN_IB_PROXY)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
     endif()
+    if(ENABLE_HOST_API_TESTS)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
+    endif()
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
+
+  # All test executables link against GTest; tell MPIHelpers.cpp so it can use
+  # GTest's current_test_info() rather than relying on __has_include (which only
+  # proves the header is installed, not that the target actually links the library).
+  list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_MPIHelpers_HAS_GTEST)
 
   # Common link libraries
   set(RCCL_COMMON_LINK_LIBS
@@ -156,16 +179,23 @@ if(BUILD_TESTS)
     AllReduceTests.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
+    AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    P2pChannelScalingTests.cpp
+    VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    DdaIpcTests.cpp
+    TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
@@ -205,21 +235,97 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      IommuPassthrough_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
+      DdaCollCommonTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/GinDeviceTests.cpp
+      device/GinAnvilIpcDevice_test.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
+      ../src/misc/kernel_config.cc
     )
+
+  if(ENABLE_ROCSHMEM_GIN)
+    list(APPEND TEST_FIXTURE_SOURCE_FILES
+      gin/GinAnvilIpcTableHost_test.cpp
+      ../src/gin/gin_anvil_ipc_table_host.cc
+    )
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    list(APPEND TEST_FIXTURE_SOURCE_FILES
+      device/GinAnvilSdmaTemplate_test.cpp
+    )
+  endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
+
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+    if(ROCSHMEM_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+    elseif(ROCSHMEM_INSTALL_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        "${ROCSHMEM_INSTALL_DIR}/include")
+    endif()
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        "${ROCSHMEM_SOURCE_DIR}/src"
+        "${ROCSHMEM_SOURCE_DIR}/include")
+    endif()
+    if(ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
+    endif()
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin)
+
+    add_executable(rccl-UnitTestsGinAnvilPlugin
+      gin/GinAnvilPlugin_test.cpp
+      gin/gin_anvil_plugin_test_stubs.cc
+      ../src/gin/gin_plugin_anvil_sdma.cc
+      ../src/gin/gin_anvil_ipc_table_host.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/TestChecks.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${CMAKE_CURRENT_SOURCE_DIR}/gin
+    )
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        ${ROCSHMEM_SOURCE_DIR}/include)
+    else()
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        ${CMAKE_SOURCE_DIR}/../rocshmem/include)
+    endif()
+
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+  endif()
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
@@ -231,20 +337,34 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
+      BootstrapBidirTests.cpp
+      DdaAlltoAllThresholdTests.cpp
+      DdaIpcEligibilityTests.cpp
+      DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
+      TopoEnvPolicyTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/NetDevsPolicyP2pNetTests.cpp
+      graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
+    # from the source tree (tools/topo_expl/models). Expose the test source dir
+    # so they can build the path.
+    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
+      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -291,13 +411,23 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/GinDeviceMPITests.cpp
+      WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp
+      HostApiMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
+      ce/CeMPITests.cpp
+      ce/CeInternalMPITests.cpp
+      GrowMPITests.cpp
+      GinNcclTimeoutMPITests.cpp
+      SymmetricKernelMPITests.cpp
+      SymmetricWindowMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -307,6 +437,10 @@ if(BUILD_TESTS)
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+    if(ENABLE_DEVICE_LINKER)
+      # Mirror the rccl library define so device-linker-specific test expectations compile in.
+      target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
+    endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
@@ -314,7 +448,7 @@ if(BUILD_TESTS)
       if(DEFINED ASAN_RUNTIME_DIR)
         target_link_options(${test_executable} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
       endif()
-    endif()                                                                                                                                                                     
+    endif()
 
     # Add MPI-specific configuration if MPI tests are enabled
     if(ENABLE_MPI_TESTS)
@@ -339,5 +473,110 @@ if(BUILD_TESTS)
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
+
+  # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    else()
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${CMAKE_SOURCE_DIR}/../rocshmem/src)
+    endif()
+    target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/device)
+  endif()
+
+  # Create install-time test file for distribution
+  set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+  file(WRITE "${INSTALL_TEST_FILE}"
+  [=[
+  # This is a test file generated by rccl for install time.
+  # Tests are defined with relative paths to work in the installed location.
+  ]=]
+  )
+
+  # Shared ROCm Libraries CTest categories (see shared/ctest/README.md)
+  if(ROCM_SYSTEMS_ROOT AND EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+    # Currently these files only exist in rocm-libraries, without that repo this will fail.
+    # get_filename_component(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+    include("${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+    enable_testing()
+
+    set(_rccl_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    if(EXISTS "${_rccl_test_categories_yaml}")
+        message(STATUS "Applying test categories for rccl-UnitTests")
+        apply_test_category_labels(
+            rccl-UnitTests
+            "${_rccl_test_categories_yaml}"
+            "${PROJECT_BINARY_DIR}"
+            "${INSTALL_TEST_FILE}"
+        )
+    else()
+        message(WARNING "Skipping test categories for rccl-UnitTests: missing ${_rccl_test_categories_yaml}")
+    endif()
+
+    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+        set(_rccl_test_categories_fixtures_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_fixtures.yaml")
+        if(EXISTS "${_rccl_test_categories_fixtures_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsFixtures")
+            apply_test_category_labels(
+                rccl-UnitTestsFixtures
+                "${_rccl_test_categories_fixtures_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsFixtures: missing ${_rccl_test_categories_fixtures_yaml}")
+        endif()
+    endif()
+
+    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+        set(_rccl_test_categories_fixtures_debug_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_fixtures_debug.yaml")
+        if(EXISTS "${_rccl_test_categories_fixtures_debug_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsFixturesDebug")
+            apply_test_category_labels(
+                rccl-UnitTestsFixturesDebug
+                "${_rccl_test_categories_fixtures_debug_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsFixturesDebug: missing ${_rccl_test_categories_fixtures_debug_yaml}")
+        endif()
+
+        set(_rccl_test_categories_altrsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_altrsmi.yaml")
+        if(EXISTS "${_rccl_test_categories_altrsmi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsAltRsmi")
+            apply_test_category_labels(
+                rccl-UnitTestsAltRsmi
+                "${_rccl_test_categories_altrsmi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsAltRsmi: missing ${_rccl_test_categories_altrsmi_yaml}")
+        endif()
+    endif()
+
+    if(ENABLE_MPI_TESTS)
+        set(_rccl_test_categories_mpi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_mpi.yaml")
+        if(EXISTS "${_rccl_test_categories_mpi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsMPI")
+            apply_test_category_labels(
+                rccl-UnitTestsMPI
+                "${_rccl_test_categories_mpi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsMPI: missing ${_rccl_test_categories_mpi_yaml}")
+        endif()
+    endif()
+  endif()
+
+  install(
+    FILES "${INSTALL_TEST_FILE}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
+    RENAME "CTestTestfile.cmake"
+  )
 
 endif()

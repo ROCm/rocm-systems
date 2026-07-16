@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include "nccl.h"
 
-struct ncclGinIbCollComm {
+struct CastIbGinCollComm {
   void*         ctx;
   int           rank;
   int           nranks;
@@ -24,8 +24,8 @@ struct ncclGinIbCollComm {
     struct ibv_pd *pd;
   }ib;
   ncclResult_t (*getProperties)(int dev, void *props);
-  ncclResult_t (*allGather)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
-  ncclResult_t (*allToAll)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
+  ncclResult_t (*allGather)(struct CastIbGinCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
+  ncclResult_t (*allToAll)(struct CastIbGinCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
   ncclResult_t (*getGidIndex)(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr* portAttr, int *gidIndex);
 };
 

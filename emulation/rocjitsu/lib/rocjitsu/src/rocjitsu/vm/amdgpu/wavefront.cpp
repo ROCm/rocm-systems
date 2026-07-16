@@ -8,9 +8,22 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+
+const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
 void Wavefront::halt() {
+  cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   state_ = WfState::HALTED;
   cu_.release_wf(dispatch_id_, wg_id_);
+}
+
+void Wavefront::release_wait_counter(WaitCounterType type) {
+  wait_counters_.decrement(type);
+  if (state_ == WfState::WAITCNT && wait_satisfied())
+    state_ = WfState::RUNNING;
+  if (state_ == WfState::ENDING && wait_counters_.empty())
+    halt();
 }
 
 } // namespace amdgpu

@@ -288,6 +288,7 @@ class TestParserSemaXml:
 
     def test_pragma_distribution(self, blocks):
         from collections import Counter
+
         pragmas = Counter(b.pragma for b in blocks.values())
         assert pragmas[ExecModel.VECTOR] == 931
         assert pragmas[ExecModel.SCALAR] == 301
@@ -359,9 +360,9 @@ class TestParserSemaXml:
     def test_all_nodes_have_valid_kind(self, blocks):
         for name, b in blocks.items():
             for n in b.body.walk():
-                assert isinstance(n.kind, SemaNodeKind), (
-                    f"{name}: node has invalid kind {n.kind}"
-                )
+                assert isinstance(
+                    n.kind, SemaNodeKind
+                ), f"{name}: node has invalid kind {n.kind}"
 
     def test_walk_covers_all_nodes(self, blocks):
         b = blocks['S_ADD_CO_U32']

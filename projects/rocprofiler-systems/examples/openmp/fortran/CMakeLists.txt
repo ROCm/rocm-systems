@@ -3,13 +3,10 @@
 
 set(OPENMP_DIRECTIVE_USE_OFFLOAD TRUE)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    if("fortran" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        return()
-    endif()
-    if("offload" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        set(OPENMP_DIRECTIVE_USE_OFFLOAD FALSE)
-    endif()
+check_rocprofsys_disable_examples("fortran" _FORTRAN_DISABLED)
+check_rocprofsys_disable_examples("openmp-fortran" _OPENMP_FORTRAN_DISABLED)
+if(_FORTRAN_DISABLED OR _OPENMP_FORTRAN_DISABLED)
+    return()
 endif()
 
 rocprofiler_systems_message(STATUS "Configure OpenMP Fortran examples...")
@@ -38,8 +35,9 @@ mark_as_advanced(amdflang_EXECUTABLE)
 
 if(NOT amdflang_EXECUTABLE)
     rocprofiler_systems_message(
-      FATAL_ERROR
-      "Could not find amdflang. This is required for the OpenMP Fortran examples."
+        FATAL_ERROR
+        "Could not find amdflang. This is required for the OpenMP Fortran examples. "
+        "Append fortran to ROCPROFSYS_DISABLE_EXAMPLES to prevent these examples from being built."
     )
 endif()
 

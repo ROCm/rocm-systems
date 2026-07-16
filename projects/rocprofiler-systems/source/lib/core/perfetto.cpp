@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "perfetto.hpp"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
 #include "output_file_registry.hpp"
@@ -244,9 +246,9 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             if(config::get_verbose() >= 0)
                 _fom(_filename, std::string{ "perfetto" },
                      " (%.2f KB / %.2f MB / %.2f GB)... ",
-                     static_cast<double>(trace_data.size()) / units::KB,
-                     static_cast<double>(trace_data.size()) / units::MB,
-                     static_cast<double>(trace_data.size()) / units::GB);
+                     static_cast<double>(trace_data.size()) / units::kilobyte,
+                     static_cast<double>(trace_data.size()) / units::megabyte,
+                     static_cast<double>(trace_data.size()) / units::gigabyte);
             std::ofstream ofs{};
             if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
             {
@@ -271,12 +273,13 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
     }
 
-    // Merge the output files, if rank 0
-    if(dmp::rank() == 0)
+    // Merge the output files, if rank 0 and output is enabled for this rank
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         auto _output_folder = filepath::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+        auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
         if(!_script_dir.empty())
         {

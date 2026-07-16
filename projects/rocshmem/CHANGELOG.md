@@ -1,7 +1,34 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.4.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## rocSHMEM 3.5.0 for ROCm 7.14
 
-## Since last release (ROCm 7.12)
+### Added
+* Added new APIs:
+   * `rocshmem_align`
+   * `rocshmem_calloc`
+   * `rocshmem_buffer_unregister_all`
+   * `rocshmem_buffer_register/unregister` for GDA backend
+   * `rocshmem_buffer_register_symmetric` for IPC backend
+   * `rocshmem_buffer_unregister_symmetric` for IPC backend
+   * `rocshmem_reduce_on_stream`
+   * `rocshmem_team_split_2D`
+* Added tile-granular RMA operations for the IPC backend
+* Added host-initiated RMA operations in the IPC backend for the non-MPI
+   bootstrapping path: put, get, fence, quiet, arithmetic AMOs, and P2P sync ops
+* Added team creation using non-contiguous parent teams in the IPC backend
+* Added Python bindings of memory-management APIs
+* Added Python bindings coverage for team APIs
+* Added support for GPU initiated operations using the SDMA engines
+* Added ASAN build support
+
+### Changed
+* Changed default `ROCSHMEM_DEBUG_LEVEL` from `WARN` to `ERROR`
+* Performance optimizations:
+   * Separated put/get memcpy primitives to apply correct cache coherence semantics and fences
+   * Use constmem for backend variables and provider muxing
+   * Updated O(1) IPC availability check using pattern detection
+
+## rocSHMEM 3.4.0 for ROCm 7.13
 ### Added
 * Added new APIs:
    * `rocshmem_quiet_on_stream`
@@ -29,6 +56,7 @@
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
+  * `ROCSHMEM_MAX_SYMM_REGIONS`
 * Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
    * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
    * Requires ROCm 7.0+ and Linux kernel 5.6+

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <numeric>
@@ -184,8 +185,7 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
 std::string
 get_output_directory(const char* env_var = nullptr)
 {
-    const char* output_path =
-        std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH.data());
+    const char* output_path = std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH);
     if(output_path && std::strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
@@ -308,8 +308,8 @@ void
 validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES.data());
-    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES.data());
+    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES);
+    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES);
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
@@ -321,7 +321,7 @@ validate_configuration()
     }
 
     // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir     = std::getenv(env_vars::TMPDIR.data());
+    const char* tmpdir     = std::getenv(env_vars::TMPDIR);
     auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
@@ -522,49 +522,209 @@ line_contains_flag(const std::string& line, const std::string& flag)
 }
 }  // namespace
 
+namespace
+{
+// ---------------------------------------------------------------------------
+// Ordered source of truth for the group/domain help topic tables.
+//
+// Each group-topic entry carries everything the help system needs:
+//   * name     - the token accepted by --help=<name>
+//   * blurb    - the one-line description shown in the compact --help listing
+//   * sections - the option-section header(s) surfaced by --help=<name>
+//   * tools    - names of the tools ("run", "sample") whose compact
+//                listing should advertise this topic; empty means "all tools".
+//
+// get_help_topic_map() / get_domain_help_map() are derived views built from
+// these tables, and print_compact_help() iterates the same tables to render
+// the "Group topics"/"Domain topics" listing.
+// ---------------------------------------------------------------------------
+
+// Minimum column width for the topic name in the compact listing. The width is
+// grown at print time if a topic name would otherwise touch its blurb
+constexpr int topic_col_width = 13;
+constexpr int name_blurb_gap  = 2;
+
+struct group_topic_desc
+{
+    const char*                   name;
+    const char*                   blurb;
+    help_group_names              sections;
+    std::vector<std::string_view> tools{};  // empty => shown for all tools
+};
+
+const std::vector<group_topic_desc>&
+group_topic_table()
+{
+    static const std::vector<group_topic_desc> table = {
+        { "preset",
+          "Preset, domain, and export options",
+          { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
+        { "general",
+          "General options (output, trace, profile)",
+          { "[GENERAL OPTIONS]" } },
+        { "tracing", "Tracing-specific options", { "[TRACING OPTIONS]" } },
+        { "profiling", "Profile output format options", { "[PROFILE OPTIONS]" } },
+        { "output",
+          "Output format selection (proto/rocpd/json/text)",
+          { "[OUTPUT FORMAT OPTIONS]" } },
+        { "sampling",
+          "Sampling frequency and timer options",
+          { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
+            "[ADVANCED SAMPLING OPTIONS]" } },
+        { "process",
+          "Host/device process sampling options",
+          { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
+        { "counters",
+          "Hardware counter options (CPU/GPU events)",
+          { "[HARDWARE COUNTER OPTIONS]" } },
+        { "backend", "Backend options (include/exclude)", { "[BACKEND OPTIONS]" } },
+        { "execution",
+          "Execution control options (e.g., --fork)",
+          { "[EXECUTION OPTIONS]" },
+          { "run" } },
+        { "debug", "Debug, logging, and verbosity options", { "[DEBUG OPTIONS]" } },
+        { "misc", "Miscellaneous options", { "[MISCELLANEOUS OPTIONS]" } },
+    };
+    return table;
+}
+
+struct domain_topic_desc
+{
+    const char*       name;
+    domain_help_entry info;
+};
+
+const std::vector<domain_topic_desc>&
+domain_topic_table()
+{
+    static const std::vector<domain_topic_desc> table = {
+        { "gpu",
+          { "GPU metrics, device sampling, GPU counters",
+            { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",
+              "--process-duration", "-G", "--gpu-events", "--ai-nics", "--use-amd-smi",
+              "--amd-smi-metrics" } } },
+        { "cpu",
+          { "CPU sampling, timers, CPU counters",
+            { "--cpu", "-H", "--host", "-S", "--sample", "--sampling-freq",
+              "--sampling-wait", "--sampling-duration", "-t", "--tids",
+              "--sample-cputime", "--sample-realtime", "--sample-overflow", "-C",
+              "--cpu-events" } } },
+        { "rocm",
+          { "ROCm API tracing options",
+            { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
+              "--use-amd-smi", "--gpus", "--ai-nics" } } },
+        { "parallel",
+          { "MPI, OpenMP, Kokkos, RCCL options",
+            { "--parallel", "-I", "--include", "-E", "--exclude" } } },
+    };
+    return table;
+}
+
+// A topic is listed for a tool when it targets no specific tool (empty =>
+// all tools) or explicitly names the current tool. Shared by the compact
+// --help listing and the unknown-topic error so both stay in sync (e.g. the
+// 'execution' topic is gated to rocprof-sys-run only).
+bool
+shown_for_tool(const std::vector<std::string_view>& tools, std::string_view tool_name)
+{
+    return tools.empty() ||
+           std::find(tools.begin(), tools.end(), tool_name) != tools.end();
+}
+}  // namespace
+
 const help_topic_map&
 get_help_topic_map()
 {
-    static const help_topic_map map = {
-        { "preset", { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
-        { "general", { "[GENERAL OPTIONS]" } },
-        { "tracing", { "[TRACING OPTIONS]" } },
-        { "profiling", { "[PROFILE OPTIONS]" } },
-        { "sampling",
-          { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
-            "[ADVANCED SAMPLING OPTIONS]" } },
-        { "process", { "[HOST/DEVICE (PROCESS SAMPLING) OPTIONS]" } },
-        { "counters", { "[HARDWARE COUNTER OPTIONS]" } },
-        { "backend", { "[BACKEND OPTIONS]" } },
-        { "debug", { "[DEBUG OPTIONS]" } },
-        { "execution", { "[EXECUTION OPTIONS]" } },
-        { "misc", { "[MISCELLANEOUS OPTIONS]" } },
-    };
+    static const help_topic_map map = [] {
+        help_topic_map result;
+        for(const auto& topic : group_topic_table())
+            result.emplace(topic.name, topic.sections);
+        return result;
+    }();
     return map;
 }
 
 const domain_help_map&
 get_domain_help_map()
 {
-    static const domain_help_map map = {
-        { "gpu",
-          { "GPU metrics, device sampling, GPU counters",
-            { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",
-              "--process-duration", "-G", "--gpu-events", "--ai-nics" } } },
-        { "cpu",
-          { "CPU sampling, timers, CPU counters",
-            { "--cpu", "-H", "--host", "-S", "--sample", "-f", "--freq",
-              "--sampling-freq", "--sampling-wait", "--sampling-duration", "-t", "--tids",
-              "--cputime", "--sample-cputime", "--realtime", "--sample-realtime",
-              "--sample-overflow", "-C", "--cpu-events" } } },
-        { "rocm",
-          { "ROCm API tracing options",
-            { "--rocm", "-T", "--trace", "--hsa-interrupt" } } },
-        { "parallel",
-          { "MPI, OpenMP, Kokkos, RCCL options",
-            { "--parallel", "-I", "--include", "-E", "--exclude" } } },
+    static const domain_help_map map = [] {
+        domain_help_map result;
+        for(const auto& domain : domain_topic_table())
+            result.emplace(domain.name, domain.info);
+        return result;
+    }();
+    return map;
+}
+
+// Hand-curated topic relations. Listing a topic here surfaces it under
+// the "See also" footer of another topic. Keep the per-topic list short
+// (≤4 entries) so the footer stays useful rather than noisy.
+const related_topics_map&
+get_related_topics_map()
+{
+    static const related_topics_map map = {
+        { "tracing", { "rocm", "process", "backend", "output" } },
+        { "profiling", { "sampling", "counters", "backend", "output" } },
+        { "output", { "tracing", "profiling", "backend" } },
+        { "sampling", { "process", "profiling", "counters", "cpu" } },
+        { "process", { "gpu", "sampling" } },
+        { "counters", { "gpu", "cpu", "sampling" } },
+        { "backend", { "tracing", "profiling", "rocm" } },
+        { "general", { "preset", "tracing", "profiling" } },
+        { "preset", { "tracing", "profiling", "sampling" } },
+        { "misc", { "debug", "general" } },
+        { "gpu", { "rocm", "process", "counters" } },
+        { "cpu", { "sampling", "process", "counters" } },
+        { "rocm", { "gpu", "tracing", "parallel" } },
+        { "parallel", { "rocm", "sampling" } },
     };
     return map;
+}
+
+void
+print_see_also(std::string_view topic, std::ostream& out)
+{
+    const auto& relations = get_related_topics_map();
+    auto        it        = relations.find(topic);
+    if(it == relations.end() || it->second.empty()) return;
+
+    out << "\n  See also (related topics):\n";
+    for(const auto& related : it->second)
+        out << "    --help=" << related << "\n";
+}
+
+void
+print_topic_listing(std::string_view tool_name, std::ostream& out)
+{
+    // Grow the name column if any topic name would otherwise touch its blurb.
+    // "all" is synthetic (emitted below) but still participates in alignment.
+    const int name_width = [] {
+        std::size_t longest = std::string_view{ "all" }.size();
+        for(const auto& topic : group_topic_table())
+            longest = std::max(longest, std::string_view{ topic.name }.size());
+        for(const auto& domain : domain_topic_table())
+            longest = std::max(longest, std::string_view{ domain.name }.size());
+        return std::max<int>(topic_col_width, static_cast<int>(longest) + name_blurb_gap);
+    }();
+
+    const auto saved_flags = out.flags();
+    out << std::left;
+
+    out << "  Group topics:\n";
+    // "all" is a synthetic entry (dumps the full parser help) rather than a
+    // registered topic, so it is emitted here rather than living in the table.
+    out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
+    for(const auto& topic : group_topic_table())
+    {
+        if(!shown_for_tool(topic.tools, tool_name)) continue;
+        out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
+    }
+    out << "\n  Domain topics:\n";
+    for(const auto& domain : domain_topic_table())
+        out << "    " << std::setw(name_width) << domain.name << domain.info.description
+            << "\n";
+
+    out.flags(saved_flags);
 }
 
 void
@@ -592,26 +752,11 @@ print_compact_help(std::string_view tool_name, std::ostream& out)
         << "  -v, --verbose          Increase verbosity\n"
         << "\n"
         << "HELP TOPICS (use --help=<topic> for details)\n"
-        << "\n"
-        << "  Group topics:\n"
-        << "    all          Full help output (all options)\n"
-        << "    preset       Preset, domain, and export options\n"
-        << "    general      General options (output, trace, profile)\n"
-        << "    tracing      Tracing-specific options\n"
-        << "    profiling    Profile output format options\n"
-        << "    sampling     Sampling frequency and timer options\n"
-        << "    process      Host/device process sampling options\n"
-        << "    counters     Hardware counter options (CPU/GPU events)\n"
-        << "    backend      Backend options (include/exclude)\n"
-        << "    debug        Debug, logging, and verbosity options\n"
-        << "    misc         Miscellaneous options\n"
-        << "\n"
-        << "  Domain topics:\n"
-        << "    gpu          GPU metrics, device sampling, GPU counters\n"
-        << "    cpu          CPU sampling, timers, CPU counters\n"
-        << "    rocm         ROCm API tracing options\n"
-        << "    parallel     MPI, OpenMP, Kokkos, RCCL options\n"
-        << "\n"
+        << "\n";
+
+    print_topic_listing(tool_name, out);
+
+    out << "\n"
         << "EXAMPLES\n"
         << "  rocprof-sys-" << tool_name << " --preset=balanced -- ./myapp\n"
         << "  rocprof-sys-" << tool_name << " --preset=trace-hpc --rocm -- ./hpc_app\n"
@@ -643,7 +788,6 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         size_t      end;
         std::string header;
     };
-    size_t               preamble_end = lines.size();
     std::vector<Section> sections;
 
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
@@ -651,10 +795,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         std::string bracket_name;
         if(is_section_header(lines[line_idx], bracket_name))
         {
-            if(sections.empty())
-                preamble_end = line_idx;
-            else
-                sections.back().end = line_idx;
+            if(!sections.empty()) sections.back().end = line_idx;
             sections.push_back({ line_idx, lines.size(), bracket_name });
         }
     }

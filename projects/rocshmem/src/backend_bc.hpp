@@ -33,6 +33,7 @@
  * It is the top-level interface for these resources.
  */
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -199,6 +200,33 @@ class Backend {
   std::map<uintptr_t, size_t> user_buffer_regions;
 
   /**
+   * @brief Per-symmetric-registration record kept on the host.
+   */
+  struct SymmRegion {
+    size_t length{0};       // registered length in bytes
+    uintptr_t orig_base{0}; // user's original buffer base address
+  };
+
+  /**
+   * @brief Symmetric registrations keyed by the rocSHMEM-managed alias address.
+   *
+   * The alias is the address returned to (and used by) the caller; it is the
+   * key for unregistration and the base that needs unmapping at cleanup. The
+   * stored orig_base ties the alias back to the user's original buffer so its
+   * entry in symm_orig_regions can be removed on unregister.
+   */
+  std::map<uintptr_t, SymmRegion> symm_buffer_regions;
+
+  /**
+   * @brief User original buffer ranges keyed by original base address.
+   *
+   * Used to reject overlapping registrations of the same underlying buffer.
+   * Aliases are freshly reserved virtual addresses and never overlap, so
+   * overlap detection must be performed against the original addresses.
+   */
+  std::map<uintptr_t, size_t> symm_orig_regions;
+
+  /**
    * @brief Register a user buffer.
    */
   virtual int buffer_register(void *addr, size_t length);
@@ -207,6 +235,38 @@ class Backend {
    * @brief Unregister a user buffer.
    */
   virtual int buffer_unregister(void *addr);
+
+  /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  virtual void buffer_unregister_all();
+
+  /**
+   * @brief Register a symmetric user buffer (collective).
+   *
+   * The base implementation performs the common host-side work: argument
+   * validation, mapping the user's buffer to a fresh rocSHMEM-owned virtual
+   * address (the "alias"), capacity enforcement (ROCSHMEM_MAX_SYMM_REGIONS),
+   * duplicate detection, and recording the registration (keyed by the alias)
+   * in symm_buffer_regions. The alias is returned via @p registered_addr and
+   * is the address the caller must use for RMA and for unregistration.
+   *
+   * @param[in]  addr            User's VMM allocation to register
+   * @param[in]  length          Length in bytes
+   * @param[out] registered_addr Filled with the rocSHMEM-managed alias address
+   */
+  virtual int buffer_register_symmetric(void *addr, size_t length,
+                                        void **registered_addr);
+
+  /**
+   * @brief Unregister a symmetric user buffer (collective).
+   *
+   * The base implementation removes the registration from
+   * symm_buffer_regions. Backends override to release transport-specific
+   * resources and call Backend::buffer_unregister_symmetric for the common
+   * portion.
+   */
+  virtual int buffer_unregister_symmetric(void *addr);
 
   /**
    * @brief High level device stats that do not depend on backend type.
@@ -293,7 +353,7 @@ class Backend {
    */
   TeamTracker team_tracker{};
 
-  BackendType get_backend_type() { return type; }
+  BackendType get_type() { return type; }
 
   /**
    * Fine grained memory allocator for buffers used in collectives Routines
@@ -301,6 +361,31 @@ class Backend {
   HIPAllocator *psync_allocator_{nullptr};
 
  protected:
+  /**
+   * @brief Alignment for regions carved from a backend's work/sync pool.
+   *
+   * The barrier_sync and pSync pools are accessed with 64-bit atomics, which
+   * require 8-byte alignment.
+   */
+  static constexpr size_t wrk_sync_pool_alignment{alignof(int64_t)};
+
+  /* @brief Maximum number of concurrent symmetric buffer registrations.
+   *
+   * Configured via ROCSHMEM_MAX_SYMM_REGIONS (see envvar::max_symm_regions)
+   * and shared by every backend that supports symmetric registration.
+   */
+  size_t max_symm_regions_{0};
+
+  /**
+   * @brief Collective all-gather of fixed-size per-PE blobs.
+   *
+   * @p inout points to a contiguous array of num_pes elements, each
+   * @p bytes_per_pe long. The calling PE's slot (index my_pe) must already be
+   * populated on entry. Works with either the MPI or TCP bootstrap transport.
+   * Shared helper for backends exchanging registration handles.
+   */
+  void symm_allgather(void *inout, size_t bytes_per_pe);
+
   /**
    * @brief Required to support static inheritance for device calls.
    *
@@ -315,14 +400,30 @@ class Backend {
   BackendType type;
 
   /**
-   * @brief Dumps derived class statistics.
+   * @brief Copies per-context device-side stats from the hipMalloc ctx_array
+   *        into globalStats via hipMemcpy, so that dump_stats() can read them
+   *        from the host.  Default implementation is a no-op for backends that
+   *        do not have a device ctx_array.
    */
-  virtual void dump_backend_stats() = 0;
+  virtual void accumulate_ctx_device_stats() {}
 
   /**
-   * @brief Resets derived class statistics.
+   * @brief Accumulates the default host context's ctxHostStats into
+   *        globalHostStats.  The default host context is not in list_of_ctxs
+   *        (to avoid a double-free with its owning unique_ptr), so it must be
+   *        handled separately.  Default is a no-op.
    */
-  virtual void reset_backend_stats() = 0;
+  virtual void accumulate_default_host_ctx_stats() {}
+
+  /**
+   * @brief Dumps derived class statistics. Default is a no-op.
+   */
+  virtual void dump_backend_stats() {}
+
+  /**
+   * @brief Resets derived class statistics. Default is a no-op.
+   */
+  virtual void reset_backend_stats() {}
 
  private:
   /**

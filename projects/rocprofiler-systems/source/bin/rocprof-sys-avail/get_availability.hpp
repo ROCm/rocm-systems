@@ -8,12 +8,13 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
 #include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/macros.hpp>
 
@@ -22,38 +23,23 @@
 struct unknown
 {};
 
-template <typename T, typename U = typename T::value_type>
-constexpr bool
-available_value_type_alias(int)
-{
-    return true;
-}
-
-template <typename T, typename U = unknown>
-constexpr bool
-available_value_type_alias(long)
-{
-    return false;
-}
-
-template <typename Type, bool>
-struct component_value_type;
+template <typename T>
+concept has_value_type = requires { typename T::value_type; };
 
 template <typename Type>
-struct component_value_type<Type, true>
+struct component_value_type
+{
+    using type = unknown;
+};
+
+template <has_value_type Type>
+struct component_value_type<Type>
 {
     using type = typename Type::value_type;
 };
 
 template <typename Type>
-struct component_value_type<Type, false>
-{
-    using type = unknown;
-};
-
-template <typename Type>
-using component_value_type_t =
-    typename component_value_type<Type, available_value_type_alias<Type>(0)>::type;
+using component_value_type_t = typename component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
@@ -133,7 +119,7 @@ get_availability<Type>::get_info()
                               : std::string("");
     auto description =
         (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = demangle<value_type>();
+    auto     data_type = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
     string_t id_type   = property_t::id();
     auto     ids_set   = property_t::ids();
@@ -149,16 +135,25 @@ get_availability<Type>::get_info()
         auto     itr = ids_set.begin();
         string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
         string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
-        if(has_metadata) description += ". " + metadata_t::extra_description();
+        if(has_metadata)
+        {
+            description += ". " + metadata_t::extra_description();
+        }
         description += ".";
         while(itr->empty())
+        {
             ++itr;
+        }
         if(itr != ids_set.end())
-            ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
+        {
+            ids_str = fmt::format("{}{}{}", db, *itr++, de);
+        }
         for(; itr != ids_set.end(); ++itr)
         {
             if(!itr->empty())
-                ids_str = TIMEMORY_JOIN(", ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+            {
+                ids_str = fmt::format("{}, {}{}{}", ids_str, db, *itr, de);
+            }
         }
     }
 

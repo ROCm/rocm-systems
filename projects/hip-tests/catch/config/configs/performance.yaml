@@ -37,8 +37,12 @@ performance:
   Performance_hipMemcpyHtoA:
     <<: *level_2
     tags: [image]
-  Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned: *level_2
-  Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_4ByteOffset: *level_2
+  Performance_hipMemcpyBatchAsync_D2D: *level_2
+  Performance_hipMemcpyBatchAsync_P2P: *level_2
+  Performance_hipMemcpyBatchAsync_H2D_Pageable: *level_2
+  Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_2
+  Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_2
+  Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_2
   Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_2
   Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_2
   Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_2
@@ -194,3 +198,62 @@ performance:
   Performance_Reduce_Sync_And: *level_2
   Performance_Reduce_Sync_Or: *level_2
   Performance_Reduce_Sync_Xor: *level_2
+  Performance_hipPerfDotProduct: *level_2
+  Performance_hipPerfMandelbrot: *level_2
+  Performance_hipPerfDispatchAndExecutionSpeed: *level_2
+  Performance_hipKernelLookup: *level_2
+  Performance_hipEventOverflow: *level_2
+  Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations: *level_2
+  Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps: *level_2
+  Performance_GraphWithMoreAllocFreeNodes_MultipleBranches: *level_2
+  Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches: *level_2
+  Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch: *level_2
+  Performance_hipGraph_ParallelGraph: *level_2
+  Performance_hipGraph_WithStreamOperations: *level_2
+  Performance_hipGraph_WithStreamCapture: *level_2
+  Performance_GraphTopology_Straight: *level_2
+  Performance_GraphTopology_Parallel: *level_2
+  Performance_GraphTopology_Hexagon: *level_2
+  Performance_GraphTopology_Mixed: *level_2
+  Performance_PyFR_Couette_IndividualGraphs: *level_2
+  Performance_PyFR_Couette_StepSimulation: *level_2
+  Performance_PyFR_Couette_SingleIteration: *level_2
+  Performance_hipPerfMemcpy_test: *level_2
+  Performance_hipPerfBufferCopyRectSpeed_test: *level_2
+  Performance_hipPerfBufferCopySpeed_test: *level_2
+  Performance_hipPerfDevMemReadSpeed_test: *level_2
+  Performance_hipPerfDevMemWriteSpeed_test: *level_2
+  Performance_hipPerfMemFill_test: *level_2
+  Performance_hipPerfMemMallocCpyFree_test: *level_2
+  Performance_hipPerfMemset_test: *level_2
+  Performance_hipPerfSampleRate_test: *level_2
+  Performance_hipPerfSharedMemReadSpeed_test: *level_2
+  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU: *level_2
+  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU: *level_2
+  Performance_hipTestP2PUniDirKernelCopy_test_Timing_CPU: *level_2
+  Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU: *level_2
+  Performance_hipTestP2PBiDirMemcpyAsync_test: *level_2
+  Performance_hipTestP2PBiDirKernelCopy_test: *level_2
+  Performance_hipCheckP2PSupport: *level_2
+  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local: *level_2
+  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_2
+  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local: *level_2
+  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes: *level_2
+  Performance_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local: *level_2
+  Performance_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_2
+  Performance_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local: *level_2
+  Performance_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes: *level_2
+  Performance_MempoolManager_hipMallocAsync_hipFreeAsync: *level_2
+  Performance_DeviceHeapMemoryAllocation: *level_2
+  Performance_PerfBufferCopySpeedAll2All_Inter_GPU: *level_2
+  Performance_hipPerfMemcpyAsyncSpeed_test: *level_2
+  Performance_hipPerfMemsetAsyncSpeed_test: *level_2
+  Performance_hipPerfHostNumaAlloc_test: *level_2
+  Performance_hipPerfDeviceConcurrency: *level_2
+  Performance_hipPerfStreamConcurrency: *level_2
+  Performance_hipPerfStreamCreateCopyDestroy: *level_2
+  Performance_KernelLaunchLatency_IncreasingNumberOfStreams: *level_2
+  Performance_hipPerfMultiStreamKernelLaunch: *level_2
+  Performance_hipPerfVMMAllocSpeed_test: *level_2
+  Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_2
+  Performance_Graph_CollapseCorrectness: *level_2

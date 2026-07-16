@@ -25,6 +25,8 @@
 
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

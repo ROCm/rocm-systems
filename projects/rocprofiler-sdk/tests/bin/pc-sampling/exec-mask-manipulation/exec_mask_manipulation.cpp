@@ -28,6 +28,14 @@ THE SOFTWARE.
 #define ITER_NUM   16 * 1024
 #define BLOCK_SIZE 1024
 
+// In some cases, there might be a skid between exec-mask and the PC.
+// Thus we inject some nops around branches in our testing kernels.
+#define EXEC_MASK_SKID                                                                             \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");                                                                     \
+    asm volatile("s_nop 1\n");
+
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
         hipError_t error_ = (CALL);                                                                \
@@ -60,6 +68,7 @@ kernel1(const int c, const int iter_num)
 #pragma nounroll
     for(int i = 0; i < iter_num; i++)
     {
+        EXEC_MASK_SKID;
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
@@ -160,6 +169,7 @@ kernel1(const int c, const int iter_num)
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
+        EXEC_MASK_SKID;
     }
 }
 
@@ -170,6 +180,7 @@ kernel2(const int c, const int iter_num)
 #pragma nounroll
     for(int i = 0; i < iter_num; i++)
     {
+        EXEC_MASK_SKID;
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
@@ -270,6 +281,7 @@ kernel2(const int c, const int iter_num)
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
+        EXEC_MASK_SKID;
     }
 }
 
@@ -285,6 +297,7 @@ kernel3(const float c, const int iter_num)
     {
         if(tid_even == 0)
         {
+            EXEC_MASK_SKID;
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
@@ -385,9 +398,11 @@ kernel3(const float c, const int iter_num)
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
             asm volatile("v_rcp_f64 %0, %0\n" : "+v"(a), "=s"(i) : "s"(c));
+            EXEC_MASK_SKID;
         }
         else
         {
+            EXEC_MASK_SKID;
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
@@ -488,6 +503,7 @@ kernel3(const float c, const int iter_num)
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
             asm volatile("v_rcp_f32 %0, %0\n" : "+v"(d), "=s"(e) : "s"(c));
+            EXEC_MASK_SKID;
         }
     }
 }

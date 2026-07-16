@@ -33,11 +33,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
-    int managed_memory = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    }
+    CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
 
   for (size_t i = 0; i < N; i++) {
@@ -63,11 +59,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   for (int i = 0; i < numDevices; i++) {
-    int managed_memory = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    }
+    CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
 
   for (int i = 0; i < numDevices; i++) {

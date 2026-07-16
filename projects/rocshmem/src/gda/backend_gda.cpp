@@ -115,10 +115,17 @@ void GDABackend::init() {
                                                      &heap);
 
   setup_wrk_sync_buffer();
-  setup_fence_buffer();
   setup_collectives();
 
   setup_teams();
+
+  /*
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
+   */
+  setup_fence_buffer();
+
   setup_team_world();
   rte_barrier();
 
@@ -266,6 +273,8 @@ void GDABackend::setup_ipc() {
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_comm);
   else
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_bootstr);
+
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void GDABackend::cleanup_ipc() {
@@ -323,7 +332,7 @@ void GDABackend::setup_ctxs() {
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     rocshmem_ctx_array_device[i].ctx_opaque  = &ctx_array[i];
-    rocshmem_ctx_array_device[i].team_opaque = team_tracker.get_team_world()->tinfo_wrt_world;
+    rocshmem_ctx_array_device[i].team_opaque = nullptr;
   }
 
   CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
@@ -614,13 +623,36 @@ int GDABackend::buffer_unregister(void *addr) {
   return err;
 }
 
-void GDABackend::reset_backend_stats() {
-  assert(false);
+void GDABackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
 }
 
-void GDABackend::dump_backend_stats() {
-  assert(false);
+void GDABackend::buffer_unregister_all() {
+  /* Deregister all buffers with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    host_qps[i].buffer_unregister_all();
+  }
+
+  /* Clear the ptr cache */
+  Backend::buffer_unregister_all();
 }
+
+void GDABackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
+}
+
+void GDABackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
+}
+
 
 __host__ void GDABackend::global_exit(int status) {
   if (backend_comm != MPI_COMM_NULL)
@@ -647,7 +679,7 @@ void GDABackend::setup_wrk_sync_buffer() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -657,7 +689,7 @@ void GDABackend::setup_wrk_sync_buffer() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
@@ -666,10 +698,14 @@ void GDABackend::setup_wrk_sync_buffer() {
    */
   wrk_sync_pool_size_ += sizeof(int) * num_pes; //TODO: do we need a fence array?
 
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
+
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using heap memory
    * (should be uncached fine-grained ideally)
-  */
+   */
   heap.malloc((void**)&wrk_sync_pool_, wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
@@ -680,9 +716,7 @@ void GDABackend::cleanup_wrk_sync_buffer() {
 }
 
 void GDABackend::setup_fence_buffer() { //TODO is this used?
-  /*
-   * Reserve memory for fence
-   */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
@@ -694,6 +728,9 @@ void GDABackend::setup_collectives() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -717,6 +754,9 @@ void GDABackend::setup_teams() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;
@@ -927,12 +967,6 @@ int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
 
-  /* Libnuma ? */
-  if (!numa.is_available()) {
-    LOG_WARN("GDA backend unavailable: libnuma support is missing");
-    return ROCSHMEM_ERROR;
-  }
-
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;
 
@@ -1018,8 +1052,8 @@ void GDABackend::cleanup_ibv() {
       qp_allocator_->deallocate(bnxt_qps[i].sq_buf);
       qp_allocator_->deallocate(bnxt_qps[i].rq_buf);
 
-      close(bnxt_qps[i].sq_dmabuf_fd);
-      close(bnxt_qps[i].rq_dmabuf_fd);
+      if (bnxt_qps[i].sq_dmabuf_fd > 0) close(bnxt_qps[i].sq_dmabuf_fd);
+      if (bnxt_qps[i].rq_dmabuf_fd > 0) close(bnxt_qps[i].rq_dmabuf_fd);
 
       err = bnxt_re_dv.destroy_cq(bnxt_scqs[i].cq);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_cq (SCQ)");
@@ -1033,8 +1067,8 @@ void GDABackend::cleanup_ibv() {
       err = bnxt_re_dv.umem_dereg(bnxt_rcqs[i].umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (RCQ)");
 
-      close(bnxt_scqs[i].dmabuf_fd);
-      close(bnxt_rcqs[i].dmabuf_fd);
+      if (bnxt_scqs[i].dmabuf_fd > 0) close(bnxt_scqs[i].dmabuf_fd);
+      if (bnxt_rcqs[i].dmabuf_fd > 0) close(bnxt_rcqs[i].dmabuf_fd);
 
       qp_allocator_->deallocate(bnxt_scqs[i].buf);
       qp_allocator_->deallocate(bnxt_rcqs[i].buf);
@@ -1653,18 +1687,6 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_vector   = 0;
   cq_attr.flags         = 0;
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
-  /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
-   *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
-   *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
-   *  - see Mellanox Adapters Programmer’s Reference Manual Rev 0.40, §7.12.8, Tables 75-76
-   *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
-   *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
-   *    for how this flag sets the bit */
-  if (gda_provider == GDAProvider::MLX5) {
-    cq_attr.cqe         = 1;
-    cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
-    cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
-  }
 
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);

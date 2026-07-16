@@ -890,9 +890,9 @@ hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // 1 per WGP (i.e. for a total number equal to half the number of CUs per Shader Engine)
+  // 1 per CU (the result is the number CUs on the smallest Shader Engine of the design)
   // Note that for devices not supporting clustered launches, clusterSize would be set
-  // to zero (but the function does not necessarily return an error)
+  // to one
   *clusterSize = device.info().clusterMaxSize_;
   HIP_RETURN(hipSuccess);
 }
@@ -959,7 +959,6 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
   hipFunction_t func;
   hipError_t hip_error = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
   const amd::device::Info& deviceInfo = device.info();
-
   if ((hip_error != hipSuccess) || (func == nullptr)) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -1009,7 +1008,8 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
   if (hip_error == hipSuccess) {
     // a maximum of 15 total clusters in flight per shader engine are possible (gfx1250)
     static constexpr int MaxClustersPerSE = 15;
-    int clustersPerSE = (numBlocks * deviceInfo.clusterMaxSize_) / totalClusterSize;
+    int computeUnitsPerSE = deviceInfo.maxComputeUnits_ / deviceInfo.numberOfShaderEngines_;
+    int clustersPerSE = (numBlocks * computeUnitsPerSE) / totalClusterSize;
 
     clustersPerSE = std::min(clustersPerSE, MaxClustersPerSE);
     *numClusters = clustersPerSE * deviceInfo.numberOfShaderEngines_;
@@ -1211,41 +1211,6 @@ void PlatformState::ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
 void PlatformState::PopExec(ihipExec_t& exec) {
   exec = std::move(hip::tls.exec_stack_.top());
   hip::tls.exec_stack_.pop();
-}
-
-// ================================================================================================
-std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  std::scoped_lock lock(ufd_lock_);
-
-  auto it = ufd_map_.find(file_path);
-  if (it != ufd_map_.end()) {
-    return it->second;
-  }
-
-  // Get the file desc and file size from amd::Os API
-  amd::Os::FileDesc fdesc;
-  size_t fsize = 0;
-  if (!amd::Os::GetFileHandle(file_path.c_str(), &fdesc, &fsize)) {
-    return nullptr;
-  }
-  
-  auto ufd = std::make_shared<UniqueFD>(file_path, fdesc, fsize);
-  ufd_map_.emplace(file_path, ufd);
-  return ufd;
-}
-
-// ================================================================================================
-bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  std::scoped_lock lock(ufd_lock_);
-
-  // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
-  if (ufd.use_count() == 2) {
-    ufd_map_.erase(ufd->fpath_);
-    if (!amd::Os::CloseFileHandle(ufd->fdesc_)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // ================================================================================================

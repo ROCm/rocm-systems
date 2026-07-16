@@ -24,7 +24,9 @@ __device__ static inline unsigned __hip_ds_bpermute(int index, unsigned src) {
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)
+              ? __builtin_amdgcn_ds_bpermute(index, tmp.i)
+              : 0;
   return tmp.u;
 }
 
@@ -35,7 +37,9 @@ __device__ static inline float __hip_ds_bpermutef(int index, float src) {
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)
+              ? __builtin_amdgcn_ds_bpermute(index, tmp.i)
+              : 0;
   return tmp.f;
 }
 
@@ -46,7 +50,9 @@ __device__ static inline unsigned __hip_ds_permute(int index, unsigned src) {
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)
+              ? __builtin_amdgcn_ds_permute(index, tmp.i)
+              : 0;
   return tmp.u;
 }
 
@@ -57,7 +63,9 @@ __device__ static inline float __hip_ds_permutef(int index, float src) {
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_permute)
+              ? __builtin_amdgcn_ds_permute(index, tmp.i)
+              : 0;
   return tmp.f;
 }
 
@@ -71,7 +79,9 @@ template <int pattern> __device__ static inline unsigned __hip_ds_swizzle_N(unsi
     float f;
   } tmp;
   tmp.u = src;
-  tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)
+              ? __builtin_amdgcn_ds_swizzle(tmp.i, pattern)
+              : 0;
   return tmp.u;
 }
 
@@ -82,7 +92,9 @@ template <int pattern> __device__ static inline float __hip_ds_swizzlef_N(float 
     float f;
   } tmp;
   tmp.f = src;
-  tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
+  tmp.i = __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_swizzle)
+              ? __builtin_amdgcn_ds_swizzle(tmp.i, pattern)
+              : 0;
   return tmp.f;
 }
 
@@ -91,12 +103,16 @@ template <int pattern> __device__ static inline float __hip_ds_swizzlef_N(float 
 
 template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl>
 __device__ static inline int __hip_move_dpp_N(int src) {
-  return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp))
+    return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+  __builtin_trap();
 }
 
 inline __device__ const struct {
   __device__ __attribute__((always_inline, const)) operator int() const noexcept {
-    return __builtin_amdgcn_wavefrontsize();
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_wavefrontsize))
+      return __builtin_amdgcn_wavefrontsize();
+    __builtin_trap();
   }
 } warpSize{};
 
@@ -106,7 +122,9 @@ __device__ inline int __all(int predicate) { return __ockl_wfall_i32(predicate);
 __device__ inline int __any(int predicate) { return __ockl_wfany_i32(predicate); }
 
 __device__ inline unsigned long long int __ballot(int predicate) {
-  return __builtin_amdgcn_ballot_w64(predicate);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ballot_w64))
+    return __builtin_amdgcn_ballot_w64(predicate);
+  __builtin_trap();
 }
 
 __device__ inline unsigned long long int __ballot64(int predicate) { return __ballot(predicate); }
@@ -119,14 +137,23 @@ __device__ inline unsigned long long __activemask() { return __ballot(true); }
 #endif  // HIP_DISABLE_WARP_SYNC_BUILTINS
 
 __device__ static inline unsigned int __lane_id() {
-  if (static_cast<int>(warpSize) == 32) return __builtin_amdgcn_mbcnt_lo(-1, 0);
-  return __builtin_amdgcn_mbcnt_hi(-1, __builtin_amdgcn_mbcnt_lo(-1, 0));
+  if (static_cast<int>(warpSize) == 32) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo))
+      return __builtin_amdgcn_mbcnt_lo(-1, 0);
+    __builtin_trap();
+  }
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi))
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo))
+      return __builtin_amdgcn_mbcnt_hi(-1, __builtin_amdgcn_mbcnt_lo(-1, 0));
+  __builtin_trap();
 }
 
 __device__ inline int __shfl(MAYBE_UNDEF int var, int src_lane, int width = warpSize) {
   int self = __lane_id();
   int index = (src_lane & (width - 1)) + (self & ~(width - 1));
-  return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+    return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  __builtin_trap();
 }
 __device__ inline unsigned int __shfl(MAYBE_UNDEF unsigned int var, int src_lane,
                                       int width = warpSize) {
@@ -242,7 +269,9 @@ __device__ inline int __shfl_up(MAYBE_UNDEF int var, unsigned int lane_delta,
   int self = __lane_id();
   int index = self - lane_delta;
   index = (index < (self & ~(width - 1))) ? self : index;
-  return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+    return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  __builtin_trap();
 }
 __device__ inline unsigned int __shfl_up(MAYBE_UNDEF unsigned int var, unsigned int lane_delta,
                                          int width = warpSize) {
@@ -361,7 +390,9 @@ __device__ inline int __shfl_down(MAYBE_UNDEF int var, unsigned int lane_delta,
   int self = __lane_id();
   int index = self + lane_delta;
   index = (int)((self & (width - 1)) + lane_delta) >= width ? self : index;
-  return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+    return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  __builtin_trap();
 }
 __device__ inline unsigned int __shfl_down(MAYBE_UNDEF unsigned int var, unsigned int lane_delta,
                                            int width = warpSize) {
@@ -476,7 +507,9 @@ __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width =
   int self = __lane_id();
   int index = self ^ lane_mask;
   index = index >= ((self + width) & ~(width - 1)) ? self : index;
-  return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute))
+    return __builtin_amdgcn_ds_bpermute(index << 2, var);
+  __builtin_trap();
 }
 __device__ inline unsigned int __shfl_xor(MAYBE_UNDEF unsigned int var, int lane_mask,
                                           int width = warpSize) {

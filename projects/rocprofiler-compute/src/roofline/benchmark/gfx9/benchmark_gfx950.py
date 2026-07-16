@@ -16,16 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx950 Class
 # =============================================================================
 class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.unsupported_data_types = []
-
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 32 * 1024, 256>",
-            "L2": "Cache_bw<float, 4 * 1024 * 1024, 256>",
-            "MALL": "Cache_bw<float, 64 * 1024 * 1024, 256>",
-        }
 
         self.matrix_ops = {
             "F4": 131072,
@@ -37,12 +31,6 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             "BF16": 32768,
             "I8": 65536,
             "F64": 2048,
-        }
-
-        self.cache_sizes = {
-            "L1": 32 * 1024,
-            "L2": 4 * 1024 * 1024,
-            "MALL": 64 * 1024 * 1024,
         }
 
     # -----------------------------------------------------------------------------
@@ -185,6 +173,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
                             0
                         );
                     }
+                    break;
                 case BF8_E5M2: // bf8 x bf8
                     for(int i = 0; i < iter; ++i)
                     {

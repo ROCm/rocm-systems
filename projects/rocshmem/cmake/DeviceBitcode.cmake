@@ -16,9 +16,14 @@ find_program(LLVM_LINK llvm-link
                ${ROCM_PATH}/llvm/bin
                ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
                NO_DEFAULT_PATH QUIET)
+find_program(LLVM_OPT opt
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH QUIET)
 
-if(NOT LLVM_CLANG OR NOT LLVM_LINK)
-  message(WARNING "ROCm LLVM tools (clang++, llvm-link) not found under "
+if(NOT LLVM_CLANG OR NOT LLVM_LINK OR NOT LLVM_OPT)
+  message(WARNING "ROCm LLVM tools (clang++, llvm-link, opt) not found under "
                   "${ROCM_PATH}/llvm/bin; skipping device bitcode targets.")
   return()
 endif()
@@ -34,13 +39,33 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
-# Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
+# Convert arch feature suffix to clang -Xclang -target-feature flags.
+# gfx950:sramecc+:xnack-  ->  "-Xclang;-target-feature;-Xclang;+sramecc;-Xclang;-target-feature;-Xclang;-xnack"
+# Caller passes the list directly to add_custom_command COMMAND.
+function(arch_features_to_target_feature_flags full_arch out_var)
+  string(REPLACE ":" ";" _all_tokens "${full_arch}")
+  list(LENGTH _all_tokens _ntokens)
+  set(_flags "")
+  if(_ntokens GREATER 1)
+    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
+    foreach(_tok ${_feat_tokens})
+      if(_tok STREQUAL "")
+        continue()
+      endif()
+      # "sramecc+" -> "+sramecc", "xnack-" -> "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _feat "${_tok}")
+      list(APPEND _flags -Xclang -target-feature -Xclang ${_feat})
+    endforeach()
+  endif()
+  set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
+# Resolve the target arch list: GPU_TARGETS CMake var -> auto-detect local GPUs.
+# Both accept comma- or semicolon-separated lists.
 if(GPU_TARGETS)
   # Convert comma-separated string to CMake list (semicolon-separated)
   # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
   string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
-  # Ensure it's treated as a list even if already semicolon-separated
-  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
   strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
@@ -55,8 +80,27 @@ endif()
 
 set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architectures for device bitcode (semicolon-separated)")
 
+# BITCODE_GPU_ARCHS_FULL: full arch strings with feature suffixes (e.g.
+# gfx950:sramecc+:xnack-), used by CMakeDeviceBitcodeTester to pass the correct
+# -target-feature flags to clang. These are embedded in the HSACO amdhsa.target
+# metadata string, which HIP validates when loading the module — a mismatch causes error 209.
+#
+# GPU_TARGETS_FULL is set by the main CMakeLists.txt from the user-supplied
+# GPU_TARGETS value before rocm_check_target_ids strips feature suffixes.
+# When available, use it as the source of truth for per-arch feature strings.
+# Fall back to bare arch names when building with auto-detected GPUs (where
+# no suffix information is available without querying the hardware directly).
+if(GPU_TARGETS_FULL)
+  string(REPLACE "," ";" _GPU_TARGETS_FULL_LIST "${GPU_TARGETS_FULL}")
+  set(_BITCODE_FULL_LIST ${_GPU_TARGETS_FULL_LIST})
+else()
+  set(_BITCODE_FULL_LIST ${_BITCODE_DEFAULT_ARCHS})
+endif()
+set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
+  "Full GPU arch strings with feature suffixes for device bitcode (e.g. gfx950:sramecc+:xnack-)")
+
 # -fvisibility=default ensures extern "C" device API symbols remain
-# externally visible after llvm-link and llc.
+# externally visible after llvm-link and clang backend compilation.
 set(BITCODE_COMPILE_FLAGS_BASE
     -Wall
     -Wextra
@@ -65,6 +109,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -O3
     -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -90,6 +135,7 @@ endif()
 # the device-side create_ctx/destroy_ctx dispatchers)
 set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_gpu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_tile_gpu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/team.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/sync/abql_block_mutex.cpp
@@ -153,9 +199,18 @@ if(USE_GDA)
 endif()
 
 # Build bitcode for each GPU architecture
+#
+# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) are DCE'd
+# by LLVM's -O3 passes when compiled per-TU: no amdgpu_kernel in the same TU
+# calls them, so the optimizer treats them as dead.  Fix: compile each source
+# with -Xclang -disable-llvm-passes (frontend runs at -O3, LLVM DCE is skipped,
+# all __device__ bodies are retained), then run opt -O3 over the merged BC where
+# all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
-  set(BITCODE_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch})
+  # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch}
+                     -Xclang -disable-llvm-passes)
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})
     get_filename_component(src_name ${src_file} NAME_WE)
@@ -165,21 +220,31 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
     add_custom_command(
       OUTPUT ${bc_file}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}
-      COMMAND ${LLVM_CLANG} ${BITCODE_COMPILE_FLAGS} -c ${src_file} -o ${bc_file}
+      COMMAND ${LLVM_CLANG} ${_COMPILE_FLAGS} -c ${src_file} -o ${bc_file}
       DEPENDS ${src_file}
       COMMENT "Compiling ${src_name} to bitcode for ${gpu_arch}"
       VERBATIM
     )
   endforeach()
 
+  set(_UNOPT_BC ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}/librocshmem_device_${gpu_arch}_unopt.bc)
   set(BITCODE_OUTPUT_${gpu_arch} ${CMAKE_CURRENT_BINARY_DIR}/librocshmem_device_${gpu_arch}.bc)
   list(APPEND ALL_BITCODE_OUTPUTS ${BITCODE_OUTPUT_${gpu_arch}})
 
   add_custom_command(
-    OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
-    COMMAND ${LLVM_LINK} ${BITCODE_OBJECTS_${gpu_arch}} -o ${BITCODE_OUTPUT_${gpu_arch}}
+    OUTPUT ${_UNOPT_BC}
+    COMMAND ${LLVM_LINK} ${BITCODE_OBJECTS_${gpu_arch}} -o ${_UNOPT_BC}
     DEPENDS ${BITCODE_OBJECTS_${gpu_arch}}
     COMMENT "Linking device bitcode for ${gpu_arch}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
+    COMMAND ${LLVM_OPT} -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
+            ${_UNOPT_BC} -o ${BITCODE_OUTPUT_${gpu_arch}}
+    DEPENDS ${_UNOPT_BC}
+    COMMENT "Optimizing device bitcode for ${gpu_arch}"
     VERBATIM
   )
 

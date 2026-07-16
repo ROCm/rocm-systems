@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/units.hpp"
 #include "core/perfetto.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
@@ -10,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <spdlog/fmt/fmt.h>
-#include <timemory/units.hpp>
 
 #include <vector>
 
@@ -62,7 +62,7 @@ make_default_tracks()
 {
     return {
         { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
-        { UMC_BUSY_VALUE, { "UMC Busy", "%", {} } },
+        { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
         { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
         { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
         { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
@@ -247,8 +247,18 @@ struct perfetto_policy
             }
             else
             {
+                const char* track_name = description.track_name;
+                if(num == detail::CURRENT_POWER_VALUE)
+                {
+                    // Label reflects the reading actually emitted (current vs. average),
+                    // based on what this device supports and the user enabled.
+                    enabled_metrics effective_power{};
+                    effective_power.value =
+                        enabled_metric_config.value & device_data.supported_metrics.value;
+                    track_name = socket_power_track_label(effective_power);
+                }
                 description.track_indexes.emplace_back(counter_track::emplace(
-                    device_index, addendum(description.track_name), description.units));
+                    device_index, addendum(track_name), description.units));
             }
         }
 
@@ -425,9 +435,7 @@ private:
             effective_metrics.bits.current_socket_power) &&
            power_it != tracks.end() && !power_it->second.track_indexes.empty())
         {
-            const double power = effective_metrics.bits.average_socket_power
-                                     ? metric_values.average_socket_power
-                                     : metric_values.current_socket_power;
+            const double power = select_socket_power(effective_metrics, metric_values);
             TRACE_COUNTER(
                 "device_power",
                 counter_track::at(device_index, power_it->second.track_indexes[0]), ts,
@@ -439,7 +447,7 @@ private:
            !memory_it->second.track_indexes.empty())
         {
             const double usage =
-                metric_values.memory_usage / static_cast<double>(tim::units::megabyte);
+                metric_values.memory_usage / static_cast<double>(units::megabyte);
             TRACE_COUNTER(
                 "device_memory_usage",
                 counter_track::at(device_index, memory_it->second.track_indexes[0]), ts,

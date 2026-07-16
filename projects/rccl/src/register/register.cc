@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "nccl.h"
@@ -15,7 +16,7 @@
 
 using namespace rccl;
 
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
 #else
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
@@ -33,13 +34,41 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
 
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool isGraph, void** handle) {
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
+
   struct ncclRegCache* cache = &comm->regCache;
   uintptr_t pageSize = cache->pageSize;
   uintptr_t begAddr = (uintptr_t)data & -pageSize;
   uintptr_t endAddr = ((uintptr_t)data + size + pageSize-1) & -pageSize;
 
-  if (comm->checkPointers) NCCLCHECK(CudaPtrCheck(data, comm, "buff", "ncclCommRegister"));
-  INFO(NCCL_REG, "register comm %p buffer %p size %zi", comm, data, size);
+  if (comm->checkMode != ncclCheckModeDefault) NCCLCHECK(CudaPtrCheck(data, comm, "buff", "ncclCommRegister"));
+
+  bool hasSysmemSegment = false;
+  if (ncclCuMemEnable()) {
+    CUdeviceptr base;
+    size_t baseSize;
+    int numSegments;
+    int legacyIpcCap;
+    CUCHECK(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr) data));
+    CUmemorytype memType;
+    CUCHECK(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) data));
+    if (memType == CU_MEMORYTYPE_HOST) {
+      hasSysmemSegment = true;
+    } else {
+      // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
+      // that we're calling ncclCuMemGetAddressRange only when necessary.
+      CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr) base));
+      if (!legacyIpcCap) {
+        NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr) data, size, (CUdeviceptr *)&base, &baseSize, &numSegments, &hasSysmemSegment));
+      }
+    }
+  }
+  if (hasSysmemSegment) {
+    INFO(NCCL_REG, "Skipping registration for buffer %p size %zi since it contains segments backed by CPU memory",
+        data, size);
+    return ncclSuccess;
+  } else {
+    INFO(NCCL_REG, "register comm %p buffer %p size %zi", comm, data, size);
+  }
 
   for (int slot=0; /*true*/; slot++) {
     if ((slot == cache->population) || (begAddr < cache->slots[slot]->begAddr)) {
@@ -76,7 +105,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     struct ncclRegNetHandles* netHandlePrev;
     while(netHandle) {
       if (ncclNetDeregBuffer(comm, netHandle->proxyConn, netHandle->handle) != ncclSuccess) {
-        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed\n", comm->rank, netHandle->handle, netHandle->proxyConn->rank);
+        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle, netHandle->proxyConn->rank);
       }
       netHandlePrev = netHandle;
       netHandle = netHandle->next;
@@ -95,15 +124,18 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     }
   }
   if (reg->state & IPC_REG_COMPLETE) {
-    for (int i = 0; i < NCCL_MAX_LOCAL_RANKS; ++i)
-      if (reg->ipcInfos[i]) {
-        if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
-          WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr, reg->ipcInfos[i]->peerRank);
+    if (reg->ipcInfos) {
+      for (int i = 0; i < reg->ipcInfosSize; ++i)
+        if (reg->ipcInfos[i]) {
+          if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
+            WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr, reg->ipcInfos[i]->peerRank);
+          }
+          free(reg->ipcInfos[i]);
         }
-        free(reg->ipcInfos[i]);
-      }
+      free(reg->ipcInfos);
+    }
     if (reg->regIpcAddrs.hostPeerRmtAddrs) free(reg->regIpcAddrs.hostPeerRmtAddrs);
-    if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs));
+    if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs, comm->memManager));
   }
   return ncclSuccess;
 }
@@ -112,7 +144,7 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
   struct ncclRegCache* cache = &comm->regCache;
   for (int i = 0; i < cache->population; i++) {
     struct ncclReg* reg = cache->slots[i];
-    INFO(NCCL_INIT, "Cleanup buffer %p pages %lx", (void*)reg->begAddr, (reg->endAddr-reg->begAddr)/cache->pageSize);
+    INFO(NCCL_DESTROY, "Cleanup buffer %p pages %lx", (void*)reg->begAddr, (reg->endAddr-reg->begAddr)/cache->pageSize);
     NCCLCHECK(regCleanup(comm, reg));
     free(reg);
   }

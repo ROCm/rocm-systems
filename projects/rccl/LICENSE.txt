@@ -4,7 +4,7 @@ Attributions
 Contains contributions from NVIDIA.
 
 Copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
-Modifications Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
 
 Redistribution and use in source and binary forms, with or without

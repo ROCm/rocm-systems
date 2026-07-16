@@ -194,11 +194,17 @@ class HostInterface {
 
   __host__ void barrier_all(WindowInfo* window_info);
 
+  __host__ void barrier(rocshmem_team_t team, WindowInfo* window_info);
+
   __host__ void barrier_all_on_stream(hipStream_t stream);
+
+  __host__ void barrier_on_stream(rocshmem_team_t team, hipStream_t stream);
 
   __host__ void quiet_on_stream(hipStream_t stream);
 
   __host__ void sync_all_on_stream(hipStream_t stream);
+
+  __host__ void sync_on_stream(rocshmem_team_t team, hipStream_t stream);
 
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
@@ -227,6 +233,8 @@ class HostInterface {
 
   __host__ void sync_all(WindowInfo* window_info);
 
+  __host__ void sync(rocshmem_team_t team, WindowInfo* window_info);
+
   template <typename T>
   __host__ void broadcast(T* dest, const T* source, int nelems, int pe_root,
                           int pe_start, int log_pe_stride, int pe_size,
@@ -243,6 +251,14 @@ class HostInterface {
 
   template <typename T, ROCSHMEM_OP Op>
   __host__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
+                              int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                int nreduce, hipStream_t stream);
 
   template <typename T>
   __host__ void wait_until(T *ivars, int cmp, T val,
@@ -280,6 +296,8 @@ class HostInterface {
 
   template <typename T>
   __host__ int test(T *ivars, int cmp, T val, WindowInfo* window_info);
+
+  __host__ void hdp_flush() { hdp_policy_->hdp_flush(); }
 
 #if defined USE_HDP_FLUSH
   __host__ void create_hdp_window();

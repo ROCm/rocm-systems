@@ -29,11 +29,14 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -106,45 +109,10 @@ context_filter(const context::context* ctx, DomainT domain, Args... args)
 }
 
 bool
-context_filter(const context::context* ctx)
+full_packet_instrumentation_context_filter(const context::context* ctx)
 {
     return (context_filter(ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
-}
-
-signal_t&
-construct_hsa_signal(signal_t&          signal,
-                     hsa_signal_value_t initial_value = 0,
-                     uint32_t           num_consumers = 0,
-                     const hsa_agent_t* consumers     = nullptr,
-                     uint64_t           attributes    = 0)
-{
-    auto status = HSA_STATUS_SUCCESS;
-    if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
-        status = HSA_STATUS_ERROR;
-    else
-        status = get_amd_ext_table()->hsa_amd_signal_create_fn(
-            initial_value, num_consumers, consumers, attributes, &signal.value);
-
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
-        << fmt::format("Error: hsa_amd_signal_create failed with error code {} :: {}",
-                       static_cast<int>(status),
-                       hsa::get_hsa_status_string(status));
-
-    return signal;
-}
-
-auto*
-get_signal_pool()
-{
-    constexpr size_t default_signal_pool_size = (1 << 12);  // 4096 signals per pool batch
-
-    static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
-        std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
-        });
-
-    return pool;
 }
 
 bool
@@ -346,21 +314,14 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
-    if(pkt_count == 0)
-    {
-        writer(packets, pkt_count);
-        return;
-    }
+    auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
+    const bool graph_launch_active = (gls != nullptr);
+    // #8586 removed the per-queue callback registry, so queue.get_notifiers() no longer
+    // exists; "any real consumer" reduces to an active full-instrumentation context.
+    const bool no_real_consumers =
+        context::get_active_contexts(full_packet_instrumentation_context_filter).empty();
 
-    // Skip per-packet rewriting when no subsystem needs it.
-    bool kernel_tracing_active = !context::get_active_contexts(context_filter).empty();
-    bool counters_active       = rocprofiler::counters::is_any_active();
-    bool thread_trace_active   = rocprofiler::thread_trace::is_any_active();
-    bool pc_sampling_configured =
-        rocprofiler::pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id);
-
-    if(!kernel_tracing_active && !counters_active && !thread_trace_active &&
-       !pc_sampling_configured)
+    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
     {
         writer(packets, pkt_count);
         return;
@@ -396,10 +357,22 @@ WriteInterceptor(const void* packets,
         return;
     }
 
+    // Fast path: graph_launch is the only reason we're here. Increment the per-launch
+    // dispatch count and write the original packets without allocating signals or rewriting
+    // packets. Large graph launches in summary-only mode would otherwise pay the full
+    // tracing overhead and exhaust the HSA signal pool.
+    if(graph_launch_active && no_real_consumers)
+    {
+        gls->dispatch_count += num_dispatch_packets;
+        writer(packets, pkt_count);
+        return;
+    }
+
     // these are for the services (dispatch counter collection, pc sampling, ATT) which use
     // the queue/queue_controller callback mechanism
     const auto queue_callback_context_filter = [](const context::context* ctx) {
-        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
+        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
+                ctx->dispatch_spm);
     };
 
     auto tracing_data_v = tracing::tracing_data{};
@@ -468,7 +441,7 @@ WriteInterceptor(const void* packets,
         // handler to complete during finalization.
         queue.async_started();
 
-        // Searching accross all the packets given during this write
+        // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& original_packet = _packets[i].kernel_dispatch;
@@ -588,6 +561,13 @@ WriteInterceptor(const void* packets,
                           "failed to compute size field based on offset of reserved_padding field");
 
             auto dispatch_id = ++sequence_counter;
+
+            // Always feed HIP_GRAPH summary's kernel_dispatch_count (independent of
+            // subscription).
+            if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
+               graph_launch_state != nullptr)
+                ++graph_launch_state->dispatch_count;
+
             _packet_data.callback_record =
                 callback_record_t{sizeof(callback_record_t),
                                   rocprofiler_timestamp_t{0},
@@ -661,6 +641,16 @@ WriteInterceptor(const void* packets,
                     });
             }
 
+            for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+            {
+                if(!pkt_injection.first->before_krn_barrier_pkt.empty())
+                {
+                    for(const auto& pkt : pkt_injection.first->before_krn_barrier_pkt)
+                    {
+                        transformed_packets.emplace_back(pkt);
+                    }
+                }
+            }
             for(const auto& pkt_injection : _packet_data.instrumentation_packets)
             {
                 for(const auto& pkt : pkt_injection.first->before_krn_pkt)
@@ -833,7 +823,7 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
@@ -878,7 +868,7 @@ Queue::Queue(const AgentCache&  agent,
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
     *queue = _intercept_queue;
 
-    (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
+    signal_pool_init();  // ensure the signal pool is constructed
 }
 
 Queue::Queue(
@@ -921,21 +911,37 @@ Queue::Queue(
             });
     }
 
-    set_write_interceptor(WriteInterceptor, this);
-
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
     create_signal(0, &_active_kernels, false);
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
 
-    (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
+    signal_pool_init();  // ensure the signal pool is constructed
+    // Since this is an active queue, the write interceptor may be called immediately, so this needs
+    // to appear after signal construction.
+    if(!queue_interposition::supports_queue_interposition())
+    {
+        set_write_interceptor(WriteInterceptor, this);
+    }
+}
+
+void
+Queue::invoke_write_interceptor(const void*                           packets,
+                                uint64_t                              pkt_count,
+                                hsa_amd_queue_intercept_packet_writer writer) const
+{
+    WriteInterceptor(packets, pkt_count, 0, const_cast<Queue*>(this), writer);
 }
 
 Queue::~Queue()
 {
     sync();
-    _core_api.hsa_signal_destroy_fn(_active_kernels);
+
+    if(_active_kernels.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
+    {
+        _core_api.hsa_signal_destroy_fn(_active_kernels);
+    }
 }
 
 void
@@ -1040,29 +1046,16 @@ Queue::set_state(queue_state state)
     _state = state;
 }
 
-namespace
-{
-auto did_queue_init = false;
-}
-
 void
 queue_init()
 {
-    // record that queue initialization happened
-    did_queue_init = true;
+    // placeholder for future global init if required
 }
 
 void
 queue_fini()
 {
-    if(did_queue_init)
-    {
-        if(auto* pool = get_signal_pool(); pool != nullptr)
-        {
-            ROCP_INFO << pool->get_usage_report();
-            pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
-        }
-    }
+    signal_pool_fini();
 }
 }  // namespace hsa
 }  // namespace rocprofiler

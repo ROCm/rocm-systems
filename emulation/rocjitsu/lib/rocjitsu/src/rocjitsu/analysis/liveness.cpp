@@ -96,14 +96,42 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks) { analyze(blocks); }
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options,
+                                   std::span<const ScopedCfgEdge> extra_edges) {
+  min_free_vgpr_ = options.min_free_vgpr;
+  analyze(blocks, extra_edges);
+}
 
-void LivenessAnalysis::analyze(KernelBlockScope blocks) {
+void LivenessAnalysis::analyze(KernelBlockScope blocks,
+                               std::span<const ScopedCfgEdge> extra_edges) {
   liveness_.resize(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] != nullptr)
       block_index_.emplace(blocks[i], i);
   }
+
+  std::vector<std::vector<size_t>> successors(blocks.size());
+  std::vector<std::vector<size_t>> predecessors(blocks.size());
+  auto add_edge = [&](const BasicBlock *from, const BasicBlock *to) {
+    auto from_it = block_index_.find(from);
+    auto to_it = block_index_.find(to);
+    if (from_it == block_index_.end() || to_it == block_index_.end())
+      return;
+    auto &succs = successors[from_it->second];
+    if (std::ranges::find(succs, to_it->second) != succs.end())
+      return;
+    succs.push_back(to_it->second);
+    predecessors[to_it->second].push_back(from_it->second);
+  };
+
+  for (const BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const BasicBlock *succ : block->successors())
+      add_edge(block, succ);
+  }
+  for (const ScopedCfgEdge &edge : extra_edges)
+    add_edge(edge.from, edge.to);
 
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
@@ -123,7 +151,6 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     }
   }
 
-  const auto rpo = reverse_post_order(blocks);
   std::deque<size_t> worklist;
   std::vector<bool> in_worklist(blocks.size(), false);
   auto enqueue = [&](size_t idx) {
@@ -133,11 +160,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     worklist.push_back(idx);
   };
 
-  for (const BasicBlock *block : rpo) {
-    auto idx_it = block_index_.find(block);
-    if (idx_it != block_index_.end())
-      enqueue(idx_it->second);
-  }
+  for (size_t idx = 0; idx < blocks.size(); ++idx)
+    enqueue(idx);
 
   while (!worklist.empty()) {
     const size_t idx = worklist.front();
@@ -149,11 +173,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
       continue;
 
     RegisterSet live_out;
-    for (const BasicBlock *succ : block->successors()) {
-      auto succ_idx = block_index_.find(succ);
-      if (succ_idx != block_index_.end())
-        live_out |= liveness_[succ_idx->second].live_in;
-    }
+    for (size_t succ_idx : successors[idx])
+      live_out |= liveness_[succ_idx].live_in;
 
     RegisterSet live_in = live_out;
     live_in -= liveness_[idx].kill;
@@ -166,11 +187,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
       state.live_in = live_in;
 
       if (live_in_changed) {
-        for (const BasicBlock *pred : block->predecessors()) {
-          auto pred_idx = block_index_.find(pred);
-          if (pred_idx != block_index_.end())
-            enqueue(pred_idx->second);
-        }
+        for (size_t pred_idx : predecessors[idx])
+          enqueue(pred_idx);
       }
     }
   }
@@ -220,7 +238,8 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  for (size_t base = search_start; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
+  const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
+  for (size_t base = first_candidate; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
     if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
       return static_cast<uint16_t>(base);
   }

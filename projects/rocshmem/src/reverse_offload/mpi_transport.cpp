@@ -156,6 +156,18 @@ void MPITransport::submitRequestsToMPI() {
               next_element.PE,
               reinterpret_cast<int64_t>(next_element.ol2.pWrk));
       break;
+    case RO_NET_TEAM_REDUCE_SCATTER:
+      team_reduce_scatter(next_element.dst, next_element.src,
+                          next_element.ol1.size,
+                          next_element.ro_net_win_id, queue_idx,
+                          (MPI_Comm)next_element.team_comm,
+                          static_cast<ROCSHMEM_OP>(next_element.op),
+                          static_cast<ro_net_types>(next_element.datatype),
+                          next_element.status, true);
+      LOG_TRACE("proxy::mpi Submitted TEAM_REDUCE_SCATTER dst %p src %p nreduce %lu team %zd",
+              next_element.dst, next_element.src, next_element.ol1.size,
+              (intptr_t)next_element.team_comm);
+      break;
     case RO_NET_TEAM_REDUCE:
       team_reduction(next_element.dst, next_element.src, next_element.ol1.size,
                      next_element.ro_net_win_id, queue_idx,
@@ -360,6 +372,24 @@ void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused
   outstanding[contextId]++;
 }
 
+void MPITransport::team_reduce_scatter(void *dst, void *src, int nreduce,
+                                       [[maybe_unused]] int win_id,
+                                       int contextId, MPI_Comm team,
+                                       ROCSHMEM_OP op, ro_net_types type,
+                                       volatile char *status, bool blocking) {
+  MPI_Request request{};
+
+  MPI_Op mpi_op{get_mpi_op(op)};
+  MPI_Datatype mpi_type{convertType(type)};
+  MPI_Comm comm{team};
+
+  NET_CHECK(mpilib_ftable_.Ireduce_scatter_block(
+      src, dst, nreduce, mpi_type, mpi_op, comm, &request));
+
+  requests.push_back({request, {status, contextId, blocking}});
+  outstanding[contextId]++;
+}
+
 void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
                                   int contextId, MPI_Comm team, int root,
                                   ro_net_types type, volatile char *status,
@@ -385,14 +415,12 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   MPI_Datatype mpi_type{convertType(type)};
   MPI_Request req;
 
-  if (rank != root){
-    NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
-                       bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
-                       size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
+  NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
+                      bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
+                      size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
 
-      requests.push_back({req, {nullptr, contextId, false}});
-      outstanding[contextId]++;
-  }
+  requests.push_back({req, {nullptr, contextId, false}});
+  outstanding[contextId]++;
 
   NET_CHECK(mpilib_ftable_.Win_flush_all(bp->heap_window_info[win_id]->get_win()));
   barrier(contextId, nullptr, false, comm, false);

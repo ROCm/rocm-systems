@@ -119,8 +119,8 @@ inline T clear_bit(T val, int position) {
 
 /// @brief Extract bits from first to last inclusive from val and justify to the LSB.
 /// @param val The value to extract bits from.
-/// @param first The first bit (LSB) to extact.
-/// @param last The last bit (MSB) to extact.
+/// @param first The first bit (LSB) to extract.
+/// @param last The last bit (MSB) to extract.
 /// @returns The extracted bits.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -134,7 +134,7 @@ inline T bits(T val, int first, int last) {
 
 /// @brief Extract bit specified by position from val and justify to the LSB.
 /// @param val The value to extract the bit from.
-/// @param position The bit to extact.
+/// @param position The bit to extract.
 /// @returns The extracted bit.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -146,10 +146,10 @@ inline T bit(T val, int position) {
 }
 
 /// @brief Extend bits of val starting from the LSB up to num_bits - 1.
-/// @details The bits are replicated as many times as possibe based on
+/// @details The bits are replicated as many times as possible based on
 /// the size of T. The number of bits should be a power of two.
 /// @param[in] val Value to be extended.
-/// @param[in] num_bits The number of of bits in val to extend.
+/// @param[in] num_bits The number of bits in val to extend.
 /// @returns Value containing the replicated bits.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -247,6 +247,37 @@ template <typename T>
 constexpr inline T align_up(T val, T alignment) {
   assert(std::has_single_bit(alignment));
   return (val + alignment - 1) & ~(alignment - 1);
+}
+
+/// @brief Divide @p numerator by @p divisor, rounding up.
+/// @details Asserts that @p divisor is non-zero; this is the strict,
+/// general-purpose form. Call sites that must tolerate a zero divisor from
+/// untrusted guest input should use ceil_div_or_one() instead.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div(T numerator, T divisor) {
+  assert(divisor != 0);
+  return numerator / divisor + (numerator % divisor != 0 ? T{1} : T{0});
+}
+
+/// @brief Divide @p numerator by @p divisor, rounding up, returning 1 when
+/// @p divisor is 0.
+/// @details Tolerant variant for paths that parse malformed guest input (e.g.
+/// a dispatch packet with a zero workgroup dimension): the emulator must not
+/// abort on bad guest data, so a zero divisor yields 1 rather than asserting.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div_or_one(T numerator, T divisor) {
+  return divisor == 0 ? T{1} : ceil_div(numerator, divisor);
+}
+
+/// @brief Return true when @p val is aligned to @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline bool is_aligned(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val & (alignment - 1)) == 0;
 }
 
 } // namespace util

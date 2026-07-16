@@ -979,31 +979,13 @@ const DecodeFn Decoder::fp_fcvt_d_from_int_rs2_[32] = {
 const DecodeFn Decoder::system_priv_funct7_[128] = {
     // 0x00-0x07
     &decode_field<system_priv_ecall_rs2_, 20, 5>, // 0x00 ECALL/EBREAK
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x08-0x0F
     &decode_field<system_priv_sret_rs2_, 20, 5>, // 0x08 SRET/WFI
     &sfence_vma_decode,                          // 0x09 SFENCE.VMA
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x10-0x17
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x18-0x1F
     &decode_field<system_priv_mret_rs2_, 20, 5>, // 0x18 MRET
 };
@@ -1014,136 +996,58 @@ const DecodeFn Decoder::op_fp_funct7_[128] = {
     // 0x00-0x07
     &f_fadd_s_decode, // 0x00 FADD.S
     &d_fadd_d_decode, // 0x01 FADD.D
-    nullptr,
-    nullptr,
+    nullptr, nullptr,
     &f_fsub_s_decode, // 0x04 FSUB.S
     &d_fsub_d_decode, // 0x05 FSUB.D
-    nullptr,
-    nullptr,
+    nullptr, nullptr,
     // 0x08-0x0F
     &f_fmul_s_decode, // 0x08 FMUL.S
     &d_fmul_d_decode, // 0x09 FMUL.D
-    nullptr,
-    nullptr,
+    nullptr, nullptr,
     &f_fdiv_s_decode, // 0x0C FDIV.S
     &d_fdiv_d_decode, // 0x0D FDIV.D
-    nullptr,
-    nullptr,
+    nullptr, nullptr,
     // 0x10-0x17
-    &decode_field<fp_fsgnj_s_funct3_, 12, 3>, // 0x10 FSGNJ*.S
-    &decode_field<fp_fsgnj_d_funct3_, 12, 3>, // 0x11 FSGNJ*.D
-    nullptr,
-    nullptr,
-    &decode_field<fp_fminmax_s_funct3_, 12, 3>, // 0x14 FMIN/FMAX.S
-    &decode_field<fp_fminmax_d_funct3_, 12, 3>, // 0x15 FMIN/FMAX.D
-    nullptr,
-    nullptr,
+    &decode_field<fp_fsgnj_s_funct3_, 12, 3>,                     // 0x10 FSGNJ*.S
+    &decode_field<fp_fsgnj_d_funct3_, 12, 3>,                     // 0x11 FSGNJ*.D
+    nullptr, nullptr, &decode_field<fp_fminmax_s_funct3_, 12, 3>, // 0x14 FMIN/FMAX.S
+    &decode_field<fp_fminmax_d_funct3_, 12, 3>,                   // 0x15 FMIN/FMAX.D
+    nullptr, nullptr,
     // 0x18-0x1F
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x20-0x27
     &decode_field<fp_fcvt_s_d_rs2_, 20, 5>, // 0x20 FCVT.S.D
     &decode_field<fp_fcvt_d_s_rs2_, 20, 5>, // 0x21 FCVT.D.S
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x28-0x2F
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr,
     &f_fsqrt_s_decode, // 0x2C FSQRT.S
     &d_fsqrt_d_decode, // 0x2D FSQRT.D
-    nullptr,
-    nullptr,
+    nullptr, nullptr,
     // 0x30-0x3F
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x40-0x4F
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x50-0x57
     &decode_field<fp_fcmp_s_funct3_, 12, 3>, // 0x50 FEQ/FLT/FLE.S
     &decode_field<fp_fcmp_d_funct3_, 12, 3>, // 0x51 FEQ/FLT/FLE.D
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x58-0x5F
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x60-0x67
     &decode_field<fp_fcvt_int_from_s_rs2_, 20, 5>, // 0x60 FCVT.W/WU/L/LU.S
     &decode_field<fp_fcvt_int_from_d_rs2_, 20, 5>, // 0x61 FCVT.W/WU/L/LU.D
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x68-0x6F
     &decode_field<fp_fcvt_s_from_int_rs2_, 20, 5>, // 0x68 FCVT.S.W/WU/L/LU
     &decode_field<fp_fcvt_d_from_int_rs2_, 20, 5>, // 0x69 FCVT.D.W/WU/L/LU
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x70-0x77
     &decode_field<fp_fmvclass_s_funct3_, 12, 3>, // 0x70 FMV.X.W / FCLASS.S
     &decode_field<fp_fmvclass_d_funct3_, 12, 3>, // 0x71 FMV.X.D / FCLASS.D
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     // 0x78-0x7F
     &f_fmv_w_x_decode, // 0x78 FMV.W.X
     &d_fmv_d_x_decode, // 0x79 FMV.D.X
@@ -1202,10 +1106,8 @@ const DecodeFn Decoder::store_fp_funct3_[8] = {
 };
 
 const DecodeFn Decoder::amo_funct3_[8] = {
-    nullptr,
-    nullptr,
-    &decode_field<amo_w_funct5_, 27, 5>, // 010 word
-    &decode_field<amo_d_funct5_, 27, 5>, // 011 doubleword
+    nullptr, nullptr, &decode_field<amo_w_funct5_, 27, 5>, // 010 word
+    &decode_field<amo_d_funct5_, 27, 5>,                   // 011 doubleword
 };
 
 const DecodeFn Decoder::op_funct3_[8] = {

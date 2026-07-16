@@ -22,7 +22,7 @@
  *   7. Hash both buffers and compare
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -42,10 +42,6 @@
 #ifndef BRW_SIZE
 #define BRW_SIZE (128UL * 1024UL)
 #endif
-
-/// @brief Alignment used for O_DIRECT transfers (must be a power of two).
-#define BLOCK_ALIGN ((size_t)4096)
-static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 int
 main(int argc, char *argv[])
@@ -78,7 +74,7 @@ main(int argc, char *argv[])
     }
 
     /* 2. Build CPU pattern + copy to GPU */
-    cpu_pattern = (uint8_t *)malloc(payload_size);
+    cpu_pattern = static_cast<uint8_t *>(malloc(payload_size));
     if (!cpu_pattern) {
         fprintf(stderr, "Could not allocate CPU pattern buffer\n");
         return EXIT_FAILURE;
@@ -121,7 +117,7 @@ main(int argc, char *argv[])
     }
 
     /* 6. ftruncate to exact size */
-    if (-1 == ftruncate(out_fd, (off_t)payload_size)) {
+    if (-1 == ftruncate(out_fd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", out_path, strerror(errno));
         goto close_out;
     }

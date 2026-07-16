@@ -47,8 +47,12 @@ namespace envvar {
       "Debug output level (NONE, ERROR, WARN, ENV, VERSION, INFO, API, TRACE). "
       "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "
       ":env[:all|:full] to enable/control env variable output; "
-      ":color (default) or :nocolor for ANSI colors (e.g. trace:noversion:nocolor, env:full)",
-      types::debug_level::WARN);
+      ":color (default) or :nocolor for ANSI colors; "
+      ":stats to print backend API call counters at finalize (requires -DPROFILE=ON; "
+      "output uses LOG_INFO so INFO level must also be active; "
+      "not implied by any verbosity level, must be specified explicitly, e.g. info:stats) "
+      "(e.g. trace:noversion:nocolor, env:full, info:stats)",
+      types::debug_level::ERROR);
   }  // close _base temporarily to define log_flags after debug_level
 
   // Build log_flags from the parsed debug_level and any :modifiers.
@@ -67,6 +71,7 @@ namespace envvar {
     bool warn     = (lvl >= debug_level::WARN);
     bool trace    = (lvl >= debug_level::TRACE);
     bool color    = true;
+    bool stats    = false;  // opt-in only; never implied by verbosity level
 
     // Apply :modifier overrides
     const char* envstr = std::getenv("ROCSHMEM_DEBUG_LEVEL");
@@ -104,10 +109,11 @@ namespace envvar {
         else if (mod == "modified") env_mode = env_print_mode::MODIFIED;
         else if (mod == "color")    color = true;
         else if (mod == "nocolor")  color = false;
+        else if (mod == "stats")    stats = true;
         pos = next;
       }
     }
-    return {error, ver, env, env_mode, info, api, warn, trace, color};
+    return {error, ver, env, env_mode, info, api, warn, trace, color, stats};
   }
 
   const types::debug_flags log_flags = make_debug_flags();
@@ -140,6 +146,10 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
       1024);
+    const var<size_t> max_symm_regions("MAX_SYMM_REGIONS",
+      "Maximum number of symmetric user buffers an application can register "
+      "with rocshmem_buffer_register_symmetric. The default value is 4",
+      4);
   }  // inline namespace _base
 
   namespace bootstrap {

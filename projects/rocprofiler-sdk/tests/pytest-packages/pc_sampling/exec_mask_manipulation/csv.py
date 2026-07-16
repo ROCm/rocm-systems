@@ -27,22 +27,6 @@ import numpy as np
 import pandas as pd
 
 
-def stochastic_assert(df, df_condition_selection, max_failing_samples=30):
-    # TODO: When asserting certain conditions related to exec_masks for all samples,
-    # we observe some failures.
-    # This usually happens because some small number of samples (e.g., 1-30 out of 100k)
-    # do not satisfy the condition. This is either a regression in the ROCr 2nd level trap
-    # handler (as sometimes execution mask or correlation ID mismatches), or
-    # just stochastic nature of the sampling (meaning our checks are too strict).
-    # To relax checks, we introduce an assertion that will allow some small number
-    # of samples to disobey the condition.
-    # This is a temporary solution until we find the root cause of the issue.
-
-    # extract the failing samples
-    failing_samples = df[~df_condition_selection]
-    assert len(failing_samples) <= max_failing_samples, "Too many failing samples"
-
-
 # Keep this in case we decide to revert workgroup_id information
 def validate_workgoup_id_x_y_z(df, max_x, max_y, max_z):
     assert (df["Workgroup_Size_X"].astype(int) >= 0).all()
@@ -78,9 +62,9 @@ def validate_instruction_decoding(
     assert not df_inst.empty
     # assert the exec mask if requested
     if exec_mask_uint64 is not None:
-        stochastic_assert(
-            df_inst, df_inst["Exec_Mask"].astype(np.uint64) == exec_mask_uint64
-        )
+        assert (
+            df_inst["Exec_Mask"].astype(np.uint64) == exec_mask_uint64
+        ).all(), "Exec_Mask mismatch: not all samples have the expected exec mask value"
 
     # assert whether the samples source code lines belongs to the provided range
     if source_code_lines_range is not None:
@@ -109,7 +93,7 @@ def validate_instruction_comment(df):
 def validate_instruction_correlation_id_relation(df):
     # Samples with no decoded instructions originates from either
     # blit kernels or self modifying code. The correlation id for this
-    # type of samples should alway be zero.
+    # type of samples should always be zero.
     # Thus, Correlation_Id is 0 `iff`` instruction is not decoded.
 
     # The previous statement has two implications.
@@ -141,7 +125,9 @@ def validate_exec_mask_based_on_correlation_id(df):
     df["active_SIMD_threads"] = df["Exec_Mask"].apply(
         lambda exec_mask: bin(exec_mask).count("1")
     )
-    stochastic_assert(df, df["active_SIMD_threads"] == df["Correlation_Id"])
+    assert (
+        df["active_SIMD_threads"] == df["Correlation_Id"]
+    ).all(), "Active SIMD thread count does not match Correlation_Id for all samples"
 
     # TODO: Comment out the following code if it causes spurious fails.
     # The more conservative constraint based on the experience follows.
@@ -158,9 +144,9 @@ def validate_exec_mask_based_on_correlation_id(df):
     )
 
     # TODO: exec should be in hex and that will ease the comparison
-    stochastic_assert(
-        df, df["Exec_Mask"].astype(np.uint64) == df["Exec_Mask2"].astype(np.uint64)
-    )
+    assert (
+        df["Exec_Mask"].astype(np.uint64) == df["Exec_Mask2"].astype(np.uint64)
+    ).all(), "Exec_Mask does not match expected mask derived from Correlation_Id for all samples"
 
 
 def exec_mask_manipulation_validate_csv(df, all_sampled=False):
@@ -215,7 +201,7 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
         last_kernel,
         "v_rcp_f64",
         exec_mask_uint64=np.uint64(even_simd_threads_active_exec_mask),
-        source_code_lines_range=(288, 387),
+        source_code_lines_range=(301, 400),
         all_source_lines_samples=all_sampled,
     )
 
@@ -225,6 +211,6 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
         last_kernel,
         "v_rcp_f32",
         exec_mask_uint64=np.uint64(odd_simd_threads_active_exec_mask),
-        source_code_lines_range=(391, 490),
+        source_code_lines_range=(406, 505),
         all_source_lines_samples=all_sampled,
     )

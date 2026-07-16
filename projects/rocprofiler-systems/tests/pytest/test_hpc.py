@@ -147,7 +147,6 @@ class TestJacobi(RocprofsysTest):
     def test_roctx(self, mode, hpc_openmp_environment):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
 
         result = self.run_test(
@@ -159,22 +158,29 @@ class TestJacobi(RocprofsysTest):
         )
         self.assert_regex(result)
 
+        # Going through dyninst (binary_rewrite or runtime_instrument) makes the host
+        # functions visible, changing the depth of the ROCTx markers as
+        # _QMjacobi_modPinit_jacobi is captured.
+        # sys_run does not go through dyninst, and hence needs a different depth check
+        expected_depths = (
+            [2, 2] if mode in ["binary_rewrite", "runtime_instrument"] else [1, 1]
+        )
         self.assert_perfetto(
             result,
             subtest_name="Perfetto ROCtx marker validation",
             categories=["rocm_marker_api"],
             labels=["init", "run"],
             counts=[1, 1],
-            depths=[1, 1],
+            depths=expected_depths,
         )
 
     @pytest.mark.hip
     @pytest.mark.mpi
+    @pytest.mark.multi_gpu(2)
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_hip(self, mode, hpc_hip_environment):
         env = hpc_hip_environment.copy()
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
         result = self.run_test(
@@ -185,27 +191,27 @@ class TestJacobi(RocprofsysTest):
             launcher="mpi",
             num_procs=2,
         )
-        # hipHostFree is one of the last calls and should be present if the program worked correctly
-        self.assert_regex(
-            result,
-            pass_regex=[r"0>>>.*_hipHostFree"],
-        )
-
+        self.assert_regex(result)
         # Taken from the program's defines.hpp
         JACOBI_MAX_LOOPS = 1000
 
         # With -g 2 1, 2 MPI ranks exist. The merged perfetto trace has 2x the per-rank count
-        MERGED_LAPLACIAN_KERNEL_COUNT = JACOBI_MAX_LOOPS * 2
-
         self.assert_perfetto(
             result,
             subtest_name="Laplacian Kernel Count Validation",
             perfetto_file="merged.proto",
             categories=["rocm_hip_stream"],
             print_output=True,
-            pass_regex=[
-                rf"LocalLaplacianKernel.*\|\s+{MERGED_LAPLACIAN_KERNEL_COUNT}\s+\|"
-            ],
+            pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
+        )
+
+        # hipHostFree is one of the last calls — tracked via rocprofiler-sdk in Perfetto
+        self.assert_perfetto(
+            result,
+            subtest_name="hipHostFree Validation",
+            perfetto_file="merged.proto",
+            categories=["rocm_hip_api"],
+            pass_regex=[r"hipHostFree\s*\|\s*[1-9]"],
         )
 
 
@@ -230,16 +236,12 @@ class TestMatrixExponential(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_USE_OMPT"] = "ON"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
 
         result = self.run_test(
             mode, target="matrix-exponential-streams-sync-hip", env=env
         )
-        self.assert_regex(
-            result,
-            pass_regex=self.rocblas_gemm_kernel_prefix,
-            subtest_name="rocBLAS GEMM Kernel Validation",
-        )
+        self.assert_regex(result)
+
         # 171 total GEMM dispatches (sum of 1 to 18 from the Taylor series loop),
         # but schedule(dynamic) distributes them non-deterministically across
         # 4 OpenMP threads, so we verify presence rather than exact per-thread counts
@@ -250,13 +252,10 @@ class TestMatrixExponential(RocprofsysTest):
             pass_regex=self.rocblas_gemm_kernel_prefix,
         )
 
-        # TODO: Disabled pending investigation (AIPROFSYST-418)
-        # We expect 171 GEMM dispatches, but sometimes we see less.
-
-        # self.assert_rocpd(
-        #     result,
-        #     rules_files=matrix_exponential_rules,
-        # )
+        self.assert_rocpd(
+            result,
+            rules_files=matrix_exponential_rules,
+        )
 
 
 @pytest.mark.rocm

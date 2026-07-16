@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys
@@ -14,69 +14,66 @@ inline namespace common
 namespace
 {
 template <typename ContainerT, typename... Args>
+concept has_emplace_back = requires(ContainerT& _c, Args&&... _args) {
+    _c.emplace_back(std::forward<Args>(_args)...);
+};
+
+template <typename ContainerT, typename... Args>
+    requires has_emplace_back<ContainerT, Args...>
 inline auto
-emplace_impl(ContainerT& _c, int,
-             Args&&... _args) -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace_back(std::forward<Args>(_args)...);
 }
 
 template <typename ContainerT, typename... Args>
+    requires(!has_emplace_back<ContainerT, Args...>)
 inline auto
-emplace_impl(ContainerT& _c, long,
-             Args&&... _args) -> decltype(_c.emplace(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace(std::forward<Args>(_args)...);
 }
 
-template <typename ContainerT, typename... Args>
-inline auto
-emplace(ContainerT& _c, Args&&... _args)
-{
-    return emplace_impl(_c, 0, std::forward<Args>(_args)...);
-}
+template <typename ContainerT, typename ArgT>
+concept has_reserve = requires(ContainerT& _c, ArgT _arg) { _c.reserve(_arg); };
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT& _c, int, ArgT _arg) -> decltype(_c.reserve(_arg), bool())
+    requires has_reserve<ContainerT, ArgT>
+inline bool
+reserve(ContainerT& _c, ArgT _arg)
 {
     _c.reserve(_arg);
     return true;
 }
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT&, long, ArgT)
+    requires(!has_reserve<ContainerT, ArgT>)
+inline bool
+reserve(ContainerT&, ArgT)
 {
     return false;
 }
 
-template <typename ContainerT, typename ArgT>
-inline auto
-reserve(ContainerT& _c, ArgT _arg)
-{
-    return reserve_impl(_c, 0, _arg);
-}
-
 template <typename ContainerT = std::vector<std::string>>
 inline ContainerT
-delimit(const std::string& line, const char* delimiters = "\"',;: ");
+delimit(const std::string& line, std::string_view delimiters = "\"',;: ");
 
 template <typename ContainerT>
 inline ContainerT
-delimit(const std::string& line, const char* delimiters)
+delimit(const std::string& line, std::string_view delimiters)
 {
     ContainerT _result{};
     size_t     _beginp = 0;  // position that is the beginning of the new string
     size_t     _delimp = 0;  // position of the delimiter in the string
     if(reserve(_result, 0))
     {
+        // tally every character in the line that is one of the delimiters
         size_t _nmax = 0;
         for(char itr : line)
         {
-            for(size_t j = 0; j < strlen(delimiters); ++j)
+            if(delimiters.find(itr) != std::string_view::npos)
             {
-                if(itr == delimiters[j]) ++_nmax;
+                ++_nmax;
             }
         }
         reserve(_result, _nmax);

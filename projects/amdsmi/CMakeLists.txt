@@ -111,7 +111,13 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
-option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+else()
+    option(ENABLE_ESMI_LIB "Build ESMI Library" OFF)
+endif()
+
 option(BUILD_EXAMPLES "Build examples" OFF)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
@@ -175,8 +181,28 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+
+# Netlink libraries for network interface functionality (required)
+# TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
+find_package(PkgConfig REQUIRED)
+
+# Try to use CMake config files first (bundled sysdeps provide these)
+find_package(libnl CONFIG QUIET)
+find_package(libmnl CONFIG QUIET)
+
+if(libnl_FOUND AND libmnl_FOUND)
+    message(STATUS "Using bundled netlink libraries via CMake config")
+    set(USING_BUNDLED_NETLINK TRUE)
+else()
+    message(STATUS "Using system netlink libraries via pkg-config")
+    pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
+    pkg_check_modules(LIBNLGENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
+    pkg_check_modules(LIBMNL REQUIRED IMPORTED_TARGET libmnl)
+    set(USING_BUNDLED_NETLINK FALSE)
+endif()
 
 # Configuration
 function(get_imported_target_info target out_soname out_include_dirs)
@@ -234,7 +260,7 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-5.1.1")
+    set(current_esmi_tag "esmi_pkg_ver-5.2.1.1")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
@@ -359,9 +385,8 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
-    add_subdirectory("tests/python_unittest")
+    add_subdirectory("tests/python")
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries

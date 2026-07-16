@@ -40,7 +40,9 @@
 #include "log.hpp"
 
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 
 namespace rocshmem {
 
@@ -112,6 +114,8 @@ void Backend::init(void) {
       hipHostMalloc(reinterpret_cast<void**>(&done_init), sizeof(uint8_t)));
 
   psync_allocator_ = get_default_allocator();
+
+  max_symm_regions_ = envvar::max_symm_regions;
 }
 
 void Backend::init_mpi_once(MPI_Comm comm) {
@@ -157,100 +161,169 @@ Backend::~Backend() {
 }
 
 void Backend::dump_stats() {
-  printf("PE %d\n", my_pe);
+#ifndef PROFILE
+  LOG_WARN("dump_stats() called but PROFILE=ON was not set at build time; all counters are zero");
+#endif
+  // Accumulate per-context stats into the global accumulators before printing.
+  // Reset first so repeated calls to dump_stats() do not double-count.
+  globalStats.resetStats();
+  globalHostStats.resetStats();
 
+  // Device stats: each backend copies ctx_array[i].ctxStats via hipMemcpy.
+  accumulate_ctx_device_stats();
+
+  // Host stats: walk list_of_ctxs and accumulate ctxHostStats from each,
+  // then include the default host context which is not in list_of_ctxs.
+  for (auto* ctx : list_of_ctxs) {
+    globalHostStats.accumulateStats(ctx->ctxHostStats);
+  }
+  accumulate_default_host_ctx_stats();
+
+  // Build each stats section into a buffer and emit with a single LOG_INFO per section.
+  char buf[8192];
+  int pos = 0;
+  auto append = [&](const char* fmt, ...) {
+    if (pos >= static_cast<int>(sizeof(buf)) - 1) return;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + pos, sizeof(buf) - pos, fmt, args);
+    va_end(args);
+    if (n > 0) pos += n;
+  };
+
+  int n_printed = 0;
+  auto pstat = [&](const char* name, StatType val) {
+    if (val) { append("  %-30s %llu\n", name, static_cast<unsigned long long>(val)); ++n_printed; }
+  };
+
+  static_assert(NUM_STATS == 69,
+    "rocshmem_stats enum changed; update dump_stats device section");
   const auto& device_stats{globalStats};
-  printf("DEVICE STATS\n");
-  printf("Puts (Blocking/P/Nbi) %llu/%llu/%llu\n",
-         device_stats.getStat(NUM_PUT), device_stats.getStat(NUM_P),
-         device_stats.getStat(NUM_PUT_NBI));
-  printf("WG_Puts (Blocking/Nbi) %llu/%llu\n", device_stats.getStat(NUM_PUT_WG),
-         device_stats.getStat(NUM_PUT_NBI_WG));
-  printf("WAVE_Puts (Blocking/Nbi) %llu/%llu\n",
-         device_stats.getStat(NUM_PUT_WAVE),
-         device_stats.getStat(NUM_PUT_NBI_WAVE));
-  printf("Gets (Blocking/G/Nbi) %llu/%llu/%llu\n",
-         device_stats.getStat(NUM_GET), device_stats.getStat(NUM_G),
-         device_stats.getStat(NUM_GET_NBI));
-  printf("WG_Gets (Blocking/Nbi) %llu/%llu\n", device_stats.getStat(NUM_GET_WG),
-         device_stats.getStat(NUM_GET_NBI_WG));
-  printf("WAVE_Gets (Blocking/Nbi) %llu/%llu\n",
-         device_stats.getStat(NUM_GET_WAVE),
-         device_stats.getStat(NUM_GET_NBI_WAVE));
-  printf("Fences %llu\n", device_stats.getStat(NUM_FENCE));
-  printf("Quiets %llu\n", device_stats.getStat(NUM_QUIET));
-  printf("PE Quiets %llu\n", device_stats.getStat(NUM_PE_QUIET));
-  printf("ToAll %llu\n", device_stats.getStat(NUM_TO_ALL));
-  printf("BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL));
-  printf("WAVE_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WAVE));
-  printf("WG_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WG));
-  printf("Barrier %llu\n", device_stats.getStat(NUM_BARRIER));
-  printf("WAVE_Barrier %llu\n", device_stats.getStat(NUM_BARRIER_WAVE));
-  printf("WG_Barrier %llu\n", device_stats.getStat(NUM_BARRIER_WG));
-  printf("Wait Until %llu\n", device_stats.getStat(NUM_WAIT_UNTIL));
-  printf("Wait Until Any %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ANY));
-  printf("Wait Until All %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ALL));
-  printf("Wait Until Some %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_SOME));
-  printf("Wait Until All Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_ALL_VECTOR));
-  printf("Wait Until Any Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_ANY_VECTOR));
-  printf("Wait Until Some Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_SOME_VECTOR));
-  printf("Finalizes %llu\n", device_stats.getStat(NUM_FINALIZE));
-  printf("Coalesced %llu\n", device_stats.getStat(NUM_MSG_COAL));
-  printf("Atomic_FAdd %llu\n", device_stats.getStat(NUM_ATOMIC_FADD));
-  printf("Atomic_FCswap %llu\n", device_stats.getStat(NUM_ATOMIC_FCSWAP));
-  printf("Atomic_FInc %llu\n", device_stats.getStat(NUM_ATOMIC_FINC));
-  printf("Atomic_Fetch %llu\n", device_stats.getStat(NUM_ATOMIC_FETCH));
-  printf("Atomic_Add %llu\n", device_stats.getStat(NUM_ATOMIC_ADD));
-  printf("Atomic_Set %llu\n", device_stats.getStat(NUM_ATOMIC_SET));
-  printf("Atomic_Cswap %llu\n", device_stats.getStat(NUM_ATOMIC_CSWAP));
-  printf("Atomic_Inc %llu\n", device_stats.getStat(NUM_ATOMIC_INC));
-  printf("Tests %llu\n", device_stats.getStat(NUM_TEST));
-  printf("SHMEM_PTR %llu\n", device_stats.getStat(NUM_SHMEM_PTR));
-  printf("SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL));
-  printf("WAVE_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WAVE));
-  printf("WG_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WG));
-  printf("Sync %llu\n", device_stats.getStat(NUM_SYNC));
-  printf("WAVE_Sync %llu\n", device_stats.getStat(NUM_SYNC_WAVE));
-  printf("WG_Sync %llu\n", device_stats.getStat(NUM_SYNC_WG));
+  uint64_t device_total = 0;
+  for (int i = 0; i < NUM_STATS; i++) device_total += device_stats.getStat(i);
+  if (device_total) {
+    n_printed = 0;
+    append("DEVICE STATS\n");
+    pstat("Put",                   device_stats.getStat(NUM_PUT));
+    pstat("Put_NBI",               device_stats.getStat(NUM_PUT_NBI));
+    pstat("P",                     device_stats.getStat(NUM_P));
+    pstat("WG_Put",                device_stats.getStat(NUM_PUT_WG));
+    pstat("WG_Put_NBI",            device_stats.getStat(NUM_PUT_NBI_WG));
+    pstat("WAVE_Put",              device_stats.getStat(NUM_PUT_WAVE));
+    pstat("WAVE_Put_NBI",          device_stats.getStat(NUM_PUT_NBI_WAVE));
+    pstat("Get",                   device_stats.getStat(NUM_GET));
+    pstat("Get_NBI",               device_stats.getStat(NUM_GET_NBI));
+    pstat("G",                     device_stats.getStat(NUM_G));
+    pstat("WG_Get",                device_stats.getStat(NUM_GET_WG));
+    pstat("WG_Get_NBI",            device_stats.getStat(NUM_GET_NBI_WG));
+    pstat("WAVE_Get",              device_stats.getStat(NUM_GET_WAVE));
+    pstat("WAVE_Get_NBI",          device_stats.getStat(NUM_GET_NBI_WAVE));
+    pstat("Fence",                 device_stats.getStat(NUM_FENCE));
+    pstat("Quiet",                 device_stats.getStat(NUM_QUIET));
+    pstat("PE_Quiet",              device_stats.getStat(NUM_PE_QUIET));
+    pstat("ToAll",                 device_stats.getStat(NUM_TO_ALL));
+    pstat("BarrierAll",            device_stats.getStat(NUM_BARRIER_ALL));
+    pstat("WAVE_BarrierAll",       device_stats.getStat(NUM_BARRIER_ALL_WAVE));
+    pstat("WG_BarrierAll",         device_stats.getStat(NUM_BARRIER_ALL_WG));
+    pstat("Barrier",               device_stats.getStat(NUM_BARRIER));
+    pstat("WAVE_Barrier",          device_stats.getStat(NUM_BARRIER_WAVE));
+    pstat("WG_Barrier",            device_stats.getStat(NUM_BARRIER_WG));
+    pstat("SyncAll",               device_stats.getStat(NUM_SYNC_ALL));
+    pstat("WAVE_SyncAll",          device_stats.getStat(NUM_SYNC_ALL_WAVE));
+    pstat("WG_SyncAll",            device_stats.getStat(NUM_SYNC_ALL_WG));
+    pstat("Sync",                  device_stats.getStat(NUM_SYNC));
+    pstat("WAVE_Sync",             device_stats.getStat(NUM_SYNC_WAVE));
+    pstat("WG_Sync",               device_stats.getStat(NUM_SYNC_WG));
+    pstat("Wait_Until",            device_stats.getStat(NUM_WAIT_UNTIL));
+    pstat("Wait_Until_Any",        device_stats.getStat(NUM_WAIT_UNTIL_ANY));
+    pstat("Wait_Until_All",        device_stats.getStat(NUM_WAIT_UNTIL_ALL));
+    pstat("Wait_Until_Some",       device_stats.getStat(NUM_WAIT_UNTIL_SOME));
+    pstat("Wait_Until_All_Vector", device_stats.getStat(NUM_WAIT_UNTIL_ALL_VECTOR));
+    pstat("Wait_Until_Any_Vector", device_stats.getStat(NUM_WAIT_UNTIL_ANY_VECTOR));
+    pstat("Wait_Until_Some_Vector",device_stats.getStat(NUM_WAIT_UNTIL_SOME_VECTOR));
+    pstat("Test",                  device_stats.getStat(NUM_TEST));
+    pstat("SHMEM_PTR",             device_stats.getStat(NUM_SHMEM_PTR));
+    pstat("Finalize",              device_stats.getStat(NUM_FINALIZE));
+    pstat("Msg_Coal",              device_stats.getStat(NUM_MSG_COAL));
+    pstat("Atomic_FAdd",           device_stats.getStat(NUM_ATOMIC_FADD));
+    pstat("Atomic_FCswap",         device_stats.getStat(NUM_ATOMIC_FCSWAP));
+    pstat("Atomic_FInc",           device_stats.getStat(NUM_ATOMIC_FINC));
+    pstat("Atomic_Fetch",          device_stats.getStat(NUM_ATOMIC_FETCH));
+    pstat("Atomic_Add",            device_stats.getStat(NUM_ATOMIC_ADD));
+    pstat("Atomic_Set",            device_stats.getStat(NUM_ATOMIC_SET));
+    pstat("Atomic_Swap",           device_stats.getStat(NUM_ATOMIC_SWAP));
+    pstat("Atomic_Cswap",          device_stats.getStat(NUM_ATOMIC_CSWAP));
+    pstat("Atomic_Inc",            device_stats.getStat(NUM_ATOMIC_INC));
+    pstat("Atomic_FetchAnd",       device_stats.getStat(NUM_ATOMIC_FETCH_AND));
+    pstat("Atomic_And",            device_stats.getStat(NUM_ATOMIC_AND));
+    pstat("Atomic_FetchOr",        device_stats.getStat(NUM_ATOMIC_FETCH_OR));
+    pstat("Atomic_Or",             device_stats.getStat(NUM_ATOMIC_OR));
+    pstat("Atomic_FetchXor",       device_stats.getStat(NUM_ATOMIC_FETCH_XOR));
+    pstat("Atomic_Xor",            device_stats.getStat(NUM_ATOMIC_XOR));
+    pstat("Broadcast",             device_stats.getStat(NUM_BROADCAST));
+    pstat("Alltoall",              device_stats.getStat(NUM_ALLTOALL));
+    pstat("Alltoallv",             device_stats.getStat(NUM_ALLTOALLV));
+    pstat("Fcollect",              device_stats.getStat(NUM_FCOLLECT));
+    pstat("Create",                device_stats.getStat(NUM_CREATE));
+    pstat("Put_Signal",            device_stats.getStat(NUM_PUT_SIGNAL));
+    pstat("WG_Put_Signal",         device_stats.getStat(NUM_PUT_SIGNAL_WG));
+    pstat("WAVE_Put_Signal",       device_stats.getStat(NUM_PUT_SIGNAL_WAVE));
+    pstat("Put_Signal_NBI",        device_stats.getStat(NUM_PUT_SIGNAL_NBI));
+    pstat("WG_Put_Signal_NBI",     device_stats.getStat(NUM_PUT_SIGNAL_NBI_WG));
+    pstat("WAVE_Put_Signal_NBI",   device_stats.getStat(NUM_PUT_SIGNAL_NBI_WAVE));
+    pstat("ReduceScatter",         device_stats.getStat(NUM_REDUCE_SCATTER));
+    LOG_INFO("%s", buf);
+  }
 
+  static_assert(NUM_HOST_STATS == 39,
+    "rocshmem_host_stats enum changed; update dump_stats host section");
   const auto& host_stats{globalHostStats};
-  printf("HOST STATS\n");
-  printf("Puts (Blocking/P/Nbi) %llu/%llu/%llu\n",
-         host_stats.getStat(NUM_HOST_PUT), host_stats.getStat(NUM_HOST_P),
-         host_stats.getStat(NUM_HOST_PUT_NBI));
-  printf("Gets (Blocking/G/Nbi) (%llu/%llu/%llu)\n",
-         host_stats.getStat(NUM_HOST_GET), host_stats.getStat(NUM_HOST_G),
-         host_stats.getStat(NUM_HOST_GET_NBI));
-  printf("Fences %llu\n", host_stats.getStat(NUM_HOST_FENCE));
-  printf("Quiets %llu\n", host_stats.getStat(NUM_HOST_QUIET));
-  printf("ToAll %llu\n", host_stats.getStat(NUM_HOST_TO_ALL));
-  printf("BarrierAll %llu\n", host_stats.getStat(NUM_HOST_BARRIER_ALL));
-  printf("Wait Until %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL));
-  printf("Wait Until Any %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY));
-  printf("Wait Until All %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL));
-  printf("Wait Until Some %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME));
-  printf("Wait Until All Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL_VECTOR));
-  printf("Wait Until Any Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY_VECTOR));
-  printf("Wait Until Some Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME_VECTOR));
-  printf("Finalizes %llu\n", host_stats.getStat(NUM_HOST_FINALIZE));
-  printf("Atomic_FAdd %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FADD));
-  printf("Atomic_FCswap %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FCSWAP));
-  printf("Atomic_FInc %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FINC));
-  printf("Atomic_Fetch %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FETCH));
-  printf("Atomic_Add %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_ADD));
-  printf("Atomic_Set %llu\n", host_stats.getStat(NUM_ATOMIC_SET));
-  printf("Atomic_Cswap %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_CSWAP));
-  printf("Atomic_Inc %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_INC));
-  printf("Tests %llu\n", host_stats.getStat(NUM_HOST_TEST));
-  printf("SHMEM_PTR %llu\n", host_stats.getStat(NUM_HOST_SHMEM_PTR));
-  printf("SyncAll %llu\n", host_stats.getStat(NUM_HOST_SYNC_ALL));
+  uint64_t host_total = 0;
+  for (int i = 0; i < NUM_HOST_STATS; i++) host_total += host_stats.getStat(i);
+  if (host_total) {
+    pos = 0;
+    n_printed = 0;
+    append("HOST STATS\n");
+    pstat("Put",                   host_stats.getStat(NUM_HOST_PUT));
+    pstat("Put_NBI",               host_stats.getStat(NUM_HOST_PUT_NBI));
+    pstat("P",                     host_stats.getStat(NUM_HOST_P));
+    pstat("Get",                   host_stats.getStat(NUM_HOST_GET));
+    pstat("Get_NBI",               host_stats.getStat(NUM_HOST_GET_NBI));
+    pstat("G",                     host_stats.getStat(NUM_HOST_G));
+    pstat("Fence",                 host_stats.getStat(NUM_HOST_FENCE));
+    pstat("Quiet",                 host_stats.getStat(NUM_HOST_QUIET));
+    pstat("ToAll",                 host_stats.getStat(NUM_HOST_TO_ALL));
+    pstat("BarrierAll",            host_stats.getStat(NUM_HOST_BARRIER_ALL));
+    pstat("SyncAll",               host_stats.getStat(NUM_HOST_SYNC_ALL));
+    pstat("Wait_Until",            host_stats.getStat(NUM_HOST_WAIT_UNTIL));
+    pstat("Wait_Until_Any",        host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY));
+    pstat("Wait_Until_All",        host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL));
+    pstat("Wait_Until_Some",       host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME));
+    pstat("Wait_Until_All_Vector", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL_VECTOR));
+    pstat("Wait_Until_Any_Vector", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY_VECTOR));
+    pstat("Wait_Until_Some_Vector",host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME_VECTOR));
+    pstat("Test",                  host_stats.getStat(NUM_HOST_TEST));
+    pstat("SHMEM_PTR",             host_stats.getStat(NUM_HOST_SHMEM_PTR));
+    pstat("Finalize",              host_stats.getStat(NUM_HOST_FINALIZE));
+    pstat("Atomic_FAdd",           host_stats.getStat(NUM_HOST_ATOMIC_FADD));
+    pstat("Atomic_FCswap",         host_stats.getStat(NUM_HOST_ATOMIC_FCSWAP));
+    pstat("Atomic_FInc",           host_stats.getStat(NUM_HOST_ATOMIC_FINC));
+    pstat("Atomic_Fetch",          host_stats.getStat(NUM_HOST_ATOMIC_FETCH));
+    pstat("Atomic_Add",            host_stats.getStat(NUM_HOST_ATOMIC_ADD));
+    pstat("Atomic_Set",            host_stats.getStat(NUM_HOST_ATOMIC_SET));
+    pstat("Atomic_Swap",           host_stats.getStat(NUM_HOST_ATOMIC_SWAP));
+    pstat("Atomic_Cswap",          host_stats.getStat(NUM_HOST_ATOMIC_CSWAP));
+    pstat("Atomic_Inc",            host_stats.getStat(NUM_HOST_ATOMIC_INC));
+    pstat("Atomic_FetchAnd",       host_stats.getStat(NUM_HOST_ATOMIC_FETCH_AND));
+    pstat("Atomic_And",            host_stats.getStat(NUM_HOST_ATOMIC_AND));
+    pstat("Atomic_FetchOr",        host_stats.getStat(NUM_HOST_ATOMIC_FETCH_OR));
+    pstat("Atomic_Or",             host_stats.getStat(NUM_HOST_ATOMIC_OR));
+    pstat("Atomic_FetchXor",       host_stats.getStat(NUM_HOST_ATOMIC_FETCH_XOR));
+    pstat("Atomic_Xor",            host_stats.getStat(NUM_HOST_ATOMIC_XOR));
+    pstat("Broadcast",             host_stats.getStat(NUM_HOST_BROADCAST));
+    pstat("Alltoall",              host_stats.getStat(NUM_HOST_ALLTOALL));
+    LOG_INFO("%s", buf);
+  }
 
   dump_backend_stats();
 }
@@ -263,11 +336,15 @@ void Backend::reset_stats() {
 }
 
 int Backend::buffer_register(void *addr, size_t length) {
+  LOG_TRACE("Backend::buffer_register addr=%p length=%zu", addr, length);
+
   if (addr == nullptr) {
+    LOG_TRACE("Backend::buffer_register FAIL: addr is null");
     return ROCSHMEM_ERROR;
   }
 
   if (length == 0) {
+    LOG_TRACE("Backend::buffer_register FAIL: length is 0");
     return ROCSHMEM_ERROR;
   }
 
@@ -275,6 +352,7 @@ int Backend::buffer_register(void *addr, size_t length) {
 
   // Check for overflow when computing end address
   if (start > UINTPTR_MAX - length) {
+    LOG_TRACE("Backend::buffer_register FAIL: overflow start=0x%lx length=%zu", start, length);
     return ROCSHMEM_ERROR;
   }
 
@@ -285,6 +363,9 @@ int Backend::buffer_register(void *addr, size_t length) {
 
   // Check entry at or after our start for overlap
   if (it != user_buffer_regions.end() && it->first < end) {
+    LOG_TRACE("Backend::buffer_register FAIL: overlap with existing region "
+              "[0x%lx, +%zu], new [0x%lx, +%zu]",
+              it->first, it->second, start, length);
     return ROCSHMEM_ERROR;
   }
 
@@ -293,11 +374,16 @@ int Backend::buffer_register(void *addr, size_t length) {
     auto prev = std::prev(it);
     uintptr_t prev_end = prev->first + prev->second;
     if (prev_end > start) {
+      LOG_TRACE("Backend::buffer_register FAIL: overlap with preceding region "
+                "[0x%lx, +%zu] (ends at 0x%lx), new start=0x%lx",
+                prev->first, prev->second, prev_end, start);
       return ROCSHMEM_ERROR;
     }
   }
 
   user_buffer_regions[start] = length;
+  LOG_TRACE("Backend::buffer_register OK: registered [0x%lx, +%zu] (total regions: %zu)",
+            start, length, user_buffer_regions.size());
   return ROCSHMEM_SUCCESS;
 }
 
@@ -324,6 +410,127 @@ int Backend::buffer_unregister(void *addr) {
   }
 
   return ROCSHMEM_ERROR;
+}
+
+void Backend::buffer_unregister_all() {
+  user_buffer_regions.clear();
+}
+
+int Backend::buffer_register_symmetric(void *addr, size_t length,
+                                       void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+
+  /*
+   * Symmetric registration is restricted to HIP VMM device memory. Validate
+   * the buffer against the heap's own allocator (mirrors NVSHMEM's per-buffer
+   * checks): this rejects non-VMM heaps, null/zero/granularity-misaligned
+   * sizes, non-VMM pointers, memory on the wrong device, and handle-type
+   * mismatches.
+   */
+  if (!alloc->ValidateVMMRegistration(addr, length, hip_dev_id)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Enforce the configured maximum number of symmetric registrations. */
+  if (symm_buffer_regions.size() >= max_symm_regions_) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Overlap detection is performed against the user's *original* address
+   * range. Aliases are freshly reserved virtual addresses and never overlap,
+   * so checking them would be meaningless.
+   */
+  uintptr_t orig_start = reinterpret_cast<uintptr_t>(addr);
+
+  // Check for overflow when computing end address
+  if (orig_start > UINTPTR_MAX - length) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t orig_end = orig_start + length;
+
+  // Find first entry with base >= our base
+  auto it = symm_orig_regions.lower_bound(orig_start);
+
+  // Check entry at or after our base for overlap
+  if (it != symm_orig_regions.end() && it->first < orig_end) {
+    return ROCSHMEM_ERROR;
+  }
+
+  // Check entry just before our base for overlap
+  if (it != symm_orig_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t prev_end = prev->first + prev->second;
+    if (prev_end > orig_start) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  /*
+   * Map the user's buffer to a fresh rocSHMEM-owned virtual address. This
+   * alias refers to the same physical memory but at a distinct address that
+   * the caller uses for RMA and unregistration.
+   */
+  void *alias = nullptr;
+  if (alloc->MapLocalAlias(addr, length, &alias) != hipSuccess) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t alias_start = reinterpret_cast<uintptr_t>(alias);
+  symm_buffer_regions[alias_start] = SymmRegion{length, orig_start};
+  symm_orig_regions[orig_start] = length;
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  (void)length;
+  (void)registered_addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int Backend::buffer_unregister_symmetric(void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t base = reinterpret_cast<uintptr_t>(addr);
+
+  auto it = symm_buffer_regions.find(base);
+  if (it == symm_buffer_regions.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Release the rocSHMEM-owned alias mapping created at registration. */
+  (void)heap.get_allocator()->UnmapLocalAlias(addr, it->second.length);
+
+  /* Drop the original-range entry used for overlap detection. */
+  symm_orig_regions.erase(it->second.orig_base);
+
+  symm_buffer_regions.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void Backend::symm_allgather(void* inout, size_t bytes_per_pe) {
+  if (backend_comm != MPI_COMM_NULL) {
+    NET_CHECK(mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes_per_pe, MPI_CHAR,
+                                       inout, bytes_per_pe, MPI_CHAR,
+                                       backend_comm));
+  } else {
+    assert(backend_bootstr != nullptr);
+    backend_bootstr->allGather(inout, bytes_per_pe);
+  }
 }
 
 }  // namespace rocshmem

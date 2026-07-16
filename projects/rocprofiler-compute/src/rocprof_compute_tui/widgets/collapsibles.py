@@ -60,7 +60,7 @@ def create_widget_from_data(
 
 
 def load_config(config_path: str) -> dict[str, Any]:
-    with open(config_path) as file:
+    with open(config_path, encoding="utf-8") as file:
         return yaml.safe_load(file)
 
 

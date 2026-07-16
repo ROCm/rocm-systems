@@ -16,14 +16,6 @@ hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t
 
 hipError_t hipMemcpy2DValidateBuffer(const void* buf, size_t pitch, size_t width);
 
-hipError_t ihipMemcpy_validate(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
-
-hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, size_t offset,
-                                      bool read_write);
-
-hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes,
-                                size_t dstOffset, size_t srcOffset);
-
 hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, const void* srcMemory,
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, bool isAsync = true);

@@ -424,6 +424,16 @@ typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
 /// \endcond
 
 /**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ */
+typedef enum {
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory evenly capped per XCP
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP may use full partition memory
+} rsmi_compute_partition_mem_alloc_mode_t;
+
+/**
  * @brief Memory Partitions. This enum is used to identify various
  * memory partition types.
  */
@@ -552,20 +562,35 @@ typedef enum {
   // GPU Board VR (Voltage Regulator) temperature
   RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST = 150,
   RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD0 =
-      RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST,    //!< VDDCR VDD0 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD1,      //!< VDDCR VDD1 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD2,      //!< VDDCR VDD2 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD3,      //!< VDDCR VDD3 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_A,     //!< VDDCR SOC A voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_C,     //!< VDDCR SOC C voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_A,   //!< VDDCR SOCIO A voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_C,   //!< VDDCR SOCIO C voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDD_085_HBM,     //!< VDD 0.85V HBM voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_B,  //!< VDDCR 1.1V HBM B voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D,  //!< VDDCR 1.1V HBM D voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDD_USR,         //!< VDD USR voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,    //!< VDDIO 1.1V E32 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_LAST = RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,
+      RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST,        //!< VDDCR VDD0 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD1,          //!< VDDCR VDD1 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD2,          //!< VDDCR VDD2 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD3,          //!< VDDCR VDD3 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_A,         //!< VDDCR SOC A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_C,         //!< VDDCR SOC C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_A,       //!< VDDCR SOCIO A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_C,       //!< VDDCR SOCIO C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDD_085_HBM,         //!< VDD 0.85V HBM voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_B,      //!< VDDCR 1.1V HBM B voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D,      //!< VDDCR 1.1V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDD_USR,             //!< VDD USR voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,        //!< VDDIO 1.1V E32 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_04_HBM_B,      //!< VDDIO 0.4V HBM B voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_04_HBM_D,      //!< VDDIO 0.4V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_HBM_B,     //!< VDDCR 0.75V HBM B voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_HBM_D,     //!< VDDCR 0.75V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_GTA_A,      //!< VDDIO 1.1V GTA A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_GTA_C,      //!< VDDIO 1.1V GTA C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075_GTA_A,     //!< VDDAN 0.75V GTA A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075_GTA_C,     //!< VDDAN 0.75V GTA C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_UCIE,      //!< VDDCR 0.75V UCIE voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAA,    //!< VDDIO 0.65V UCIEAA voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A,  //!< VDDIO 0.65V UCIEAM A voltage regulator
+                                               //!< temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C,  //!< VDDIO 0.65V UCIEAM C voltage regulator
+                                               //!< temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075,           //!< VDDAN 0.75V voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_LAST = RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075,
 
   // Baseboard System temperature
   RSMI_TEMP_TYPE_BASEBOARD_FIRST = 200,
@@ -5096,6 +5121,27 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                              rsmi_compute_partition_type_t compute_partition);
 
 /**
+ *  @brief Retrieves the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] mode a pointer to an ::rsmi_compute_partition_mem_alloc_mode_t into
+ *  which the current mode will be written.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Sets the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] mode the desired ::rsmi_compute_partition_mem_alloc_mode_t value.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode);
+
+/**
  *  @brief Retrieves the partition_id for a desired device
  *
  *  @details
@@ -5396,8 +5442,6 @@ rsmi_status_t rsmi_dev_memory_partition_capabilities_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
  *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
  *  because it is already being used - device is busy
  *

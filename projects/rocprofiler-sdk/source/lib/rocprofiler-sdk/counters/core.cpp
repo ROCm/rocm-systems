@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -83,14 +84,14 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
             rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
         if(!agent_map)
         {
-            ROCP_ERROR << fmt::format("Coult not build AST for {}", agent_name);
+            ROCP_ERROR << fmt::format("Could not build AST for {}", agent_name);
             return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
         }
 
         const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
         if(!counter_ast)
         {
-            ROCP_ERROR << fmt::format("Coult not find AST for {}", metric.name());
+            ROCP_ERROR << fmt::format("Could not find AST for {}", metric.name());
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
         config.asts.push_back(*counter_ast);
@@ -150,11 +151,19 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
+    bool already_enabled = true;
     CHECK_NOTNULL(controller)->enable_serialization();
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        enabled = true;
+        already_enabled = false;
+        enabled         = true;
     });
+    if(!already_enabled)
+    {
+        // #8586: per-queue callback registration removed; counter instrumentation now
+        // flows through counters::write_hook. Keep develop's callback-thread startup.
+        callback_thread_start();
+    }
 }
 
 void
@@ -169,7 +178,16 @@ stop_context(const context::context* ctx)
         enabled = false;
     });
 
-    if(controller) controller->disable_serialization();
+    if(controller)
+    {
+        controller->disable_serialization();
+
+        // #8586: per-queue counter callbacks were removed; counter instrumentation now
+        // runs via counters::write_hook, which no-ops once dispatch_counter_collection is
+        // disabled above. The attach-mode detach-drain teardown is therefore implicit.
+    }
+
+    callback_thread_stop();
 }
 
 rocprofiler_status_t

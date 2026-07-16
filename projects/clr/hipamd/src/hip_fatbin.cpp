@@ -14,6 +14,7 @@
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hotswap.hpp"
 
 #if ROCM_KPACK_ENABLED
 #include <rocm_kpack/kpack.h>
@@ -41,7 +42,7 @@ kpack_cache_t getHipKpackCache() {
 #endif
 
 FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
-    : foffset_(0), image_(image), image_mapped_(false), uri_(std::string()) {
+    : foffset_(0), image_(image), image_size_(0), image_mapped_(false), uri_(std::string()) {
   if (fname != nullptr) {
     fname_ = std::string(fname);
   } else {
@@ -81,20 +82,14 @@ FatBinaryInfo::~FatBinaryInfo() {
 }
 
 void FatBinaryInfo::ReleaseImageAndFile() {
-  // Release image_ and ufd_
-  if (ufd_) {
-    if (image_mapped_ && !amd::Os::MemoryUnmapFile(image_, ufd_->fsize_)) {
+  if (image_mapped_) {
+    if (!amd::Os::MemoryUnmapFile(image_, image_size_)) {
       guarantee(false, "Cannot unmap the file");
     }
-
-    if (!PlatformState::Instance().CloseUniqueFileHandle(ufd_)) {
-      guarantee(false, "Cannot close file for fdesc: %d", ufd_->fdesc_);
-    }
-
-    ufd_ = nullptr;
     image_ = nullptr;
-    uri_ = std::string();
+    image_size_ = 0;
     image_mapped_ = false;
+    uri_ = std::string();
   }
 }
 
@@ -403,29 +398,33 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     return hipErrorInvalidValue;
   }
 
+  // The source-file fd, when one is opened. AddDevProgram dups it for each
+  // file-backed handoff; the original is closed on every exit from this
+  // function so the open-fd burden does not grow with the number of loaded
+  // modules.
+  amd::Os::FileDesc fdesc = amd::Os::FDescInit();
+  auto fdesc_guard = std::shared_ptr<void>(nullptr, [&fdesc](void*) {
+    if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
+  });
+
   if (image_ != nullptr) {
     if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
       fname_ = std::string("");
       foffset_ = 0;
     }
   } else {
-    ufd_ = PlatformState::Instance().GetUniqueFileHandle(fname_.c_str());
-    if (ufd_ == nullptr) {
+    size_t fsize = 0;
+    if (!amd::Os::GetFileHandle(fname_.c_str(), &fdesc, &fsize)) {
       return hipErrorFileNotFound;
     }
-
-    // If the file name exists but the file size is 0, the something wrong with the file or its path
-    if (ufd_->fsize_ == 0) {
+    if (fsize == 0) {
       return hipErrorInvalidImage;
     }
-
-    // If image_ is nullptr, then file path is passed via hipMod* APIs, so map the file.
-    if (!amd::Os::MemoryMapFileDesc(ufd_->fdesc_, ufd_->fsize_, foffset_, &image_)) {
+    if (!amd::Os::MemoryMapFileDesc(fdesc, fsize, foffset_, &image_)) {
       LogError("Cannot map the file descriptor");
-      PlatformState::Instance().CloseUniqueFileHandle(ufd_);
       return hipErrorInvalidValue;
     }
-
+    image_size_ = fsize;
     image_mapped_ = true;
   }
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
@@ -440,7 +439,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
       for (auto* device : devices) {
-        if (hipSuccess != AddDevProgram(device, image_, elf_size, 0)) return hipErrorInvalidImage;
+        if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
+          return hipErrorInvalidImage;
       }
       return hipSuccess;  // We are done since it was already ELF
     } else {
@@ -462,6 +462,18 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     auto generic_name = TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
+    }
+  }
+
+  // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
+  if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+    for (auto device : devices) {
+      const std::string target_gfx = device->devices()[0]->isa().processorName();
+      for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+        if (target_gfx == p.target) {
+          unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + p.source);
+        }
+      }
     }
   }
 
@@ -491,15 +503,45 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
+      // HotSwap: pick the first supported source bundle for this device's target.
+      auto hotswap_co = code_obj_map.end();
+      if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        const std::string target_gfx = device->devices()[0]->isa().processorName();
+        for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+          if (target_gfx != p.target) {
+            continue;
+          }
+          for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {
+            if (amd::hotswap::IsaIsGfx(it->first, p.source)) {
+              hotswap_co = it;
+              break;
+            }
+          }
+          if (hotswap_co != code_obj_map.end()) {
+            break;
+          }
+        }
+      }
 
-      // If the size is not 0, that means we found the native isa code object
-      if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
+      // HotSwap: forward the chosen source bundle first so the HSA loader transpiles/rewrites it.
+      if (hotswap_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        LogPrintfInfo("HotSwap: forwarding %s for transpilation to device %s",
+                      hotswap_co->first.c_str(), device_name.c_str());
+        hip_status =
+            AddDevProgram(device, hotswap_co->second.first, hotswap_co->second.second, fdesc);
+        if (hip_status != hipSuccess) {
+          break;
+        }
+        // If the size is not 0, that means we found the native isa code object
+      } else if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        hip_status =
+            AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
+        hip_status =
+            AddDevProgram(device, generic_co->second.first, generic_co->second.second, fdesc);
         if (hip_status != hipSuccess) {
           break;
         }
@@ -632,7 +674,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
-        hip_status = AddDevProgram(device, co, co_size, 0);
+        hip_status = AddDevProgram(device, co, co_size, fdesc);
         if (hip_status != hipSuccess) {
           break;
         }
@@ -710,9 +752,11 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     return hipErrorInvalidImage;
   }
 
-  // Add code object to all devices
+  // Add code object to all devices. The kpack buffer isn't backed by a file
+  // on disk, so no fd is passed.
   for (auto device : devices) {
-    hipError_t hip_err = AddDevProgram(device, code_object, code_object_size, 0);
+    hipError_t hip_err =
+        AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
     if (hip_err != hipSuccess) {
       kpack_free_code_object(code_object);
       return hip_err;
@@ -727,7 +771,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
 }
 
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,
-                                        size_t binary_size, size_t binary_offset) {
+                                        size_t binary_size, amd::Os::FileDesc fdesc) {
   int devID = device->deviceId();
   amd::Context* ctx = device->asContext();
   amd::Program* program = new amd::Program(*ctx);
@@ -735,10 +779,28 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   if (program == nullptr) {
     return hipErrorOutOfMemory;
   }
+
+  // The binary is file-backed (sub-region of image_) only when:
+  //   - the caller passed an open fd for the source file,
+  //   - the FatBinaryInfo did mmap that file as image_, and
+  //   - the binary is not one of the freshly allocated buffers (compressed
+  //     bundle, SPIRV->native, kpack) tracked in code_obj_allocations_.
+  // In that case we dup the fd so the downstream setKernels owns and closes
+  // its own copy.
+  amd::Os::FileDesc out_fdesc = amd::Os::FDescInit();
+  size_t out_foffset = 0;
+  const bool is_file_backed = fdesc != amd::Os::FDescInit() && image_mapped_ &&
+                              code_obj_allocations_.count(binary_image) == 0;
+  if (is_file_backed) {
+    out_fdesc = amd::Os::DupFileHandle(fdesc);
+    out_foffset = static_cast<size_t>(reinterpret_cast<const char*>(binary_image) -
+                                      reinterpret_cast<const char*>(image_));
+  }
+
   if (CL_SUCCESS !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
-                                binary_offset, uri_)) {
+                                nullptr, out_fdesc, out_foffset, uri_)) {
+    if (out_fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(out_fdesc);
     return hipErrorInvalidKernelFile;
   }
   return hipSuccess;

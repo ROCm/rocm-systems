@@ -23,9 +23,16 @@
 #     TOOL    = PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS
 function(rj_configure_target target)
     set(options
-        PRIVATE_INCLUDES GENERATED DEVICE_KERNELS SCHEMAS
-        WARNINGS HIDDEN CONFIG_DIRS
-        LIB TEST TOOL
+        PRIVATE_INCLUDES
+        GENERATED
+        DEVICE_KERNELS
+        SCHEMAS
+        WARNINGS
+        HIDDEN
+        CONFIG_DIRS
+        LIB
+        TEST
+        TOOL
     )
     cmake_parse_arguments(ARG "${options}" "" "" ${ARGN})
 
@@ -54,10 +61,13 @@ function(rj_configure_target target)
 
     # Include directories.
     if(ARG_PRIVATE_INCLUDES)
-        target_include_directories(${target} PRIVATE
-            ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
-            ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
-            ${HSA_INCLUDE_DIR})
+        target_include_directories(
+            ${target}
+            PRIVATE
+                ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+                ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
+                ${HSA_INCLUDE_DIR}
+        )
     endif()
     if(ARG_GENERATED)
         target_include_directories(${target} PRIVATE ${GENERATED_DIR})
@@ -68,7 +78,10 @@ function(rj_configure_target target)
         if(MSVC)
             target_compile_options(${target} PRIVATE /W4 /WX)
         elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+            target_compile_options(
+                ${target}
+                PRIVATE -Wall -Wextra -Wpedantic -Werror
+            )
         endif()
     endif()
     if(ARG_HIDDEN)
@@ -80,9 +93,12 @@ function(rj_configure_target target)
 
     # Definitions.
     if(ARG_CONFIG_DIRS)
-        target_compile_definitions(${target} PRIVATE
-            SCHEMA_DIR="${CMAKE_SOURCE_DIR}/schemas"
-            CONFIG_DIR="${CMAKE_SOURCE_DIR}/configs")
+        target_compile_definitions(
+            ${target}
+            PRIVATE
+                SCHEMA_DIR="${CMAKE_SOURCE_DIR}/schemas"
+                CONFIG_DIR="${CMAKE_SOURCE_DIR}/configs"
+        )
     endif()
 
     # Schema dependency.
@@ -92,9 +108,10 @@ function(rj_configure_target target)
 
     # Device kernel support.
     if(ARG_DEVICE_KERNELS AND HAS_DEVICE_KERNELS)
-        target_compile_definitions(${target} PRIVATE
-            HAS_DEVICE_KERNELS=1
-            KERNEL_DIR="${KERNEL_OUTPUT_DIR}")
+        target_compile_definitions(
+            ${target}
+            PRIVATE HAS_DEVICE_KERNELS=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
         add_dependencies(${target} device_kernels)
     endif()
 endfunction()

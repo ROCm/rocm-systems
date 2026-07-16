@@ -21,6 +21,7 @@ set(ROCPROFILER_LIB_COUNTERS_HEADERS
     sample_processing.hpp
     controller.hpp
     device_counting.hpp
+    sample_consumer.hpp
     ioctl.hpp
     firmware_restrictions.hpp
     queue_hooks.hpp)

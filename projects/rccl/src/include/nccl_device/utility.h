@@ -10,17 +10,55 @@
 
 #include "hip_compat.h"
 
+// compiler specific check for __CUDACC__
+// We define NCCL_CHECK_CUDACC as a textual alias of __CUDACC__ (not a
+// "snapshot" 0/1 value) so each `#if NCCL_CHECK_CUDACC` re-evaluates
+// __CUDACC__ at the point of use. This matters for the AMD path because
+// some host-API headers (e.g. nccl_device/lsa_barrier.h) do
+// `#undef __CUDACC__` followed by `#define __CUDACC__ 0` (which hipify
+// rewrites to __HIPCC__) to hide device-side declarations from host TUs.
+// With a snapshot value, NCCL_CHECK_CUDACC and __CUDACC__ would diverge
+// after that point and we'd compile references to types that were never
+// declared in this TU.
+#ifndef NCCL_CHECK_CUDACC
+    #define NCCL_CHECK_CUDACC __CUDACC__
+#endif
+
+// NCCL_DEVICE_INLINE / NCCL_HOST_DEVICE_INLINE are provided by hip_compat.h
+// (included above) for the AMD path; do not redefine them here.
+
+// Macro for conditional constexpr support
+#if defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
+  #ifndef NCCL_IF_CONSTEXPR
+    #define NCCL_IF_CONSTEXPR constexpr
+  #endif
+#else
+  #ifndef NCCL_IF_CONSTEXPR
+    #define NCCL_IF_CONSTEXPR
+  #endif
+#endif
+
 #if __cplusplus
 #define NCCL_EXTERN_C extern "C"
 #else
 #define NCCL_EXTERN_C
 #endif
 
+#ifdef __clang_llvm_bitcode_lib__
+  #define NCCL_IR_EXTERN_C extern "C"
+#else
+  #define NCCL_IR_EXTERN_C
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
-#if __CUDACC__
-#if __HIP_PLATFORM_AMD__
+#if defined(NCCL_OS_WINDOWS)
+#include <intrin.h>
+#endif
+
+#if NCCL_CHECK_CUDACC
+#if defined(__HIP_PLATFORM_AMD__)
 #include <atomic>
 #else
 #include <cuda/atomic>
@@ -31,17 +69,46 @@
 namespace nccl {
 namespace utility {
 
+#if NCCL_CHECK_CUDACC
+// cuda/atomic header file is included so we can use atomic_ref to load the abortFlag
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    steps = 0;
+    return abortFlag != nullptr && cuda::atomic_ref<uint32_t>{*abortFlag}.load(cuda::memory_order_relaxed) != 0;
+  }
+}
+#else
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    volatile uint32_t *ptr = (volatile uint32_t*)abortFlag;
+    steps = 0;
+    return ptr != nullptr && *ptr != 0;
+  }
+}
+#endif
+
 template<typename T>
 NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
+
+template <typename>
+struct always_false {
+  static constexpr bool value = false;
+};
 
 template<typename T, T value_>
 struct ValueAsType { static constexpr T value = value_; };
 
 // Returns the value zero but the compiler cannot prove that it is zero so it
 // is useful to inhibit compiler optimizations.
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename=void>
 NCCL_DEVICE_INLINE int opaqueZero() {
   __device__ static int zero = 0;
@@ -147,7 +214,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imulRcp32(uint32_t x, uint32_t xrcp, uint32_t y
   if (xrcp == 0) return yrcp;
   if (yrcp == 0) return xrcp;
   uint32_t rcp = mul32hi(xrcp, yrcp);
-  uint32_t rem = -x*y*rcp;
+  uint32_t rem = 0u - x*y*rcp;
   if (x*y <= rem) rcp += 1;
   return rcp;
 }
@@ -155,7 +222,7 @@ NCCL_HOST_DEVICE_INLINE uint64_t imulRcp64(uint64_t x, uint64_t xrcp, uint64_t y
   if (xrcp == 0) return yrcp;
   if (yrcp == 0) return xrcp;
   uint64_t rcp = mul64hi(xrcp, yrcp);
-  uint64_t rem = -x*y*rcp;
+  uint64_t rem = 0ULL - x*y*rcp;
   if (x*y <= rem) rcp += 1;
   return rcp;
 }
@@ -170,8 +237,8 @@ NCCL_HOST_DEVICE_INLINE void idivmodFast32(uint32_t *quo, uint32_t *rem, uint32_
   *rem = r;
 }
 NCCL_HOST_DEVICE_INLINE void idivmodFast64(uint64_t *quo, uint64_t *rem, uint64_t x, uint64_t y, uint64_t yrcp) {
-  uint32_t q = yrcp == 0 ? x : mul64hi(x, yrcp);
-  uint32_t r = x - y*q;
+  uint64_t q = yrcp == 0 ? x : mul64hi(x, yrcp);
+  uint64_t r = x - y*q;
   if (r >= y) { q += 1; r -= y; }
   *quo = q;
   *rem = r;
@@ -185,7 +252,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t idivFast32(uint32_t x, uint32_t y, uint32_t yrc
 NCCL_HOST_DEVICE_INLINE uint32_t idivFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
   uint64_t q, r;
   idivmodFast64(&q, &r, x, y, yrcp);
-  return q;
+  return (uint32_t)q;
 }
 
 NCCL_HOST_DEVICE_INLINE uint32_t imodFast32(uint32_t x, uint32_t y, uint32_t yrcp) {
@@ -193,7 +260,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imodFast32(uint32_t x, uint32_t y, uint32_t yrc
   idivmodFast32(&q, &r, x, y, yrcp);
   return r;
 }
-NCCL_HOST_DEVICE_INLINE uint32_t imodFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
+NCCL_HOST_DEVICE_INLINE uint64_t imodFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
   uint64_t q, r;
   idivmodFast64(&q, &r, x, y, yrcp);
   return r;
@@ -232,8 +299,8 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 }
 #endif
 
-#if __CUDACC__
-#if __HIP_PLATFORM_AMD__
+#if NCCL_CHECK_CUDACC
+#if defined(__HIP_PLATFORM_AMD__)
 NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
          ord == std::memory_order_acq_rel ? std::memory_order_acquire :
@@ -291,11 +358,11 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   static __device__ int dummy;
   int tmp;
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
   tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
   __threadfence();
 #else
@@ -304,7 +371,7 @@ NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   dummy = tmp;
 }
 NCCL_DEVICE_INLINE void fenceReleaseGpu() {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
   __threadfence();
 #else
   cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
@@ -312,7 +379,7 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -329,7 +396,7 @@ NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_sco
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -411,6 +478,9 @@ struct Present<H, T...> {
   H h;
   Present<T...> t;
 
+  NCCL_HOST_DEVICE_INLINE Present(H h, Present<T...> t): h(static_cast<H>(h)), t(t) {}
+  NCCL_HOST_DEVICE_INLINE Present(Present const& that): h(static_cast<H>(that.h)), t(that.t) {}
+
   NCCL_HOST_DEVICE_INLINE H get(IntSeq<0>) {
     return static_cast<H>(h);
   }
@@ -440,7 +510,7 @@ struct Optional {
   NCCL_HOST_DEVICE_INLINE constexpr Optional(Absent): present(false) {}
 
   // Helper constructor
-  template<int ...i, typename ...Arg>
+  template<typename ...Arg, int ...i>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args, IntSeq<i...>):
     present(true),
     thing{args.get(IntSeq<i>())...} {

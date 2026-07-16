@@ -1,0 +1,36 @@
+[package]
+name = "mirage_daemon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mirage_core = { workspace = true }
+mirage_ctl = { workspace = true }
+mirage_dashboard = { path = "../dashboard", optional = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+[features]
+# Serve the bundled dashboard SPA (and its client-side routing
+# fallback) in addition to the JSON API. Pulls in `mirage_dashboard`
+# with its own `webui` feature, which is what actually builds and
+# embeds the SPA (and requires the Node.js toolchain). Without it the
+# daemon serves the `/api` surface only.
+webui = ["dep:mirage_dashboard", "mirage_dashboard/webui"]
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tempfile = { workspace = true }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

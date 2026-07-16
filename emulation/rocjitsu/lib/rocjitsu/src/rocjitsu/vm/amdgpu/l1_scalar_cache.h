@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
 #define ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
 
+#include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -12,6 +13,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class GpuMemory;
 class L2Cache;
 
 /// @brief L1 Scalar Cache (K$) controller for SMEM instructions.
@@ -37,31 +39,37 @@ public:
   /// @param l2 New L2 cache (not owned).
   void set_l2(L2Cache *l2) { l2_ = l2; }
 
+  /// @brief Set the memory subsystem for PTE MTYPE lookups.
+  void set_memory(GpuMemory *mem) { memory_ = mem; }
+
   /// @brief Scalar load: read num_dwords contiguous dwords from addr.
   ///
   /// Fetches from K$ on hit, or fills from L2 on miss. Handles requests
   /// that span multiple cache lines.
-  void load(uint64_t addr, uint32_t num_dwords, uint32_t *dst);
+  void load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0);
+
+  /// @brief Scalar load: read num_bytes contiguous bytes from addr.
+  void load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0);
 
   /// @brief Scalar store: write num_dwords contiguous dwords to addr.
-  ///
-  /// Allocates the line in K$ if not present (read-allocate), writes the
-  /// data, and marks the line dirty. The dirty line is written back to L2
-  /// on eviction or on s_dcache_wb.
-  void store(uint64_t addr, uint32_t num_dwords, const uint32_t *src);
+  void store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
 
   /// @brief Write back all dirty K$ lines to L2 (s_dcache_wb).
-  void writeback_all();
+  /// @param vmid Ignored. Each dirty line is written back under its own owning
+  /// vmid (recorded in the line tag), so a caller-supplied vmid cannot be
+  /// correct for a bulk writeback. Retained only for call-site signature symmetry.
+  void writeback_all(uint32_t vmid = 0);
 
   /// @brief Invalidate all K$ lines without writeback (s_dcache_inv).
   void invalidate_all() { cache_.invalidate_all(); }
 
 private:
-  /// @brief Ensure the cache line containing addr is present, fetching from L2 if needed.
-  void ensure_line(uint64_t addr);
+  void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void flush_line(uint64_t addr, uint32_t vmid = 0);
 
   CacheStore cache_;
   L2Cache *l2_;
+  GpuMemory *memory_ = nullptr;
 };
 
 } // namespace amdgpu

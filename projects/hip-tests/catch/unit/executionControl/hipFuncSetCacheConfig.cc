@@ -73,23 +73,39 @@ HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Parameters) {
 /**
  * Test Description
  * ------------------------
- *  - Sets cache config that is not supported.
- *    - Expected output: return `hipErrorNotSupported`
+ *  - Verifies that hipFuncSetCacheConfig maps cache config hints to the
+ *    expected preferredShmemCarveout percentages:
+ *    -# hipFuncCachePreferShared  -> 100%
+ *    -# hipFuncCachePreferL1      -> 1%
+ *    -# hipFuncCachePreferEqual   -> 50%
+ *    -# hipFuncCachePreferNone    -> 0% (no preference)
  * Test source
  * ------------------------
  *  - unit/executionControl/hipFuncSetCacheConfig.cc
- * Test requirements
- * ------------------------
- *  - Platform specific (AMD)
- *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Not_Supported) {
+HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping) {
 #if HT_NVIDIA
   HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #endif
 
-  HIP_CHECK_ERROR(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), hipFuncCachePreferNone),
-                  hipErrorNotSupported);
+  struct {
+    hipFuncCache_t config;
+    int expectedCarveout;
+  } testCases[] = {
+      {hipFuncCachePreferNone, 0},
+      {hipFuncCachePreferShared, 100},
+      {hipFuncCachePreferL1, 1},
+      {hipFuncCachePreferEqual, 50},
+  };
+
+  for (const auto& tc : testCases) {
+    HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), tc.config));
+
+    hipFuncAttributes attributes;
+    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+
+    REQUIRE(attributes.preferredShmemCarveout == tc.expectedCarveout);
+  }
 }
 
 /**

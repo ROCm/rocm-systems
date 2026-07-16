@@ -336,7 +336,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -393,6 +393,29 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
     *offset = result.offset;
   }
   return result.memory;
+}
+
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
+  return nullptr;
 }
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
@@ -668,6 +691,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
+      vaddr_sub_obj->release();
       return nullptr;
     }
   }
@@ -700,6 +724,50 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   }
 
   return true;
+}
+
+//==================================================================================================
+amd::Memory* Device::MapMemObjBookkeeping(amd::Memory* phys, void* va_ptr, size_t va_size) const {
+  if (phys == nullptr) {
+    LogError("MapMemObjBookkeeping: phys is nullptr");
+    return nullptr;
+  }
+  constexpr bool kParent = false;
+  return phys->getContext().devices()[0]->CreateVirtualBuffer(
+      phys->getContext(), va_ptr, va_size, phys->getUserData().deviceId,
+      phys->getUserData().locationType, kParent);
+}
+
+//==================================================================================================
+void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys,
+                                          void* va_ptr, bool import_vmm_for_interprocess) const {
+  assert(vaddr_sub_obj != nullptr);
+  assert(phys != nullptr);
+  assert(amd::MemObjMap::FindMemObj(va_ptr) == nullptr);
+  amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  vaddr_sub_obj->getUserData().phys_mem_obj = phys;
+  phys->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+  if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
+    vaddr_sub_obj->setVmmImported(true);
+  }
+}
+
+//==================================================================================================
+void Device::UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr,
+                                    bool destroy_virtual_buffer, bool release_sub_obj) const {
+  assert(vaddr_sub_obj != nullptr);
+  if (destroy_virtual_buffer) {
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+  }
+  amd::MemObjMap::RemoveMemObj(va_ptr);
+  if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
+    vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
+    vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
+  }
+  if (release_sub_obj) {
+    // ~Memory releases parent va_ via parent_->release().
+    vaddr_sub_obj->release();
+  }
 }
 
 Device::BlitProgram::~BlitProgram() {
@@ -769,7 +837,20 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
-  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+  // Check if GPU_ENABLE_PAL env var is empty string, consider it as default
+  const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
+  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+
+  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  if (gpu_enable_pal_is_empty_string) {
+    if (IS_WINDOWS) {
+      // Windows default: PAL path
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // Linux default: ROCr path
+      GPU_ENABLE_PAL = 0;
+    }
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
     // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
     // Without this, roc::Device::init() returns true & disables PAL path in below code
     GPU_ENABLE_PAL = 1;
@@ -805,6 +886,7 @@ bool Device::init() {
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
     }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "ROCr backend initialized");
   }
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
@@ -816,6 +898,7 @@ bool Device::init() {
       }
     }
     ret |= PalDeviceLoad();
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "PAL backend initialized");
   }
 #endif  // WITH_PAL_DEVICE
   return ret;

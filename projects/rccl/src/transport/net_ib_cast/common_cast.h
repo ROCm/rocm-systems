@@ -356,9 +356,9 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
   uint32_t nreqs;
   uint32_t tag;
-  uint64_t idx;
+  uint32_t idx;
   uint16_t rxReqIndex;
-  char padding[14];
+  char padding[2];
 };
 
 #define MAX_INLINE_DATA_SIZE 24
@@ -420,6 +420,8 @@ struct ncclIbQp {
   // to.
   int remDevIdx;
   int8_t ctsQpSlot;
+  int channelId;
+  bool isDataQp;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -597,6 +599,7 @@ struct ncclIbSendComm {
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0, "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
+static_assert( sizeof(struct ncclIbSendFifo) <=64, "struct ncclIbSendFifo should fit one cache line");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0, "ncclIbSendFifoCtsInline element size must be 32-byte multiples");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
@@ -809,6 +812,7 @@ struct ncclIbQpSchedParmsCB {
   struct ncclIbQpSchedParms parms;
 };
 
+bool rcclUseIbCastQpSched();
 ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms);
 void IbCastLogSched(struct ncclIbSendComm *comm);
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase *base, int nreqs, int size);
@@ -819,4 +823,3 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex
 ncclResult_t IbCastQpSchedGetRemap(struct ncclIbNetCommBase* base, uint64_t wrId, int qpIndex, struct ncclIbRemapWrId** remap);
 ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r);
 #endif
-

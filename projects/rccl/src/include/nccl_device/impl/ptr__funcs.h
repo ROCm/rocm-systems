@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_PTR__FUNCS_H_
 #define _NCCL_DEVICE_PTR__FUNCS_H_
@@ -89,42 +90,46 @@ NCCL_HOST_DEVICE_INLINE ncclSymPtr<T>& ncclSymPtr<T>::operator-=(unsigned long l
   return *this;
 }
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::localPtr() const {
-  return (T*)ncclGetLocalPointer(window, offset);
+  if (window) {
+    return (T*)ncclGetLocalPointer(window, offset);
+  } else {
+    return (T*)offset;
+  }
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::lsaPtr(int peer) const {
   return (T*)ncclGetLsaPointer(window, offset, peer);
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::peerPtr(int peer) const {
   return (T*)ncclGetPeerPointer(window, offset, peer);
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::peerPtr(ncclTeam team, int peer) const {
   return (T*)ncclGetPeerPointer(window, offset, team, peer);
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::multimemPtr(ncclMultimemHandle mmHandle) const {
   return (T*)ncclGetMultimemPointer(window, offset, mmHandle);
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::lsaMultimemPtr(ncclDevComm const& comm) const {
   return (T*)ncclGetLsaMultimemPointer(window, offset, comm);

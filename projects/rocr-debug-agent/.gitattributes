@@ -1,0 +1,4 @@
+# Use cpp-style diffs.
+*.h     diff=cpp
+*.h.in  diff=cpp
+*.cpp   diff=cpp

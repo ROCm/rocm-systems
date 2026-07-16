@@ -12,14 +12,16 @@
 #include "debug.h"
 #include "checks.h"
 #include "alloc.h"
+#include <inttypes.h>
 #include <stdlib.h>
 #include "archinfo.h"
+#include <cinttypes>
 
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
 #define MAX_SUBS 512	//Changed the value from 128 to 512 for CPX mode
-
+#define UALOE_GPU_FABRIC_UUID_LEN 16
 #define NODE_TYPE_NONE 0
 #define NODE_TYPE_OPEN 1
 #define NODE_TYPE_CLOSE 2
@@ -52,7 +54,7 @@ ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXm
 
 /* Auto-detect functions */
 ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct ncclXmlNode** gpuNode);
-ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent=NULL);
+ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* tagName, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent=NULL);
 
 /* Remove unneeded parts */
 ncclResult_t ncclTopoTrimXml(struct ncclXml* xml);
@@ -294,7 +296,19 @@ static ncclResult_t xmlSetAttrLong(struct ncclXmlNode* node, const char* attrNam
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
-  snprintf(node->attrs[index].value, MAX_STR_LEN, "%#lx", value);
+  snprintf(node->attrs[index].value, MAX_STR_LEN, "%#" PRIx64, (uint64_t)value);
+  return ncclSuccess;
+}
+
+static ncclResult_t xmlSetAttrUint64(struct ncclXmlNode* node, const char* attrName, const uint64_t value) {
+  int index;
+  NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
+  if (index == -1) {
+    index = node->nAttrs++;
+    strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
+    node->attrs[index].key[MAX_STR_LEN] = '\0';
+  }
+  snprintf(node->attrs[index].value, MAX_STR_LEN, "0x%" PRIx64, value);
   return ncclSuccess;
 }
 
@@ -422,6 +436,14 @@ static ncclResult_t kvConvertToInt(const char* str, int* value, struct kvDict* d
   return ncclSuccess;
 }
 static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* dict) {
+  if (dict == NULL) {
+    WARN("KV Convert to str : null dictionary");
+    return ncclInternalError;
+  }
+  if (str == NULL) {
+    WARN("KV Convert to str : null result pointer");
+    return ncclInternalError;
+  }
   struct kvDict* d = dict;
   while (d->str) {
     if (value == d->value) {

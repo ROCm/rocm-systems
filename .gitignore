@@ -1,6 +1,9 @@
 .cline_storage
 /projects/hip/_build
 
+# Emacs backup files.
+*~
+
 # Visual Studio project files
 *.suo
 *.user
@@ -13,3 +16,4 @@
 .vscode/
 /.rocshmem-worktree
 /projects/cuid/_build
+build/

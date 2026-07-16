@@ -92,7 +92,7 @@ class TestFillPaddingGaps:
         """Original fields + synthesized pads together cover 100% of bits."""
         fields = [
             _field('enc', 6, 0),
-            _field('op',  8, 8),
+            _field('op', 8, 8),
         ]
         pads = _fill_padding_gaps(fields, 32)
         total = _total_bits(fields) + _total_bits(pads)
@@ -102,7 +102,7 @@ class TestFillPaddingGaps:
         """Simulated 32-bit encoding with op and imm fields, gap in middle."""
         fields = [
             _field('enc', 9, 23),
-            _field('op',  8, 8),
+            _field('op', 8, 8),
             _field('imm', 8, 0),
         ]
         sorted_fields = sorted(fields, key=lambda f: f.bit_offset)

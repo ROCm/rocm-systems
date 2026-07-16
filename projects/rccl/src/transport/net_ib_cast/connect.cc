@@ -16,44 +16,20 @@ NCCL_PARAM(IbCastTimeout, "IB_TIMEOUT", 20);
 NCCL_PARAM(IbCastRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbCastPkey, "IB_PKEY", 0);
 NCCL_PARAM(IbCastUseInline, "IB_USE_INLINE", 0);
-NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 1);
 NCCL_PARAM(IbCastSl, "IB_SL", -1);
 NCCL_PARAM(IbCastTc, "IB_TC", -1);
 NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
 NCCL_PARAM(IbCastEceEnable,"IB_ECE_ENABLE",1);
 
 extern int64_t ncclParamIbCastOooRq();
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
 
 struct ncclIbDevExtraProps {
   bool oooRq;
 };
 
-enum ncclIbCommState {
-  ncclIbCommStateStart = 0,
-  ncclIbCommStateConnect = 1,
-  ncclIbCommStateAccept = 3,
-  ncclIbCommStateSend = 4,
-  ncclIbCommStateRecv = 5,
-  ncclIbCommStateConnecting = 6,
-  ncclIbCommStateConnected = 7,
-  ncclIbCommStatePendingReady = 8,
-  ncclIbCommStateSendDevList = 9,
-  ncclIbCommStateRecvDevList = 10,
-};
-
-struct ncclIbCommStage {
-  enum ncclIbCommState state;
-  int offset;
-  void* buffer;
-  void* comm;
-};
-
-struct ncclIbHandle {
-  union ncclSocketAddress connectAddr; // Filled by the target
-  uint64_t magic; // random number to help debugging
-  int isP2p;
-  struct ncclIbCommStage stage; // Used by the other side when connecting
-};
 
 NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 extern int64_t rcclParamIbCastQpsPerP2p();
@@ -90,6 +66,27 @@ static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
+}
+
+static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
+  // Order matters here:
+  // BY_ORDER -> ctsoffload
+  // BY_ID -> failover
+  // BY_INDEX -> default or user requested
+
+  if (useCtsOffload) {
+    return BY_ORDER;
+  }
+
+  if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
+    return BY_ID;
+  }
+
+  int64_t requested = ncclParamIbCastReceiverSideMatchingScheme();
+  if (requested == -2 || requested == BY_ORDER) {
+    return BY_INDEX;
+  }
+  return requested;
 }
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
@@ -444,12 +441,34 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   return ncclSuccess;
 }
 
+// Build base QP creation attributes from comm context. Callers MUST set
+// channelId and isDataQp from the saved ncclIbQp fields — these control
+// AINIC driver behavior (UDMA load balancing and sq_sig_all feature flags)
+// and differ between sender QPs (isDataQp=true) and receiver QPs (isDataQp=false).
+void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
+  memset(out, 0, sizeof(*out));
+  out->type = IBV_QPT_RC;
+  out->qpContext = (void*)&base->stats;
+  struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(base, devIndex);
+  out->cq = devBase->cq;
+  out->pd = devBase->pd;
+  out->ibDevN = devBase->ibDevN;
+  out->useIonic = IbCastAinicRoce;
+  if (base->isSend) {
+    out->maxRecvWorkRequest = 0;
+    out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+  } else {
+    IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+  }
+}
+
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   if (createQpAttrs->oooRq) {
      NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
      return ncclSuccess;
   }
-  if (IbCastAinicRoce) {
+  if (createQpAttrs->useIonic && createQpAttrs->type != IBV_QPT_UD) {
     NCCLCHECK(ncclIbCreateQpIonic(createQpAttrs, qp));
     return ncclSuccess;
   }
@@ -613,6 +632,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -628,6 +648,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     }
 
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+
     INFO(NCCL_NET, "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
         __func__,
         ibDev->portNum,
@@ -640,6 +661,8 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
         commDev->base.pd,
         qpCreateAttrs.oooRq);
     localQp->devIndex = devIndex;
+    localQp->channelId = channelId;
+    localQp->isDataQp = qpCreateAttrs.isDataQp;
 
     // Populate the metadata that will be delivered to the remote peer
     localQpInfo->qpn      = localQp->qp->qp_num;
@@ -827,14 +850,17 @@ ib_recv_dev_list:
   comm->base.vProps = mergedDev->vProps;
   // Read isP2p from handle
   isP2p = handle->isP2p;
-  comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p);
-  if (comm->useCtsOffload) {
-    comm->base.recvMatchingScheme = BY_ORDER;
-  }
+  comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
+  comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
 
-  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d", isP2p);
+  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d",
+       isP2p, handle->isRMA, comm->useCtsOffload, comm->base.recvMatchingScheme);
   comm->base.nqps = IbCastCalculateNqps(isP2p, comm->base.vProps.ndevs, 
                                          remoteVProps.ndevs, __func__);
+  if (handle->isRMA) {
+    comm->base.nqps = 1;
+  }
+
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
   if (comm->base.resiliency) {
@@ -862,6 +888,7 @@ ib_recv_dev_list:
   memset(&meta, 0, sizeof(meta));
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
+  meta.isRMA = handle->isRMA;
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
@@ -1096,6 +1123,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1120,6 +1148,9 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       }
     }
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+    localQp->channelId = channelId;
+    localQp->isDataQp = qpCreateAttrs.isDataQp;
+
     INFO(NCCL_NET, "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
         __func__,
         ibDev->portNum,
@@ -1205,8 +1236,12 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.isDataQp = true;
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+      qpCreateAttrs.useIonic = IbCastAinicRoce;
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
+      rCommDev->gpuFlush.qp.channelId = channelId;
+      rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
+
       INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
           __func__,
           ibDev->portNum,
@@ -1376,10 +1411,9 @@ ib_recv:
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
-  if (rComm->useCtsOffload) {
-    rComm->base.recvMatchingScheme = BY_ORDER;
-  }
-  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%d)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
+  rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
+  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
+       remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
                                          remMeta.ndevs, __func__);
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remMeta.ndevs);
@@ -1451,8 +1485,8 @@ ib_recv:
   // Determine if Flush is enabled for this Comm. Must be done before creating
   // QPs. If Flush is enabled, extra QPs will be created for Flush operations.
   useDmaBuf  = (IbCastDmaBufSupport(lComm->dev) == ncclSuccess && ncclParamDmaBufEnable());
-  rComm->flushEnabled = ((IbCastGdrSupport() == ncclSuccess || useDmaBuf) && (!IbCastOffloadEnabled)
-                            && (ncclParamIbCastGdrFlushDisable() == 0)) ? 1 : 0;
+  rComm->flushEnabled = (((IbCastGdrSupport() == ncclSuccess || useDmaBuf) && (!IbCastOffloadEnabled)
+                            && (ncclParamIbCastGdrFlushDisable() == 0)) || remMeta.isRMA) ? 1 : 0;
 
   NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
@@ -1486,10 +1520,21 @@ ib_recv:
     if (rComm->flushEnabled) {
       if (rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering()) {
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocUncached;
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocFinegrained), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocFinegrained;
 #endif
+        // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
+        // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
+        // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
+        CUDACHECKGOTO(
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int), gpuFlushFlags),
+          ret, fail);
+        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0,
+                                sizeof(int)),
+                      ret, fail);
+
         if (useDmaBuf) {
           uint64_t exportOffset = 0;
           void *aligned_ptr = NULL;
@@ -1613,7 +1658,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem));
+          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;
@@ -1653,4 +1698,3 @@ ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p) {
   ibHandle->isP2p = isP2p;
   return ncclSuccess;
 }
-

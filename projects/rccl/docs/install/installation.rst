@@ -1,113 +1,155 @@
 .. meta::
-   :description: Instruction on how to install the RCCL library for collective communication primitives using the quick start install script
+   :description: Instruction on how to install the RCCL library for collective communication primitives using prebuilt packages
    :keywords: RCCL, ROCm, library, API, install
 
 .. _install:
 
-*****************************************
-Installing RCCL using the install script
-*****************************************
+************
+Install RCCL
+************
 
-To quickly install RCCL using the install script, follow these steps.
-For instructions on building RCCL from the source code, see :doc:`building-installing`.
-For additional tips, see :doc:`../how-to/rccl-usage-tips`.
+RCCL is distributed as a prebuilt package with ROCm. The recommended way to
+install RCCL is to install ROCm using the package manager for your Linux
+distribution, which provides RCCL along with the rest of the ROCm stack.
 
-Requirements
-============
+Before you begin, verify that your system is supported. For more information,
+see :doc:`ROCm components <rocm:what-is-rocm>`.
 
-The following prerequisites are required to use RCCL:
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./building-installing`.
 
-1. ROCm-supported GPUs
-2. The ROCm stack must be installed on the system, including the :doc:`HIP runtime <hip:index>` and the HIP-Clang compiler.
+.. note::
 
-Quick start RCCL build
-======================
+   ROCm is transitioning to a new packaging scheme. The package names you use
+   depend on which ROCm release stream you are installing:
 
-RCCL directly depends on the HIP runtime plus the HIP-Clang compiler, which are part of the ROCm software stack.
-For ROCm installation instructions, see the :doc:`package manager installation guide <rocm-install-on-linux:install/install-methods/package-manager-index>`.
+   * **ROCm 7.2 and earlier (production):** packages use the ``rccl`` /
+     ``rccl-dev`` naming scheme and are installed from the production ROCm
+     repositories. See :ref:`install-rocm`.
+   * **ROCm 7.13.0 technology preview (built with TheRock):** packages use the
+     new ``amdrocm-*`` naming scheme. See :ref:`install-preview`.
 
-Use the `install.sh helper script <https://github.com/ROCm/rccl/blob/develop/install.sh>`_,
-located in the root directory of the RCCL repository,
-to build and install RCCL with a single command. It uses hard-coded configurations that can be specified directly
-when using cmake. However, it's a great way to get started quickly and provides an
-example of how to build and install RCCL.
+.. _install-rocm:
 
-Building the library using the install script:
-----------------------------------------------
+Install RCCL with ROCm (recommended)
+====================================
 
-To build the library using the install script, use this command:
+RCCL is included with ROCm on Linux. For the most complete installation, install
+the full ROCm stack, which installs RCCL along with the HIP runtime and the other
+ROCm libraries and tools.
 
-.. code-block:: shell
+#. Complete the :doc:`ROCm installation prerequisites
+   <rocm-install-on-linux:install/quick-start>` to install dependencies and
+   configure GPU access permissions.
 
-    ./install.sh
+#. Install ROCm using the meta package for your distribution. This installs RCCL
+   (the ``rccl`` runtime package) as part of the ROCm stack:
 
-For more information on the build options and flags for the install script, run the following command:
+   .. tab-set::
 
-.. code-block:: shell
+      .. tab-item:: Debian-based distros
 
-    ./install.sh --help
+         .. code-block:: bash
 
-The RCCL build and installation helper script options are as follows:
+            sudo apt install rocm
 
-.. code-block:: shell
+      .. tab-item:: RHEL-based distros
 
-       --address-sanitizer     Build with address sanitizer enabled
-    -c|--enable-code-coverage  Enable code coverage
-    -d|--dependencies          Install RCCL dependencies
-       --debug                 Build debug library
-       --debug-fast            Build debug library with lto optimization disabled (fast build times)
-       --enable_backtrace      Build with custom backtrace support
-       --disable-colltrace     Build without collective trace
-       --dump-asm              Disassemble code and dump assembly with inline code
-       --disable-roctx         Build without ROCTX logging
-    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
-    -h|--help                  Prints this help message
-    -i|--install               Install RCCL library (see --prefix argument below)
-    -j|--jobs                  Specify how many parallel compilation jobs to run (128 by default)
-       --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage
-    -l|--local_gpu_only        Only compile for local GPU architecture
-       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
-       --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
-       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
-       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
-       --openmp-test-enable    Enable OpenMP in rccl unit tests
-    -p|--package_build         Build RCCL package
-       --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
-       --run_tests_all         Run all rccl unit tests (must be built already)
-    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)
-       --static                Build RCCL as a static library instead of shared library
-    -t|--tests_build           Build rccl unit tests, but do not run
-       --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
-       --verbose               Show compile commands
-       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
-       --generate-sym-kernels  Generate symmetric memory kernels
-    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)
-       --rocshmem              Build with rocSHMEM support
-       --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
+         .. code-block:: bash
 
-  Available RCCL-specific CMake options for --cmake-options:
-    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
-    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
-    -DPROFILE=ON                          Enable profiling (default: OFF)
-    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
-    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
-    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
-    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
+            sudo dnf install rocm
 
-  Environment variables:
-    ONLY_FUNCS                 Build only specified collective functions (debug builds only).
-                               Restricts GPU kernel generation to the listed collectives, significantly
-                               reducing build time during development. Use '|' to separate multiple functions.
-                               Example: ONLY_FUNCS="AllReduce|SendRecv" ./install.sh --debug -t
-                               Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,
-                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda
-                               Advanced: Specify algo, protocol, redop, and type per collective.
-                                 ONLY_FUNCS="AllReduce RING SIMPLE Sum f32|SendRecv"
+      .. tab-item:: SLES
 
-.. tip::
+         .. code-block:: bash
 
-    By default, the RCCL install script builds all the GPU targets that are defined in ``DEFAULT_GPUS`` in `CMakeLists.txt <https://github.com/ROCm/rccl/blob/develop/CMakeLists.txt>`_.
-    To target specific GPUs and potentially reduce the build time, use ``--amdgpu_targets`` along with
-    a semicolon (``;``) separated string list of the GPU targets.
+            sudo zypper install rocm
+
+For complete, distribution-specific instructions, see the
+:doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`.
+
+Install RCCL only
+-----------------
+
+If you want to install RCCL without the rest of the ROCm stack, install the RCCL
+package directly. The package depends on the core ROCm runtime, which is pulled
+in automatically.
+
+* The runtime package is named ``rccl``.
+* The development package, which adds the library headers, is named ``rccl-dev``
+  on all supported distributions.
+
+.. tab-set::
+
+   .. tab-item:: Debian-based distros
+
+      .. code-block:: bash
+
+         sudo apt install rccl-dev
+
+   .. tab-item:: RHEL-based distros
+
+      .. code-block:: bash
+
+         sudo dnf install rccl-dev
+
+   .. tab-item:: SLES
+
+      .. code-block:: bash
+
+         sudo zypper install rccl-dev
+
+.. _install-preview:
+
+Install RCCL from the ROCm technology preview
+=============================================
+
+The ROCm 7.13.0 technology preview is built with `TheRock
+<https://github.com/ROCm/TheRock>`__ and uses a new ``amdrocm-*`` package naming
+scheme. These packages are published from the ROCm preview repositories and are
+intended for evaluation and development.
+
+For the most complete installation, install the ``amdrocm-core-sdk`` meta
+package, which provides the full ROCm Core SDK including RCCL.
+
+To install RCCL on its own, install the ``amdrocm-rccl`` package. RCCL package
+names use the following format:
+
+.. code-block:: shell-session
+
+   amdrocm-rccl<-dev><rocm_version>
+
+Where:
+
+* ``-dev`` adds the library headers in addition to the runtime files. Omit this
+  suffix to install only the runtime package.
+
+* ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this suffix to
+  install the latest available version.
+
+For example: ``amdrocm-rccl-dev7.13``.
+
+Use the following command to install the latest RCCL development package:
+
+.. tab-set::
+
+   .. tab-item:: Debian-based distros
+
+      .. code-block:: bash
+
+         sudo apt install amdrocm-rccl-dev
+
+   .. tab-item:: RHEL-based distros
+
+      .. code-block:: bash
+
+         sudo dnf install amdrocm-rccl-dev
+
+.. _install-nightly:
+
+Install a nightly build
+=======================
+
+`TheRock <https://github.com/ROCm/TheRock>`__ also publishes nightly builds for
+the ROCm Core SDK and its components, including RCCL. See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
