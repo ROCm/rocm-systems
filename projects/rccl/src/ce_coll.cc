@@ -182,9 +182,9 @@ fail:
   if (ceDevBase != nullptr) ncclMemFree(ceDevBase);
   if (sigWinDev != nullptr) ncclCommWindowDeregister(comm, sigWinDev);
   if (signalBuf != nullptr) ncclMemFree(signalBuf);
-  if (comm->ceColl.d_barrierSync != nullptr) hipFree(comm->ceColl.d_barrierSync);
-  if (comm->ceColl.scatterStream != nullptr) cudaStreamDestroy(comm->ceColl.scatterStream);
-  if (comm->ceColl.synceEvent != nullptr) cudaEventDestroy(comm->ceColl.synceEvent);
+  if (comm->ceColl.d_barrierSync != nullptr) CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
+  if (comm->ceColl.scatterStream != nullptr) CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
+  if (comm->ceColl.synceEvent != nullptr) CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
   goto exit;
 }
 
@@ -228,9 +228,9 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 
   // Clean up copy streams and events
   ceDestroyCopyStreams(comm, comm->ceColl.nCopyStreams);
-  if (comm->ceColl.d_barrierSync != nullptr) hipFree(comm->ceColl.d_barrierSync);
-  if (comm->ceColl.scatterStream != nullptr) cudaStreamDestroy(comm->ceColl.scatterStream);
-  if (comm->ceColl.synceEvent != nullptr) cudaEventDestroy(comm->ceColl.synceEvent);
+  if (comm->ceColl.d_barrierSync != nullptr) CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
+  if (comm->ceColl.scatterStream != nullptr) CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
+  if (comm->ceColl.synceEvent != nullptr) CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
 
 
 exit:
