@@ -54,12 +54,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
        grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
-  CUDACHECK(cudaMemcpyAsync(
-        comm->ddaScratch,
-        sendbuff,
-        totalCount * sizeof(T),
-        cudaMemcpyDeviceToDevice,
-        stream));
+  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 
   switch (nRanks) {
   case 4:
