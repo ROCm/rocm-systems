@@ -10,10 +10,15 @@
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "rocjitsu/kmd/linux/cwsr.h"
+
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -195,6 +200,186 @@ TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
   EXPECT_EQ(wf->queue_id(), 0u);
   for (uint32_t i = 0; i < 16; ++i)
     EXPECT_EQ(wf->ttmp(i), 0u);
+}
+
+// -----------------------------------------------------------------------------
+// CWSR serialization round-trip: parse the serialized area back with the exact
+// formulas rocm-dbgapi uses (projects/rocdbgapi/src/architecture.cpp gfx9/mi
+// cwsr_record_t) and confirm the header invariants and every register offset.
+// -----------------------------------------------------------------------------
+
+struct ParsedWave {
+  uint64_t pc = 0, exec = 0, vcc = 0, wave_id = 0;
+  uint32_t status = 0, trapsts = 0, mode = 0, m0 = 0, ttmp6 = 0, ttmp11 = 0;
+  bool first = false, last = false;
+  uint32_t group[3] = {};
+  std::vector<uint32_t> sgprs;
+  std::vector<uint32_t> vgprs;
+};
+
+// Walk the CWSR area exactly as rocm-dbgapi's control_stack_iterate +
+// register_address do, asserting the contiguity invariants dbgapi enforces.
+std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint64_t base) {
+  auto rd = [&](uint64_t va) -> uint32_t {
+    auto it = mem.find(va);
+    return it == mem.end() ? 0u : it->second;
+  };
+  auto rd64 = [&](uint64_t va) -> uint64_t {
+    return rd(va) | (static_cast<uint64_t>(rd(va + 4)) << 32);
+  };
+
+  const uint32_t cs_off = rd(base + 0);
+  const uint32_t cs_size = rd(base + 4);
+  const uint32_t ws_off = rd(base + 8);
+  const uint32_t ws_size = rd(base + 12);
+
+  // dbgapi: control_stack_end must equal wave_area_begin.
+  EXPECT_EQ(base + cs_off + cs_size, base + ws_off - ws_size);
+
+  std::vector<ParsedWave> out;
+  uint64_t last_wave_area = base + ws_off;
+  uint32_t state = 0;
+  const uint32_t words = cs_size / 4;
+  for (uint32_t i = 2; i < words; ++i) {
+    uint32_t rl = rd(base + cs_off + i * 4);
+    if (rl & (1u << 30))
+      continue; // event
+    if (rl & (1u << 31)) {
+      state = rl;
+      continue;
+    }
+    const uint32_t vgprs_field = state & 0x3F;
+    const uint32_t sgprs_field = (state >> 6) & 0x7;
+    const uint32_t accum = (state >> 24) & 0x3F;
+    const uint32_t vgpr_count = (accum + 1) * 4;
+    const uint32_t acc = (vgprs_field + 1) * 8 - vgpr_count;
+    const uint32_t sgpr_count = (sgprs_field + 1) * 16 - 16;
+
+    const uint64_t save = last_wave_area - 64;
+    const uint64_t hwregs = save - 32 * 4;
+    const uint64_t ttmps = save - 16 * 4;
+    const uint64_t sgprs_addr = hwregs - sgpr_count * 4;
+    const uint64_t accv = sgprs_addr - acc * 256;
+    const uint64_t vgprs_addr = accv - static_cast<uint64_t>(vgpr_count) * 256;
+
+    ParsedWave pw;
+    pw.last = rl & (1u << 16);
+    pw.first = rl & (1u << 17);
+    pw.m0 = rd(hwregs + 0 * 4);
+    pw.pc = rd64(hwregs + 1 * 4);
+    pw.exec = rd64(hwregs + 3 * 4);
+    pw.status = rd(hwregs + 5 * 4);
+    pw.trapsts = rd(hwregs + 6 * 4);
+    pw.mode = rd(hwregs + 9 * 4);
+    pw.wave_id = rd64(ttmps + 4 * 4);
+    pw.ttmp6 = rd(ttmps + 6 * 4);
+    pw.group[0] = rd(ttmps + 8 * 4);
+    pw.group[1] = rd(ttmps + 9 * 4);
+    pw.group[2] = rd(ttmps + 10 * 4);
+    pw.ttmp11 = rd(ttmps + 11 * 4);
+    const uint32_t vcc_lo_slot = std::min<uint32_t>(108, sgpr_count) - 2;
+    pw.vcc = rd64(sgprs_addr + vcc_lo_slot * 4);
+    pw.sgprs.resize(sgpr_count);
+    for (uint32_t s = 0; s < sgpr_count; ++s)
+      pw.sgprs[s] = rd(sgprs_addr + s * 4);
+    pw.vgprs.resize(static_cast<size_t>(vgpr_count) * 64);
+    for (uint32_t r = 0; r < vgpr_count; ++r)
+      for (uint32_t l = 0; l < 64; ++l)
+        pw.vgprs[r * 64 + l] = rd(vgprs_addr + r * 256 + l * 4);
+    out.push_back(std::move(pw));
+    last_wave_area = vgprs_addr;
+  }
+  // dbgapi: the walk must bottom out exactly at wave_area_begin.
+  EXPECT_EQ(last_wave_area, base + ws_off - ws_size);
+  return out;
+}
+
+kmd::CwsrWaveState make_wave(uint64_t id, uint64_t pc) {
+  kmd::CwsrWaveState w;
+  w.pc = pc;
+  w.exec = 0xF0F0F0F0ULL;
+  w.vcc = 0xABCD1234ULL;
+  w.status = (1u << 13); // HALT
+  w.trapsts = 0;
+  w.mode = 0;
+  w.m0 = 0x55;
+  w.wave_id = id;
+  w.group_ids = {1, 2, 3};
+  w.wave_in_group = 0;
+  w.queue_packet_id = 7;
+  w.trap_id = 1;
+  w.wave_stopped = true;
+  w.num_sgprs = 16;
+  w.num_vgprs = 4;
+  w.sgprs.resize(w.num_sgprs);
+  for (uint32_t s = 0; s < w.num_sgprs; ++s)
+    w.sgprs[s] = 0x1000 + s;
+  w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
+  for (uint32_t r = 0; r < w.num_vgprs; ++r)
+    for (uint32_t l = 0; l < 64; ++l)
+      w.vgprs[r * 64 + l] = (r << 16) | l;
+  return w;
+}
+
+TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000; // 256 KiB
+
+  std::map<uint64_t, uint32_t> mem;
+  auto write32 = [&](uint64_t va, uint32_t val) { mem[va] = val; };
+
+  std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x2000), make_wave(0xAA02, 0x2040),
+                                           make_wave(0xAA03, 0x2080)};
+  waves[0].wave_in_group = 0;
+  waves[1].wave_in_group = 1;
+  waves[2].group_ids[0] = 2;
+
+  kmd::CwsrLayout layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32);
+  ASSERT_TRUE(layout.ok);
+
+  std::vector<ParsedWave> parsed = parse_cwsr(mem, kCtxBase);
+  ASSERT_EQ(parsed.size(), waves.size());
+
+  for (size_t i = 0; i < waves.size(); ++i) {
+    const auto &in = waves[i];
+    const auto &out = parsed[i];
+    EXPECT_EQ(out.pc, in.pc) << "wave " << i;
+    EXPECT_EQ(out.exec, in.exec);
+    EXPECT_EQ(out.status, in.status);
+    EXPECT_EQ(out.mode, in.mode);
+    EXPECT_EQ(out.m0, in.m0);
+    EXPECT_EQ(out.wave_id, in.wave_id);
+    EXPECT_EQ(out.vcc, in.vcc);
+    EXPECT_EQ(out.group[0], in.group_ids[0]);
+    EXPECT_EQ(out.group[1], in.group_ids[1]);
+    EXPECT_EQ(out.group[2], in.group_ids[2]);
+    EXPECT_EQ(out.first, i == 0 || i == 2);
+    EXPECT_EQ(out.last, i == 1 || i == 2);
+    // TTMP6: wave_stopped (bit30) and trap id (bits 25:28).
+    EXPECT_TRUE(out.ttmp6 & (1u << 30));
+    EXPECT_EQ((out.ttmp6 >> 25) & 0xF, in.trap_id);
+    // TTMP11: trap-handler-setup (bit31) and packet id (bits 6:30).
+    EXPECT_TRUE(out.ttmp11 & (1u << 31));
+    EXPECT_EQ((out.ttmp11 >> 6) & 0x1FFFFFF, in.queue_packet_id);
+    // Meaningful scalars and vectors round-trip.
+    for (uint32_t s = 0; s < in.num_sgprs; ++s)
+      EXPECT_EQ(out.sgprs[s], in.sgprs[s]) << "sgpr " << s;
+    for (uint32_t r = 0; r < in.num_vgprs; ++r)
+      for (uint32_t l = 0; l < 64; ++l)
+        EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
+  }
+
+  const auto original_mem = mem;
+  auto invalid = make_wave(1, 0x3000);
+  invalid.num_vgprs = 257;
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, {invalid}, write32).ok);
+  EXPECT_EQ(mem, original_mem);
+
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(kCtxBase + 1, kAreaSize, waves, write32).ok);
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(UINT64_MAX - 3, kAreaSize, waves, write32).ok);
+  EXPECT_FALSE(
+      kmd::serialize_queue_cwsr(kCtxBase, layout.wave_state_offset - 1, waves, write32).ok);
+  EXPECT_EQ(mem, original_mem);
 }
 
 } // namespace
