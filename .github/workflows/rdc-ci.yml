@@ -161,13 +161,15 @@ jobs:
     - name: Build and install amd-smi
       working-directory: projects/amdsmi
       run: |
+        # RDC's metric fetcher links amdsmi_get_cpu_* (ESMI/CPU), so amd-smi
+        # must be built with the E-SMI library enabled or librdc fails to link.
         cmake -B build \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
           -DCMAKE_INSTALL_PREFIX=${ROCM_DIR} \
           -DCPACK_GENERATOR=DEB \
-          -DENABLE_ESMI_LIB=OFF
+          -DENABLE_ESMI_LIB=ON
         make -C build -j $(nproc)
         make -C build install
         make -C build -j $(nproc) package
