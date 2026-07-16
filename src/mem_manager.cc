@@ -226,8 +226,14 @@ ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* manager, void* pt
   return ncclMemTrackInternal(manager, ptr, size, handle, handleType, memType, true, ownerRank, ownerDev, ownerPtr);
 }
 
-// Untrack allocation
-ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size) {
+// Untrack a dynamic (scratch/offload) allocation
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, struct ncclMemUntrackInfo* info) {
+  if (info != nullptr) {
+    info->memType = ncclMemPersist;
+    info->dynMemState = ncclDynMemStateActive;
+    info->dynMemSize = 0;
+  }
+
   if (ncclParamMemManagerDisable()) return ncclSuccess;
   if (manager == nullptr || ptr == nullptr) return ncclInternalError;
 
@@ -238,6 +244,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
   }
 
   // Variables to save values before releasing lock
+  bool found = false;
   size_t entrySize = 0;
   int numEntries COMPILER_ATTRIBUTE_UNUSED = 0;  // May be unused if TRACE compiled out
   bool isImportedFromPeer = false;
@@ -280,14 +287,15 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
         }
 
         // Save values before unlock for logging (may be unused if TRACE is compiled out)
+        found = true;
         entrySize = entry->size;
         numEntries = manager->numEntries;
         isImportedFromPeer = entry->isImportedFromPeer;
         memType = entry->memType;
-
-        // Safety check: log if tracked size doesn't match passed size
-        if (entrySize != size) {
-          INFO(NCCL_ALLOC, "MemManager: Untrack size mismatch ptr=%p tracked=%zu passed=%zu", ptr, entrySize, size);
+        if (info != nullptr) {
+          info->memType = entry->memType;
+          info->dynMemState = entry->state;
+          info->dynMemSize = entry->size;
         }
 
         free(entry);
@@ -298,9 +306,8 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
     }
   } // lock_guard automatically releases mutex
 
-  // Update statistics
-  if (entrySize > 0) {
-    // Entry found in linked list
+  // Update statistics for the dynamic entry we just removed (if any)
+  if (found) {
     if (isImportedFromPeer) {
       if (memType == ncclMemScratch) {
         (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalScratchImported, entrySize, std::memory_order_relaxed);
@@ -316,8 +323,23 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
     }
 
     TRACE(NCCL_ALLOC, "MemManager: Untrack ptr=%p size=%zu entries=%d", ptr, entrySize, numEntries);
-  } else {
-    // Entry not found in linked list - must be persistent memory
+  }
+
+  return ncclSuccess;
+}
+
+// Decrement the persistent-memory counter. No linked-list traversal.
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* manager, void* ptr, size_t size) {
+  if (ncclParamMemManagerDisable()) return ncclSuccess;
+  if (manager == nullptr || ptr == nullptr) return ncclInternalError;
+
+  // Atomic check to avoid touching a destroyed manager
+  if (!COMPILER_ATOMIC_LOAD(&manager->initialized, std::memory_order_acquire)) {
+    WARN("MemManager: Cannot untrack persistent allocation ptr=%p, manager not initialized", ptr);
+    return ncclInternalError;
+  }
+
+  if (size > 0) {
     (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalPersist, size, std::memory_order_relaxed);
     TRACE(NCCL_ALLOC, "MemManager: Untrack Persistent ptr=%p size=%zu", ptr, size);
   }

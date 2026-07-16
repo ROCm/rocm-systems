@@ -318,8 +318,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
     free(task);
   }
-  // Destroy dynamic memory manager only after all proxy threads have been joined
-  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   if (comm->memPool) CUDACHECK(cudaMemPoolDestroy(comm->memPool));
 
@@ -392,6 +390,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->gproxyConn);
 
   NCCLCHECK(ncclRegCleanup(comm));
+
+  // Destroy dynamic memory manager only after all device memory has been released.
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   TRACE_CALL("%s(%p)", (abort ? "ncclCommAbort" : "ncclCommDestroy"), comm);
   INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx commId 0x%" PRIx64 " - %s COMPLETE", comm,
