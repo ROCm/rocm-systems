@@ -376,6 +376,10 @@ public:
   // GPU-visible indirect buffer holding PM4 commands.
   void* pm4_ib_buf_;
   uint32_t pm4_ib_size_b_;
+  // True if pm4_ib_buf_ was allocated from device memory (DRM VM) rather than
+  // system memory. In DRM/UKI mode the utility queue's CPF must fetch this IB
+  // from the DRM VM, so it is device-allocated; the free path must match.
+  bool pm4_ib_dev_mem_;
   std::mutex pm4_ib_mutex_;
 
   // Error handler control variable.
