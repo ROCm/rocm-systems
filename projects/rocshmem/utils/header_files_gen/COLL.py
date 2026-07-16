@@ -201,6 +201,79 @@ def generate_fcollect_api():
     for type_, tname_ in types:
         expanded_code += fcollect_api(type_, tname_)
 
+    expanded_code += """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
+ * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
+ * @p dest buffer.
+ * Must be called as a work-group collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of bytes contributed by each PE.
+ *
+ * @return void
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t
+    rocshmem_team_t team, void *dest, const void *source, int nelems);\n
+"""
+
+    return expanded_code
+
+
+def fcollect_wave_api(T, TNAME):
+    return (
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_fcollect_wave(\n"
+        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
+        f"    const {T} *source, int nelems);\n\n"
+    )
+
+
+def generate_fcollect_wave_api():
+    expanded_code = """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECT_WAVE
+ * @brief Concatenates blocks of data from multiple PEs to an array in every
+ * PE participating in the collective routine.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @param[in] ctx          The context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data elements contributed by each PE.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */\n"""
+    for type_, tname_ in types:
+        expanded_code += fcollect_wave_api(type_, tname_)
+
+    expanded_code += """
+/**
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE
+ * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
+ * @p dest buffer.
+ * Must be called as a wave-level collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of bytes contributed by each PE.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */
+__device__ ATTR_NO_INLINE int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);\n
+"""
+
     return expanded_code
 
 
@@ -398,6 +471,7 @@ namespace rocshmem {
         generate_alltoall_wave_api() +
         generate_broadcast_api() +
         generate_fcollect_api() +
+        generate_fcollect_wave_api() +
         generate_reduction_api() +
         generate_reduce_on_stream_api() +
         generate_broadcast_wave_api()
