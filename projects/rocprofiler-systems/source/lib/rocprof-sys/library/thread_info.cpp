@@ -131,6 +131,8 @@ grow_data(std::int64_t _tid)
         return peak_num_threads;
     }
 
+    // Unreachable code: peak_num_threads is already max_supported_threads,
+    // and _tid >= max_supported_threads returns above. Retained for future use.
     if(_tid >= peak_num_threads)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);

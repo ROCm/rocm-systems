@@ -139,10 +139,12 @@ inline void
 warn_thread_limit_once()
 {
     std::call_once(thread_limit_warning_flag, []() {
-        LOG_WARNING(
-            "Maximum allowed thread limit ({}) reached. Further thread creation and "
-            "profiling will be disabled to prevent resource exhaustion.",
-            static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
+        LOG_WARNING("Maximum allowed thread limit ({}) reached. Further profiling will "
+                    "be disabled "
+                    "to prevent resource exhaustion. Consider increasing the limit at "
+                    "compile time "
+                    "using the ROCPROFSYS_MAX_THREADS CMake option.",
+                    static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
     });
 }
 }  // namespace

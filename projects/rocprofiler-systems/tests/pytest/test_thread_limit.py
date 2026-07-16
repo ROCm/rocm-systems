@@ -90,16 +90,9 @@ def get_thread_limit_warning_regex(thread_limit: int) -> str:
     """Regex for pthread_create_gotcha thread-limit warning in runner logs."""
     return (
         rf"\[warning\] Maximum allowed thread limit \({thread_limit}\) reached\. "
-        r"Further thread creation and profiling will be disabled to prevent "
-        r"resource exhaustion\."
-    )
-
-
-def get_thread_launched_regex(thread_index: int, max_threads: int) -> str:
-    """Regex for thread-limit workload launch log past the compile-time max."""
-    return (
-        rf"\[thread-limit\] launching thread {thread_index} "
-        rf"\(max: {max_threads}\)\.\.\."
+        r"Further profiling will be disabled to prevent resource exhaustion\. "
+        r"Consider increasing the limit at compile time using the "
+        r"ROCPROFSYS_MAX_THREADS CMake option\."
     )
 
 
