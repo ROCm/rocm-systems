@@ -27,7 +27,7 @@ rocprof-compute stores and tracks the supported metrics in YAML format as "analy
 | Panel / Block | A single analysis config. Each analysis config displays one panel or one block of the `analyze` mode output. |
 | Table | A grouping of metrics within an analysis config. |
 | Family | An architecture family consists of architectures of similar design methodology. Currently, rocprof-compute supports 2 families: CDNA and RDNA. |
-| Collectable | A sub-expression of a metric formula whose counters fit in a single hardware pass, producing a correct result on its own. Metrics whose full formula exceeds the hardware pass limit are composed of collectables. |
+| Set | A set of metric formulas whose counters fit in a single hardware pass. |
 
 ### Structure
 
