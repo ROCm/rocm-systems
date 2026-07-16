@@ -22,6 +22,7 @@ import smtplib
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -232,6 +233,53 @@ def print_environment_info() -> None:
     log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
 
 
+def parse_junit_xml(xml_path: Path) -> dict:
+    """Parse JUnit XML and return structured results."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    passed_tests = []
+    failed_tests = []
+    error_details = []
+    tests_run = 0
+    failures = 0
+    errors = 0
+
+    for suite in root.iter("testsuite"):
+        tests_run = int(suite.get("tests", 0))
+        failures = int(suite.get("failures", 0))
+        errors = int(suite.get("errors", 0))
+
+    for tc in root.iter("testcase"):
+        name = tc.get("name", "")
+        time_s = tc.get("time", "")
+        duration = f"{float(time_s):.2f}s" if time_s else ""
+
+        failure = tc.find("failure")
+        error = tc.find("error")
+        if failure is not None:
+            failed_tests.append(name)
+            error_details.append(
+                f"FAILED: {name}\n  {failure.get('message', '')}"
+            )
+        elif error is not None:
+            failed_tests.append(name)
+            error_details.append(
+                f"ERROR: {name}\n  {error.get('message', '')}"
+            )
+        else:
+            passed_tests.append((name, duration))
+
+    return {
+        "passed": passed_tests,
+        "failed": failed_tests,
+        "error_details": error_details,
+        "tests_run": tests_run,
+        "failures": failures,
+        "errors": errors,
+    }
+
+
 def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> tuple[int, dict]:
     """Run pytest on test_c10d_nccl.py and return (exit_code, summary_dict)."""
     miopen_cache = tempfile.mkdtemp(prefix="miopen_cache_")
@@ -239,6 +287,8 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(pytorch_src / "test") + ":" + env.get("PYTHONPATH", "")
+
+    junit_xml = results_log.parent / "pytorch_c10d_results.xml"
 
     if test_scope == "smoke":
         k_expr = " or ".join(SMOKE_TESTS)
@@ -257,15 +307,11 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
         "-v",
         f"--timeout={timeout}",
         "--tb=short",
+        f"--junitxml={junit_xml}",
         "-k",
         k_expr,
     ]
     log.info("Running: %s", " ".join(cmd))
-
-    passed_tests = []
-    failed_tests = []
-    summary_line = ""
-    current_test = ""
 
     with open(results_log, "w") as log_file:
         proc = subprocess.Popen(
@@ -281,32 +327,58 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
             sys.stdout.write(line)
             sys.stdout.flush()
             log_file.write(line)
-            test_header = re.match(r"test/.*?::([\w:]+)", line)
-            if test_header:
-                current_test = test_header.group(1)
-            if "PASSED" in line and re.search(r"PASSED\s+\[", line):
-                dur_match = re.search(r"\[(\d+\.\d+s)\]", line)
-                duration = dur_match.group(1) if dur_match else ""
-                passed_tests.append((current_test, duration))
-                current_test = ""
-            elif "FAILED" in line and re.search(r"FAILED\s+\[", line):
-                failed_tests.append(current_test)
-                current_test = ""
-            elif line.strip().startswith("=") and "passed" in line:
-                summary_line = line.strip()
         proc.wait()
 
     log.info("Test exit code: %d", proc.returncode)
     log.info("Results written to: %s", results_log)
 
+    exit_code = proc.returncode
+    passed_tests = []
+    failed_tests = []
+    error_details = []
+    tests_run = 0
+    summary_line = ""
+
+    if junit_xml.exists():
+        log.info("Parsing JUnit XML: %s", junit_xml)
+        junit = parse_junit_xml(junit_xml)
+        passed_tests = junit["passed"]
+        failed_tests = junit["failed"]
+        error_details = junit["error_details"]
+        tests_run = junit["tests_run"]
+        parts = []
+        if passed_tests:
+            parts.append(f"{len(passed_tests)} passed")
+        if failed_tests:
+            parts.append(f"{len(failed_tests)} failed")
+        summary_line = ", ".join(parts)
+
+        if error_details:
+            log.info("Failure/error details from JUnit XML:")
+            for detail in error_details:
+                log.info("  %s", detail)
+    else:
+        log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
+
+    if test_scope == "smoke" and tests_run < len(SMOKE_TESTS):
+        log.error(
+            "Expected %d smoke tests but only %d were collected — "
+            "test names may have changed in the nightly",
+            len(SMOKE_TESTS),
+            tests_run,
+        )
+        exit_code = 1
+
     summary = {
-        "exit_code": proc.returncode,
+        "exit_code": exit_code,
         "test_scope": test_scope,
         "passed": passed_tests,
         "failed": failed_tests,
-        "summary_line": summary_line.strip("= "),
+        "summary_line": summary_line,
+        "tests_run": tests_run,
+        "expected_tests": len(SMOKE_TESTS) if test_scope == "smoke" else None,
     }
-    return proc.returncode, summary
+    return exit_code, summary
 
 
 def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
@@ -330,8 +402,11 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0)}",
         f"",
         f"Results:    {summary['summary_line']}",
-        f"",
     ]
+
+    if summary.get("expected_tests") is not None:
+        lines.append(f"Collected:  {summary['tests_run']}/{summary['expected_tests']} expected smoke tests")
+    lines.append("")
 
     if summary["failed"]:
         lines.append(f"FAILED tests ({len(summary['failed'])}):")

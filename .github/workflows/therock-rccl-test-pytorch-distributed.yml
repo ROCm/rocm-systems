@@ -127,5 +127,6 @@ jobs:
           name: pytorch-c10d-results-${{ inputs.amdgpu_families }}
           path: |
             ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log
+            ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.xml
             ${{ env.PYTORCH_SRC }}/pytorch_c10d_summary.txt
           retention-days: 14
