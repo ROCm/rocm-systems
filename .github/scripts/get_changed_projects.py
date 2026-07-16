@@ -61,7 +61,7 @@ def should_run_all_tests(paths: Optional[Iterable[str]]) -> bool:
     return matches_paths(paths, FULL_TEST_TRIGGER_PATTERNS)
 
 
-def get_changed_projects(base_ref: str, head_ref: str = "HEAD") -> ChangedProjectsResult:
+def get_changed_projects(base_ref: str, head_ref: str | None = None) -> ChangedProjectsResult:
     """Get changed project paths validated against repos-config.json.
 
     Returns a ChangedProjectsResult with:
@@ -102,7 +102,7 @@ def get_changed_projects(base_ref: str, head_ref: str = "HEAD") -> ChangedProjec
 
 if __name__ == "__main__":
     base_ref = os.environ.get("BASE_REF", "HEAD^")
-    head_ref = os.environ.get("HEAD_REF", "HEAD")
+    head_ref = os.environ.get("HEAD_REF")
     result = get_changed_projects(base_ref, head_ref)
     set_github_output(
         {
