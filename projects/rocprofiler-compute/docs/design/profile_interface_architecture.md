@@ -19,9 +19,11 @@ profiling, analysis, CLI, TUI, WebUI, and utility code to change with it.
 Profile data storage is becoming more varied:
 
 - ROCPD `.db` is becoming the default and canonical profile output.
-- The native tool is expected to write counters data directly into a SQLite/ROCPD database via
-  profiler-hub.
+- The native tool's counter data sits behind a storage boundary and is not assumed
+  to be any specific on-disk format (long-term it is written and read through the
+  Profiler Hub, which is not necessarily a database).
 - Parquet is a possible future option for large workloads.
+- Compress csv-profile outputs with gzip streaming
 
 Today the writing, reading, joining, and pivoting of profile data are thinly
 spread across many modules. On-disk file names are hardcoded in multiple places,
@@ -36,17 +38,17 @@ going straight to an in-memory frame.
 
 ## Goal
 
-Put PMC profile data storage behind one boundary with a clear reader and writer
-contract:
+Reduce format coupling in this order:
 
-- Profile mode finalizes data through a **writer**.
-- Analyze mode reads data through a **reader** that returns the in-memory frame.
-- No other module knows whether the source is ROCPD, profiler-hub, or a future
-  format, and no other module knows where or how it is stored on disk.
-
-Adding a new storage format should mean adding one implementation behind the
-boundary and extending one selection point — not editing profiling, analysis,
-and utility code.
+1. Remove the old CSV profile backend.
+2. Add gzip csv compression.
+    - Gzip the result CSV (output of rocpd to CSV conversion)
+    - Gzip the native tool counter output
+3. Stop the rocpd to csv conversion, stop converting the merged result DB into a unified result CSV. SDK kernels stay in the DB, native counters stay in compressed CSV.
+4. Move the cross-tool merge (SDK kernels + native counters) into analyze; the per-process -> per-pass consolidation stays in profile.
+5. Introduce the profile data reader interface, where analyze calls it for the DataFrame.
+6. Remove `pmc_perf.csv` as an analyze input; analyze builds the pandas DataFrame from the source artifacts directly.
+7. Move the native counter lane behind the Profiler Hub interface.
 
 ## User visible architectural Decisions (AD)
 
@@ -67,17 +69,45 @@ Users who want to collect profiling data to csv will need to install older versi
 Also ROCm SDK rocpd tool allows conversion to CSV as one of the supported formats.
 If there is future strong request to return CSV support, we may implement it under a newly defined interface.
 
-*Note: The `results_*.csv` intermediate that the rocpd path still emits is removed later with the reader boundary (AD-3), not here.*
+*Note: The results_*.csv intermediate that the rocpd path still emits is removed in Phase C (AD-3), when the rocpd-to-csv conversion stops and SDK kernels are read from the DB directly.*
 
+### AD-2: Compress remaining CSV intermediates
 
-### AD-2: Remove the rocprofv3 backend so rocprofiler-sdk is the lone backend
+Gzip is short-term storage-size reduction for CSV artifacts that still exist
+after CSV profile backend removal. 
 
-Remove `rocprofv3` backend and simplify `rocprofiler-sdk` backend by removing unnecessary inheritance in code.
-Both of these backends collect data via rocprofiler-sdk-tool shared library loaded into the target process.
-`rocprofv3` backend is a legacy mode, which adds a redundant rocprofv3 script invocation layer and this adds complexity to the system.
-This mode is set via environment variable and is expected to be generally not used by customers.
+We introduce gzip streaming for two separate csv artifacts, written through its own compression interface used by both python and backend:
+ - the results_*.csv(s), written by compute's Python side (rocpd_data.py) at the end of a pass, when the merged result DB is converted to csv and is the artifact analyze reads today.
+ - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
 
-### AD-3: Analyze scripts don't generate intermediate `pmc_perf.csv` by default anymore
+Compression belongs at CSV read/write, where profile writes compressed CSV
+and analyze reads compressed CSV. Other profile and analyze code should not take
+on gzip-specific behavior.
+
+### AD-3: Keep SDK and native counter data in separate lanes
+
+Today the profile data merge fuses the two data types: native counter data is
+injected into the SDK kernel ROCPD, so everything downstream sees one combined
+artifact.
+
+AD-3 removes that fusion. SDK kernel data (from the SDK tool) and native counter
+data (from the native tool) stay in separate storage lanes through profile and
+analyze, and are combined only in memory when analyze builds the DataFrame.
+
+Keeping the lanes separate lets each evolve its storage independently, where the native
+counter path can move to Profiler Hub, parquet, or another format without reshaping
+the SDK ROCPD path. Gzip (Phase B) is a separate, earlier change and does not depend
+on this separation.
+
+### AD-4: Analyze reads through the profile data interface
+
+Analyze should not know which profile artifacts exist on disk, it runs through the
+profile data interface for the pandas DataFrame.
+
+The interface reads SDK/kernel data from ROCPD, reads native/counter data from
+its storage path, and merges into the DataFrame.
+
+### AD-5: Analyze scripts don't generate intermediate `pmc_perf.csv` by default anymore
 
 Eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
 
@@ -95,34 +125,116 @@ However, `pmc_perf.csv` generation could be useful for debugging purposes and so
 Therefore, we will add a new debug option `--gen-pmc` which implements one-way export of this file.
 However, analysis scripts will not read its back.
 
+### AD-6: Native counter storage moves behind the Profiler Hub
 
-### BOUNDARIES in these ADs to mention:
-#### Unit tests do not touch disk
+Move the native counter lane behind the
+Profiler Hub interface (a `profiler_hub_data.py` implementation selected at the
+boundary), written and read through the Hub rather than straight as compressed CSV.
 
-Disk I/O lives behind a thin, transparent adapter (like 
-header/row write primitives) that is intentionally left untested. Tests that write to disk leave stray artifacts when they crash, can exhaust CI storage, and depend on system resources.
-Unit tests mock the writer/reader and assert on what is passed rather than writing or
-reading real files. The boundary makes disk free testing natural as in the same writer interface that production uses is swapped for an in memory fake in tests
+The SDK still writes raw rocpd directly, the per-process -> per-pass merge
+stays in profile, and the two are merged in analyze.
 
-#### No pandas in profiling
+## Boundaries
 
-Already discussed at length and merged to current develop pipeline, this boundary has to be respected in this design as well as in profiling code must not depend on pandas or other analysis only
-dependencies. The boundary exposes a **writer** used by
-profiling (pandas-free) and a **reader** used by analysis (pandas is fine here), packaged
-together but with different dependency characteristics.
+### Unit tests do not touch disk
 
-## Phasing and Acceptance
+Disk I/O lives behind thin adapters. Unit tests mock the reader or writer and
+assert what is passed across the boundary.
 
-Phase order: A (remove CSV) -> B (`profiling_data` boundary) -> C (backend
-execution), plus follow-ups (e.g. A-2, removing the now-dead `--join-type`
-option). Once Phase A lands, B and C have no hard ordering dependency on each
-other.
+### No pandas in profiling
+
+Profile mode stays pandas-free. Pandas is allowed in analyze mode, where source
+artifacts are read and normalized into a DataFrame.
+
+## Phase Order
+
+Phase order: A (remove CSV profile backend) -> B (gzip CSV read/write) -> C
+(native tool counter storage + stop the rocpd-to-csv conversion) -> D (profile
+data interface + remove `pmc_perf.csv` as an analyze input) -> Phase E (Profiler Hub).
+
+Backend execution cleanup and future storage formats are follow-ups unless they
+are required by one of these phases.
+
+## Current Collection Architecture
+
+Collection mode: ROCPD. Equals post-Phase-A (removal of CSV backend).
+
+```mermaid
+sequenceDiagram
+    participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py
+    participant computeMerger as [rocprof-compute]<br>[Profile phase]<br>rocpd_data.py
+    participant process as Target Process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant countersWriter as [Interface]<br> Counters Writer
+    participant countersWriterCsv as [Impl]<br>Csv Counters Writer
+    participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
+    participant countersData as [Storage: CSV]<br>[per-process & per-pass]<br>Counters Data
+    participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
+    participant resultCsv as [Storage:CSV]<br>[per-pass]<br>Result
+    participant pmcPerf as [Storage:CSV]<br>pmc_perf.csv
+    participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
+
+    loop each collection pass
+        computeLauncher->>process: Launches with LD_PRELOAD of tracing libs
+        process->>sdkTool: Loads via LD_PRELOAD
+        process->>computeTool: Loads via LD_PRELOAD
+
+        rect rgb(230, 230, 230)
+        note right of sdkTool: In-process data collection
+            sdkTool->>sdkData: Write
+            computeTool->>countersWriter: Pass data
+            countersWriter->>countersWriterCsv: Delegate
+            countersWriterCsv->>countersData: Write
+        end
+
+        computeLauncher->>computeMerger: Requests Merge
+        rect rgb(230, 230, 230)
+        note right of computeMerger: Data merge
+            loop each per-process counters CSV
+                computeMerger->>countersData: Read counters
+                countersData-->>computeMerger: Counters Data
+                computeMerger->>sdkData: Inject counters data to existing per-process SDK databases
+            end
+            loop each per-process SDK database
+                computeMerger->>sdkData: Read counters collection view from database
+                computeMerger->>resultDb: Merge data
+            end
+        end
+
+        computeLauncher->>computeMerger: Request CSV conversion
+        rect rgb(230, 230, 230)
+        note right of computeMerger: Conversion of data to CSV
+            computeMerger->>resultDb: Read data
+            resultDb-->>computeMerger: Data
+            computeMerger->>resultCsv: Write data to CSV
+        end
+
+        rect rgb(230, 230, 230)
+        note right of computeLauncher: Removal of intermediate<br>data
+            computeLauncher->>sdkData: Deletes per-process rocpds
+            computeLauncher->>countersData: Deletes per-process CSVs
+            computeLauncher->>resultDb: Deletes result database
+        end
+    end
+
+    rect rgb(230, 230, 230)
+    note left of computeAnalyze: Data read in analysis phase
+        loop each per-pass result
+            computeAnalyze->>resultCsv: Read
+            resultCsv-->>computeAnalyze: Data
+        end
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
+        computeAnalyze->>pmcPerf: Read back
+        pmcPerf-->>computeAnalyze: Data
+        computeAnalyze->>computeAnalyze: build pandas dataframe
+    end
+```
 
 ## Phase A: Remove the CSV Profile Backend
 
 Phase A deletes the csv format choice and the csv-format analyze branch, but
-keeps the rocpd read path (`results_*.csv` -> `pmc_perf.csv`). Moving analyze off
-`results_*.csv` / `pmc_perf.csv` to read `.db` directly is Phase B.
+keeps the rocpd read path (`results_*.csv` -> `pmc_perf.csv`). Phase A changes nothing visible in the above sequence diagram.
 
 ### Before
 
@@ -190,8 +302,8 @@ Intentionally **kept** in this phase:
 
 - Rocpd path still converts each `.db` into `results_*.csv`,
   and analyze still reads `results_*.csv` through the rocpd concat path. Removing
-  it requires analyze to read the frame directly from `.db`, which is the reader
-  contract introduced in Phase B (AD-3).
+  it requires analyze to read the frame directly from `.db`, which happens in
+  Phase C (AD-3) when the rocpd-to-csv conversion stops.
 - `utils_profile_csv.py`. It is still a necessary csv helper file used by the
   rocpd path, `sysinfo.csv`, and marker-trace augmentation. It is removed as csv intermediates are eliminated in later phases.
 
@@ -207,190 +319,384 @@ removal itself because it also deletes user-facing surface, the dedicated
 `join_type_grid` / `join_type_kernel` golden workloads, their related tests,
 and the `--join-type` references in the docs.
 
-## Phase B: The Profiling Data Boundary
+## Phase B: Add Compression at CSV Read/Write
 
-The boundary owns where profile source data stays and how it is read/written. It exposes a **writer** (used by profile) and a **reader**
-(used by analyze):
+We are to introduce gzip streaming to provide a size reduction to csv files.
+Phase B does not change the shape of
+the profile/analyze contract yet, profile still produces the per-pass CSV result
+and analyze still reads it.
 
-- the writer persists a completed profiling pass's PMC data (pandas-free), without profile mode knowing the on-disk storage format;
-- the reader returns the in-memory PMC DataFrame built from source for a given analysis run;
-- an availability check reports whether readable profile data exists, so callers stop matching hardcoded file names.
-
-Callers obtain implementations through selection functions (`get_writer` / `get_reader`) rather than constructing them directly.
-
-This is the only place that maps a configured format to an implementation.
-
-### Before
-
-```mermaid
-flowchart LR
-    subgraph profile["Profile Mode"]
-        uprof["utils_profile.py<br/>run_prof"]
-    end
-    subgraph analyze["Analyze Mode"]
-        abase["analysis_base.py"]
-        adb["analysis_db.py"]
-        fio["file_io.py"]
-    end
-    subgraph disk["On-Disk"]
-        db["rocpd .db"]
-        pmc["pmc_perf.csv<br/>(materialized + read back)"]
-    end
-    uprof -->|"writes"| db
-    abase -->|"materializes"| pmc
-    abase -->|"reads (hardcoded name)"| pmc
-    adb -->|"reads (hardcoded name)"| pmc
-    fio -->|"reads (hardcoded name)"| pmc
-```
-
-### Target
-
-This is the Phase B boundary only (rocpd). For the integrated view once the
-Profiler Hub is applied, see [Phase B-2](#phase-b-2-combined-sequence-with-the-profiler-hub-integration).
+The change goes through one
+compression interface shared by both the native/backend counter writer
+and the Python result-CSV writer. Compression is applied at two write points, the
+native counter output and the result CSV, and decompressed on read
+(during merge in analyze).
 
 ```mermaid
 sequenceDiagram
-    participant Profile as Profile mode
-    participant Boundary as profiling_data boundary (get_writer / get_reader)
-    participant Impl as rocpd_data.py
-    participant Store as On-disk (rocpd .db)
-    participant Analyze as Analyze mode
+    participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py
+    participant computeMerger as [rocprof-compute]<br>[Profile phase]<br>rocpd_data.py
+    participant process as Target Process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant countersWriter as [Interface]<br> Counters Writer
+    participant countersWriterCsv as [Impl]<br>Csv Counters Writer
+    participant compression as [Interface]<br>Compression (gzip impl)
+    participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
+    participant countersData as [Storage: Compressed CSV]<br>[per-process & per-pass]<br>Counters Data
+    participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
+    participant resultCsv as [Storage:Compressed CSV]<br>[per-pass]<br>Result
+    participant pmcPerf as [Storage:CSV]<br>pmc_perf.csv
+    participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
 
-    note over Profile, Store: Profile (write side)
-    Profile->>Boundary: get_writer(format), persist completed pass
-    Boundary->>Impl: selected implementation
-    Impl->>Store: write per-pass rocpd (.db)
-
-    note over Analyze, Store: Analyze (read side)
-    Analyze->>Boundary: get_reader(profiling_config).read_pmc_frame(dir, filters)
-    Boundary->>Impl: selected implementation
-    Impl->>Store: read per-pass rocpd(s) (.db)
-    Store-->>Impl: rows
-    note over Impl: concatenate + apply filters, normalize to pmc df (in memory)
-    Impl-->>Boundary: PMC DataFrame
-    Boundary-->>Analyze: PMC DataFrame
-    Boundary->>Store: write pmc_perf.csv (one way export, never read back)
-```
-
-### Phase B-2: Combined sequence with the Profiler Hub integration
-
-This is the integrated view of Phase B's boundary alongside the Profiler Hub
-integration, which is a separate effort
-([Profiler Hub integration HLD](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/projects/rocprofiler-compute/docs/design/hld-profiler-hub-integration.md)).
-Phase B itself does not depend on the Hub; this shows what the sequence of
-operations looks like once both are applied.
-
-```mermaid
-sequenceDiagram
-    participant Profile as Profile mode
-    participant SDK as SDK tool (rocprofiler-sdk)
-    participant Native as Native tool (rocprofiler-compute)
-    participant Boundary as profiling_data boundary (get_writer / get_reader)
-    participant Hub as Profiler Hub
-    participant Store as Workload storage (on disk)
-    participant Analyze as Analyze mode
-
-    note over Profile, Store: Profile (write side)
-    Profile->>SDK: run pass (LD_PRELOAD)
-    Profile->>Native: run pass (LD_PRELOAD)
     loop each collection pass
-        SDK->>Store: per-process rocpd
-        Native->>Boundary: hand off per-process counters
-        note over Boundary: get_writer(format) selects the native implementation, compute performs the merge, the implementation only reads/writes
-        alt rocpd_data.py implementation
-            Boundary->>Store: read per process, write per pass native rocpd (.db)
-        else profiler_hub_data.py implementation
-            Boundary->>Hub: read per process, write per pass (via Hub interface)
-            Hub->>Store: per-pass native storage
+        computeLauncher->>process: Launches with LD_PRELOAD of tracing libs
+        process->>sdkTool: Loads via LD_PRELOAD
+        process->>computeTool: Loads via LD_PRELOAD
+
+        rect rgb(138, 185, 142)
+        note right of sdkTool: In-process data collection<br>(native output compressed)
+            sdkTool->>sdkData: Write
+            computeTool->>countersWriter: Pass data
+            countersWriter->>countersWriterCsv: Delegate
+            countersWriterCsv->>compression: Write counters
+            compression->>countersData: Write compressed data
         end
-        Profile->>Store: merge per-process to per-pass SDK rocpd (compute, raw, no boundary)
-        Profile->>Store: delete per-process intermediates
-    end
 
-    note over Analyze, Store: Analyze (read side)
-    Analyze->>Boundary: get_reader(profiling_config).read_pmc_frame(dir, filters)
-    Boundary->>Store: read per-pass SDK rocpd (raw, always)
-    alt rocpd_data.py implementation
-        Boundary->>Store: read per-pass native rocpd (.db)
-    else profiler_hub_data.py implementation
-        Boundary->>Hub: read native counters
-        Hub-->>Boundary: native counter rows
+        computeLauncher->>computeMerger: Requests Merge
+        rect rgb(230, 230, 230)
+        note right of computeMerger: Data merge
+            loop each per-process counters CSV
+                computeMerger->>compression: Read counters
+                compression->>countersData: Read
+                countersData-->>compression: Compressed counters
+                compression-->>computeMerger: Counters Data
+                computeMerger->>sdkData: Inject counters data to existing per-process SDK databases
+            end
+            loop each per-process SDK database
+                computeMerger->>sdkData: Read counters collection view from database
+                computeMerger->>resultDb: Merge data
+            end
+        end
+
+        computeLauncher->>computeMerger: Request CSV conversion
+        rect rgb(138, 185, 142)
+        note right of computeMerger: Conversion of data to CSV<br>with compression
+            computeMerger->>resultDb: Read data
+            resultDb-->>computeMerger: Data
+            computeMerger->>compression: Write data
+            compression->>resultCsv: Write data to CSV in compressed form
+        end
+
+        rect rgb(230, 230, 230)
+        note right of computeLauncher: Removal of intermediate<br>data
+            computeLauncher->>sdkData: Deletes per-process rocpds
+            computeLauncher->>countersData: Deletes per-process CSVs
+            computeLauncher->>resultDb: Deletes result database
+        end
     end
-    note over Boundary: merge SDK + native, apply filters, normalize to PMC DataFrame (in memory)
-    Boundary-->>Analyze: pmc DataFrame
-    Boundary->>Store: write pmc_perf.csv (one-way export for users/devs, never read back)
+    rect rgb(138, 185, 142)
+    note left of computeAnalyze: Data read in analysis phase
+        loop each per-pass result
+            computeAnalyze->>compression: Read
+            compression->>resultCsv: Read and uncompress
+            resultCsv-->>compression: Data
+            compression-->>computeAnalyze: Data
+        end
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
+        computeAnalyze->>pmcPerf: Read back
+        pmcPerf-->>computeAnalyze: Data
+        computeAnalyze->>computeAnalyze: build pandas dataframe
+    end
 ```
 
-## Phase C: Backend Execution
+## Phase C: Native Tool Counter Storage
 
-Backend execution which controls command construction, environment setup, attach/detach,
-subprocess execution, and pass finalization is separate from profile data
-storage. This phase removes rocprofv3 (AD-2) and merges the backend into a
-single profiler entity.
+This phase untangles the two data types on the profile side (AD-3). Native counter
+data is no longer injected into the SDK ROCPD:
 
-Today `profiler_base` is a base class with `rocprof_v3_profiler` and
-`rocprofiler_sdk_profiler` as subclasses, and the bulk of execution lives in a
-very large `run_prof` function. With v3 gone there is a single backend, so the
-two are merged into one cohesive profiler entity that finalizes each pass through
-the writer from Phase B.
+- SDK kernel data is consolidated per-process -> per-pass into the result DB and
+  stays there (the unified rocpd-to-csv conversion is gone).
+- Native counter data is consolidated per-process -> per-pass into its own
+  compressed `results_*.csv` lane.
 
-### Before
+The per-process -> per-pass data merge stays in profile. Analyze now reads the two
+lanes and still materializes `pmc_perf.csv`; the reader interface and dropping
+`pmc_perf.csv` come in Phase D.
 
 ```mermaid
-flowchart LR
-    pbase["profiler_base.py<br/>(base class)"]
-    v3["rocprof_v3_profiler<br/>(subclass)"]
-    sdk["rocprofiler_sdk_profiler<br/>(subclass)"]
-    runprof["run_prof()<br/>(large; build + run + finalize)"]
-    disk["ROCPD .db / results_*.csv"]
+sequenceDiagram
+    participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py
+    participant computeMerger as [rocprof-compute]<br>[Profile phase]<br>rocpd_data.py
+    participant process as Target Process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant countersWriter as [Interface]<br> Counters Writer
+    participant countersWriterCsv as [Impl]<br>Csv Counters Writer
+    participant compression as [Interface]<br>Compression (gzip impl)
+    participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
+    participant countersData as [Storage: Compressed CSV]<br>[per-process & per-pass]<br>Counters Data
+    participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
+    participant resultCsv as [Storage:Compressed CSV]<br>[per-pass]<br>Result
+    participant pmcPerf as [Storage:CSV]<br>pmc_perf.csv
+    participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
 
-    v3 -->|"inherits (anti-pattern)"| pbase
-    sdk -->|"inherits (anti-pattern)"| pbase
-    pbase -->|"delegates execution to"| runprof
-    runprof -->|"writes (format-branched)"| disk
+    loop each collection pass
+        computeLauncher->>process: Launches with LD_PRELOAD of tracing libs
+        process->>sdkTool: Loads via LD_PRELOAD
+        process->>computeTool: Loads via LD_PRELOAD
+
+        rect rgb(230, 230, 230)
+        note right of sdkTool: In-process data collection<br>(native output compressed)
+            sdkTool->>sdkData: Write
+            computeTool->>countersWriter: Pass data
+            countersWriter->>countersWriterCsv: Delegate
+            countersWriterCsv->>compression: Write counters
+            compression->>countersData: Write compressed data
+        end
+
+        computeLauncher->>computeMerger: Requests Merge
+        rect rgb(138, 185, 142)
+        note right of computeMerger: SDK data merge<br>(kernels only, no injection)
+            loop each per-process SDK database
+                computeMerger->>sdkData: Read database
+                sdkData-->>computeMerger: Kernels Data
+                computeMerger->>resultDb: Add kernels data to result DB
+            end
+        end
+        rect rgb(138, 185, 142)
+        note right of computeMerger: CSV data merge<br>(native counters, separate lane)
+            loop each per-process counters CSV
+                computeMerger->>compression: Read counters
+                compression->>countersData: Read
+                countersData-->>compression: Compressed counters
+                compression-->>computeMerger: Counters Data
+                computeMerger->>compression: Write counters data
+                compression->>resultCsv: Write counters data
+            end
+        end
+
+        rect rgb(230, 230, 230)
+        note right of computeLauncher: Removal of intermediate<br>data
+            computeLauncher->>sdkData: Deletes per-process rocpds
+            computeLauncher->>countersData: Deletes per-process CSVs
+        end
+    end
+    rect rgb(138, 185, 142)
+    note left of computeAnalyze: Data read in analysis phase
+        loop each per-pass result
+            computeAnalyze->>resultDb: Read kernel data
+            resultDb-->>computeAnalyze: Kernel data
+            computeAnalyze->>compression: Read
+            compression->>resultCsv: Read and uncompress
+            resultCsv-->>compression: Data
+            compression-->>computeAnalyze: Counter data
+        end
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
+        computeAnalyze->>pmcPerf: Read back
+        pmcPerf-->>computeAnalyze: Data
+        computeAnalyze->>computeAnalyze: build pandas dataframe
+    end
 ```
 
-### Target
+## Phase D: Profile Data Interface and Drop `pmc_perf.csv` as Analyze Input
+
+Results from SDK and native collector are processed independently in profiling
+and analysis.
+
+This is the profile interface architecture phase. Analyze asks the profile data
+interface for the DataFrame. The interface reads SDK kernel data from ROCPD,
+reads native counter data from its storage path, and merges them in memory.
+`pmc_perf.csv` may still be generated as a one-way export, but analyze does not
+read it back.
+
+The per-process -> per-pass data merge stays in profile (kept, as in the source
+HLD). The profile side is identical to Phase C; only the analyze side changes here.
 
 ```mermaid
-flowchart LR
-    subgraph backend["Profiler (merged single entity)"]
-        prof["profiler<br/>command build + run<br/>attach/detach + finalize"]
-    end
-    subgraph iface["profiling_data/"]
-        writer["get_writer / ProfilingDataWriter"]
-        rocpd["implementations/rocpd_data.py"]
-    end
-    db["ROCPD .db"]
+sequenceDiagram
+    participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py
+    participant computeMerger as [rocprof-compute]<br>[Profile phase]<br>rocpd_data.py
+    participant process as Target Process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant countersWriter as [Interface]<br> Counters Writer
+    participant countersWriterCsv as [Impl]<br>Csv Counters Writer
+    participant compression as [Interface]<br>Compression (gzip impl)
+    participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
+    participant countersData as [Storage: Compressed CSV]<br>[per-process & per-pass]<br>Counters Data
+    participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
+    participant resultCsv as [Storage:Compressed CSV]<br>[per-pass]<br>Result
+    participant profileData as [Interface]<br>Profile Data Reader
+    participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
 
-    prof -->|"finalizes each pass via"| writer
-    writer -->|"implemented by"| rocpd
-    rocpd -->|"writes"| db
+    loop each collection pass
+        computeLauncher->>process: Launches with LD_PRELOAD of tracing libs
+        process->>sdkTool: Loads via LD_PRELOAD
+        process->>computeTool: Loads via LD_PRELOAD
+
+        rect rgb(230, 230, 230)
+        note right of sdkTool: In-process data collection<br>(native output compressed)
+            sdkTool->>sdkData: Write
+            computeTool->>countersWriter: Pass data
+            countersWriter->>countersWriterCsv: Delegate
+            countersWriterCsv->>compression: Write counters
+            compression->>countersData: Write compressed data
+        end
+
+        computeLauncher->>computeMerger: Requests Merge
+        rect rgb(230, 230, 230)
+        note right of computeMerger: SDK data merge<br>(kernels only)
+            loop each per-process SDK database
+                computeMerger->>sdkData: Read database
+                sdkData-->>computeMerger: Kernels Data
+                computeMerger->>resultDb: Add kernels data to result DB
+            end
+        end
+        rect rgb(230, 230, 230)
+        note right of computeMerger: CSV data merge<br>(native counters, kept in profile)
+            loop each per-process counters CSV
+                computeMerger->>compression: Read counters
+                compression->>countersData: Read
+                countersData-->>compression: Compressed counters
+                compression-->>computeMerger: Counters Data
+                computeMerger->>compression: Write counters data
+                compression->>resultCsv: Write counters data
+            end
+        end
+
+        rect rgb(230, 230, 230)
+        note right of computeLauncher: Removal of intermediate<br>data
+            computeLauncher->>sdkData: Deletes per-process rocpds
+            computeLauncher->>countersData: Deletes per-process CSVs
+        end
+    end
+    rect rgb(138, 185, 142)
+    note left of computeAnalyze: Data read in analysis phase<br>(reader interface, no pmc_perf.csv read-back)
+        computeAnalyze->>profileData: Request PMC DataFrame
+        loop each per-pass result
+            profileData->>resultDb: Read kernel data
+            resultDb-->>profileData: Kernel data
+            profileData->>compression: Read
+            compression->>resultCsv: Read and uncompress
+            resultCsv-->>compression: Data
+            compression-->>profileData: Counter data
+            profileData->>profileData: merge kernels + counters in memory
+        end
+        profileData-->>computeAnalyze: PMC DataFrame
+    end
 ```
 
-## Future Scope
+## Phase E: Profiler Hub
 
-1. Analyze-derived outputs may need their own boundary, but that requires a
-   separate design effort. This proposal does not decide an `analysis_data`
-   interface, implementation, file layout, or migration plan. 
-   - The reason is that analyze outputs are customer-visible artifacts and test inputs in some flows, so the right boundary needs more definition.
-2. PC-sampling analyze reads JSON produced by profile mode. That is another
-   format that should eventually sit behind a similar boundary (likely a JSON
-   implementation); noted for future scope.
+The native counter lane moves behind the Profiler Hub interface (a
+`profiler_hub_data.py` implementation selected at the boundary), written and read
+through the Hub rather than as compressed CSV. Compute never assumes rocpd/SQLite for Hub storage. The SDK still writes raw
+rocpd directly, the per-process -> per-pass merge stays in profile, and the two are
+merged in analyze.
+
+```mermaid
+sequenceDiagram
+    participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py
+    participant computeMerger as [rocprof-compute]<br>[Profile phase]<br>rocpd_data.py
+    participant process as Target Process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant countersWriter as [Interface]<br> Counters Writer
+    participant hubImpl as [Impl]<br>profiler_hub_data.py
+    participant hub as Profiler Hub
+    participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
+    participant hubStore as [Storage: Hub]<br>[per-process & per-pass]<br>Counters (not necessarily a DB)
+    participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
+    participant hubResult as [Storage: Hub]<br>[per-pass]<br>Result
+    participant profileData as [Interface]<br>Profile Data Reader
+    participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
+
+    loop each collection pass
+        computeLauncher->>process: Launches with LD_PRELOAD of tracing libs
+        process->>sdkTool: Loads via LD_PRELOAD
+        process->>computeTool: Loads via LD_PRELOAD
+
+        rect rgb(138, 185, 142)
+        note right of sdkTool: In-process data collection<br>(native writes through Hub)
+            sdkTool->>sdkData: Write raw rocpd (kernels)
+            computeTool->>countersWriter: Pass counters
+            countersWriter->>hubImpl: Delegate
+            hubImpl->>hub: Write counters
+            hub->>hubStore: Write (native storage)
+        end
+
+        computeLauncher->>computeMerger: Requests Merge
+        rect rgb(230, 230, 230)
+        note right of computeMerger: SDK data merge<br>(kernels, raw rocpd)
+            loop each per-process SDK database
+                computeMerger->>sdkData: Read database
+                sdkData-->>computeMerger: Kernels Data
+                computeMerger->>resultDb: Add kernels data to result DB
+            end
+        end
+        rect rgb(138, 185, 142)
+        note right of computeMerger: Native data merge<br>(through Hub, kept in profile)
+            loop each per-process counters
+                computeMerger->>hubImpl: Consolidate per-process -> per-pass
+                hubImpl->>hub: Read per-process, write per-pass
+                hub->>hubStore: Read per-process
+                hub->>hubResult: Write per-pass (native storage)
+            end
+        end
+
+        rect rgb(230, 230, 230)
+        note right of computeLauncher: Removal of intermediate<br>data
+            computeLauncher->>sdkData: Deletes per-process rocpds
+            computeLauncher->>hubStore: Deletes per-process native storage
+        end
+    end
+    rect rgb(138, 185, 142)
+        computeAnalyze->>profileData: Request PMC DataFrame
+        loop each per-pass result
+            profileData->>resultDb: Read kernel data
+            resultDb-->>profileData: Kernel data
+            profileData->>hubImpl: Read native counters
+            hubImpl->>hub: Read per-pass
+            hub->>hubResult: Read
+            hubResult-->>hub: Native counters
+            hub-->>hubImpl: Native counters
+            hubImpl-->>profileData: Counter data
+            profileData->>profileData: merge kernels + counters in memory
+        end
+        profileData-->>computeAnalyze: PMC DataFrame
+    end
+```
+
+## Optimizations
+
+> **Note:** Impacts are estimations and not empirically measured.
+
+| Optimization | Phase | Impact |
+|---|---|---|
+| Remove CSV profile backend | A | Single storage path; removes dual-format maintenance and per-feature "not supported in CSV" cost |
+| gzip counter CSV artifacts | B | 3-10x smaller counter CSVs |
+| Independent SDK/native lanes | C | Allows swapping the native lane to parquet/Hub without touching the SDK path |
+| Stop unified rocpd->CSV conversion (kernels stay in DB) | C | Removes per pass kernel conversion and read back in profile |
+| Drop `pmc_perf.csv` materialize + read-back | D | Removes one full CSV write + read + pivot per analyze run over millions of rows; largest analyze optimization on big workloads |
+| Profiler Hub / parquet native storage | E | Long term storage solution / hub |
+
+## Follow-Ups
+
+- Backend execution cleanup can remove the legacy `rocprofv3` script layer and
+  keep `rocprofiler-sdk` as the single backend.
+- PC sampling JSON and analyze-derived outputs need separate design work.
 
 ## Success Criteria
 
-- Profile mode cannot produce, and analyze mode cannot read, the legacy csv
-  output format; rocpd is the only profile source (Phase A)
-- Profile mode does not decide or know the storage layout, and does not depend on
-  pandas
-- Analyze mode can ask for a pmc DataFrame without knowing what the source is and without reading `pmc_perf.csv`.
-- `pmc_perf.csv` is written as a one-way export derived per run, and analyze no
-  longer reads it back. This saves a lot of csv processing especially on large workloads.
-- Workload availability checks go through `has_profile_data()` rather than probing
-  for specific files
-- Storage-format conditionals are isolated to `get_reader` / `get_writer` and the
-  implementations
-- Adding a new profile source primarily means adding one implementation and
-  extending selection in one place (high locality of change)
-- The boundary can be exercised in unit tests without touching disk
+- Profile mode cannot produce the legacy CSV profile output format.
+- Remaining CSV artifacts are compressed while they still exist.
+- SDK kernel data and native counter data can be read independently by analyze.
+- Analyze gets the DataFrame through the profile data interface.
+- `pmc_perf.csv` is not an analyze input.
+- The final ROCPD-to-CSV conversion is removed.
+- Analyze builds the pandas DataFrame from source artifacts instead of reading a
+  generated `pmc_perf.csv` as the profile-data contract.
+- Profile mode remains pandas-free.
+- Native counter storage can be served through the Profiler Hub interface without
+  compute assuming a database (Phase E).
