@@ -66,7 +66,13 @@ def _resolve_process_gpus(proc_dir):
 
 class TestKfdProcessGpuResolution(unittest.TestCase):
     """Regression coverage for processes being reported on every GPU instead of
-    only the GPUs they actually use (active queue or VRAM allocation)."""
+    only the GPUs they actually use (active queue or VRAM allocation).
+
+    This pins the queue/VRAM attribution algorithm as an executable spec. The
+    other-user visibility fix (IsKfdPidNamespaced skipping inaccessible PIDs)
+    lives in a hardcoded-/proc-path C++ path that is validated on hardware
+    (see PR test plan), not reproducible in this hardware-free harness.
+    """
 
     ALL_GPUS = (56179, 9367, 45514, 39772)
 
@@ -113,6 +119,17 @@ class TestKfdProcessGpuResolution(unittest.TestCase):
         # Queue on one GPU, VRAM on another -> both, not all four.
         proc_dir = self._make_proc_dir(queue_gpus=[45514], vram_gpus={9367: 1024})
         self.assertEqual(_resolve_process_gpus(proc_dir), {45514, 9367})
+
+    def test_unreadable_vram_file_is_skipped(self):
+        # A vram_<gpuid> entry that cannot be read must be skipped rather than
+        # attributed, mirroring the C++ `ReadSysfsStr(...) != 0` continue. A
+        # directory in place of the file makes open() fail on any uid (root
+        # included), unlike chmod which root would bypass.
+        proc_dir = self._make_proc_dir(queue_gpus=[])
+        target = os.path.join(proc_dir, f"vram_{self.ALL_GPUS[0]}")
+        os.remove(target)
+        os.makedirs(target)
+        self.assertEqual(_resolve_process_gpus(proc_dir), set())
 
 
 if __name__ == "__main__":
