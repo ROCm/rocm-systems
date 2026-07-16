@@ -214,21 +214,18 @@ jobs:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
-          targets=(
-            "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
-            "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
-            "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
-            "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
-            "gfx1250 gfx1250.json gfx1250_skip_tests.json"
-          )
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
           export ROCJITSU_SOURCE_DIR
 
-          export SOFT_TIMEOUT_SECONDS=25
-          export HARD_TIMEOUT_SECONDS=40
-
           corpus_test_status=0
-          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${targets[@]}" || corpus_test_status=$?
+
+          corpus_test_flags=(
+            --workers 8 \
+            --soft-timeout 15 \
+            --hard-timeout 30 \
+            --rerun-failed \
+          )
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"

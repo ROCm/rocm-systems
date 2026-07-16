@@ -4,11 +4,16 @@ set -euo pipefail
 : "${ROCM_PATH:?ROCM_PATH must be set}"
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
-WORKER_COUNT="${WORKER_COUNT:-8}"
-SOFT_TIMEOUT_SECONDS="${SOFT_TIMEOUT_SECONDS:-30}"
-HARD_TIMEOUT_SECONDS="${HARD_TIMEOUT_SECONDS:-60}"
+worker_count=8
+soft_timeout_seconds=30
+hard_timeout_seconds=60
+rerun_failed=false
 
-default_targets=(
+usage() {
+  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-failed]" >&2
+}
+
+targets=(
   "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
   "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
   "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
@@ -16,8 +21,30 @@ default_targets=(
   "gfx1250 gfx1250.json gfx1250_skip_tests.json"
 )
 
-targets=("$@")
-(( ${#targets[@]} )) || targets=("${default_targets[@]}")
+while (( $# )); do
+  case "$1" in
+    --workers)
+      worker_count="$2"
+      shift 2
+      ;;
+    --soft-timeout)
+      soft_timeout_seconds="$2"
+      shift 2
+      ;;
+    --hard-timeout)
+      hard_timeout_seconds="$2"
+      shift 2
+      ;;
+    --rerun-failed)
+      rerun_failed=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
 corpus_test_status=0
 for target in "${targets[@]}"; do
@@ -42,9 +69,9 @@ for target in "${targets[@]}"; do
     --tb=no
   )
 
-  if "${pytest_cmd[@]}" -n "${WORKER_COUNT}" -o "timeout_func_only=true" --timeout "${SOFT_TIMEOUT_SECONDS}"; then
+  if "${pytest_cmd[@]}" -n "${worker_count}" -o "timeout_func_only=true" --timeout "${soft_timeout_seconds}"; then
     status_message="All (${name}) tests passed."
-  elif "${pytest_cmd[@]}" --last-failed --timeout "${HARD_TIMEOUT_SECONDS}"; then
+  elif [[ "${rerun_failed}" == true ]] && "${pytest_cmd[@]}" --last-failed --timeout "${hard_timeout_seconds}"; then
     status_message="Retried (${name}) tests passed."
   else
     corpus_test_status=1
