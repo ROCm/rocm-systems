@@ -30,8 +30,8 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
 #ifdef __HIP_ENABLE_PCH
   hipDeviceProp_t deviceProp;
   int deviceId;
-  hipError_t error = hipGetDevice(&deviceId);
-  error = hipGetDeviceProperties(&deviceProp, deviceId);
+  (void)hipGetDevice(&deviceId);
+  (void)hipGetDeviceProperties(&deviceProp, deviceId);
   if (deviceProp.warpSize == 32) {
     *pch = __hip_pch_wave32;
     *size = __hip_pch_wave32_size;
@@ -158,12 +158,12 @@ Var::Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t 
     : name_(name),
       dVarKind_(dVarKind),
       size_(size),
+      type_(0),
+      norm_(0),
       modules_(modules),
       managedVarPtr_(pointer),
-      allocFlag_(false),
       align_(align),
-      type_(0),
-      norm_(0) {
+      allocFlag_(false) {
   dMem_.resize(g_devices.size());
 }
 
