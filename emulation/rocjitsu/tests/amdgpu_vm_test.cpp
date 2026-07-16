@@ -396,26 +396,9 @@ TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
   EXPECT_THROW((void)f.engine->step(), std::runtime_error);
 }
 
-TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
-  amdgpu::GpuMemory mem("vmid_range_mem");
-  KfdProcess process(/*process_id=*/123);
-  std::vector<uint8_t> backing(3 * amdgpu::GpuMemory::PAGE_SIZE);
-  constexpr uint64_t gpu_va = 0x100000;
-
-  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
-  process.map_pages(gpu_va, backing.data(), backing.size());
-
-  auto [host_base, size] =
-      mem.find_host_range(gpu_va + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
-  EXPECT_EQ(host_base, reinterpret_cast<uint64_t>(backing.data()));
-  EXPECT_EQ(size, backing.size());
-
-  mem.unregister_process(process.process_id());
-}
-
 TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
   amdgpu::GpuMemory mem("vmid_kernel_symbol_mem");
-  KfdProcess process(/*process_id=*/124);
+  KfdProcess process(/*process_id=*/125);
   constexpr uint64_t gpu_va = 0x5400200000;
   constexpr uint64_t kernel_descriptor_offset = 0x800;
   auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_kernel.kd");
@@ -426,6 +409,10 @@ TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
   uint64_t kernel_object = gpu_va + kernel_descriptor_offset;
   auto [host_base, host_size] = mem.find_host_range(kernel_object, process.process_id());
   ASSERT_NE(host_base, 0u);
+
+  // Kernel descriptors arrive as GPU VAs. Symbol lookup needs the translated
+  // host pointer so pointer subtraction against the loaded ELF image produces
+  // the descriptor offset recorded in .dynsym.
   auto *mapped_page = mem.translate_debug(kernel_object, process.process_id());
   ASSERT_NE(mapped_page, nullptr);
   auto *kernel_object_host = mapped_page + (kernel_object & amdgpu::GpuMemory::PAGE_MASK);

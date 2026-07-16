@@ -254,6 +254,11 @@ TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
       "Cijk_Ailk_Bjlk_S_B_UserArgs_MT8x8x8_SN_LDSB0_ISA1151_WG8_8_1_WGMXCC1";
 
   EXPECT_EQ(kernel_display_name("_Z11racy_kernelPKfPf"), "racy_kernel");
+
+  // This is a fixture for a real-world HIP/Clang-style nested template symbol.
+  // The important behavior is that display names keep useful template context
+  // while stripping the argument list and whitespace that would break the
+  // race-detector's space-delimited log headers.
   EXPECT_EQ(kernel_display_name("_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_"
                                 "15CUDAFunctor_addIfEESt5arrayIPcLm3EEEEviT0_T1_"),
             "at::native::vectorized_elementwise_kernel<4,at::native::CUDAFunctor_add<float>,std::"

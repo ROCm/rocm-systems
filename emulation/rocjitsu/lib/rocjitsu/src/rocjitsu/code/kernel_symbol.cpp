@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cxxabi.h>
+#include <memory>
 #include <string_view>
 
 namespace rocjitsu {
@@ -151,16 +152,16 @@ std::string demangle_kernel_symbol(std::string_view symbol) {
     return {};
 
   std::string symbol_string(symbol);
-  int status = 0;
-  char *demangled = abi::__cxa_demangle(symbol_string.c_str(), nullptr, nullptr, &status);
-  if (status != 0 || demangled == nullptr) {
-    std::free(demangled);
+  if (!symbol_string.starts_with("_Z"))
     return symbol_string;
-  }
 
-  std::string result(demangled);
-  std::free(demangled);
-  return result;
+  int status = 0;
+  std::unique_ptr<char, decltype(&std::free)> demangled(
+      abi::__cxa_demangle(symbol_string.c_str(), nullptr, nullptr, &status), &std::free);
+  if (status != 0 || demangled == nullptr)
+    return symbol_string;
+
+  return std::string(demangled.get());
 }
 
 std::string kernel_display_name(std::string_view symbol) {

@@ -51,8 +51,6 @@ public:
     });
   }
 
-  using SparseMemory::find_host_range;
-
   simdojo::Port *cpl_port() { return cpl_; }
 
   /// @brief Register a process's page table in the VMID table.

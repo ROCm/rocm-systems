@@ -214,11 +214,21 @@ protected:
   }
 
   void ExpectDispatchContext(const RaceRecord &r, const std::string &kernel_name_substring) {
+    // Race reports should carry resolved dispatch context, not just the
+    // instruction trace. "?" would mean kernel-symbol resolution failed.
     EXPECT_FALSE(r.kernel.empty());
     EXPECT_NE(r.kernel, "?");
     EXPECT_FALSE(r.symbol.empty());
     EXPECT_NE(r.symbol, "?");
+
+    // The dispatch id ties the race back to the AQL dispatch that produced it.
+    // This catches regressions where the plugin logs a default-constructed
+    // context instead of the dispatch packet metadata.
     EXPECT_GE(r.dispatch, 1);
+
+    // Match on the source kernel name rather than the whole demangled spelling:
+    // the exact symbol can include ABI/compiler-specific type detail, while the
+    // kernel name substring is the user-facing identity the report must preserve.
     EXPECT_NE(r.kernel.find(kernel_name_substring), npos) << "kernel: " << r.kernel;
     EXPECT_NE(r.symbol.find(kernel_name_substring), npos) << "symbol: " << r.symbol;
   }
