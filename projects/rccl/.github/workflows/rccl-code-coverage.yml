@@ -34,6 +34,11 @@ on:
         description: "Override: number of nodes to allocate"
         type: string
         default: "2"
+      alloc_mode:
+        description: "SLURM allocation mode"
+        type: choice
+        options: ["salloc", "sbatch", "existing"]
+        default: "salloc"
       test_config:
         description: "Override: test_runner.py config filename"
         type: string
@@ -80,6 +85,7 @@ jobs:
       dockerfile: ${{ inputs.dockerfile || 'Dockerfile.Multinode.Ubuntu' }}
       gpu_arch: ${{ inputs.gpu_arch || 'gfx942' }}
       nodes: ${{ inputs.nodes || '2' }}
+      alloc_mode: ${{ inputs.alloc_mode || 'salloc' }}
       test_config: ${{ inputs.test_config || 'mi300x_mellanox_ib.json' }}
       test_suite: ${{ inputs.test_suite || '' }}
       test_name: ${{ inputs.test_name || '' }}

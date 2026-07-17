@@ -21,6 +21,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field, fields
 from typing import List, Optional
 
@@ -93,6 +94,10 @@ class RunConfig:
         self.mnctl_dir = self.mnctl_dir or _env("MNCTL_DIR") or os.path.abspath(
             os.path.join(self.rccl_dir, "..", "..", "rccl-utils", "MultiNodeDocker")
         )
+        # Modes are named after the SLURM command they use: "salloc" / "sbatch".
+        # "new" is kept as a backward-compat alias for "salloc".
+        self.alloc_mode = {"new": "salloc"}.get(self.alloc_mode, self.alloc_mode)
+
         branch = _env("RCCL_BRANCH") or self._git_branch()
         pr = _env("PR_NUMBER")
         # ROCm version is parsed from the image tag; if it can't be derived, skip it
@@ -126,10 +131,10 @@ class RunConfig:
         m = re.search(r"[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9]*", self.rocm_image)
         return m.group(0) if m else ""
 
-    def child_env(self) -> dict:
-        """Env for the salloc re-exec (mirror the bash export list)."""
-        env = dict(os.environ)
-        env.update(
+    def reexec_vars(self) -> dict:
+        """Resolved values re-exported across a salloc/sbatch boundary so the
+        second process (compute node) uses identical settings and does not re-allocate."""
+        return dict(
             WORKLOAD=self.workload, ALLOC_MODE="inherit", RUN_ID=self.run_id,
             ROCM_IMAGE=self.rocm_image, DOCKERFILE=self.dockerfile, GPU_ARCH=self.gpu_arch,
             NIC_TYPE=self.nic_type, NODES=str(self.nodes), PARTITION=self.partition,
@@ -138,6 +143,11 @@ class RunConfig:
             CONTAINER=self.container, HOSTFILE=self.hostfile, RCCL_DIR=self.rccl_dir,
             MNCTL_DIR=self.mnctl_dir, SHARED_FS_ROOT=self.shared_fs_root,
         )
+
+    def child_env(self) -> dict:
+        """Env for the salloc re-exec (full environment + resolved overrides)."""
+        env = dict(os.environ)
+        env.update(self.reexec_vars())
         return env
 
 
@@ -170,27 +180,83 @@ class Orchestrator:
         if not (self.cfg.mnctl_dir and os.path.isdir(os.path.join(self.cfg.mnctl_dir, "mnctl"))):
             sys.exit(f"ERROR: mnctl not found at {self.cfg.mnctl_dir!r}; set MNCTL_DIR.")
 
-    def maybe_salloc_reexec(self) -> None:
+    def _alloc_flags(self) -> List[str]:
+        """SLURM flags shared by salloc and sbatch."""
         c = self.cfg
-        need = c.alloc_mode == "new" or (
+        flags = ["-N", str(c.nodes), "-p", c.partition]
+        if c.account:                       # some clusters (e.g. ruby) use no -A
+            flags += ["-A", c.account]
+        # GPU request differs per cluster. Default asks for `gpu:<N>` via --gres, but
+        # some clusters don't define a `gpu` gres (ruby: "Invalid gres specification")
+        # or hand out whole nodes. Override with GRES (a gres string, or "" to omit)
+        # and/or SALLOC_EXTRA (e.g. "--exclusive" or "--gpus-per-node=8").
+        gres = _env("GRES", f"gpu:{c.gpus_per_node}")
+        if gres:
+            flags.append(f"--gres={gres}")
+        flags += [f"--ntasks-per-node={c.gpus_per_node}", "-t", c.time_limit]
+        if c.reservation:
+            flags.append(f"--reservation={c.reservation}")
+        extra = _env("SALLOC_EXTRA", "")
+        if extra:
+            flags += shlex.split(extra)
+        return flags
+
+    def maybe_allocate(self) -> None:
+        """Acquire a SLURM allocation per ALLOC_MODE (selectable per run):
+          auto (default)   -> salloc a fresh allocation unless one is already visible
+          salloc           -> always salloc a fresh allocation ("new" is an alias)
+          sbatch           -> submit a batch job (sbatch --wait) and stream its output
+          existing/inherit -> reuse the current allocation (no new alloc)
+        """
+        c = self.cfg
+        need = c.alloc_mode in ("salloc", "sbatch") or (
             c.alloc_mode == "auto" and not os.environ.get("SLURM_JOB_NODELIST")
             and not self._running_job()
         )
         if not need:
             return
-        log(f"Allocating {c.nodes} node(s) on partition={c.partition} account={c.account} ...")
+        if c.alloc_mode == "sbatch":
+            self._submit_sbatch()            # blocks until done, then exits
+        else:
+            self._salloc_reexec()            # replaces this process
+
+    def _salloc_reexec(self) -> None:
+        c = self.cfg
+        log(f"Allocating {c.nodes} node(s) via salloc on partition={c.partition} "
+            f"account={c.account or '(none)'} ...")
         inner = f"exec python3 {shlex.quote(self.entrypoint)}"
-        salloc = ["salloc", "-N", str(c.nodes), "-p", c.partition]
-        if c.account:                       # some clusters (e.g. ruby) use no -A
-            salloc += ["-A", c.account]
-        salloc += [
-            f"--gres=gpu:{c.gpus_per_node}", f"--ntasks-per-node={c.gpus_per_node}",
-            "-t", c.time_limit,
-        ]
-        if c.reservation:
-            salloc.append(f"--reservation={c.reservation}")
-        salloc += ["bash", "-c", inner]
+        salloc = ["salloc", *self._alloc_flags(), "bash", "-c", inner]
         os.execvpe("salloc", salloc, c.child_env())  # replaces this process
+
+    def _submit_sbatch(self) -> None:
+        c = self.cfg
+        rundir = os.path.dirname(c.hostfile) or os.path.expanduser("~/.mnctl")
+        os.makedirs(rundir, exist_ok=True)
+        script_path = os.path.join(rundir, f"{c.run_id}.sbatch.sh")
+        logfile = os.path.join(rundir, f"{c.run_id}.sbatch.out")
+        # Re-export resolved values and force ALLOC_MODE=inherit so the batch job
+        # (which inherits the submit env via --export=ALL) does not submit again.
+        exports = "\n".join(f"export {k}={shlex.quote(v)}"
+                            for k, v in c.reexec_vars().items())
+        with open(script_path, "w") as f:
+            f.write("#!/bin/bash\n"
+                    f"{exports}\n"
+                    f"exec python3 {shlex.quote(self.entrypoint)}\n")
+        os.chmod(script_path, 0o755)
+        sbatch = ["sbatch", "--wait", f"--output={logfile}",
+                  f"--job-name=rccl-{c.workload}-{c.gpu_arch}",
+                  *self._alloc_flags(), script_path]
+        log(f"Submitting sbatch job ({c.nodes} node(s), partition={c.partition}, "
+            f"account={c.account or '(none)'}); output -> {logfile}")
+        log("$ " + " ".join(shlex.quote(a) for a in sbatch))
+        open(logfile, "w").close()           # ensure it exists so tail can follow
+        tail = subprocess.Popen(["tail", "-n", "+1", "-F", logfile])
+        try:
+            rc = subprocess.run(sbatch).returncode
+        finally:
+            time.sleep(1)                    # let tail flush the final lines
+            tail.terminate()
+        sys.exit(rc)
 
     def _running_job(self) -> str:
         out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "-o", "%i"],
@@ -325,7 +391,7 @@ class Orchestrator:
         c = self.cfg
         self.core_validate()
         self.payload.validate(self)
-        self.maybe_salloc_reexec()   # may replace this process
+        self.maybe_allocate()   # may replace this process or submit+wait via sbatch
         self.resolve_nodelist()
         self.write_hostfile()
         self.payload.prelaunch(self)

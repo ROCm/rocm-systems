@@ -65,6 +65,10 @@ on:
         description: "SLURM allocation time limit (HH:MM:SS)"
         type: string
         default: "04:00:00"
+      alloc_mode:
+        description: "SLURM allocation mode: 'salloc', 'sbatch' (batch job), or 'existing'"
+        type: string
+        default: "salloc"
       artifact_prefix:
         description: "Prefix for the uploaded artifact name (suffixed with the target name)"
         type: string
@@ -168,7 +172,7 @@ jobs:
           GPUS_PER_NODE: ${{ matrix.gpus_per_node }}
           SHARED_FS_ROOT: ${{ matrix.shared_fs_root }}
           TIME_LIMIT: ${{ inputs.time_limit }}
-          ALLOC_MODE: new
+          ALLOC_MODE: ${{ inputs.alloc_mode }}
           # Recognition metadata folded into RUN_ID (arch-rocm-branch[-prN]).
           RCCL_BRANCH: ${{ github.head_ref || github.ref_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
