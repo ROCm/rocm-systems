@@ -20,6 +20,7 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_effects import InlineOperationEffects, inline_binary_op_effects
 from amdisa.sema_helpers import (
     HELPER_REGISTRY,
     HelperTreatment,
@@ -155,6 +156,7 @@ _CONTEXT_READS: dict[str, str] = {
     'SCC': 'wf.read_scc()',
     'VCC': 'wf.vcc()',
     'EXEC': 'wf.exec()',
+    'EXEC_RAW': 'wf.exec_raw()',
     'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
@@ -164,6 +166,7 @@ _CONTEXT_WRITES: dict[str, str] = {
     'SCC': 'wf.write_scc',
     'VCC': 'wf.write_vcc',
     'EXEC': 'wf.set_exec',
+    'EXEC_RAW': 'wf.set_exec_raw',
 }
 
 _STD_MATH: dict[SemaNodeKind, str] = {
@@ -1321,7 +1324,20 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt': '{0}',
 }
 
-_INLINE_BINARY_OPS: dict[str, str] = {
+
+@dataclass(frozen=True)
+class InlineBinaryOp:
+    template: str
+    effects: InlineOperationEffects
+
+
+def _effectful_inline_binary_op(name: str, template: str) -> InlineBinaryOp:
+    effects = inline_binary_op_effects(name)
+    assert effects != InlineOperationEffects(), f'{name} has no declared effects'
+    return InlineBinaryOp(template, effects)
+
+
+_INLINE_BINARY_OPS: dict[str, str | InlineBinaryOp] = {
     'mul_hi': '[&]() {{ auto a = static_cast<uint64_t>({0});'
     ' auto b = static_cast<uint64_t>({1});'
     ' return static_cast<uint32_t>((a * b) >> 32); }}()',
@@ -1418,27 +1434,45 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' if (a < b) vcc |= (1ULL << lane);'
     ' else vcc &= ~(1ULL << lane);'
     ' return a - b; }}()',
-    'addc': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
-    ' + static_cast<uint64_t>({1})'
-    ' + static_cast<uint64_t>(wf.read_scc());'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'subb': '[&]() {{ uint32_t a = {0}, b = {1};'
-    ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
-    ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
-    ' return a - b - cin; }}()',
-    'lshl1_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 1u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl2_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 2u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl3_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 3u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
-    'lshl4_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 4u) + static_cast<uint64_t>({1});'
-    ' wf.write_scc(w > 0xFFFFFFFFULL);'
-    ' return static_cast<uint32_t>(w); }}()',
+    'addc': _effectful_inline_binary_op(
+        'addc',
+        '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
+        ' + static_cast<uint64_t>({1})'
+        ' + static_cast<uint64_t>(wf.read_scc());'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'subb': _effectful_inline_binary_op(
+        'subb',
+        '[&]() {{ uint32_t a = {0}, b = {1};'
+        ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
+        ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
+        ' return a - b - cin; }}()',
+    ),
+    'lshl1_add': _effectful_inline_binary_op(
+        'lshl1_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 1u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl2_add': _effectful_inline_binary_op(
+        'lshl2_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 2u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl3_add': _effectful_inline_binary_op(
+        'lshl3_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 3u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
+    'lshl4_add': _effectful_inline_binary_op(
+        'lshl4_add',
+        '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 4u) + static_cast<uint64_t>({1});'
+        ' wf.write_scc(w > 0xFFFFFFFFULL);'
+        ' return static_cast<uint32_t>(w); }}()',
+    ),
     'pack_ll': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'pack_lh': '(({0} & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'pack_hh': '((({0} >> 16) & 0xFFFFu) | ({1} & 0xFFFF0000u))',
@@ -1487,7 +1521,6 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
-
 _INLINE_TERNARY_OPS: dict[str, str] = {
     'min3_f': 'std::fmin(std::fmin({0}, {1}), {2})',
     'max3_f': 'std::fmax(std::fmax({0}, {1}), {2})',
@@ -1737,7 +1770,11 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
-        return _INLINE_BINARY_OPS[callee].format(args[0], args[1])
+        inline_op = _INLINE_BINARY_OPS[callee]
+        template = (
+            inline_op.template if isinstance(inline_op, InlineBinaryOp) else inline_op
+        )
+        return template.format(args[0], args[1])
     if callee in ('min3', 'max3', 'med3'):
         suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
         return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])

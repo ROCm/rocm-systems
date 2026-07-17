@@ -15,6 +15,8 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.codegen.execute.sema_lower import (
+    _INLINE_BINARY_OPS,
+    InlineBinaryOp,
     LoweringContext,
     OperandBinding,
     OperandMap,
@@ -25,6 +27,33 @@ from amdisa.codegen.execute.sema_lower import (
 _MRISA = os.environ.get('MRISA_PATH', os.path.expanduser('~/rocm-dev/mrisa'))
 SEMA_XML_PATH = os.path.join(_MRISA, 'amdgpu_isa_cdna4.semantics.xml')
 _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
+
+
+@pytest.mark.parametrize(
+    'name', ['addc', 'subb', 'lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add']
+)
+def test_scc_writing_inline_operations_declare_their_effect(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.writes_scc
+
+
+@pytest.mark.parametrize('name', ['addc', 'subb'])
+def test_scc_carry_inline_operations_declare_their_read(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.reads_scc
+
+
+@pytest.mark.parametrize('name', ['lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'])
+def test_scc_shift_add_inline_operations_do_not_read_scc(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert not inline_op.effects.reads_scc
+
+
+def test_non_scc_inline_operation_has_no_scc_effect():
+    assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
 
 
 def _src(idx: int) -> SemaNode:
