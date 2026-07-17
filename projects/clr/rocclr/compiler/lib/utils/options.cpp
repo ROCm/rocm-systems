@@ -1353,8 +1353,7 @@ static std::string getValidDumpPath(const std::string& path) {
   }
 
   const std::string curPath = path + ".";
-  long pathname_max = pathconf(curPath.c_str(), _PC_PATH_MAX);
-  assert(pathname_max != -1 && path.size() < static_cast<unsigned long>(pathname_max));
+  assert(pathconf(curPath.c_str(), _PC_PATH_MAX) != -1 && path.size() < static_cast<unsigned long>(pathname_max));
   return path;
 }
 
