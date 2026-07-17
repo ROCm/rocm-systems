@@ -3,6 +3,7 @@
 *.gcov
 /coverage/
 build*/
+/build*
 install*/
 ext/
 src/transport/net_ib_rocm.cc
@@ -10,6 +11,32 @@ ext-profiler/inspector/librccl-profiler-inspector.so
 ext-profiler/inspector/version.cc
 plugins/profiler/inspector/librccl-profiler-inspector.so
 plugins/profiler/inspector/version.cc
+failed/
+junits/
+*.xml
+/plugins/net/ib_sharp/build/
+/plugins/net/example/*.so
+/plugins/mixed/example/*.so
+/plugins/net/mock/*.so
+tags
+*.swp
+.cache/
 
 # Visual Studio Code
 .vscode
+
+# Example build artifacts
+*.o
+examples/**/multiple_devices_single_process
+examples/**/one_device_per_pthread
+examples/**/one_device_per_process_mpi
+examples/**/ring_pattern
+examples/**/allreduce
+examples/**/allreduce_ub
+examples/**/allreduce_sm
+examples/**/allgather_ce
+examples/**/allreduce_device_api
+examples/**/rmsnorm_lsa
+examples/**/rmsnorm_multimem
+examples/**/rmsnorm_gin
+examples/**/rmsnorm_hybrid

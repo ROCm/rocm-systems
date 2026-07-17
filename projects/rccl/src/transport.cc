@@ -175,7 +175,8 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     struct channelMasks recvMask = comm->connectRecv[recvPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
     struct channelMasks sendMask = comm->connectSend[sendPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
 
-    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv peer
+    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv
+    // peer
     // This data is packed in the array based on the number of sendChannels and recvChannels connected with these peers
     // The first N entries contain recvData, connection information for recv connections
     // The next M entries contain sendData, connection information for send connections

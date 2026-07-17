@@ -225,6 +225,8 @@ fail:
   *ptr = nullptr;
   return result;
 }
+#define ncclCuMemHostAlloc(ptr, handlep, size) \
+  ncclCuMemHostAllocDebug((ptr), (handlep), (size), __FILE__, __LINE__, __func__)
 
 static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   if (ptr == NULL) return ncclSuccess;
@@ -246,10 +248,19 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
 
 #else /* CUDART_VERSION >= 12020 */
 
-static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, void* handlep, size_t size) {
+static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
+                                                   const char* callerFunc) {
+  (void)ptr;
+  (void)handlep;
+  (void)size;
+  (void)file;
+  (void)line;
+  (void)callerFunc;
   WARN("CUMEM Host is not supported prior to CUDA 12.2");
   return ncclInternalError;
 }
+#define ncclCuMemHostAlloc(ptr, handlep, size) \
+  ncclCuMemHostAllocDebug((ptr), (handlep), (size), __FILE__, __LINE__, __func__)
 
 static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   WARN("CUMEM Host is not supported prior to CUDA 12.2");
@@ -305,7 +316,8 @@ static inline ncclResult_t ncclCudaHostFree(void* ptr) {
 #define ncclCudaHostCalloc(...) ncclCudaHostCallocDebug(__VA_ARGS__, __FILE__, __LINE__)
 
 template <typename T>
-ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
+ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char* file, int line, const char* callerFunc,
+                             bool logHostAlloc) {
   if (nelem > 0) {
     T* p = (T*)malloc(nelem * ncclSizeOfT<T>());
     if (p == NULL) {
@@ -315,6 +327,9 @@ ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char* filefunc, int li
     // INFO(NCCL_ALLOC, "%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*ncclSizeOfT<T>(), p);
     memset((void*)p, 0, nelem * ncclSizeOfT<T>());
     *ptr = p;
+    if (logHostAlloc)
+      INFO_LOC_FN(NCCL_ALLOC_HOST, file, line, callerFunc, "Host Calloc Size %ld pointer %p", nelem * ncclSizeOfT<T>(),
+                  p);
   } else {
     *ptr = NULL;
   }
@@ -322,25 +337,30 @@ ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char* filefunc, int li
 }
 
 template <typename T>
-ncclResult_t ncclCallocDebug(ncclUniquePtr<T>& ptr, size_t nelem, const char* filefunc, int line) {
+ncclResult_t ncclCallocDebug(ncclUniquePtr<T>& ptr, size_t nelem, const char* file, int line, const char* callerFunc,
+                             bool logHostAlloc) {
   typename ncclUniquePtr<T>::pointer p = nullptr;
-  ncclResult_t result = ncclCallocDebug(&p, nelem, filefunc, line);
+  ncclResult_t result = ncclCallocDebug(&p, nelem, file, line, callerFunc, logHostAlloc);
   ptr.reset(p);
   return result;
 }
 
 template <typename T>
-ncclResult_t ncclCallocDebug(ncclUniqueArrayPtr<T>& ptr, size_t nelem, const char* filefunc, int line) {
+ncclResult_t ncclCallocDebug(ncclUniqueArrayPtr<T>& ptr, size_t nelem, const char* file, int line,
+                             const char* callerFunc, bool logHostAlloc) {
   typename ncclUniqueArrayPtr<T>::pointer p = nullptr;
-  ncclResult_t result = ncclCallocDebug(&p, nelem, filefunc, line);
+  ncclResult_t result = ncclCallocDebug(&p, nelem, file, line, callerFunc, logHostAlloc);
   ptr.reset(p);
   return result;
 }
 
-#define ncclCalloc(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__)
+#define ncclCalloc(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__, true)
+/* Quiet calloc/realloc skip NCCL_ALLOC_HOST INFO on very high-churn host paths only. */
+#define ncclCallocQuiet(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__, false)
 
 template <typename T>
-ncclResult_t ncclRealloc(T** ptr, size_t oldNelem, size_t nelem) {
+ncclResult_t ncclReallocDebug(T** ptr, size_t oldNelem, size_t nelem, const char* file, int line,
+                              const char* callerFunc, bool logHostAlloc) {
   T* oldp = *ptr;
   if (nelem < oldNelem || (oldp == NULL && oldNelem > 0)) return ncclInternalError;
   if (nelem == oldNelem) return ncclSuccess;
@@ -358,6 +378,10 @@ ncclResult_t ncclRealloc(T** ptr, size_t oldNelem, size_t nelem) {
        nelem * ncclSizeOfT<T>(), *ptr);
   return ncclSuccess;
 }
+#define ncclRealloc(ptr, oldNelem, nelem) \
+  ncclReallocDebug((ptr), (oldNelem), (nelem), __FILE__, __LINE__, __func__, true)
+#define ncclReallocQuiet(ptr, oldNelem, nelem) \
+  ncclReallocDebug((ptr), (oldNelem), (nelem), __FILE__, __LINE__, __func__, false)
 
 struct __attribute__((aligned(64))) allocationTracker {
   union {
@@ -882,22 +906,6 @@ finish:
 }
 
 template <typename T>
-ncclResult_t ncclCudaMemset(T* dst, int value, size_t nelem) {
-  ncclResult_t result = ncclSuccess;
-  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
-  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  // Need a side stream so as not to interfere with graph capture.
-  cudaStream_t stream;
-  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, finish);
-  CUDACHECKGOTO(cudaMemsetAsync((void*)dst, value, nelem * ncclSizeOfT<T>(), stream), result, finish);
-  CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-  CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
-finish:
-  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  return result;
-}
-
-template <typename T>
 ncclResult_t ncclCudaMemcpyAsync(T* dst, T* src, size_t nelem, cudaStream_t stream) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
@@ -969,7 +977,7 @@ finish:
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK
 // and if they are shared, that could cause a crash in a child process
-inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char* filefunc, int line) {
+inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char* file, int line, const char* callerFunc) {
   if (size > 0) {
     void* p = NULL;
     size_t page_size = ncclOsGetPageSize();
@@ -989,9 +997,9 @@ inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char* filef
   } else {
     *ptr = NULL;
   }
-  INFO(NCCL_ALLOC, "%s:%d Ib Alloc Size %ld pointer %p", filefunc, line, size, *ptr);
+  INFO_LOC_FN(NCCL_ALLOC, file, line, callerFunc, "Ib Alloc Size %ld pointer %p", size, *ptr);
   return ncclSuccess;
 }
-#define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__)
+#define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__)
 
 #endif
