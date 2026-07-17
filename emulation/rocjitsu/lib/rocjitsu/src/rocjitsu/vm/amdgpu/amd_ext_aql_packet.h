@@ -20,8 +20,44 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::amdgpu {
 
+// AMD vendor-specific packet format 0 is unassigned; 200 is reserved and unreleased.
+
+/// ROCR-internal PM4 indirect-buffer packet format.
+constexpr uint8_t kAmdAqlFormatPm4Ib = 1;
+
+/// AMD vendor-specific packet format selector for barrier-value packets.
+constexpr uint8_t kHsaAmdPacketTypeBarrierValue = 2;
+
 /// AMD vendor-specific packet format selector for extended kernel dispatch.
 constexpr uint8_t kHsaAmdPacketTypeExtKernelDispatch = 3;
+
+/// @brief AMD vendor-specific barrier-value packet layout.
+///
+/// @details Processing stops until `(signal_value & mask) cond value` is true.
+/// This mirrors hsa_amd_barrier_value_packet_t without depending on the ROCr
+/// extension-header version installed on the host.
+struct AmdBarrierValuePacket {
+  uint16_t header;
+  uint8_t amd_format;
+  uint8_t reserved_header;
+  uint32_t reserved0;
+  hsa_signal_t signal;
+  int64_t value;
+  int64_t mask;
+  uint32_t condition;
+  uint32_t reserved1;
+  uint64_t reserved2;
+  uint64_t reserved3;
+  hsa_signal_t completion_signal;
+};
+
+static_assert(std::is_trivially_copyable_v<AmdBarrierValuePacket>);
+static_assert(sizeof(AmdBarrierValuePacket) == 64);
+static_assert(offsetof(AmdBarrierValuePacket, signal) == 8);
+static_assert(offsetof(AmdBarrierValuePacket, value) == 16);
+static_assert(offsetof(AmdBarrierValuePacket, mask) == 24);
+static_assert(offsetof(AmdBarrierValuePacket, condition) == 32);
+static_assert(offsetof(AmdBarrierValuePacket, completion_signal) == 56);
 
 /// @brief AMD vendor-specific extended kernel dispatch packet layout.
 ///

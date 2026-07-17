@@ -356,6 +356,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    register_access_test.cpp
     instruction_execution_harness_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
@@ -530,6 +531,9 @@ set(RJ_CDNA4_KMD_2GPU_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
+set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
+    "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
+)
 set(RJ_HIP_TEST_ARCH
     "gfx950"
     CACHE STRING
@@ -546,6 +550,12 @@ set(RJ_HIP_TEST_2GPU_CONFIG
     "rocjitsu config used by basic two-GPU HIP tests"
 )
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
+get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
+get_filename_component(
+    RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME
+    "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}"
+    NAME
+)
 get_filename_component(
     RJ_CDNA4_KMD_2GPU_CONFIG_NAME
     "${RJ_CDNA4_KMD_2GPU_CONFIG}"
@@ -619,6 +629,54 @@ target_include_directories(
 target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
 add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
+rj_add_test(
+    NAME "GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
+)
+rj_add_test(
+    NAME "GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
+)
 if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
@@ -1208,7 +1266,13 @@ if(HSA_RUNTIME64)
             ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
+        add_dependencies(
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            device_kernels
+            rocjitsu_bin
+            rocjitsu_shared
+            rocjitsu_hooks
+        )
         rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE})
@@ -1235,15 +1299,75 @@ if(HSA_RUNTIME64)
             )
         endforeach()
 
-        if(HAS_CDNA3_GPU)
-            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
-                DynamicCopyLoopDispatchAndRun
-                TritonDynamicMatmulDispatchAndRun
-                TritonBufferAsyncMatmulDispatchAndRun
-                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-                TritonFlashAttentionNoAsyncDispatchAndRun
-                TritonFlashAttentionBufferAsyncDispatchAndRun
+        _rj_path_from_installed_test_bin(
+            _rj_installed_cdna3_kmd_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_CDNA3_KMD_CONFIG_NAME}"
+        )
+        _rj_path_from_installed_test_bin(
+            _rj_installed_cdna4_to_cdna3_sim_dbt_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME}"
+        )
+
+        set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
+            DynamicCopyLoopDispatchAndRun
+            TritonDynamicMatmulDispatchAndRun
+            TritonBufferAsyncMatmulDispatchAndRun
+            TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+            TritonFlashAttentionNoAsyncDispatchAndRun
+            TritonFlashAttentionBufferAsyncDispatchAndRun
+        )
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
+            rj_add_test(
+                NAME "Cdna4ToCdna3SimulatedDispatchTest.${_test_name}"
+                COMMAND
+                    ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+                    $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 300
+                INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "${_rj_installed_cdna3_kmd_config}"
+                    "--"
+                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                    "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
             )
+        endforeach()
+        message(STATUS "CDNA4->CDNA3 simulator dispatch tests enabled")
+
+        set(RJ_CDNA4_TO_CDNA3_DBT_GUEST_TESTS
+            DynamicCopyLoopDispatchAndRun
+            TritonDynamicMatmulDispatchAndRun
+            TritonBufferAsyncMatmulDispatchAndRun
+            TritonFlashAttentionNoAsyncDispatchAndRun
+            TritonFlashAttentionBufferAsyncDispatchAndRun
+        )
+        # The conservative-liveness variant injects BinaryTranslatorOptions
+        # directly and cannot be expressed through the public DBT hook. Running
+        # it here would duplicate the default buffer-async guest path.
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DBT_GUEST_TESTS)
+            rj_add_test(
+                NAME "Cdna4ToCdna3DbtGuestTest.${_test_name}"
+                COMMAND
+                    ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
+                    $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
+                    --gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 300
+                INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "${_rj_installed_cdna4_to_cdna3_sim_dbt_config}"
+                    "--"
+                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                    "--gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}"
+            )
+        endforeach()
+
+        if(HAS_CDNA3_GPU)
             foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
                 rj_add_test(
                     NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
@@ -1264,7 +1388,7 @@ if(HSA_RUNTIME64)
         else()
             message(
                 STATUS
-                "CDNA4->CDNA3 dispatch tests built but NOT registered with CTest "
+                "CDNA4->CDNA3 hardware dispatch tests built but NOT registered with CTest "
                 "(no CDNA3 GPU)"
             )
         endif()

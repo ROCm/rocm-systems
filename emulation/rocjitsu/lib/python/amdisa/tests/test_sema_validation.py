@@ -218,10 +218,10 @@ class TestSaveexecValidation:
     def test_saveexec_b32_uses_32_bit_operand_access(self):
         sem = _FakeSem('S_AND_SAVEEXEC_B32', 'scalar_saveexec', 'and', 'b32')
         new = _new_output(sem, ['ssrc0'], ['sdst'], 'b32')
-        assert 'ssrc0.read_scalar(wf)' in new
-        assert 'ssrc0.read_scalar64(wf)' not in new
-        assert 'sdst.write_scalar(wf' in new
-        assert 'sdst.write_scalar64(wf' not in new
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' in new
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' not in new
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(sdst,' in new
+        assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst,' not in new
         assert '0xffffffffULL' in new
 
 

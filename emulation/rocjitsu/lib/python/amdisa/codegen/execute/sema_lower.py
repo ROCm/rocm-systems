@@ -267,9 +267,9 @@ def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
     # vector_cmp.py.
     return (
         f'if (wf.wf_size() <= 32)\n'
-        f'    {dst}.write_scalar(wf, static_cast<uint32_t>(vcc));\n'
+        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>(vcc));\n'
         f'  else\n'
-        f'    {dst}.write_scalar64(wf, vcc);'
+        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, vcc);'
     )
 
 
@@ -827,9 +827,15 @@ def _lower_src_write(
     if binding:
         name = binding.name
         if binding.bit_width == 64:
-            return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
-        return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
-    return [f'{_indent(ctx)}inst.src{idx}.write_lane(wf, lane, {rhs});']
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane64({name}, lane, {rhs});'
+            ]
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane({name}, lane, {rhs});'
+        ]
+    return [
+        f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane(inst.src{idx}, lane, {rhs});'
+    ]
 
 
 def _get_operand_index(node: SemaNode) -> int:
@@ -865,15 +871,15 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         name = binding.name
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
-                return f'{name}.read_scalar64(wf)'
-            value = f'{name}.read_scalar(wf)'
+                return f'amdgpu::RegisterAccess(wf).read_scalar64({name})'
+            value = f'amdgpu::RegisterAccess(wf).read_scalar({name})'
             if tag != 'D' and idx in ctx.true16_src_selects:
                 select = ctx.true16_src_selects[idx]
                 return f'(({select}) != 0 ? ({value} >> 16) : {value})'
             return value
         if binding.bit_width == 64:
-            return f'{name}.read_lane64(wf, lane)'
-        value = f'{name}.read_lane(wf, lane)'
+            return f'amdgpu::RegisterAccess(wf).read_lane64({name}, lane)'
+        value = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
         if (
             tag == 'D'
             and ctx.true16_dst_select is not None
@@ -881,7 +887,7 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         ):
             if ctx.true16_dst_reg is not None:
                 value = (
-                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                    'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + '
                     f'({ctx.true16_dst_reg}), lane)'
                 )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
@@ -895,13 +901,16 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
 
+    # A D-tagged instoperand is a read of the destination operand's old value
+    # (for accumulator/update forms), not a source-operand alias.
+    operand = f'inst.dst{idx}' if tag == 'D' else f'inst.src{idx}'
     if ctx.exec_model == ExecModel.SCALAR:
-        value = f'inst.src{idx}.read_scalar(wf)'
+        value = f'amdgpu::RegisterAccess(wf).read_scalar({operand})'
         if tag != 'D' and idx in ctx.true16_src_selects:
             select = ctx.true16_src_selects[idx]
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
-    value = f'inst.src{idx}.read_lane(wf, lane)'
+    value = f'amdgpu::RegisterAccess(wf).read_lane({operand}, lane)'
     if tag != 'D' and idx in ctx.true16_src_selects:
         if ctx.true16_vop3_opsel is not None:
             return (
@@ -1012,8 +1021,12 @@ def _lower_dst_write(
         name = binding.name
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
-                return [f'{_indent(ctx)}{name}.write_scalar64(wf, {rhs});']
-            return [f'{_indent(ctx)}{name}.write_scalar(wf, {rhs});']
+                return [
+                    f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar64({name}, {rhs});'
+                ]
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar({name}, {rhs});'
+            ]
         if ctx.true16_dst_select is not None and (
             (lhs_ty and lhs_ty.size == 16) or binding.bit_width == 16
         ):
@@ -1034,19 +1047,25 @@ def _lower_dst_write(
             ind = _indent(ctx)
             if ctx.true16_dst_reg is not None:
                 dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
-                read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
-                write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
-            elif ctx.true16_vop3_opsel is not None:
+                read_dst = f'amdgpu::RegisterAccess(wf.cu()).read_vgpr({dst_ref}, lane)'
+                write_dst = f'amdgpu::RegisterAccess(wf.cu()).write_vgpr({dst_ref}, lane, merged);'
+            elif ctx.true16_vop3_opsel is not None or ctx.true16_dst_select in {
+                'inst_.opsel & 0x8u',
+                'amdgpu::vop3_opsel(inst_) & 0x8u',
+            }:
+                opsel_expr = ctx.true16_vop3_opsel or ctx.true16_dst_select
                 return [
                     f'{ind}{{',
                     f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
                     f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
-                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, src_half, true);',
+                    f'{name}, wf, lane, {opsel_expr}, src_half, true);',
                     f'{ind}}}',
                 ]
             else:
-                read_dst = f'{name}.read_lane(wf, lane)'
-                write_dst = f'{name}.write_lane(wf, lane, merged);'
+                read_dst = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
+                write_dst = (
+                    f'amdgpu::RegisterAccess(wf).write_lane({name}, lane, merged);'
+                )
             return [
                 f'{ind}{{',
                 f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
@@ -1058,12 +1077,20 @@ def _lower_dst_write(
                 f'{ind}}}',
             ]
         if binding.bit_width == 64:
-            return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
-        return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
+            return [
+                f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane64({name}, lane, {rhs});'
+            ]
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane({name}, lane, {rhs});'
+        ]
 
     if ctx.exec_model == ExecModel.SCALAR:
-        return [f'{_indent(ctx)}inst.dst{idx}.write_scalar(wf, {rhs});']
-    return [f'{_indent(ctx)}inst.dst{idx}.write_lane(wf, lane, {rhs});']
+        return [
+            f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_scalar(inst.dst{idx}, {rhs});'
+        ]
+    return [
+        f'{_indent(ctx)}amdgpu::RegisterAccess(wf).write_lane(inst.dst{idx}, lane, {rhs});'
+    ]
 
 
 def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:

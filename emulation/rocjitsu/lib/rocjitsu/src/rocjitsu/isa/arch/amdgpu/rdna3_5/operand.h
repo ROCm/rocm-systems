@@ -28,6 +28,8 @@ public:
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   bool simd_capable() const override;
+
+private:
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,

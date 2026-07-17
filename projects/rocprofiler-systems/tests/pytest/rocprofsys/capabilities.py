@@ -274,11 +274,18 @@ class SystemCapabilities:
 
     @cached_property
     def num_procs(self) -> int:
-        """Get the number of available processors."""
-        num_procs_real = os.cpu_count()
-        if num_procs_real is None:
-            return 2
-        return num_procs_real
+        """Number of processors available to this process.
+
+        Uses sched_getaffinity so Slurm/cgroup/taskset limits match CMake
+        ProcessorCount and runtime thread-pool sizing.
+        """
+        try:
+            affinity = os.sched_getaffinity(0)
+            count = len(affinity)
+        except (AttributeError, NotImplementedError, OSError):
+            count = os.cpu_count() or 0
+
+        return count if count > 0 else 2
 
     @cached_property
     def ptrace_scope(self) -> int:

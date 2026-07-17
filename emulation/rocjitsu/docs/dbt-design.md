@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pair is CDNA4 (GFX950) → RDNA4 (GFX1200/1201), but the architecture is designed to support any directional ISA pair.
+The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pairs are CDNA4 (GFX950) → RDNA4 (GFX1200/1201) and CDNA4 (GFX950) → CDNA3 (GFX942), but the architecture is designed to support any directional ISA pair.
 
 The translation pipeline is organized into layers with clear responsibility boundaries. The binary translator orchestrates the process without owning ISA-specific policy. The encoding translator handles per-instruction binary format conversion. The semantic translator handles instruction-level behavioral differences. The kernel descriptor translator handles descriptor ABI and resource differences.
 
@@ -34,6 +34,31 @@ The translation pipeline is organized into layers with clear responsibility boun
 │  └───────────────────────────────────────────────────────────┘│
 └───────────────────────────────────────────────────────────────┘
 ```
+
+### Runtime host configuration
+
+DBT guest mode keeps the synthetic guest identity separate from the target that
+runs translated code. `DbtGuestConfig` describes the advertised guest ISA and
+device, while its `DbtHostConfig` describes the host ISA, topology GPU ID, and
+execution backend. The backend is an enum with two modes:
+
+- `hardware` forwards execution-facing operations to a real host GPU.
+- `simulator` delegates host KFD execution to `SimulatedKfd` and runs the
+  translated code on a RocJITsu VM.
+
+A simulator-backed DBT config supports two layouts. When `simulator_config` is
+set, it names an external host simulator config; relative paths are resolved
+beside the DBT guest config, and that external file overrides any simulator
+VM/topology in the DBT guest file. This is the normal composition form and lets
+`guest_gfx950_on_simulated_gfx942.json` reuse the golden
+`gfx942_cdna3_kmd.json` config. When `simulator_config` is omitted, the DBT
+guest block and simulator VM/topology are read from the same file. The
+self-contained form is useful for tests and generated temporary configs.
+
+Both layouts use the same translation and validation path. Before discovery,
+the runtime rejects guest execution limits that the selected simulator device
+cannot provide, including LDS size, scratch slots, waves per SIMD, and wavefront
+size.
 
 ---
 
