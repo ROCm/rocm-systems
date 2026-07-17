@@ -101,9 +101,40 @@ public:
   int size_bits() const { return size_bits_; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
-  /// @details Classified at construction time by ISA-specific subclasses using
-  /// the auto-generated is_vgpr_operand_type() from operand_types.h.
+  /// @details A construction-time capability flag. Field-bearing operands are
+  /// classified by the ISA-specific subclass constructor using the generated
+  /// is_vgpr_operand_type(); fieldless operands get their value from
+  /// apply_fieldless_caps(). Accessors query the stored flag directly.
   [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+
+  /// @brief Whether this operand yields a real value through the normal read /
+  /// SIMD accessors. A construction-time capability flag: true for field-bearing
+  /// operands and read-enabled fieldless operands. False for inert operands.
+  [[nodiscard]] bool reads_value() const { return reads_value_; }
+
+  /// @brief Whether this operand is a valid target for the normal write
+  /// accessors. A construction-time capability flag: true for field-bearing
+  /// operands and write-enabled fieldless operands. False for inert operands.
+  [[nodiscard]] bool is_writable() const { return writable_; }
+
+  /// @brief Whether this operand is fieldless
+  /// @details Fieldless operands (has no encoding field in MR ISA) are
+  /// constructed from a fixed canonical encoding value rather than a decoded
+  /// field. This stays a structural marker: it drives disassembly suppression
+  /// and ordinary to_register_ref() suppression, while runtime read/write/SIMD
+  /// behavior is driven by the capability flags above.
+  [[nodiscard]] bool is_fieldless() const { return fieldless_; }
+
+  /// @brief Mark this operand fieldless and apply its runtime capability
+  /// policy. Emitted by generated constructors in place of a bare fieldless
+  /// marker; the (reads_value, writable, is_vgpr) triple comes from the shared
+  /// fieldless operand policy table.
+  void apply_fieldless_caps(bool reads_value, bool writable, bool is_vgpr) {
+    fieldless_ = true;
+    reads_value_ = reads_value;
+    writable_ = writable;
+    is_vgpr_ = is_vgpr;
+  }
 
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
@@ -233,6 +264,14 @@ public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
   bool is_vgpr_ = false;
+  /// @brief Capability flags (see reads_value() / is_writable()). Default to a
+  /// normal field-bearing operand: readable and writable. Fieldless operands
+  /// override these via apply_fieldless_caps().
+  bool reads_value_ = true;
+  bool writable_ = true;
+  /// @brief True if this operand has no MR ISA encoding field (see
+  /// is_fieldless()). Suppressed from disassembly.
+  bool fieldless_ = false;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:

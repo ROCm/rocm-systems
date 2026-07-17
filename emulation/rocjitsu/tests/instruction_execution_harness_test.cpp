@@ -3992,4 +3992,50 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
     wf->halt();
 }
 
+/// @brief Regression test for s_setreg_imm32_b32 on gfx1250, where the immediate
+/// is modeled as a field-bearing OPR_SIMM32 `literal` operand (op=19) rather than
+/// CDNA4's fieldless `simm32` (op=20). The immediate must be patched from the
+/// trailing literal dword; when it was not, the operand stayed 0 and the
+/// instruction wrote a zero immediate. Verify a non-zero imm32 reaches STATUS.
+TEST(HwregTest, Gfx1250SetregImm32WritesStatus) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  // SOPK: [31:28]=0xB, [27:23]=op(19 on gfx1250), [22:16]=sdst(0), [15:0]=simm16(hwreg).
+  // hwreg selects STATUS (reg_id=2 on gfx1250), offset=0, size=32:
+  //   reg_id | (offset << 6) | ((size-1) << 11) = 2 | 0 | (31 << 11) = 0xF802.
+  constexpr uint32_t kSopkEncoding = 0xBu << 28;
+  constexpr uint32_t kSetregImm32Op = 19u << 23;
+  constexpr uint32_t kHwregStatus32 = 2u | (0u << 6) | (31u << 11);
+  constexpr uint32_t kImm32Value = 0xDEADBEEF;
+  const uint32_t words[] = {kSopkEncoding | kSetregImm32Op | kHwregStatus32, kImm32Value};
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr) << "Failed to decode gfx1250 s_setreg_imm32_b32";
+  EXPECT_EQ(std::string_view(inst->mnemonic()).substr(0, 16), "s_setreg_imm32_b");
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  wf->set_status_raw(0);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(wf->status_raw(), kImm32Value)
+      << "gfx1250 s_setreg_imm32_b32 wrote a zero (unpatched) immediate to STATUS";
+
+  cu->reset_all_wf();
+}
+
 } // namespace
