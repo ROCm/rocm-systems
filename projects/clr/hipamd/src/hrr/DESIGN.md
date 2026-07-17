@@ -1,5 +1,7 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
+User-facing quick start: [README.md](README.md). Agent decode & triage (A1): [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
+
 ## Quick Start
 
 ```bash
@@ -1174,6 +1176,19 @@ kernel.
   `uint64_t` without serialising the pointed-to struct; only hand-written manual shims
   copy struct bytes. A newly-captured, non-manual struct-input API therefore loses its
   payload silently.
+
+## Productization Roadmap
+
+Support tooling and documentation staged for HRR consumers (agents, triage engineers, and
+end users replaying captures).
+
+| ID | Deliverable | Notes |
+|----|-------------|-------|
+| **A1** | **Decode & triage skill** | Read replay fault/divergence (or an existing replay log) and emit a structured **Finding**: `fault_class`, `fault_address`, `failing_call_index` / `failing_api`, `kernel_name`, plus a short **capture explainer** (archive layout, completeness, version). **Read-only** — uses `hrr-playback --info` and log parsing; does not require a GPU. Ships first. Lives at `hipamd/src/hrr/skills/decode-and-triage/`. |
+| **R9** | **Knob docs + tests + basic user guide** | Consolidate `HIP_HRR_*` / CLI playback knobs into a formal reference with regression tests; expand [README.md](README.md) into a full user guide (capture, replay, troubleshooting, version matching). |
+
+See [README.md](README.md) for quick-start capture/replay/build and the A1 entry script
+`skills/decode-and-triage/scripts/decode_finding.sh`.
 
 ## Relationship to Original HRR Code
 
