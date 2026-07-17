@@ -89,7 +89,7 @@
     "a_cts_depth32": {
       "extends": "a_base",
       "timeout": 600,
-      "description": "A6: CTS-on at depth 32 (expected PASS). With CTS ON, CTS_QP_DEPTH=32 is well UNDER the AINIC CTS match-table overflow boundary, so this must PASS cleanly.",
+      "description": "A5: CTS-on at depth 32 (expected PASS). With CTS ON, CTS_QP_DEPTH=32 is well UNDER the AINIC CTS match-table overflow boundary, so this must PASS cleanly.",
       "env_variables": {
         "RCCL_IB_P2P_DISABLE_CTS": "0",
         "CTS_NUM_CONNS": "16",
@@ -98,7 +98,7 @@
       },
       "tests": [
         {
-          "name": "A6_NetIB_CtsDepthStress_CtsOn_Depth32",
+          "name": "A5_NetIB_CtsDepthStress_CtsOn_Depth32",
           "description": "CTS ON at depth 32: under the CTS match-table overflow boundary, so this must PASS.",
           "test_filter": "NetIbMPITest.CtsDepthStress"
         }
@@ -123,15 +123,15 @@
 
     "a_cast_wrr": {
       "extends": "a_cast_base",
-      "description": "A7/A8: CAST multi-QP WRR scheduler.",
+      "description": "A6/A7: CAST multi-QP WRR scheduler.",
       "tests": [
         {
-          "name": "A7_Cast_EqualWeightsTwoQPsTokenCounts",
+          "name": "A6_Cast_EqualWeightsTwoQPsTokenCounts",
           "description": "WRR scheduler balances 2 QPs without corruption (token table sane).",
           "test_filter": "NetIbMPITest.CastEqualWeightsTwoQPsTokenCounts"
         },
         {
-          "name": "A8_Cast_SingleQPBypassesWrr",
+          "name": "A7_Cast_SingleQPBypassesWrr",
           "description": "Single-QP connection bypasses WRR scheduler initialisation (keep sched enabled; just drop to 1 QP).",
           "test_filter": "NetIbMPITest.CastSingleQPBypassesWrr",
           "env_variables": {
@@ -145,10 +145,10 @@
     "a_fault_inject": {
       "extends": "a_cast_base",
       "timeout": 600,
-      "description": "A9: per-QP fault injection on CAST path.",
+      "description": "A8: per-QP fault injection on CAST path.",
       "tests": [
         {
-          "name": "A9_Cast_FaultInjQpErrorIsFatal",
+          "name": "A8_Cast_FaultInjQpErrorIsFatal",
           "description": "QP fault is detected (fatal) and does not corrupt other QPs on CAST path.",
           "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
         }
@@ -158,33 +158,33 @@
     "a_gin": {
       "extends": "a_base",
       "timeout": 600,
-      "description": "A10-A15: GIN one-sided proxy tests. Require NCCL_NET=ib-cast.",
+      "description": "A9-A13: GIN one-sided proxy tests. Require NCCL_NET=ib-cast.",
       "env_variables": {
         "NCCL_NET": "ib-cast"
       },
       "tests": [
         {
-          "name": "A10_Gin_IPutBasic",
+          "name": "A9_Gin_IPutBasic",
           "description": "GIN one-sided iput RDMA write over AINIC.",
           "test_filter": "*GinMPITest.IPutBasic*"
         },
         {
-          "name": "A11_Gin_IGetBasic",
+          "name": "A10_Gin_IGetBasic",
           "description": "GIN one-sided iget RDMA read over AINIC.",
           "test_filter": "*GinMPITest.IGetBasic*"
         },
         {
-          "name": "A12_Gin_IPutSignal",
+          "name": "A11_Gin_IPutSignal",
           "description": "GIN put-with-signal (atomic inc/add) completion semantics.",
           "test_filter": "*GinMPITest.IPutSignalInc*:*GinMPITest.IPutSignalAdd*"
         },
         {
-          "name": "A14_Gin_MultipleInflight",
+          "name": "A12_Gin_MultipleInflight",
           "description": "Multiple outstanding GIN iput/iget complete without corruption.",
           "test_filter": "*GinMPITest.MultipleInflightIPuts*:*GinMPITest.MultipleInflightIGets*"
         },
         {
-          "name": "A15_Gin_IPutSignalStress10k",
+          "name": "A13_Gin_IPutSignalStress10k",
           "description": "Stress: 10k put-with-signal ops, signal counter must equal 10000 (no drops).",
           "test_filter": "*GinMPIStressTest.IPutSignalStress10k*"
         }
@@ -232,132 +232,132 @@
         "NCCL_DEBUG": "WARN"
       },
       "tests": [
-        { "name": "B_alltoall_CAST_1K_16G", "binary": "alltoall_perf", "description": "CAST alltoall full range 1K..16G (single-QP, CTS offload off)." }
+        { "name": "B2_alltoall_CAST_1K_16G", "binary": "alltoall_perf", "description": "CAST alltoall full range 1K..16G (single-QP, CTS offload off)." }
       ]
     },
 
     "b2_cast_wrr_ctsoff": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B2: explicit CAST, WRR ON, CTS OFF.",
+      "description": "B3: explicit CAST, WRR ON, CTS OFF.",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "1",
         "RCCL_IB_P2P_DISABLE_CTS": "1"
       },
       "tests": [
-        { "name": "B2_alltoall_CAST_WRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF - validates the multi-QP CAST path on AINIC over the full 1024-16G range." },
-        { "name": "B2_allreduce_CAST_WRR_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF allreduce." }
+        { "name": "B3_alltoall_CAST_WRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF - validates the multi-QP CAST path on AINIC over the full 1024-16G range." },
+        { "name": "B3_allreduce_CAST_WRR_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST WRR ON / CTS OFF allreduce." }
       ]
     },
 
     "b3_cast_nowrr_ctsoff": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B3: CAST, WRR OFF, CTS OFF (isolate scheduler).",
+      "description": "B4: CAST, WRR OFF, CTS OFF (isolate scheduler).",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "0",
         "RCCL_IB_P2P_DISABLE_CTS": "1"
       },
       "tests": [
-        { "name": "B3_alltoall_CAST_noWRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST without WRR - isolates the scheduler, ionic QP path only, over the full 1024-16G range." },
-        { "name": "B3_allreduce_CAST_noWRR_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST without WRR allreduce." }
+        { "name": "B4_alltoall_CAST_noWRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST without WRR - isolates the scheduler, ionic QP path only, over the full 1024-16G range." },
+        { "name": "B4_allreduce_CAST_noWRR_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CAST without WRR allreduce." }
       ]
     },
 
     "b4_rocmib_ctsoff": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B4: ROCM-IB alias, CTS OFF (stable AINIC RoCEv2 path).",
+      "description": "B5: ROCM-IB alias, CTS OFF (stable AINIC RoCEv2 path).",
       "env_variables": {
         "NCCL_NET": "ROCM-IB",
         "RCCL_IB_P2P_DISABLE_CTS": "1"
       },
       "tests": [
-        { "name": "B4_alltoall_ROCMIB_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC alias path (sched OFF, CTS OFF) over the full 1024-16G range." },
-        { "name": "B4_allreduce_ROCMIB_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC alias allreduce." }
+        { "name": "B5_alltoall_ROCMIB_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC alias path (sched OFF, CTS OFF) over the full 1024-16G range." },
+        { "name": "B5_allreduce_ROCMIB_CTSoff", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC alias allreduce." }
       ]
     },
 
     "b5_rocmib_ctson": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B5: ROCM-IB alias, CTS ON on P2P.",
+      "description": "B6: ROCM-IB alias, CTS ON on P2P.",
       "env_variables": {
         "NCCL_NET": "ROCM-IB",
         "RCCL_IB_P2P_DISABLE_CTS": "0"
       },
       "tests": [
-        { "name": "B5_alltoall_ROCMIB_CTSon", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "ROCM-IB alltoall with CTS ON on P2P connections." },
-        { "name": "B5_allreduce_ROCMIB_CTSon", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "ROCM-IB allreduce with CTS ON." }
+        { "name": "B6_alltoall_ROCMIB_CTSon", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "ROCM-IB alltoall with CTS ON on P2P connections." },
+        { "name": "B6_allreduce_ROCMIB_CTSon", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "ROCM-IB allreduce with CTS ON." }
       ]
     },
 
     "b6_cast_wrr_ctson": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B6: CAST, WRR ON + CTS requested ON (CTS should be forced off when sched active).",
+      "description": "B7: CAST, WRR ON + CTS requested ON (CTS should be forced off when sched active).",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "1",
         "RCCL_IB_P2P_DISABLE_CTS": "0"
       },
       "tests": [
-        { "name": "B6_alltoall_CAST_WRR_CTSon", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "WRR ON + CTS requested - verifies CTS is forced OFF under an active scheduler, over the full 1024-16G range." },
-        { "name": "B6_allreduce_CAST_WRR_CTSon", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "WRR ON + CTS requested allreduce." }
+        { "name": "B7_alltoall_CAST_WRR_CTSon", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "WRR ON + CTS requested - verifies CTS is forced OFF under an active scheduler, over the full 1024-16G range." },
+        { "name": "B7_allreduce_CAST_WRR_CTSon", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "WRR ON + CTS requested allreduce." }
       ]
     },
 
     "b7_autodetect": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B7: out-of-the-box autodetect. NCCL_NET intentionally omitted (do NOT set to '').",
+      "description": "B8: out-of-the-box autodetect. NCCL_NET intentionally omitted (do NOT set to '').",
       "tests": [
-        { "name": "B7_alltoall_autodetect", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Out-of-the-box: auto-select netIbCast on AINIC HW with stock defaults, over the full 1024-16G range (autodetect resolves to CAST)." },
-        { "name": "B7_allreduce_autodetect", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Out-of-the-box autodetect allreduce." }
+        { "name": "B8_alltoall_autodetect", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Out-of-the-box: auto-select netIbCast on AINIC HW with stock defaults, over the full 1024-16G range (autodetect resolves to CAST)." },
+        { "name": "B8_allreduce_autodetect", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "Out-of-the-box autodetect allreduce." }
       ]
     },
 
     "b7b_autodetect_off": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B7b: AINIC forced OFF (RCCL_AINIC_ROCE=0); expect fallback to plain IB/RoCE.",
+      "description": "B9: AINIC forced OFF (RCCL_AINIC_ROCE=0); expect fallback to plain IB/RoCE.",
       "env_variables": {
         "RCCL_AINIC_ROCE": "0"
       },
       "tests": [
-        { "name": "B7b_alltoall_autodetect_off", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC forced OFF - verifies fallback to plain IB/RoCE on the same HW, over the full 1024-16G range for parity with the rest of the sweep." },
-        { "name": "B7b_allreduce_autodetect_off", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC forced OFF allreduce." }
+        { "name": "B9_alltoall_autodetect_off", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC forced OFF - verifies fallback to plain IB/RoCE on the same HW, over the full 1024-16G range for parity with the rest of the sweep." },
+        { "name": "B9_allreduce_autodetect_off", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "AINIC forced OFF allreduce." }
       ]
     },
 
     "b8_no_cts_offload": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B8: ROCM-IB with CTS offload fully disabled.",
+      "description": "B10: ROCM-IB with CTS offload fully disabled.",
       "env_variables": {
         "NCCL_NET": "ROCM-IB",
         "RCCL_CTS_OFFLOAD_ENABLED": "0"
       },
       "tests": [
-        { "name": "B8_alltoall_ROCMIB_noOffload", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CTS offload disabled - isolates the ionic path without the CTS handshake, over the full 1024-16G range." },
-        { "name": "B8_allreduce_ROCMIB_noOffload", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CTS offload disabled allreduce." }
+        { "name": "B10_alltoall_ROCMIB_noOffload", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CTS offload disabled - isolates the ionic path without the CTS handshake, over the full 1024-16G range." },
+        { "name": "B10_allreduce_ROCMIB_noOffload", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "CTS offload disabled allreduce." }
       ]
     },
 
     "b9_cts_force_override": {
       "extends": "b_base",
       "timeout": 600,
-      "description": "B9: PR #4657 force-override precedence. RCCL_CTS_OFFLOAD_ENABLED=1 is the strongest override and forces CTS offload on ALL connections including P2P, overriding RCCL_IB_P2P_DISABLE_CTS=1. Exercises the `enabled && (userForced || !(isP2p && IbP2pDisableCts))` userForced branch that no other B suite covers.",
+      "description": "B11: PR #4657 force-override precedence. RCCL_CTS_OFFLOAD_ENABLED=1 is the strongest override and forces CTS offload on ALL connections including P2P, overriding RCCL_IB_P2P_DISABLE_CTS=1. Exercises the `enabled && (userForced || !(isP2p && IbP2pDisableCts))` userForced branch that no other B suite covers.",
       "env_variables": {
         "NCCL_NET": "ROCM-IB",
         "RCCL_CTS_OFFLOAD_ENABLED": "1",
         "RCCL_IB_P2P_DISABLE_CTS": "1"
       },
       "tests": [
-        { "name": "B9_alltoall_ROCMIB_CTSforceOverride", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "PR #4657: RCCL_CTS_OFFLOAD_ENABLED=1 overrides IB_P2P_DISABLE_CTS=1, forcing CTS on P2P - validates the force-override precedence." },
-        { "name": "B9_allreduce_ROCMIB_CTSforceOverride", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "PR #4657 force-override on collective transport: allreduce expected PASS (CTS is supported on collective connections)." }
+        { "name": "B11_alltoall_ROCMIB_CTSforceOverride", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "PR #4657: RCCL_CTS_OFFLOAD_ENABLED=1 overrides IB_P2P_DISABLE_CTS=1, forcing CTS on P2P - validates the force-override precedence." },
+        { "name": "B11_allreduce_ROCMIB_CTSforceOverride", "binary": "all_reduce_perf", "command_args": "-b 1024 -e 16G -f 2 -g 1", "description": "PR #4657 force-override on collective transport: allreduce expected PASS (CTS is supported on collective connections)." }
       ]
     },
 
@@ -366,9 +366,9 @@
       "command_args": "-b 1K -e 16G -f 2 -g 1",
       "description": "Dedicated large-size alltoall guard for the AINIC data path: CAST and ROCM-IB swept over the full 1K-16G range with a plain-IB control. Test names use the 1K_16G suffix to match the actual -b 1K -e 16G range.",
       "tests": [
-        { "name": "BR_alltoall_IB_1K_16G_control", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB" }, "description": "CONTROL: plain RoCE alltoall over 1K-16G (HW health check)." },
-        { "name": "BR_alltoall_CAST_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB-CAST", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "CAST alltoall over 1K-16G." },
-        { "name": "BR_alltoall_ROCMIB_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "ROCM-IB", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "ROCM-IB alltoall over 1K-16G (CAST path via alias)." }
+        { "name": "B12_alltoall_IB_1K_16G_control", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB" }, "description": "CONTROL: plain RoCE alltoall over 1K-16G (HW health check)." },
+        { "name": "B12_alltoall_CAST_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB-CAST", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "CAST alltoall over 1K-16G." },
+        { "name": "B12_alltoall_ROCMIB_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "ROCM-IB", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "ROCM-IB alltoall over 1K-16G (CAST path via alias)." }
       ]
     },
 
@@ -394,23 +394,23 @@
   "test_suites": [
     { "name": "A1-A3. Component - NetIb core",       "config": "a_netib_component", "enabled": true },
     { "name": "A4. Component - CTS workaround (off)", "config": "a_cts_workaround", "enabled": true },
-    { "name": "A6. Component - CTS depth 32 (on, passes)", "config": "a_cts_depth32", "enabled": true },
-    { "name": "A7-A8. Component - CAST WRR",          "config": "a_cast_wrr",        "enabled": true },
-    { "name": "A9. Component - Fault injection",      "config": "a_fault_inject",    "enabled": true },
-    { "name": "A10-A15. Component - GIN proxy",       "config": "a_gin",             "enabled": true },
+    { "name": "A5. Component - CTS depth 32 (on, passes)", "config": "a_cts_depth32", "enabled": true },
+    { "name": "A6-A7. Component - CAST WRR",          "config": "a_cast_wrr",        "enabled": true },
+    { "name": "A8. Component - Fault injection",      "config": "a_fault_inject",    "enabled": true },
+    { "name": "A9-A13. Component - GIN proxy",        "config": "a_gin",             "enabled": true },
 
     { "name": "B1. IB baseline",                     "config": "b1_ib",             "enabled": true },
-    { "name": "B1f. CAST alltoall full (1K-16G)",     "config": "b_alltoall_cast_full", "enabled": true },
-    { "name": "B2. CAST WRR / CTS off",              "config": "b2_cast_wrr_ctsoff","enabled": true },
-    { "name": "B3. CAST no-WRR / CTS off",           "config": "b3_cast_nowrr_ctsoff","enabled": true },
-    { "name": "B4. ROCM-IB / CTS off",               "config": "b4_rocmib_ctsoff",  "enabled": true },
-    { "name": "B5. ROCM-IB / CTS on",               "config": "b5_rocmib_ctson",   "enabled": true },
-    { "name": "B6. CAST WRR / CTS on",               "config": "b6_cast_wrr_ctson", "enabled": true },
-    { "name": "B7. Autodetect (out-of-box)",         "config": "b7_autodetect",     "enabled": true },
-    { "name": "B7b. Autodetect off (fallback)",      "config": "b7b_autodetect_off","enabled": true },
-    { "name": "B8. ROCM-IB / no CTS offload",        "config": "b8_no_cts_offload", "enabled": true },
-    { "name": "B9. CTS force-override (PR#4657)",    "config": "b9_cts_force_override", "enabled": true },
-    { "name": "B-large. alltoall full-range guard",  "config": "b_large_alltoall_repro", "enabled": true },
+    { "name": "B2. CAST alltoall full (1K-16G)",     "config": "b_alltoall_cast_full", "enabled": true },
+    { "name": "B3. CAST WRR / CTS off",              "config": "b2_cast_wrr_ctsoff","enabled": true },
+    { "name": "B4. CAST no-WRR / CTS off",           "config": "b3_cast_nowrr_ctsoff","enabled": true },
+    { "name": "B5. ROCM-IB / CTS off",               "config": "b4_rocmib_ctsoff",  "enabled": true },
+    { "name": "B6. ROCM-IB / CTS on",               "config": "b5_rocmib_ctson",   "enabled": true },
+    { "name": "B7. CAST WRR / CTS on",               "config": "b6_cast_wrr_ctson", "enabled": true },
+    { "name": "B8. Autodetect (out-of-box)",         "config": "b7_autodetect",     "enabled": true },
+    { "name": "B9. Autodetect off (fallback)",       "config": "b7b_autodetect_off","enabled": true },
+    { "name": "B10. ROCM-IB / no CTS offload",       "config": "b8_no_cts_offload", "enabled": true },
+    { "name": "B11. CTS force-override (PR#4657)",   "config": "b9_cts_force_override", "enabled": true },
+    { "name": "B12. alltoall full-range guard",      "config": "b_large_alltoall_repro", "enabled": true },
 
     { "name": "C1. IONIC counter validation",        "config": "c_counters",        "enabled": true }
   ]
