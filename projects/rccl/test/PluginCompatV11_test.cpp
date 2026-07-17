@@ -86,9 +86,9 @@ ncclResult_t mockCollFinalize(void*) { return ncclSuccess; }
 } // namespace RcclUnitTesting
 
 // These symbols are what getNcclNet_v11()/getNcclCollNet_v11() look up via
-// dlsym(). They must be exported from the test executable's dynamic symbol
-// table (the CMake target is linked with -rdynamic) and named exactly, so we
-// place them at global scope with C linkage and default visibility.
+// dlsym(). The CMake target exports them (--export-dynamic-symbol) so they land
+// in the test executable's dynamic symbol table; they must be named exactly, so
+// we place them at global scope with C linkage and default visibility.
 extern "C" {
 
 __attribute__((visibility("default")))
