@@ -152,10 +152,16 @@ if(LTO)
 endif()
 
 if(_rj_sanitizer_count GREATER 0)
-    if(thread IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+    if(
+        thread IN_LIST _rj_sanitizer_kinds
+        AND (
+            address IN_LIST _rj_sanitizer_kinds
+            OR memory IN_LIST _rj_sanitizer_kinds
+        )
+    )
         message(
             FATAL_ERROR
-            "ThreadSanitizer cannot be combined with other sanitizers"
+            "ThreadSanitizer can not be combined with address or memory sanitizers"
         )
     endif()
     if(memory IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
