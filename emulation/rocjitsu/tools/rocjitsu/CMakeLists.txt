@@ -8,6 +8,7 @@ target_include_directories(
     rocjitsu_cli_launch_preload
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
+target_compile_definitions(rocjitsu_cli_launch_preload PRIVATE _GNU_SOURCE)
 target_link_libraries(rocjitsu_cli_launch_preload PUBLIC ${CMAKE_DL_LIBS})
 rj_configure_target(rocjitsu_cli_launch_preload TOOL)
 

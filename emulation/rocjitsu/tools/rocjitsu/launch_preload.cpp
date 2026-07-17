@@ -4,9 +4,6 @@
 #include "launch_preload.h"
 
 #include <algorithm>
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
 #include <string_view>
 #include <unistd.h>
 #include <utility>
@@ -91,25 +88,6 @@ std::string find_loaded_sanitizer_runtime(void *init_symbol, std::string_view ru
   return runtime;
 }
 #endif
-
-int exec_shell(const char *file, char *const argv[], char *const envp[]) {
-  std::vector<char *> shell_argv;
-  shell_argv.push_back(const_cast<char *>("/bin/sh"));
-  shell_argv.push_back(const_cast<char *>(file));
-  for (char *const *arg = argv + 1; *arg; ++arg)
-    shell_argv.push_back(*arg);
-  shell_argv.push_back(nullptr);
-  execve("/bin/sh", shell_argv.data(), envp);
-  return -1;
-}
-
-int exec_path_candidate(const std::string &file, char *const argv[], char *const envp[]) {
-  execve(file.c_str(), argv, envp);
-  if (errno == ENOEXEC)
-    return exec_shell(file.c_str(), argv, envp);
-  return -1;
-}
-
 } // namespace
 
 LaunchEnvironment::LaunchEnvironment() {
@@ -186,38 +164,7 @@ LaunchEnvironment make_launch_environment(const std::string &interposer_path) {
 }
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
-  if (!file || !*file) {
-    errno = ENOENT;
-    return -1;
-  }
-
-  char *const *envp = environment.envp();
-  if (std::strchr(file, '/'))
-    return exec_path_candidate(file, argv, envp);
-
-  const char *path = environment.get("PATH");
-  std::string_view remaining = path ? std::string_view(path) : std::string_view("/bin:/usr/bin");
-  bool saw_eacces = false;
-
-  while (true) {
-    size_t colon = remaining.find(':');
-    std::string_view dir = colon == std::string_view::npos ? remaining : remaining.substr(0, colon);
-    std::string candidate = dir.empty() ? std::string(file) : std::string(dir) + "/" + file;
-
-    exec_path_candidate(candidate, argv, envp);
-    if (errno == EACCES) {
-      saw_eacces = true;
-    } else if (errno != ENOENT && errno != ENOTDIR) {
-      return -1;
-    }
-
-    if (colon == std::string_view::npos)
-      break;
-    remaining.remove_prefix(colon + 1);
-  }
-
-  errno = saw_eacces ? EACCES : ENOENT;
-  return -1;
+  return execvpe(file, argv, environment.envp());
 }
 
 } // namespace rocjitsu::cli
