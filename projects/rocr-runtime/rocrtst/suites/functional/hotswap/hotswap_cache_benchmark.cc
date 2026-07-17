@@ -36,6 +36,10 @@ struct Options {
   std::vector<size_t> thread_counts{1, 2, 4, 8};
   std::vector<size_t> payload_sizes{64 * 1024, 1024 * 1024, 8 * 1024 * 1024};
   size_t producer_microseconds = 2000;
+  // Models the cost of a cross-process disk-cache read (I/O + validation) that
+  // the disk tier pays on a warm start in place of the full COMGR retarget.
+  // Much smaller than producer_microseconds by design.
+  size_t disk_read_microseconds = 200;
   size_t iterations = 3;
 };
 
@@ -145,11 +149,14 @@ Options ParseOptions(int argc, char** argv) {
       options.payload_sizes = ParseList(argument.substr(std::strlen("--bytes=")));
     } else if (argument.rfind("--producer-us=", 0) == 0) {
       options.producer_microseconds = std::stoull(argument.substr(std::strlen("--producer-us=")));
+    } else if (argument.rfind("--disk-read-us=", 0) == 0) {
+      options.disk_read_microseconds = std::stoull(argument.substr(std::strlen("--disk-read-us=")));
     } else if (argument.rfind("--iterations=", 0) == 0) {
       options.iterations = std::stoull(argument.substr(std::strlen("--iterations=")));
     } else if (argument == "--help") {
       std::cout << "Usage: hotswap_cache_benchmark [--threads=1,2,4,8] "
-                   "[--bytes=65536,1048576] [--producer-us=2000] [--iterations=3]\n";
+                   "[--bytes=65536,1048576] [--producer-us=2000] "
+                   "[--disk-read-us=200] [--iterations=3]\n";
       std::exit(0);
     } else {
       std::cerr << "Unknown argument: " << argument << '\n';
@@ -328,6 +335,67 @@ Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
       metrics.coalesced_results};
 }
 
+// Models the disk-persistent tier layered on the single-flight cache: on a
+// cross-process warm start the on-disk artifact already exists, so the
+// single-flight producer pays a cheap disk read (disk_read_microseconds) plus
+// a copy-out instead of the full COMGR retarget (producer_microseconds). Uses
+// the real ContentRetargetCache so single-flight coalescing is identical to the
+// in-memory-only strategy; only the producer's cost differs. kWarm additionally
+// pre-populates the in-memory tier (same-process second launch).
+Outcome RunSingleFlightDisk(Phase phase, size_t thread_count, size_t payload_size,
+                            size_t disk_read_microseconds) {
+  ContentRetargetCache cache;
+  const RetargetCacheKey key{"source", "target", false, false};
+  const std::vector<unsigned char> source(payload_size, 0x21);
+  rocr::hotswap::RetargetedElfRef warm_owner;
+  if (phase == Phase::kWarm) {
+    warm_owner = cache
+                     .GetOrCompute(source.data(), source.size(), 0, key,
+                                   [&](const SourceSnapshotRef& snapshot) {
+                                     return MakeRetargetedElf(snapshot, payload_size, 0);
+                                   })
+                     .elf;
+  }
+  cache.ResetMetricsForTesting();
+
+  std::vector<RetargetOperationResult> results(thread_count);
+  std::vector<std::thread> threads;
+  StartGate start(thread_count);
+
+  const auto started = Clock::now();
+  for (size_t i = 0; i < thread_count; ++i) {
+    threads.emplace_back([&, i] {
+      start.ArriveAndWait();
+      results[i] = cache.GetOrCompute(
+          source.data(), source.size(), 0, key, [&](const SourceSnapshotRef& snapshot) {
+            // Disk hit: cheap read + copy-out, NOT the full COMGR retarget.
+            return MakeRetargetedElf(snapshot, payload_size, disk_read_microseconds);
+          });
+    });
+  }
+  for (auto& thread : threads) thread.join();
+
+  const auto metrics = cache.SnapshotMetrics();
+  for (const auto& result : results) {
+    if (!result.succeeded()) {
+      std::cerr << "single-flight+disk allocation failed\n";
+      std::exit(1);
+    }
+  }
+  return {
+      static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count()),
+      metrics.producer_calls,
+      metrics.produced_output_bytes / payload_size,
+      metrics.peak_live_output_bytes,
+      metrics.live_output_bytes,
+      metrics.source_snapshot_allocations,
+      metrics.peak_live_source_snapshot_bytes,
+      metrics.live_source_snapshot_bytes,
+      metrics.ready_hits,
+      metrics.coalesced_results};
+}
+
 template <typename Runner> Outcome MedianOutcome(size_t iterations, Runner&& runner) {
   std::vector<Outcome> outcomes;
   outcomes.reserve(iterations);
@@ -374,6 +442,11 @@ int main(int argc, char** argv) {
                      options.producer_microseconds, MedianOutcome(options.iterations, [&] {
                        return RunSingleFlight(phase, thread_count, payload_size,
                                               options.producer_microseconds);
+                     }));
+        PrintOutcome("single-flight+disk", phase, thread_count, payload_size,
+                     options.disk_read_microseconds, MedianOutcome(options.iterations, [&] {
+                       return RunSingleFlightDisk(phase, thread_count, payload_size,
+                                                  options.disk_read_microseconds);
                      }));
       }
     }
