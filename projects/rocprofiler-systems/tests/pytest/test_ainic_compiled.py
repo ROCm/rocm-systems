@@ -6,8 +6,7 @@ Tests that AI NIC support was compiled into librocprof-sys.so.
 
 This test does NOT require NIC hardware to be present — it checks the
 binary artifacts for compile-time indicators. It will fail if the library
-was built with ROCPROFSYS_BUILD_AINIC=OFF (e.g. due to ROCM_PATH not
-being set during the build, as in ROCM-28005).
+was built with ROCPROFSYS_BUILD_AINIC=OFF.
 """
 
 from __future__ import annotations
