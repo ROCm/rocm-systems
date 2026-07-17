@@ -13,8 +13,8 @@
 #define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
 
 #include "rocjitsu/kmd/linux/events.h"
-#include "rocjitsu/kmd/linux/fd_utils.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/unique_handle.h"
 
 #include <atomic>
 #include <cassert>
@@ -161,7 +161,7 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    UniqueFd owned_dbg_fd;
+    util::UniqueHandle owned_dbg_fd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.

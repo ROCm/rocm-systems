@@ -3,10 +3,10 @@
 
 #include "rocjitsu/daemon/rj_daemon.h"
 
-#include "rocjitsu/kmd/linux/fd_utils.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/rj_vm.h"
+#include "util/unique_handle.h"
 
 #include <algorithm>
 #include <atomic>
@@ -117,7 +117,7 @@ bool send_with_fd_exact(int socket, const void *data, size_t size, int fd) {
          rpc_send_exact(socket, static_cast<const uint8_t *>(data) + bytes_sent, size - bytes_sent);
 }
 
-bool receive_header_with_fd(int socket, RpcHeader *header, UniqueFd *fd) {
+bool receive_header_with_fd(int socket, RpcHeader *header, util::UniqueHandle *fd) {
   int received_fds[1] = {-1};
   size_t received_fd_count = 1;
   ssize_t header_bytes = 0;
@@ -196,7 +196,7 @@ public:
     try {
       while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
         RpcHeader header{};
-        UniqueFd input_fd;
+        util::UniqueHandle input_fd;
         if (!receive_header_with_fd(client_fd_, &header, &input_fd))
           break;
 
@@ -211,7 +211,7 @@ public:
   }
 
 private:
-  RequestDisposition handle_request(const RpcHeader &header, UniqueFd &input_fd) {
+  RequestDisposition handle_request(const RpcHeader &header, util::UniqueHandle &input_fd) {
     switch (header.opcode) {
     case RPC_HANDSHAKE:
       return handle_handshake(header, input_fd);
@@ -228,7 +228,7 @@ private:
     }
   }
 
-  RequestDisposition handle_handshake(const RpcHeader &header, const UniqueFd &input_fd) {
+  RequestDisposition handle_handshake(const RpcHeader &header, const util::UniqueHandle &input_fd) {
     if (process_id_ != 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
       return RequestDisposition::Disconnect;
 
@@ -275,7 +275,7 @@ private:
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_close(const RpcHeader &header, const UniqueFd &input_fd) {
+  RequestDisposition handle_close(const RpcHeader &header, const util::UniqueHandle &input_fd) {
     if (process_id_ == 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
       return RequestDisposition::Disconnect;
 
@@ -286,7 +286,7 @@ private:
     return RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_mmap(const RpcHeader &header, const UniqueFd &input_fd) {
+  RequestDisposition handle_mmap(const RpcHeader &header, const util::UniqueHandle &input_fd) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) || input_fd.get() >= 0) {
       return RequestDisposition::Disconnect;
     }
@@ -324,7 +324,7 @@ private:
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_munmap(const RpcHeader &header, const UniqueFd &input_fd) {
+  RequestDisposition handle_munmap(const RpcHeader &header, const util::UniqueHandle &input_fd) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMunmapRequest) ||
         input_fd.get() >= 0) {
       return RequestDisposition::Disconnect;
@@ -341,7 +341,7 @@ private:
                                                                    : RequestDisposition::Disconnect;
   }
 
-  RequestDisposition handle_ioctl(const RpcHeader &header, UniqueFd &input_fd) {
+  RequestDisposition handle_ioctl(const RpcHeader &header, util::UniqueHandle &input_fd) {
     if (process_id_ == 0 || header.payload_bytes > kMaxPayloadBytes ||
         header.payload_bytes < sizeof(RpcIoctlRequest)) {
       return RequestDisposition::Disconnect;
@@ -502,7 +502,7 @@ bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
   if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode))
     return false;
 
-  UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
+  util::UniqueHandle probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
   if (probe.get() < 0)
     return false;
   if (::connect(probe.get(), reinterpret_cast<const sockaddr *>(&address), address_length) == 0)
@@ -537,7 +537,7 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
       return ROCJITSU_STATUS_ERROR;
   }
 
-  UniqueFd socket_fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  util::UniqueHandle socket_fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (socket_fd.get() < 0)
     return ROCJITSU_STATUS_ERROR;
 

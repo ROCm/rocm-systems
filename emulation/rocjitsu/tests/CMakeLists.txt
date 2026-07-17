@@ -360,6 +360,7 @@ add_executable(
     instruction_execution_harness_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
+    util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
