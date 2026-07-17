@@ -50,6 +50,23 @@ namespace att_no_intercept
 {
 namespace
 {
+void
+wait_for_prior_chunks(agent_state_t& state, uint64_t chunk_index)
+{
+    auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while(state.chunk_completed < chunk_index && !state.chunk_failed)
+    {
+        if(std::chrono::steady_clock::now() >= timeout)
+        {
+            state.chunk_failed = true;
+            state.data_cv.notify_all();
+            ROCP_CI_LOG(ERROR) << "Timed out after 5 seconds waiting for ATT chunk " << chunk_index;
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+}
+
 struct scan_context_t
 {
     agent_state_t*                    state               = nullptr;
@@ -129,8 +146,7 @@ handle_dispatch(scan_context_t&                                    context,
     if(iteration_count && *iteration_count <= max_iteration_count)
     {
         // Block so we dont prematurely increment the iteration count
-        while(state.chunk_completed < context.chunk_index && !state.chunk_failed)
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        wait_for_prior_chunks(state, context.chunk_index);
 
         if(is_targeted_iteration(*iteration_count, *context.kernel_filter_range))
         {
@@ -318,7 +334,7 @@ backend_create(agent_state_t& state)
 
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
-        ROCP_ERROR << fmt::format("failed to create ATT no-intercept decoder for agent {}: {}",
+        ROCP_FATAL << fmt::format("failed to create ATT no-intercept decoder for agent {}: {}",
                                   state.id.handle,
                                   rocprof_trace_decoder_get_status_string(status));
     }
@@ -383,8 +399,7 @@ send_overlapping_requests(scan_context_t&             context,
         ROCP_INFO << "Requesting post-chunk: " << chunk_index;
     }
 
-    while(state.chunk_completed < chunk_index && !state.chunk_failed)
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    wait_for_prior_chunks(state, chunk_index);
 
     state.chunk_completed.fetch_add(1);
 
@@ -452,6 +467,18 @@ backend_shader_data(agent_state_t&                         state,
     if((shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0 ||
        (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL) != 0)
         ROCP_WARNING << "SQTT Buffer full at chunk " << shader_data.chunk_index;
+
+    if(shader_data.read_offset >= shader_data.data_size)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "Ignoring ATT no-intercept shader data for agent {} chunk {}: read offset {} is not "
+            "less than data size {}",
+            state.id.handle,
+            shader_data.chunk_index,
+            shader_data.read_offset,
+            shader_data.data_size);
+        return;
+    }
 
     auto* scan_data = static_cast<const uint8_t*>(shader_data.data) + shader_data.read_offset;
     auto  scan_size = shader_data.data_size - shader_data.read_offset;
