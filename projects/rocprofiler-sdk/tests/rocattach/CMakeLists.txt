@@ -174,6 +174,18 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "does not refer to a regular file"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
+rocprofiler_add_integration_execute_test(
+    rocattach-empty-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS --empty
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path must not be empty"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
 # Utilize rocattach to verify signals are correctly forwarded to a target application
 # during attachment
 rocprofiler_add_integration_execute_test(

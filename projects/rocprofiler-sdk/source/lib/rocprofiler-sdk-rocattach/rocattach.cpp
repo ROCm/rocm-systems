@@ -238,13 +238,8 @@ resolve_attach_tid(pid_t pid)
 }
 
 rocattach_status_t
-validate_target_tool_path(pid_t pid, std::string_view tool_lib_path)
+validate_target_absolute_tool_path(pid_t pid, const std::filesystem::path& tool_path)
 {
-    auto tool_path = std::filesystem::path{tool_lib_path};
-    if(tool_path.empty()) return ROCATTACH_STATUS_SUCCESS;
-
-    if(!tool_path.is_absolute()) return ROCATTACH_STATUS_SUCCESS;
-
     auto target_path =
         std::filesystem::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
     std::error_code ec;
@@ -256,12 +251,12 @@ validate_target_tool_path(pid_t pid, std::string_view tool_lib_path)
             // restrictions, keep attachment best-effort and let target-side dlopen
             // report the final load failure.
             ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
-                         << tool_lib_path << "' at " << target_path.string()
+                         << tool_path.string() << "' at " << target_path.string()
                          << " from the target process mount namespace: " << ec.message();
             return ROCATTACH_STATUS_SUCCESS;
         }
 
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
                    << "' is absolute but is not visible at " << target_path.string()
                    << " from the target process mount namespace. Attachment requires "
                       "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
@@ -277,12 +272,12 @@ validate_target_tool_path(pid_t pid, std::string_view tool_lib_path)
             // restrictions, keep attachment best-effort and let target-side dlopen
             // report the final load failure.
             ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
-                         << tool_lib_path << "' at " << target_path.string()
+                         << tool_path.string() << "' at " << target_path.string()
                          << " from the target process mount namespace: " << ec.message();
             return ROCATTACH_STATUS_SUCCESS;
         }
 
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
                    << "' is absolute but does not refer to a regular file at "
                    << target_path.string() << " from the target process mount namespace.";
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
@@ -325,10 +320,23 @@ setup(int pid)
     }
     const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
-    status = validate_target_tool_path(pid, tool_lib_path_env);
-    if(status != ROCATTACH_STATUS_SUCCESS)
+
+    auto tool_path = std::filesystem::path{tool_lib_path_env};
+    if(tool_path.empty())
     {
-        return status;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Bare or relative library names must be resolved by dlopen in the target
+    // process using the target's loader search path and working directory.
+    if(tool_path.is_absolute())
+    {
+        status = validate_target_absolute_tool_path(pid, tool_path);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            return status;
+        }
     }
 
     auto*      sessions = CHECK_NOTNULL(get_sessions());

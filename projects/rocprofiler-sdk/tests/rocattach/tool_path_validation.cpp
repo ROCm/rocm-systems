@@ -25,17 +25,21 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <string_view>
 
 int
 main(int argc, char** argv)
 {
     if(argc != 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <tool-library-path>\n";
+        std::cerr << "Usage: " << argv[0] << " <tool-library-path|--empty>\n";
         return 1;
     }
 
-    setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[1], 1);
+    auto tool_library_path = std::string_view{argv[1]};
+    if(tool_library_path == "--empty") tool_library_path = "";
+
+    setenv("ROCPROF_ATTACH_TOOL_LIBRARY", tool_library_path.data(), 1);
     // Invalid absolute paths should be rejected before rocattach needs a real
     // attach-enabled target thread, keeping this negative test fast.
     auto status = rocattach_attach(getpid());
