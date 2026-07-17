@@ -387,7 +387,7 @@ inline void execute_s_add_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1);
   uint32_t result = (s0 + s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc(signed_add_overflows(s0, s1));
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -420,7 +420,7 @@ inline void execute_s_add_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1);
   uint32_t result = (s0 + s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc(signed_add_overflows(s0, s1));
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -453,13 +453,16 @@ inline void execute_s_addc_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_addk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(inst.sdst);
-  uint32_t imm = static_cast<uint32_t>(
-      static_cast<int32_t>(static_cast<int16_t>(inst.simm16.encoding_value_)));
-  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);
-  uint32_t result = static_cast<uint32_t>(wide);
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc(wide > 0xFFFFFFFFu);
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
+      amdgpu::RegisterAccess(wf).read_scalar(inst.sdst),
+      static_cast<uint32_t>(static_cast<int32_t>(
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >> 16))));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst,
+      (amdgpu::RegisterAccess(wf).read_scalar(inst.sdst) +
+       static_cast<uint32_t>(static_cast<int32_t>(
+           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >>
+           16))));
 }
 
 template <typename Inst>
@@ -497,24 +500,32 @@ template <typename Inst>
 inline void execute_s_and_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec & (~src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec & (~src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not0_wrexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   uint64_t src = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
-  wf.set_exec((wf.exec() & ~src) & 0xffffffffULL);
+  uint64_t old_exec = wf.exec();
+  uint64_t result = ((old_exec & (~src)) & 0xffffffffULL);
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(result));
+  wf.set_exec(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not0_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
-  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
-  wf.set_exec((wf.exec() & ~src));
+  uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
+  uint64_t old_exec = wf.exec_raw();
+  uint64_t result = (old_exec & (~src));
+  amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
+  wf.set_exec_raw(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -550,24 +561,32 @@ template <typename Inst>
 inline void execute_s_and_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((src & (~old_exec)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((src & (~old_exec)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not1_wrexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   uint64_t src = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
-  wf.set_exec((src & ~wf.exec()) & 0xffffffffULL);
+  uint64_t old_exec = wf.exec();
+  uint64_t result = ((src & (~old_exec)) & 0xffffffffULL);
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(result));
+  wf.set_exec(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
-  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
-  wf.set_exec((src & ~wf.exec()));
+  uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
+  uint64_t old_exec = wf.exec_raw();
+  uint64_t result = (src & (~old_exec));
+  amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
+  wf.set_exec_raw(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -584,10 +603,10 @@ template <typename Inst>
 inline void execute_s_and_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec & src));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec & src));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -604,24 +623,32 @@ template <typename Inst>
 inline void execute_s_andn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec & (~src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec & (~src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn1_wrexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
-  wf.set_exec((src & ~wf.exec()) & 0xffffffffULL);
+  uint64_t old_exec = wf.exec();
+  uint64_t result = ((old_exec & (~src)) & 0xffffffffULL);
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(result));
+  wf.set_exec(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
-  wf.set_exec((src & ~wf.exec()));
+  uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
+  uint64_t old_exec = wf.exec_raw();
+  uint64_t result = (old_exec & (~src));
+  amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
+  wf.set_exec_raw(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -655,24 +682,32 @@ template <typename Inst>
 inline void execute_s_andn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((src & (~old_exec)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((src & (~old_exec)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn2_wrexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
-  wf.set_exec((wf.exec() & ~src) & 0xffffffffULL);
+  uint64_t old_exec = wf.exec();
+  uint64_t result = ((src & (~old_exec)) & 0xffffffffULL);
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, static_cast<uint32_t>(result));
+  wf.set_exec(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn2_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
-  wf.set_exec((wf.exec() & ~src));
+  uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
+  uint64_t old_exec = wf.exec_raw();
+  uint64_t result = (src & (~old_exec));
+  amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
+  wf.set_exec_raw(result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -945,7 +980,6 @@ inline void execute_s_brev_b32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
     return r;
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -958,7 +992,6 @@ inline void execute_s_brev_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
     return r;
   }();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -986,7 +1019,6 @@ inline void execute_s_ceil_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   float result = std::ceil(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -994,7 +1026,6 @@ inline void execute_s_ceil_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   float result =
       std::ceil(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
-  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -1002,30 +1033,27 @@ inline void execute_s_clause_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] 
 
 template <typename Inst>
 inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t result = [&]() {
-    int32_t sv = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0));
-    if (sv == 0 || sv == -1)
-      return 31u;
-    uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
-    return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
+  int32_t result = [&]() {
+    int32_t sv = static_cast<int32_t>(
+        static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
+    uint32_t abs_val = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
+    return abs_val == 0 ? static_cast<uint32_t>(-1)
+                        : static_cast<uint32_t>(std::countl_zero(abs_val));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cls_i32_i64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   int64_t result = [&]() {
-    int32_t sv = static_cast<int32_t>(
+    int64_t sv = static_cast<int64_t>(
         static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0)));
-    if (sv == 0 || sv == -1)
-      return 31u;
-    uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
-    return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
+    uint64_t abs_val = sv < 0 ? ~static_cast<uint64_t>(sv) : static_cast<uint64_t>(sv);
+    return abs_val == 0 ? static_cast<uint32_t>(-1)
+                        : static_cast<uint32_t>(std::countl_zero(abs_val));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
@@ -1036,7 +1064,6 @@ inline void execute_s_clz_i32_u32_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1048,7 +1075,6 @@ inline void execute_s_clz_i32_u64_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1505,7 +1531,6 @@ inline void execute_s_ctz_i32_b32_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1516,7 +1541,6 @@ inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1628,7 +1652,6 @@ inline void execute_s_ff0_i32_b32_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1639,7 +1662,6 @@ inline void execute_s_ff0_i32_b64_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1650,7 +1672,6 @@ inline void execute_s_ff1_i32_b32_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1661,7 +1682,6 @@ inline void execute_s_ff1_i32_b64_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1674,7 +1694,6 @@ inline void execute_s_flbit_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
                         : static_cast<uint32_t>(std::countl_zero(abs_val));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1685,7 +1704,6 @@ inline void execute_s_flbit_i32_b32_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1696,7 +1714,6 @@ inline void execute_s_flbit_i32_b64_sop1([[maybe_unused]] Inst &inst,
     return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1710,7 +1727,6 @@ inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
                         : static_cast<uint32_t>(std::countl_zero(abs_val));
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
@@ -1718,7 +1734,6 @@ inline void execute_s_floor_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result = util::floor_scalar(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1726,7 +1741,6 @@ inline void execute_s_floor_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result =
       util::floor_scalar(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
-  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -1854,7 +1868,7 @@ inline void execute_s_max_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1));
   int32_t result = std::max(s0, s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((s0 >= s1));
+  wf.write_scc((s0 > s1));
 }
 
 template <typename Inst>
@@ -1881,7 +1895,7 @@ inline void execute_s_max_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1);
   uint32_t result = std::max(s0, s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc((s0 >= s1));
+  wf.write_scc((s0 > s1));
 }
 
 template <typename Inst>
@@ -2114,10 +2128,10 @@ template <typename Inst>
 inline void execute_s_nand_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((~(old_exec & src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((~(old_exec & src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2154,10 +2168,10 @@ template <typename Inst>
 inline void execute_s_nor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((~(old_exec | src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((~(old_exec | src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2204,10 +2218,10 @@ template <typename Inst>
 inline void execute_s_or_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec | (~src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec | (~src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2243,10 +2257,10 @@ template <typename Inst>
 inline void execute_s_or_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((src | (~old_exec)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((src | (~old_exec)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2263,10 +2277,10 @@ template <typename Inst>
 inline void execute_s_or_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec | src));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec | src));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2283,10 +2297,10 @@ template <typename Inst>
 inline void execute_s_orn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec | (~src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec | (~src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2320,10 +2334,10 @@ template <typename Inst>
 inline void execute_s_orn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((src | (~old_exec)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((src | (~old_exec)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2396,7 +2410,6 @@ inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result = std::nearbyint(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -2404,7 +2417,6 @@ inline void execute_s_rndne_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result =
       std::nearbyint(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
-  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -2569,7 +2581,7 @@ inline void execute_s_sub_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1);
   uint32_t result = (s0 - s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc(signed_sub_overflows(s0, s1));
+  wf.write_scc(::rocjitsu::amdgpu::signed_sub_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -2602,7 +2614,7 @@ inline void execute_s_sub_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1);
   uint32_t result = (s0 - s1);
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
-  wf.write_scc(signed_sub_overflows(s0, s1));
+  wf.write_scc(::rocjitsu::amdgpu::signed_sub_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -2638,7 +2650,6 @@ inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result = util::trunc_scalar(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -2646,7 +2657,6 @@ inline void execute_s_trunc_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
   float result =
       util::trunc_scalar(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
-  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -2738,10 +2748,10 @@ template <typename Inst>
 inline void execute_s_xnor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((~(old_exec ^ src)));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((~(old_exec ^ src)));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2774,10 +2784,10 @@ template <typename Inst>
 inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
-  wf.set_exec((old_exec ^ src));
-  wf.write_scc((wf.exec() != 0ULL));
+  wf.set_exec_raw((old_exec ^ src));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>

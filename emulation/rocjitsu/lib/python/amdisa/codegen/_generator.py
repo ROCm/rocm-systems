@@ -2254,6 +2254,8 @@ class CodeGenerator:
         {
             'vector_dot',
             'vector_swap',
+            'scalar_addk',
+            'scalar_mulk',
             'mad_mixlo_f16',
             'mad_mixhi_f16',
             'mad_mixlo_bf16',
@@ -3016,6 +3018,8 @@ class CodeGenerator:
                 'scalar_bitcmp',
                 'scalar_cvt_pkrtz_f16_f32',
                 'scalar_saveexec',
+                'scalar_wrexec',
+                'scalar_addk',
                 'scalar_bfe',
                 'vector_swap',
                 'vector_mov',
@@ -3454,23 +3458,6 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
-        if cls == 'scalar_addk':
-            L.append(
-                f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({dst_ops[0]});'
-            )
-            L.append(
-                f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
-            )
-            L.append(
-                '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);'
-            )
-            L.append('  uint32_t result = static_cast<uint32_t>(wide);')
-            L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, result);'
-            )
-            L.append('  wf.write_scc(wide > 0xFFFFFFFFu);')
-            return '\n'.join(L)
-
         if cls == 'scalar_mulk':
             L.append(
                 f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({dst_ops[0]});'
@@ -3481,27 +3468,6 @@ class CodeGenerator:
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, s0 * imm);'
             )
-            return '\n'.join(L)
-
-        if cls == 'scalar_wrexec':
-            if dtype == 'b32':
-                L.append(
-                    f'  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
-                )
-                mask_expr = ' & 0xffffffffULL'
-            else:
-                L.append(
-                    f'  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
-                )
-                mask_expr = ''
-            if op in ('andn1', 'and_not1'):
-                # EXEC = SRC & ~EXEC
-                L.append(f'  wf.set_exec((src & ~wf.exec()){mask_expr});')
-            elif op in ('andn2', 'and_not0'):
-                # EXEC = EXEC & ~SRC
-                L.append(f'  wf.set_exec((wf.exec() & ~src){mask_expr});')
-            else:
-                L.append(f'  wf.set_exec(src{mask_expr}); // TODO: {op}')
             return '\n'.join(L)
 
         if cls == 'scalar_getpc':
