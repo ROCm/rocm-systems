@@ -15,6 +15,9 @@ once all policy checks have passed.
 
 This document explains what each policy check means, why it exists, and how to fix a failure.
 
+> **Note:** This is **NOT an AI Bot and does not use any LLMs**. It is a
+> deterministic, rule-based checker driven entirely by `policy.yml`.
+
 ______________________________________________________________________
 
 ## 🌿 Branch Name
@@ -54,45 +57,24 @@ ______________________________________________________________________
 ## 📝 PR Title
 
 **What does it check?**
-The PR title must follow **Conventional Commits** style so the changelog and release notes can be generated automatically.
 
 > **Note:** In the results table, the title and description checks are reported together as a single **PR Title/Description** row. Any title *or* description failure shows up there.
 
-**Required format**
-
-```
-type(optional-scope): short description
-```
-
-**Allowed types**
-
-| Type       | When to use                              |
-| ---------- | ---------------------------------------- |
-| `feat`     | A new feature                            |
-| `fix`      | A bug fix                                |
-| `docs`     | Documentation only changes               |
-| `style`    | Formatting, whitespace — no logic change |
-| `refactor` | Code restructure — no feature or fix     |
-| `perf`     | Performance improvement                  |
-| `test`     | Adding or fixing tests                   |
-| `build`    | Build system or dependency changes       |
-| `ci`       | CI / workflow changes                    |
-| `chore`    | Maintenance tasks                        |
-| `revert`   | Reverting a previous commit              |
-
-**Length rules**
+**Length rules (only)**
 
 - Minimum: **10** characters
-- Maximum: **80** characters
+- Maximum: **100** characters
 
-**Forbidden words** — titles containing `WIP` or `do not merge` are blocked.
+> The title is validated by **length only**. There is no enforced format
+> (e.g. Conventional Commits) and no forbidden-word list — any wording is
+> accepted as long as it is 10–100 characters long.
 
 **How to fix**
-Edit the PR title on GitHub (top of the PR page → pencil icon) to match the format, e.g.:
+Edit the PR title on GitHub (top of the PR page → pencil icon) so it is between 10 and 100 characters, e.g.:
 
 ```
-feat(auth): add token refresh support
-fix(ci): correct codeql workflow trigger
+Add token refresh support
+Correct codeql workflow trigger
 ```
 
 ______________________________________________________________________
@@ -136,15 +118,14 @@ ______________________________________________________________________
 ## 📏 PR Size
 
 **What does it check?**
-Large PRs are hard to review thoroughly. Three limits are enforced:
+Large PRs are hard to review thoroughly.
 
-| Limit                   | Value | Reason                                         |
-| ----------------------- | ----- | ---------------------------------------------- |
-| Max files changed       | 50    | Avoids PRs that touch too many unrelated areas |
-| Max total changes       | 2000  | Keeps the overall diff reviewable              |
-| Max changes in one file | 700   | Flags files that may need splitting            |
+> **Note:** PR size limits are **not currently enforced** by `policy.yml`
+> (there are no `max_files_changed` / `max_total_changes` /
+> `max_single_file_changes` values configured). This section is guidance only
+> and the bot does not fail a PR on size today.
 
-**How to fix**
+**Recommended guidance**
 Split your work into smaller, focused PRs. Each PR should ideally do one thing:
 
 - One feature, one fix, or one refactor — not all three at once.
@@ -280,7 +261,7 @@ A **Bump PR** is an automated pull request that updates dependencies (e.g. from 
 When a PR is detected as a bump update from a configured bot account (e.g. `@assistant-librarian[bot]`), **all policy checks are auto-approved**. This includes:
 
 - Branch name validation
-- Conventional Commits title check
+- PR title (length) check
 - JIRA/ISSUE ID reference requirement
 - Unit test requirement
 - And all other policies
@@ -307,7 +288,7 @@ The label is added when:
 1. **Unit Test check fails** — your PR changes source code but has no accompanying test file.
 1. **JIRA/ISSUE ID reference is missing** — your PR description does not include a tracking reference.
 
-All other policy failures (branch name, title format, description length, forbidden files, etc.) do NOT add the label; they are still reported in the table but do not block the PR.
+All other policy failures (branch name, title format, description length, forbidden files, etc.) do not add the label; they are still reported in the table but do not block the PR.
 
 **What is the "Not ready to Review" label?**
 
@@ -322,7 +303,7 @@ These run as separate CI workflows. The bot waits for them and folds their resul
 **The bot timed out — what do I do?**
 
 If `pre-commit` or CodeQL takes longer than 15 minutes, the bot times out.
-Push an empty commit to re-trigger the workflow:
+Push an empty commit to re-trigger the workflow or close and reopen PR:
 
 ```bash
 git commit --allow-empty -m "ci: retrigger policy check"
@@ -338,8 +319,7 @@ ______________________________________________________________________
 
 ## 🙋 Wish to Override the Policy Process and get unblocked?
 
-Contact gardeners on supporters channel - (DevOps - Support or Help)
-
+Contact CODEOWNERS or supporters channel - (DevOps - Support or Help)
 
 ## 🙋 For any policy related feedback?
 
