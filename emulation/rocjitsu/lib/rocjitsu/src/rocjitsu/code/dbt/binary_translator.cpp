@@ -184,8 +184,8 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
-    if (kernel.has_kernarg_preload)
-      offsets.push_back(kernel.kernarg_preload_entry_text_offset);
+    if (kernel.has_kernarg_preload_firmware_skip)
+      offsets.push_back(kernel.kernarg_preload_firmware_entry_text_offset);
   }
 
   std::ranges::sort(offsets);
@@ -203,8 +203,9 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
     // kernarg_preload_spec_length is non-zero, compatible CP firmware starts at
     // KERNEL_CODE_ENTRY_BYTE_OFFSET + 256. That address is a real hardware entry,
     // not merely padding, so split a block there and seed reachability from it.
-    if (kernel.has_kernarg_preload && kernel.kernarg_preload_entry_text_offset < text.size())
-      offsets.push_back(kernel.kernarg_preload_entry_text_offset);
+    if (kernel.has_kernarg_preload_firmware_skip &&
+        kernel.kernarg_preload_firmware_entry_text_offset < text.size())
+      offsets.push_back(kernel.kernarg_preload_firmware_entry_text_offset);
   }
 
   std::ranges::sort(offsets);
@@ -417,10 +418,11 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     if (entry == nullptr)
       continue;
     std::unordered_set<uint64_t> own_entries{kernel->entry_text_offset};
-    if (kernel->has_kernarg_preload) {
-      if (block_for_offset(block_index, kernel->kernarg_preload_entry_text_offset) == nullptr)
+    if (kernel->has_kernarg_preload_firmware_skip) {
+      if (block_for_offset(block_index, kernel->kernarg_preload_firmware_entry_text_offset) ==
+          nullptr)
         continue;
-      own_entries.insert(kernel->kernarg_preload_entry_text_offset);
+      own_entries.insert(kernel->kernarg_preload_firmware_entry_text_offset);
     }
 
     scopes.push_back({kernel, entry,
@@ -1049,7 +1051,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     auto skipped_text =
         append_skipped_kernel_stub(translated_text,
                                    {.source_entry = scope.translation->entry_text_offset,
-                                    .has_kernarg_preload = scope.translation->has_kernarg_preload},
+                                    .has_kernarg_preload_firmware_skip =
+                                        scope.translation->has_kernarg_preload_firmware_skip},
                                    host_arch_);
     if (!skipped_text.ok) {
       append_error(result.diagnostics, materialization_diagnostic_kind(skipped_text),
@@ -1229,8 +1232,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
 
     layout.entry_plan = {
-        .has_kernarg_preload = scope.translation->has_kernarg_preload,
-        .kernarg_preload_entry_text_offset = scope.translation->kernarg_preload_entry_text_offset,
+        .has_kernarg_preload_firmware_skip =
+            scope.translation->has_kernarg_preload_firmware_skip,
+        .kernarg_preload_firmware_entry_text_offset =
+            scope.translation->kernarg_preload_firmware_entry_text_offset,
         .prologue_words = scope.translation->prologue_words,
     };
     if (!kernarg_preload_launch_window_fits(layout.entry_plan)) {
@@ -1573,6 +1578,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             break;
           }
           return leave_unchanged();
+        }
+
+        // A stepping-only translation has identical encodings for ordinary
+        // instructions. Copy the authoritative source text, including literal
+        // and modifier suffix words, instead of reconstructing bytes from the
+        // decoder's base-format raw encoding. Direct branches and recovered
+        // indirect transfers have already taken their relocation paths above;
+        // explicit errata expansions have already continued or failed closed.
+        if (guest_arch_ == host_arch_ && leg == nullptr) {
+          copy_original_instruction(inst, offset, kernel_text, pending_traces);
+          continue;
         }
 
         bool copied_original = false;

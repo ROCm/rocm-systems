@@ -177,7 +177,7 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
 }
 
 bool kernarg_preload_launch_window_fits(const KernelEntryLayoutPlan &translation) {
-  return !translation.has_kernarg_preload ||
+  return !translation.has_kernarg_preload_firmware_skip ||
          kernel_entry_stub_bytes(translation) <= kKernargPreloadSkipBytes;
 }
 
@@ -223,7 +223,7 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
   const uint32_t endpgm = build_s_endpgm(arch);
   append_words(text, std::span<const uint32_t>(&trap, 1));
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
-  if (plan.has_kernarg_preload) {
+  if (plan.has_kernarg_preload_firmware_skip) {
     append_nop_padding(text, kKernargPreloadSkipBytes - 2 * sizeof(uint32_t), arch);
     append_words(text, std::span<const uint32_t>(&trap, 1));
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
@@ -244,8 +244,9 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   layout.target_body_entry = *body_entry;
 
   std::optional<uint64_t> preload_body_entry;
-  if (layout.entry_plan.has_kernarg_preload) {
-    const uint64_t source_preload_entry = layout.entry_plan.kernarg_preload_entry_text_offset;
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
+    const uint64_t source_preload_entry =
+        layout.entry_plan.kernarg_preload_firmware_entry_text_offset;
     preload_body_entry = target_for_source_offset(layout, source_preload_entry);
     if (!preload_body_entry) {
       return kernel_text_append_error(
@@ -263,7 +264,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 
   const bool has_descriptor_prologue = !layout.entry_plan.prologue_words.empty();
   uint64_t target_delta = 0;
-  if (layout.entry_plan.has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     // Kernarg-preload kernels have two hardware-visible entries separated by
     // exactly 256 bytes. Reserve that launch window before appending the body;
     // the stubs are written after the body offsets have been rebased.
@@ -302,7 +303,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   rebase_kernel_text_layout(layout, target_delta);
   translated_text.insert(translated_text.end(), kernel_text.begin(), kernel_text.end());
 
-  if (layout.entry_plan.has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     assert(preload_body_entry && "preload body entry was checked before rebase");
     if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
                            layout.target_body_entry, arch)) {
@@ -314,7 +315,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                            layout.target_entry + kKernargPreloadSkipBytes,
                            *preload_body_entry + target_delta, arch)) {
       return kernel_text_append_error(
-          layout.entry_plan.kernarg_preload_entry_text_offset,
+          layout.entry_plan.kernarg_preload_firmware_entry_text_offset,
           "kernarg preload firmware launch branch cannot encode target body",
           TextLayoutFailureCategory::ResourceLimit);
     }

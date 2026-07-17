@@ -147,7 +147,8 @@ class InstEncoding(InstBase):
         ucode_fields: All microcode fields in this encoding.
         enc_conds: Encoding condition (name, logic) pairs.
         insts: Instructions encoded under this encoding.
-        implied_literal_ops: Opcodes with an implied literal (second DWORD).
+        implied_literal_ops: Opcode-to-extension-DWORD-count mapping for
+            instructions whose encoding carries an implied literal.
     """
 
     def __init__(
@@ -171,12 +172,17 @@ class InstEncoding(InstBase):
         self.ucode_fields = ucode_fields
         self.enc_conds = enc_conds
         self.insts: list[Instruction] = []
-        self.implied_literal_ops: list[str] = []
+        self.implied_literal_ops: dict[str, int] = {}
 
     @cached_property
     def has_implied_literal_ops(self) -> bool:
         """True if this encoding has any implied literal opcodes."""
         return len(self.implied_literal_ops) > 0
+
+    @cached_property
+    def has_variable_implied_literal_size(self) -> bool:
+        """True if an implied literal is not the usual one DWORD."""
+        return any(words != 1 for words in self.implied_literal_ops.values())
 
 
 class Instruction(InstBase):

@@ -51,6 +51,13 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
 };
 
 [[nodiscard]] bool requires_errata_expansion(std::string_view mnemonic) {
+  // This is deliberately more conservative than the reference patch
+  // patterns. Rocjitsu relocates and expands instructions, so it cannot retain
+  // a source clause without revalidating the translated membership and
+  // placement constraints.
+  if (mnemonic == "s_clause")
+    return true;
+
   for (std::string_view exact : kExactErrataMnemonics) {
     if (mnemonic == exact)
       return true;
@@ -92,10 +99,47 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
                           mnemonic.find("_iu4") != std::string_view::npos);
 }
 
+/// @brief True when a B0 FP8 conversion selects the B0-only E5M3 mode.
+///
+/// @details The affected VOP3 conversions reuse CLAMP as the E5M3 selector on
+/// B0. A0 implements the same CLAMP=0 E4M3 operation, so those instructions
+/// must remain on the ordinary byte-copy path. Only the eight-byte VOP3 form
+/// carries this selector.
+[[nodiscard]] bool requires_fp8_clamp_emulation(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  const bool affected = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
+                        mnemonic.starts_with("v_cvt_f32_fp8");
+  if (!affected || inst.size() != static_cast<int>(sizeof(gfx1250::Vop3MachineInst)) ||
+      inst.raw_encoding() == nullptr)
+    return false;
+
+  gfx1250::Vop3MachineInst encoding{};
+  std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
+  return encoding.clamp != 0;
+}
+
 /// @brief Append a generated instruction's words to one replacement sequence.
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
   output.insert(output.end(), words.begin(), words.end());
+}
+
+/// @brief Conservatively remove one hard-clause scheduling directive.
+///
+/// @details A legal S_CLAUSE has no architectural data result; it only groups
+/// following instructions for issue. DBT transformations can change clause
+/// membership and placement, and rocjitsu does not currently revalidate those
+/// constraints. Replacing every clause with a same-size S_NOP is functionally
+/// conservative. A future performance pass may retain clauses after proving
+/// they remain valid in the translated control flow.
+ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t,
+                                     std::span<const uint8_t>, const LivenessAnalysis &,
+                                     TranslationContext &, const LaneLayout *, const LaneLayout *) {
+  if (inst.mnemonic() != "s_clause" || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return ExpandResult::failed("gfx1250 S_CLAUSE rule received an unsupported instruction");
+
+  const auto nop = gfx1250::build_sopp(gfx1250::kSNopSopp, {.simm16 = 0});
+  return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
 }
 
 /// @brief True when two raw gfx1250 VGPR slices overlap.
@@ -481,7 +525,9 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 22> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 23> kGfx1250B0ToA0ExpandRules = {{
+    {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_s_clause, nullptr, nullptr},
     {gfx1250::encoding::kVop3p, 0x35, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale_src2, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
@@ -531,6 +577,14 @@ inline constexpr std::array<TranslationRule, 22> kGfx1250B0ToA0ExpandRules = {{
 } // namespace
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
+  // CLAMP=0 is the common E4M3 operation on both steppings. Keep CLAMP=1
+  // fail-closed until the E5M3 software lowering is implemented.
+  const std::string_view mnemonic = inst.mnemonic();
+  const bool fp8_clamp_family = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
+                                mnemonic.starts_with("v_cvt_f32_fp8");
+  if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
+    return nullptr;
+
   if (!requires_errata_expansion(inst.mnemonic()))
     return nullptr;
 

@@ -343,9 +343,16 @@ install(
 
 # Libraries: lib/
 install(
-    TARGETS rocjitsu_shared rocjitsu_hooks
+    TARGETS rocjitsu_shared rocjitsu_hooks rocjitsu_comgr
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+
+if(TARGET rocjitsu_hotswap_select)
+    install(
+        TARGETS rocjitsu_hotswap_select
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

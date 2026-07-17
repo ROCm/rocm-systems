@@ -1849,11 +1849,18 @@ class CodeGenerator:
             default_cond = dict(inst_enc.enc_conds).get('default_encoding', 'true')
             has_real_default_check = inst_enc.bit_cnt < 64 and default_cond != 'false'
 
-            if has_real_default_check and inst_enc.has_implied_literal_ops:
+            if (
+                has_real_default_check
+                and inst_enc.has_implied_literal_ops
+                and not inst_enc.has_variable_implied_literal_size
+            ):
                 size_condition = '!default_encoding() || hasImpliedLiteral()'
             elif has_real_default_check:
                 size_condition = '!default_encoding()'
-            elif inst_enc.has_implied_literal_ops:
+            elif (
+                inst_enc.has_implied_literal_ops
+                and not inst_enc.has_variable_implied_literal_size
+            ):
                 size_condition = 'hasImpliedLiteral()'
             else:
                 size_condition = None
@@ -1902,26 +1909,37 @@ class CodeGenerator:
                 if name.startswith('has_lit') and not name.startswith('has_lit64')
             ]
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
+            extension_size_line = ''
             if literal64_condition and size_condition is not None:
-                size_line += (
+                extension_size_line = (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
                     f' else if ({size_condition}) size_ += sizeof(MachineInst);'
                 )
             elif literal64_condition and literal32_condition:
-                size_line += (
+                extension_size_line = (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
                     f' else if ({literal32_condition}) size_ += sizeof(MachineInst);'
                 )
             elif literal64_condition:
-                size_line += (
+                extension_size_line = (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
                 )
             elif size_condition is not None:
-                size_line += f' if ({size_condition})' f' size_ += sizeof(MachineInst);'
+                extension_size_line = (
+                    f' if ({size_condition}) size_ += sizeof(MachineInst);'
+                )
             elif literal32_condition:
-                size_line += (
+                extension_size_line = (
                     f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
                 )
+            if inst_enc.has_variable_implied_literal_size:
+                size_line += (
+                    ' if (hasImpliedLiteral()) size_ += impliedLiteralWordCount()'
+                    ' * sizeof(MachineInst); else'
+                    + extension_size_line
+                )
+            else:
+                size_line += extension_size_line
             if inst_enc.has_implied_literal_ops:
                 size_line += (
                     ' if (hasImpliedLiteral())'
@@ -2028,6 +2046,27 @@ class CodeGenerator:
                 )
                 public_members.append(func_decl)
                 class_func_impls.append(func_body)
+
+            if inst_enc.has_variable_implied_literal_size:
+                word_count_decl = cgen.FunctionDeclaration(
+                    cgen.Value('uint32_t', 'impliedLiteralWordCount'), []
+                )
+                word_count_expr = ' : '.join(
+                    f'inst_.op == {op} ? {words}'
+                    for op, words in inst_enc.implied_literal_ops.items()
+                )
+                word_count_body = cgen.FunctionBody(
+                    cgen.FunctionDeclaration(
+                        cgen.Value(
+                            'uint32_t',
+                            f'{fmt_enc_name}::impliedLiteralWordCount',
+                        ),
+                        [],
+                    ),
+                    cgen.Block([cgen.Statement(f'return {word_count_expr} : 0')]),
+                )
+                public_members.append(word_count_decl)
+                class_func_impls.append(word_count_body)
 
             class_members.extend(public_members)
             class_members.append(

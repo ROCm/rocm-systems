@@ -94,10 +94,10 @@ struct TextRelocationResult {
 /// @brief Descriptor-neutral entry layout requested by DBT or DBI.
 struct KernelEntryLayoutPlan {
   /// @brief True when hardware may enter again at source entry plus 256 bytes.
-  bool has_kernarg_preload = false;
+  bool has_kernarg_preload_firmware_skip = false;
 
   /// @brief Source `.text` offset of the compatible-firmware preload entry.
-  uint64_t kernarg_preload_entry_text_offset = 0;
+  uint64_t kernarg_preload_firmware_entry_text_offset = 0;
 
   /// @brief Target instructions that must execute before the relocated body.
   std::vector<uint32_t> prologue_words;
@@ -109,7 +109,7 @@ struct SkippedKernelLayoutPlan {
   uint64_t source_entry = 0;
 
   /// @brief Emit trap stubs at both legal preload firmware entry addresses.
-  bool has_kernarg_preload = false;
+  bool has_kernarg_preload_firmware_skip = false;
 };
 
 /// @brief Result of appending descriptor-visible kernel text.

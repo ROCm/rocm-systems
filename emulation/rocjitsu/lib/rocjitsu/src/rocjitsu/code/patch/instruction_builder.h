@@ -497,6 +497,8 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSCallB64Sopk;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSCallB64Sopk;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSCallI64Sopk;
   default:
     throw util::UnimplementedInst("s_call_b64 for target architecture");
   }

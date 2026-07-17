@@ -125,6 +125,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 |---|---|
 | [Utilities](lib/util/README.md) | Shared utility library (`lib/util/`) |
 | [rj_dbt_translate](docs/rj_dbt_translate.md) | Standalone DBT translation tool |
+| [HotSwap with rocjitsu](docs/hotswap_rocjitsu.md) | Runtime setup and gfx1250 B0-to-A0 policy |
 | [CHANGELOG](CHANGELOG.md) | Release history |
 
 ## Contributing

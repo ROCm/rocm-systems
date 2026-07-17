@@ -375,6 +375,14 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
 }
 
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
 [[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
   const uint32_t preload_length = kernarg_preload_length(desc);
   if (preload_length == 0)
@@ -633,9 +641,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
-  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
-  result.kernarg_preload_entry_text_offset =
-      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
+  result.has_kernarg_preload_firmware_skip =
+      kernarg_preload_length(src) != 0 && uses_kernarg_preload_firmware_skip(guest_arch);
+  result.kernarg_preload_firmware_entry_text_offset =
+      result.has_kernarg_preload_firmware_skip ? entry_text_offset + kKernargPreloadSkipBytes
+                                               : entry_text_offset;
   const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
   result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
   result.target_kernarg_size = src.kernarg_size;
