@@ -42,7 +42,7 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
   constexpr std::array<AddressMode, 4> kModes = {AddressMode{0, 0}, AddressMode{1, 1},
                                                  AddressMode{2, 1}, AddressMode{3, 2}};
 
-  for (const auto mode : kModes) {
+  for (const auto &mode : kModes) {
     // VADDR=63, VDATA=68, SRSRC=1 (the descriptor s[4:7]), SOFFSET=128 (zero).
     const uint32_t words[] = {tc.encoding | (tc.address_mode_in_hi_word ? 0u : mode.fields << 12),
                               0x8001443fu | (tc.address_mode_in_hi_word ? mode.fields << 22 : 0u)};
