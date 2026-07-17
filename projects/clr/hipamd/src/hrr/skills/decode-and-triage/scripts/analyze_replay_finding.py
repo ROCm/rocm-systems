@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Parse HRR replay/capture logs into a structured finding (read-only)."""
+
 from __future__ import annotations
 
 import argparse
@@ -43,16 +44,12 @@ RE_CAPTURE_MAF = RE_MAF
 RE_SUBALLOC_OOB = re.compile(
     r"\[HRR\] SUBALLOC OOB: kernel arg\[(\d+)\] rec (0x[0-9a-fA-F]+)"
 )
-RE_D2H_SUMMARY = re.compile(
-    r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped"
-)
+RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
 RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
 RE_GRID = re.compile(r"grid=\[([^\]]+)\], workgroup=\[([^\]]+)\]")
 RE_CIJK = re.compile(r"(Cijk_[A-Za-z0-9_]+)")
 RE_CAPTURE_HIP = re.compile(r"\[capture\] HIP_SO=(\S+)")
-RE_VERSION_MISMATCH = re.compile(
-    r"\[HRR\] Version mismatch: file=(\d+) reader=(\d+)"
-)
+RE_VERSION_MISMATCH = re.compile(r"\[HRR\] Version mismatch: file=(\d+) reader=(\d+)")
 
 
 @dataclass
@@ -98,7 +95,11 @@ def _classify(text: str, finding: Finding) -> str:
         return "replay_pass"
     if "out of memory" in text.lower() or "hipErrorOutOfMemory" in text:
         return "replay_oom"
-    if RE_FATAL_EVENT.search(text) or RE_FATAL_GPU.search(text) or RE_FATAL_GENERIC.search(text):
+    if (
+        RE_FATAL_EVENT.search(text)
+        or RE_FATAL_GPU.search(text)
+        or RE_FATAL_GENERIC.search(text)
+    ):
         if "out of memory" in text.lower():
             return "replay_oom"
         return "replay_fatal_api"
@@ -222,7 +223,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         new_outcome = "MAF"
     elif RE_FAIL.search(text):
         new_outcome = "FAIL"
-    elif "aborting replay" in text or RE_FATAL_EVENT.search(text) or RE_VERSION_MISMATCH.search(text):
+    elif (
+        "aborting replay" in text
+        or RE_FATAL_EVENT.search(text)
+        or RE_VERSION_MISMATCH.search(text)
+    ):
         new_outcome = "ABORT"
     elif finding.outcome == "UNKNOWN":
         new_outcome = "UNKNOWN"
@@ -314,7 +319,9 @@ def render_markdown(f: Finding, sweep: list[dict[str, Any]] | None = None) -> st
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--log", action="append", default=[], help="Replay or capture log (repeatable)")
+    ap.add_argument(
+        "--log", action="append", default=[], help="Replay or capture log (repeatable)"
+    )
     ap.add_argument("--archive", help="HRR archive pid-* directory for --info")
     ap.add_argument("--sweep-tsv", help="multi-replay sweep summary TSV")
     ap.add_argument("--hrr-playback", help="Path to hrr-playback binary")
@@ -339,7 +346,9 @@ def main() -> int:
         if info:
             parse_text(info, f"{arch} (--info)", finding)
         else:
-            finding.notes.append("hrr-playback --info unavailable; archive path recorded only")
+            finding.notes.append(
+                "hrr-playback --info unavailable; archive path recorded only"
+            )
             finding.sources.append(str(arch))
 
     sweep = parse_sweep_tsv(Path(args.sweep_tsv)) if args.sweep_tsv else None

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for analyze_replay_finding.py (stdlib unittest)."""
+
 from __future__ import annotations
 
 import json
