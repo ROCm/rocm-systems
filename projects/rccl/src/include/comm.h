@@ -942,8 +942,8 @@ struct ncclComm {
   size_t bufThreshold;
 #endif
 
-  //Added for AlltoAllv
-  void *localSizes;
+  // Added for AlltoAllv
+  void* localSizes;
   void* gatheredSizes;
 
   // Direct Reduce Scatter [RCCL]
