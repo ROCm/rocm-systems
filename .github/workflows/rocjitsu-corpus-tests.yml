@@ -191,6 +191,7 @@ jobs:
 
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -E "${EXCLUDED_TESTS}" \
+            -j "${WORKERS}" \
             --output-on-failure
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
