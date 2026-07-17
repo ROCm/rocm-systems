@@ -75,15 +75,8 @@ on:
     - cron: '0 2 * * *'
   pull_request:
     # Label-gated smoke: runs only when the "ainic-test" label is present (see the
-    # job-level `if`). `synchronize` re-runs on new commits while the PR stays
-    # labeled; to re-run without a new commit, remove and re-add the label.
+    # job `if`); the subset that runs is defined by SMOKE_SUITES below.
     types: [labeled, synchronize]
-  push:
-    branches:
-      - users/nikitaxgusev/ainic-test-runner
-    paths:
-      - '.github/workflows/ainic_test_runner.yml'
-      - 'projects/rccl/tools/scripts/test_runner/configs/ainic.json'
 
 # Serialise on the shared AINIC nodes: only one run at a time, and never cancel
 # an in-progress allocation (it must finish cleanly to release the nodes).
@@ -110,10 +103,7 @@ env:
   DEFAULT_SALLOC_RESERVATION: rccl_dev
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
-  # Exclude known-broken GPU nodes: g24 regressed (rccl-tests perf runs abort with
-  # HIP 'out of memory' even under --exclusive, a symptom of leftover GPU state)
-  # and g25 is its historically-flaky pair. The rccl_dev reservation still has
-  # g27/g29/g30 for the 2-node job. Clear this once the nodes recover.
+  # Exclude known-broken GPU nodes: g24/g25
   DEFAULT_SALLOC_EXCLUDE: 'mia1-p01-g[24-25]'
   # Fast smoke subset for the label-gated PR path: Group A component gtests + the
   # C1 IONIC counter check (skips the long full-range B perf sweeps).
@@ -122,7 +112,7 @@ env:
 jobs:
   ainic-test-runner:
     # On PRs, run only when the "ainic-test" label is present. All other events
-    # (workflow_dispatch, schedule, push) always run.
+    # (workflow_dispatch, schedule) always run.
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'ainic-test')
@@ -371,8 +361,6 @@ jobs:
             ${{ runner.temp }}/ainic_run_groupA.log
             ${{ runner.temp }}/ainic_run_groupBC.log
             ${{ runner.temp }}/reports
-          # warn (not error): a skipped group legitimately produces no log, so
-          # error would false-fail; warn still surfaces a genuinely empty upload.
           if-no-files-found: warn
 
       - name: Print summary
