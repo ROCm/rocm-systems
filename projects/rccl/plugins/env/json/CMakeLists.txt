@@ -4,17 +4,17 @@
 #
 
 set(SRC_FILES
-  ${CMAKE_CURRENT_SOURCE_DIR}/plugin.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/plugin.cc
 )
 
-add_library(nccl-env-json SHARED ${SRC_FILES})
+add_library(rccl-env-json SHARED ${SRC_FILES})
 
-target_include_directories(nccl-env-json PRIVATE
+target_include_directories(rccl-env-json PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../example
 )
 
-set_target_properties(nccl-env-json PROPERTIES
-  OUTPUT_NAME "nccl-env-json"
+set_target_properties(rccl-env-json PROPERTIES
+  OUTPUT_NAME "rccl-env-json"
   PREFIX "lib"
   POSITION_INDEPENDENT_CODE ON
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins

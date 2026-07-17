@@ -337,7 +337,6 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_DEBUG_SOURCE_FILES
       AllocTests.cpp
       ParamTests.cpp
-
       ParameterApiTests.cpp
       EnvPluginTests.cpp
       ArgCheckTests.cpp
@@ -369,13 +368,6 @@ if(BUILD_TESTS)
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-
-    add_custom_command(TARGET rccl-UnitTestsFixturesDebug POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/EnvPluginTestsConfFile.txt"
-        "$<TARGET_FILE_DIR:rccl-UnitTestsFixturesDebug>/EnvPluginTestsConfFile.txt"
-      COMMENT "Copying EnvPluginTestsConfFile.txt to test output directory"
-    )
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with

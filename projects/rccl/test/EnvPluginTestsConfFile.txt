@@ -1,2 +1,0 @@
-# Conf file for EnvPluginTests::ConfFile_LoadedBeforePlugin
-RCCL_CONF_TEST_KEY=conf_value
