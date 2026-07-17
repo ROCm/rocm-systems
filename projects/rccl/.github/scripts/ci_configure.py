@@ -251,8 +251,13 @@ def _matches_selection(target: dict, selection: set) -> bool:
 def build_matrix(env: Mapping[str, str]) -> list:
     """Return the list of matrix entries for this run (filtered by workload)."""
     workload = env.get("INPUT_WORKLOAD", "coverage")
+    _check_value("workflow input", "workload", workload, _TARGET_VALUE_RE["workload"])
     if env.get("INPUT_ROCM_IMAGE"):
-        entries = [_entry_from_dispatch(env, workload)]
+        entry = _entry_from_dispatch(env, workload)
+        for k, pat in _TARGET_VALUE_RE.items():
+            _check_value("workflow_dispatch overrides", k, entry[k], pat)
+        _check_value("workflow_dispatch overrides", "test_config", entry["test_config"], _PARAM_VALUE_RE)
+        entries = [entry]
     else:
         selection = _parse_selection(env.get("INPUT_TARGETS", ""))
         entries = []

@@ -114,7 +114,7 @@ class SlurmSpec:
 
 def _running_job() -> str:
     """Newest running job id for $USER, or "" if none."""
-    out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "-o", "%i"],
+    out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "--sort=-i", "-o", "%i"],
                          capture_output=True, text=True)
     return out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
 
