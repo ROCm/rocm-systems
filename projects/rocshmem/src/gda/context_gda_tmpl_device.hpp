@@ -312,7 +312,7 @@ __device__ void gda_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
+__device__ void GDAContext::internal_direct_allreduce_wg(T *dst, const T *src,
     int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -369,6 +369,120 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
   }
   threadfence_system();
   __syncthreads();
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ void GDAContext::internal_direct_allreduce_wave(T *dst, const T *src,
+    int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int PE_start = team_obj->tinfo_wrt_world->pe_start;
+  int PE_size = team_obj->tinfo_wrt_world->size;
+  long *pSync = team_obj->reduce_pSync;
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int finish = PE_start + stride * PE_size;
+  int pe = constmem.my_pe;
+  int wf_tid = get_flat_block_id() % WF_SIZE;
+  int64_t flag_val = 1;
+
+  // Initialize local dst from src
+  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
+    dst[i] = src[i];
+  }
+
+  // Put src to pWrk on all other PEs and signal via pSync
+  for (int i = PE_start; i < finish; i += stride) {
+    if (i != pe) {
+      internal_putmem_nbi_wave(&pWrk[pe * nelems],
+        reinterpret_cast<const void *>(src), nelems * sizeof(T), i, i, wf_info);
+      if (is_thread_zero_in_wave()) {
+        qps[i].quiet(wf_info);
+        internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i, i, wf_info);
+      }
+    }
+  }
+
+  // Reduce contributions from all other PEs into dst
+  for (int i = PE_start; i < finish; i += stride) {
+    if (i != pe) {
+      if (is_thread_zero_in_wave()) {
+        wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+      }
+      T *ptr = &pWrk[i * nelems];
+      for (int j = wf_tid; j < nelems; j += WF_SIZE) {
+        OpWrap<Op>::Calc(ptr, dst, j);
+      }
+    }
+  }
+
+  // Reset pSync entries
+  if (is_thread_zero_in_wave()) {
+    for (int i = 0; i < constmem.num_pes; i++) {
+      pSync[i] = ROCSHMEM_SYNC_VALUE;
+    }
+    __threadfence_system();
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
+                                       const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size = team_obj->tinfo_wrt_world->size;
+
+  size_t direct_pWrk = PE_size * nreduce;
+  size_t direct_pSync = PE_size;
+  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+
+  size_t ring_pSync = 2 * PE_size;
+
+  if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
+    internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj, wf_info);
+  } else {
+    if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
+      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      int chunk_size = ring_pWrk / PE_size;
+      int seg_size = chunk_size * PE_size;
+
+      int n_seg = nreduce / seg_size;
+      int n_seg_up = (nreduce - 1) / seg_size + 1;
+      chunk_size = seg_size / PE_size;
+
+      if (n_seg > 0) {
+        internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
+          n_seg, seg_size, chunk_size, wf_info);
+      }
+      if (n_seg_up > n_seg) {
+        T *p_dst = (dest + (n_seg * seg_size));
+        const T *p_src = (source + (n_seg * seg_size));
+        int p_count = nreduce - (n_seg * seg_size);
+        int p_chunk = p_count / PE_size;
+
+        if (p_chunk > 0) {
+          internal_ring_allreduce_wave<T, Op>(p_dst, p_src, 
+            (p_chunk * PE_size), team_obj, 1, 
+            (p_chunk * PE_size), p_chunk, wf_info);
+        }
+
+        if ((p_chunk * PE_size) < p_count) {
+          p_count -= (p_chunk * PE_size);
+          p_dst += (p_chunk * PE_size);
+          const T *p_src2 = p_src + (p_chunk * PE_size);
+          internal_direct_allreduce_wave<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
+        }
+      }
+    } else {
+      LOGD_WARN("Unsupported reduction size for GDA wave conduit.");
+      return ROCSHMEM_ERROR;
+    }
+  }
+  barrier_wave(team);
+  return ROCSHMEM_SUCCESS;
 }
 
 /*
@@ -428,7 +542,7 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
  *        [03+13+23+33]  [03+13+23+33] [03+13+23+33]  [03+13+23+33]
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
+__device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
     int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
 
@@ -507,7 +621,82 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
+__device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
+    int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
+    int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
+
+  int PE_size = team_obj->tinfo_wrt_world->size;
+  long *pSync = team_obj->reduce_pSync;
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+  int my_pe_in_team = team_obj->my_pe;
+
+  int off_seg, off_send, off_recv;
+  int send_pe = (my_pe_in_team + 1) % PE_size;
+  send_pe = team_obj->get_pe_in_world(send_pe);
+  long wait_val;  // NOLINT(runtime/int)
+
+  int wf_tid = get_flat_block_id() % WF_SIZE;
+
+  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
+    dst[i] = src[i];
+  }
+
+  for (int seg = 0; seg < n_seg; seg++) {
+    off_seg = seg * seg_size;
+    // Loop 1: reduce-scatter
+    for (int iter = 0; iter < PE_size - 1; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
+
+      internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+
+      if (is_thread_zero_in_wave()) {
+        qps[send_pe].quiet(wf_info);
+        wait_val = seg + 100;
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
+#if defined(__gfx90a__)
+        __threadfence_system();
+#endif /* __gfx90a__ */
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+      }
+      for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
+        OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
+      }
+    }
+
+    // Loop 2: all-gather
+    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      internal_putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+
+      if (is_thread_zero_in_wave()) {
+        qps[send_pe].quiet(wf_info);
+        wait_val = seg + 10;
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
+#if defined(__gfx90a__)
+        __threadfence_system();
+#endif /* __gfx90a__ */
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+      }
+    }
+  }
+
+  if (is_thread_zero_in_wave()) {
+    for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
+      pSync[i] = ROCSHMEM_SYNC_VALUE;
+    }
+    __threadfence_system();
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nreduce) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -522,7 +711,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
+    internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
@@ -538,7 +727,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
       chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
-        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+        internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
           seg_size, chunk_size, wf_info);
       }
       if (n_seg_up > n_seg) {
@@ -548,7 +737,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
         int p_chunk = p_count / PE_size;
 
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src, (p_chunk * PE_size),
+          internal_ring_allreduce_wg<T, Op>(p_dst, p_src, (p_chunk * PE_size),
             team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
         }
 
@@ -558,7 +747,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
+          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
         }
       }
     } else {
@@ -741,9 +930,9 @@ __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  alltoall_linear_thread_puts(team, dst, src, nelems);
+  alltoallmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -903,7 +1092,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -934,83 +1123,31 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
-    T *dst, const T *src, int nelems) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+__device__ int GDAContext::alltoall_wave(rocshmem_team_t team, 
+                          T* dest, const T* source, int nelems) {
+  if (dest == nullptr || source == nullptr)
+    return ROCSHMEM_ERROR;
 
-  int pe_size = team_obj->num_pes;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
-  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
-
-  int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
-
-  // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j += step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single(
-      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
-  }
-
-  // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) != 1) { }
-
-    qps[dest_pe].quiet_single();
-
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
-  }
-
-  if (is_thread_zero_in_block()) {
-    team_obj->alltoall_sequence_number++;
-  }
-
-  __syncthreads();
+  alltoallmem_linear_thread_puts_wave(team, dest, source, nelems * sizeof(T));
+  
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>
-__device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollect_linear(team, dst, src, nelems);
+  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
-__device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
-    const T *src, int nelems) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+__device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
+                                     const T *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
 
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
+  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
 
-  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  // Have each PE put their designated data to the other PEs
-  for (int j = 0; j < pe_size; j++) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems], src,
-      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
-  }
-
-  if (is_thread_zero_in_block()) {
-    // Iterate through 0th qp of each PE
-    for (int j = 0; j < pe_size; j++) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      qps[dest_pe].quiet(wf_info);
-    }
-  }
-  // wait until everyone has obtained their designated data
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  return ROCSHMEM_SUCCESS;
 }
 
 // Block/wave functions

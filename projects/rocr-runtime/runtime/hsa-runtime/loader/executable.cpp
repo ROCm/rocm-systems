@@ -790,14 +790,33 @@ bool Segment::IsAddressInSegment(uint64_t addr)
   return vaddr <= addr && addr < vaddr + size;
 }
 
-void Segment::Copy(uint64_t addr, const void* src, size_t size)
+bool Segment::IsAddressInSegment(uint64_t addr, size_t copy_size)
+{
+  if (addr < vaddr) { return false; }
+  const uint64_t offset = addr - vaddr;
+  // Mirror the 1-arg bound (offset < size, i.e. addr < vaddr + size). Express
+  // the exclusive end offset + copy_size <= size without overflow via
+  // copy_size <= size - offset (equivalent to addr + copy_size <= vaddr + size).
+  return offset < size && copy_size <= size - offset;
+}
+
+bool Segment::Copy(uint64_t addr, const void* src, size_t size)
 {
   // loader must do copies before freezing.
   assert(!frozen);
 
   if (size > 0) {
+    // addr/size can be derived from attacker-controlled code-object fields
+    // (e.g. a relocation's section sh_addr + r_offset). Offset() only asserts
+    // the start address via IsAddressInSegment() and that assert compiles out
+    // under NDEBUG, so validate the entire destination range here to prevent a
+    // heap out-of-bounds write when loading a crafted code object.
+    if (!IsAddressInSegment(addr, size)) {
+      return false;
+    }
     owner->context()->SegmentCopy(segment, agent, ptr, Offset(addr), src, size);
   }
+  return true;
 }
 
 void Segment::Print(std::ostream& out)
@@ -1251,6 +1270,17 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_FROZEN_EXECUTABLE;
   }
 
+  if (code_object_size == 0) {
+    const void* elf_data = reinterpret_cast<const void*>(code_object.handle);
+    if (!elf_data) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    code_object_size = amd::elf::ElfSize(elf_data, 0);
+    if (code_object_size == 0) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+  }
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1297,7 +1327,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
   std::vector<char> buffer;
   if (substituteFileName.empty()) {
-   if (!code->InitAsHandle(code_object)) {
+    if (!code->InitAsBuffer(reinterpret_cast<const void*>(code_object.handle),
+                            code_object_size)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
   } else {
@@ -1486,13 +1517,17 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     if (s->imageSize() > s->memSize()) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    // Reject a segment whose file contents cannot be sourced from within the
+    // backing image (crafted p_offset). See ROCM-26177 finding #1.
     const char* segment_data = s->data();
-    if (!segment_data) {
+    if (s->imageSize() > 0 && segment_data == nullptr) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
     new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
+    // Copy() return unchecked: imageSize <= memSize was validated above and the
+    // destination is this segment's own [vaddr, vaddr + imageSize) range.
     new_seg->Copy(s->vaddr(), segment_data, s->imageSize());
     objects.push_back(new_seg);
 
@@ -1511,10 +1546,32 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   if (data_segment->imageSize() > data_segment->memSize()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  const char* segment_data = data_segment->data();
-  if (!segment_data) {
+  // The combined code segment allocation is sized from the last data segment
+  // only (see LoadSegmentsV2). A crafted code object with non-monotonic,
+  // overlapping, or out-of-range p_vaddr values could otherwise drive the copy
+  // below past the end of that allocation (heap OOB write). Bound the copy
+  // destination [offset, offset + imageSize) against the allocation explicitly,
+  // since Segment::Offset() only asserts the start address and compiles out
+  // under NDEBUG. See ROCM-26177 finding #1.
+  const uint64_t seg_vaddr = data_segment->vaddr();
+  const uint64_t base_vaddr = load_segment->VAddr();
+  const size_t alloc_size = load_segment->Size();
+  if (seg_vaddr < base_vaddr) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
+  const uint64_t offset = seg_vaddr - base_vaddr;
+  if (offset > alloc_size ||
+      data_segment->imageSize() > alloc_size - offset) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // Reject a segment whose file contents cannot be sourced from within the
+  // backing image (crafted p_offset). See ROCM-26177 finding #1.
+  const char* segment_data = data_segment->data();
+  if (data_segment->imageSize() > 0 && segment_data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
   load_segment->Copy(data_segment->vaddr(), segment_data,
                      data_segment->imageSize());
 
@@ -1716,6 +1773,8 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       // removed.
       uint64_t target_address = sym->GetSection()->addr() + sym->SectionOffset() + ((size_t)(&((amd_kernel_code_t*)0)->runtime_loader_kernel_symbol));
       uint64_t source_value = (uint64_t) (uintptr_t) &kernel_symbol->debug_info;
+      // Copy() return unchecked: debugger backdoor for compiler-generated kernel
+      // symbols; target is a fixed offsetof within the symbol's loaded section.
       SymbolSegment(agent, sym)->Copy(target_address, &source_value, sizeof(source_value));
   } else {
     assert(!"Unexpected symbol type in LoadDefinitionSymbol");
@@ -1844,6 +1903,11 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
   code::RelocationSection* rsec = rel->section();
   code::Section* sec = rsec->targetSection();
   Segment* rseg = SectionSegment(agent, sec);
+  // SectionSegment() returns nullptr when no loaded segment covers the target
+  // section (crafted sh_info/sh_addr); reject rather than dereferencing it.
+  if (!rseg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
+  // sec->addr() + rel->offset() can wrap on crafted input; Copy()'s range check
+  // rejects any wrapped destination that falls outside the target segment.
   size_t reladdr = sec->addr() + rel->offset();
   switch (rel->type()) {
     case R_AMDGPU_V1_32_LOW:
@@ -1881,14 +1945,14 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       switch (rel->type()) {
         case R_AMDGPU_V1_32_HIGH:
           addr32 = uint32_t((addr >> 32) & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_32_LOW:
           addr32 = uint32_t(addr & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_64:
-          rseg->Copy(reladdr, &addr, sizeof(addr));
+          if (!rseg->Copy(reladdr, &addr, sizeof(addr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         default:
           return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -1923,7 +1987,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       status = context_->SamplerCreate(agent, &hsa_sampler_descriptor, &hsa_sampler);
       if (status != HSA_STATUS_SUCCESS) { return status; }
       assert(hsa_sampler.handle);
-      rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler));
+      if (!rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -1986,7 +2050,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
                                   NULL, // TODO: image_data?
                                   &hsa_image);
       if (status != HSA_STATUS_SUCCESS) { return status; }
-      rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image));
+      if (!rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2010,6 +2074,9 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocationSection(hsa_agent_t agent, am
 hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa::code::Relocation *rel)
 {
   Segment* relSeg = VirtualAddressSegment(rel->offset());
+  // VirtualAddressSegment() returns nullptr when no loaded segment covers the
+  // attacker-controlled r_offset; reject rather than dereferencing it.
+  if (!relSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
   uint64_t symAddr = 0;
   switch (rel->symbol()->type()) {
     case STT_OBJECT:
@@ -2017,6 +2084,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     case STT_FUNC:
     {
       Segment* symSeg = VirtualAddressSegment(rel->symbol()->value());
+      if (!symSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       symAddr = reinterpret_cast<uint64_t>(symSeg->Address(rel->symbol()->value()));
       break;
     }
@@ -2048,7 +2116,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t((symAddr >> 32) & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2060,7 +2128,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2072,7 +2140,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2083,7 +2151,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
         return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
       }
 
-      relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr));
+      if (!relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2091,7 +2159,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     {
       int64_t baseDelta = reinterpret_cast<uint64_t>(relSeg->Address(0)) - relSeg->VAddr();
       uint64_t relocatedAddr = baseDelta + rel->addend();
-      relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr));
+      if (!relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 

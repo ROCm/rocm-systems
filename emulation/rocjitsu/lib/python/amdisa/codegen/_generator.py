@@ -7,6 +7,7 @@ Generates the following C++ files from a parsed ``IsaSpec``:
 
 * ``machine_insts.h`` - bitfield structs for each encoding's microcode.
 * ``opcodes.h`` - per-ISA symbolic opcode constants keyed by mnemonic.
+* ``builders.h`` - per-ISA instruction builders keyed by encoding format.
 * ``encodings.h/.cpp`` - encoding classes (mnemonic, size, modifiers).
 * ``operand_types.h`` - operand type enum and operand selector metadata.
 * ``operand.h/.cpp`` - ISA-specific operand class with read/write methods.
@@ -399,6 +400,185 @@ class CodeGenerator:
         with open(os.path.join(arch_out_path, 'opcodes.h'), 'w') as f:
             f.write('\n'.join(lines))
 
+    @staticmethod
+    def _builder_field_type(bit_count: int) -> str:
+        """Return the smallest conventional type able to hold an XML field."""
+        if bit_count <= 8:
+            return 'uint8_t'
+        if bit_count <= 16:
+            return 'uint16_t'
+        if bit_count <= 32:
+            return 'uint32_t'
+        return 'uint64_t'
+
+    @staticmethod
+    def _builder_name(enc: InstEncoding) -> str:
+        """Return the snake-case builder name for an encoding format."""
+        name = enc.enc_name
+        if name.startswith('ENC_'):
+            name = name[len('ENC_') :]
+        return f'build_{name.lower()}'
+
+    def _builder_encoding_value(self, enc: InstEncoding) -> int:
+        """Return the MachineInst ``encoding`` bitfield value for *enc*.
+
+        Primary decode selectors are indexed by ``word0 >> 23``.  The XML
+        encoding field can begin above bit 23 (VOP3 begins at bit 26, for
+        example), so its MachineInst value is the selector shifted back down
+        to the field's origin.  Opcode bits below the encoding field disappear
+        in that shift, leaving the fixed format selector.
+        """
+        encoding_field = next(
+            (field for field in enc.ucode_fields if field.name == 'encoding'),
+            None,
+        )
+        if encoding_field is None:
+            raise ValueError(f'{enc.enc_name} has no encoding field')
+        if encoding_field.bit_offset < 23:
+            raise ValueError(
+                f'{enc.enc_name} encoding field starts below primary decode bit 23'
+            )
+
+        values = self._primary_decode_values(enc)
+        if not values:
+            raise ValueError(f'{enc.enc_name} has no primary decode selector')
+        mask = (1 << encoding_field.bit_cnt) - 1
+        return (min(values) >> (encoding_field.bit_offset - 23)) & mask
+
+    def gen_instruction_builders(self) -> None:
+        """Generate compact, format-level instruction encoding helpers.
+
+        A builder fixes the XML-derived encoding selector and accepts the raw
+        generated opcode plus a value-initialized field structure.  Padding,
+        opcode, and encoding fields are intentionally absent from that public
+        structure: callers should describe only operands and modifiers, while
+        the generator remains responsible for the binary layout.
+        """
+        arch = self.isa_spec.arch_name
+        body: list[str] = [
+            CppFile._prologue_comment(),
+            f'#ifndef ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+            f'#define ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+            '',
+            '#include <array>',
+            '#include <cstddef>',
+            '#include <cstdint>',
+            '',
+            'namespace rocjitsu {',
+            f'namespace {arch} {{',
+            '',
+            'namespace builder_detail {',
+            '',
+            '/// @brief Insert one XML field into an encoded instruction.',
+            'template <std::size_t NumWords>',
+            'constexpr void set_field(std::array<uint32_t, NumWords> &words, uint64_t value,',
+            '                         std::size_t bit_offset, std::size_t bit_count) {',
+            '  while (bit_count != 0) {',
+            '    const std::size_t word_index = bit_offset / 32;',
+            '    const std::size_t word_offset = bit_offset % 32;',
+            '    const std::size_t bits_here = bit_count < (32 - word_offset) ? bit_count :',
+            '                                                                  (32 - word_offset);',
+            '    const uint32_t mask = bits_here == 32 ? ~uint32_t{0} :',
+            '                                                  ((uint32_t{1} << bits_here) - 1);',
+            '    words[word_index] |= (static_cast<uint32_t>(value) & mask) << word_offset;',
+            '    value >>= bits_here;',
+            '    bit_offset += bits_here;',
+            '    bit_count -= bits_here;',
+            '  }',
+            '}',
+            '',
+            '} // namespace builder_detail',
+        ]
+
+        for enc in self.isa_spec.inst_encodings:
+            # Alternate decoder-only encodings have no instructions of their
+            # own.  Their selector conditions (for example src0 == 0xfa for
+            # DPP) are not fixed format fields and therefore are not safe to
+            # expose as standalone builders yet.
+            if not enc.insts:
+                continue
+
+            fields = [
+                field
+                for field in enc.ucode_fields
+                if field.name not in ('op', 'encoding')
+                and not field.name.startswith('pad_')
+            ]
+            field_struct = f'{enc.fmt_enc_name}BuilderFields'
+            word_count = (enc.bit_cnt + 31) // 32
+            opcode_field = next(
+                (field for field in enc.ucode_fields if field.name == 'op'), None
+            )
+            encoding_field = next(
+                field for field in enc.ucode_fields if field.name == 'encoding'
+            )
+            encoding_value = self._builder_encoding_value(enc)
+
+            body.extend(
+                [
+                    '',
+                    f'/// @brief Caller-controlled fields for {enc.enc_name}.',
+                    f'struct {field_struct} {{',
+                ]
+            )
+            body.extend(
+                f'  {self._builder_field_type(field.bit_cnt)} {field.name} = 0;'
+                for field in fields
+            )
+            body.extend(
+                [
+                    '};',
+                    '',
+                    f'/// @brief Build one {enc.enc_name} instruction.',
+                    f'[[nodiscard]] constexpr std::array<uint32_t, {word_count}>',
+                    (
+                        f'{self._builder_name(enc)}(uint16_t op, '
+                        f'{field_struct} fields = {{}}) {{'
+                        if opcode_field is not None
+                        else f'{self._builder_name(enc)}({field_struct} fields = {{}}) {{'
+                    ),
+                    f'  std::array<uint32_t, {word_count}> words{{}};',
+                ]
+            )
+            if opcode_field is not None:
+                body.extend(
+                    [
+                        f'  builder_detail::set_field(words, op, {opcode_field.bit_offset},',
+                        f'                            {opcode_field.bit_cnt});',
+                    ]
+                )
+            body.extend(
+                [
+                    f'  builder_detail::set_field(words, {encoding_value},',
+                    f'                            {encoding_field.bit_offset},',
+                    f'                            {encoding_field.bit_cnt});',
+                ]
+            )
+            for field in fields:
+                body.extend(
+                    [
+                        f'  builder_detail::set_field(words, fields.{field.name},',
+                        f'                            {field.bit_offset}, {field.bit_cnt});',
+                    ]
+                )
+            body.extend(['  return words;', '}'])
+
+        body.extend(
+            [
+                '',
+                f'}} // namespace {arch}',
+                '} // namespace rocjitsu',
+                '',
+                f'#endif // ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
+                '',
+            ]
+        )
+
+        arch_out_path = os.path.join(self.out_path, arch)
+        os.makedirs(arch_out_path, exist_ok=True)
+        with open(os.path.join(arch_out_path, 'builders.h'), 'w') as f:
+            f.write('\n'.join(body))
+
     def _constructor_operand_type(
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> str:
@@ -425,17 +605,55 @@ class CodeGenerator:
 
     @staticmethod
     def _literal_operand_fixup_stmt(
-        opnd: Operand, lit_struct: str, size_expr: str | None = None
+        opnd: Operand,
+        lit_struct: str,
+        size_expr: str | None = None,
+        inst_sem: InstructionSemantics | None = None,
+        literal_operand_type: str | None = None,
+        dynamic_true16_opsel_bit: int | None = None,
     ) -> str | None:
-        if opnd.operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
+        operand_type = literal_operand_type or opnd.operand_type
+        if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
         literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
-        if opnd.operand_type == 'OPR_SIMM16' or opnd.size == 16:
+        operand_size = size_expr or opnd.size
+        if dynamic_true16_opsel_bit is not None:
+            display_expr = (
+                f'static_cast<uint16_t>(({literal_expr} >> '
+                f'(((amdgpu::vop3_opsel(inst_) >> {dynamic_true16_opsel_bit}) & 1u) * 16u)) '
+                f'& 0xFFFFu)'
+            )
+            return (
+                f'{opnd.name} = Operand({operand_size}, '
+                f'OperandType::{operand_type}, static_cast<int>({literal_expr}), '
+                f'{display_expr}, true);'
+            )
+        if operand_type == 'OPR_SIMM16' or opnd.size == 16:
             literal_expr = f'({literal_expr} & 0xFFFFu)'
+        if CodeGenerator._literal_operand_uses_f64_high_bits(
+            opnd, inst_sem, operand_type
+        ):
+            return (
+                f'{opnd.name} = Operand({operand_size}, '
+                f'OperandType::{operand_type}, '
+                f'(static_cast<uint64_t>({literal_expr}) << 32), true);'
+            )
         return (
-            f'{opnd.name} = Operand({size_expr or opnd.size}, '
-            f'OperandType::{opnd.operand_type}, static_cast<int>({literal_expr}));'
+            f'{opnd.name} = Operand({operand_size}, '
+            f'OperandType::{operand_type}, static_cast<int>({literal_expr}));'
         )
+
+    @staticmethod
+    def _literal_operand_uses_f64_high_bits(
+        opnd: Operand, inst_sem: InstructionSemantics | None, operand_type: str
+    ) -> bool:
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input or opnd.size != 64:
+            return False
+        if opnd.data_format_name:
+            return opnd.data_format_name == 'FMT_NUM_F64'
+        if inst_sem and inst_sem.data_type:
+            return 'f64' in inst_sem.data_type.split('_')
+        return False
 
     @staticmethod
     def _has_inline_literal_operand(inst: Instruction) -> bool:
@@ -597,6 +815,7 @@ class CodeGenerator:
         """
         self.gen_machine_inst_encodings()
         self.gen_opcode_constants()
+        self.gen_instruction_builders()
         self.gen_encodings()
         self.gen_operand_types()
         self.gen_operand()
@@ -995,6 +1214,8 @@ class CodeGenerator:
         vopd3_constructor_close = ''
         vopd3_init_operands_prefix = ''
         vopd3_init_operands_suffix = ''
+        vopd_x_literal_uses_f64_high_bits = 'false'
+        vopd_y_literal_uses_f64_high_bits = 'false'
         vopdxy_bits_decl = cpp_block('''
                 constexpr uint32_t x_bits = 32;
                 constexpr uint32_t y_bits = 32;
@@ -1103,8 +1324,8 @@ class CodeGenerator:
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-                srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
-                srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
+                srcx0_ = make_src0(x_bits, true, false, false, 0, srcx0);
+                srcy0_ = make_src0(y_bits, true, false, false, 0, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
                 srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
@@ -1139,6 +1360,8 @@ class CodeGenerator:
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
             ''')
+            vopd_x_literal_uses_f64_high_bits = 'is_float64_op(opx_)'
+            vopd_y_literal_uses_f64_high_bits = 'is_float64_op(opy_)'
             execute_impl_body = cpp_block('''
               uint64_t exec = wf.exec();
               for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1280,9 +1503,14 @@ class CodeGenerator:
             @VOPD_SLOT_CONSTANTS@
 
             Operand make_src0(uint32_t bits, @VOPD3_UNUSED_ATTR@bool vopd3, bool use_literal,
-                              uint32_t literal, uint16_t encoded) {
-              if (use_literal && encoded == 255)
+                              bool literal_uses_f64_high_bits, uint32_t literal,
+                              uint16_t encoded) {
+              if (use_literal && encoded == 255) {
+                if (literal_uses_f64_high_bits)
+                  return Operand(bits, OperandType::OPR_SIMM32,
+                                 (static_cast<uint64_t>(literal) << 32), true);
                 return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+              }
               return Operand(bits, @VOPD_SRC0_TYPE_EXPR@, encoded);
             }
 
@@ -1388,8 +1616,10 @@ class CodeGenerator:
             @VOPDXY_BITS_DECL@
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-                srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
-                srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+                srcx0_ = make_src0(x_bits, false, has_literal_,
+                                   @VOPD_X_LITERAL_USES_F64_HIGH_BITS@, literal_, srcx0);
+                srcy0_ = make_src0(y_bits, false, has_literal_,
+                                   @VOPD_Y_LITERAL_USES_F64_HIGH_BITS@, literal_, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
             @VOPD3_CONSTRUCTOR_CLOSE@
@@ -1494,6 +1724,14 @@ class CodeGenerator:
             .replace('@VOPD_FORMAT_SLOT_CASES@', vopd_format_slot_cases)
             .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
             .replace('@VOPDXY_BITS_DECL@', vopdxy_bits_decl)
+            .replace(
+                '@VOPD_X_LITERAL_USES_F64_HIGH_BITS@',
+                vopd_x_literal_uses_f64_high_bits,
+            )
+            .replace(
+                '@VOPD_Y_LITERAL_USES_F64_HIGH_BITS@',
+                vopd_y_literal_uses_f64_high_bits,
+            )
         )
 
         with open(os.path.join(out_dir, 'vopd.h'), 'w') as f:
@@ -1938,6 +2176,51 @@ class CodeGenerator:
                 'uses.expand(RegisterRef{RegClass::SGPR, '
                 'static_cast<uint16_t>(inst_.saddr), 2});'
                 '}'
+            )
+        # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial row/bank
+        # mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl) leave the old
+        # destination in place, so surface the preserved destination as a use.
+        # This matches what the executor actually restores: the non-VOPC SDWA/DPP
+        # merge only rewrites old vdst bytes/lanes via write_vgpr, so only a
+        # VGPR-class destination is preserved. SGPR destinations are fully
+        # written and never restored -- a VOP3_SDST_ENC carry (v_add_co_ci) and a
+        # VOP3 compare's SGPR mask alike -- so filter to RegClass::VGPR. The ref
+        # still comes from the decoded dst operand to get the real width.
+        #
+        # SDWA exists only on VOP1/VOP2; DPP additionally exists on VOP3/VOP3P/
+        # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
+        # VOPC/VOPCX stay omitted: their result lands in VCC/EXEC, which liveness
+        # does not track (see liveness.h).
+        enc = inst_enc.enc_name.upper()
+        has_sdwa = enc in ('ENC_VOP1', 'ENC_VOP2')
+        has_dpp = enc in ('ENC_VOP1', 'ENC_VOP2') or (
+            enc in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+            and self._supports_vop_dpp_encoding(enc)
+        )
+        if (has_sdwa or has_dpp) and 'vdst' in enc_field_names:
+            decls = ''
+            guards = []
+            if has_sdwa:
+                decls += (
+                    'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
+                    'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
+                )
+                guards.append('sdwa_preserve')
+            if has_dpp:
+                decls += (
+                    'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                    '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                    '(dpp_bound_ctrl_ == 0 && '
+                    'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+                )
+                guards.append('dpp_partial')
+            return (
+                decls + f'if ({" || ".join(guards)}) '
+                'for (int i = 0; i < num_dst_operands(); ++i) '
+                'if (const auto *dst = dst_operand(i)) '
+                'if (auto ref = dst->to_register_ref()) '
+                'if (ref->cls == RegClass::VGPR) '
+                'uses.expand(*ref);'
             )
         return ''
 
@@ -3013,6 +3296,11 @@ class CodeGenerator:
 
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
+
+        # Sleep has no architectural register effect, but FUNCTIONAL execution
+        # must return to the event loop so peer CUs can make progress.
+        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+            return '  wf.cu().request_functional_yield();'
 
         if cls == 'true_nop':
             return '  (void)wf;'
@@ -5659,6 +5947,30 @@ class CodeGenerator:
                     public_members.append(
                         cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                     )
+                    # A sub-dword (< 32-bit) destination writes only part of its
+                    # 32-bit register lane, so the old value survives and the
+                    # register is also a read. Surface these partial defs as
+                    # implicit uses. Runtime-sized outputs are never sub-dword,
+                    # so a static size check suffices. Immediate/label outputs
+                    # (e.g. the S_SETREG hwreg selector) never name a register,
+                    # so skip them to avoid dead overrides.
+                    _partial_def_outputs = [
+                        o.name
+                        for o in inst.operands
+                        if o.is_output
+                        and operand_size_exprs.get(o.name, str(o.size)) == str(o.size)
+                        and 0 < o.size < 32
+                        and not any(
+                            tag in o.operand_type.upper()
+                            for tag in ('IMM', 'LABEL', 'CONST')
+                        )
+                    ]
+                    if _partial_def_outputs:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -5786,10 +6098,26 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                fixup = self._literal_operand_fixup_stmt(
+                                    opnd,
+                                    _lit_struct,
+                                    operand_size_exprs[opnd.name],
+                                    inst_sem,
+                                    'OPR_SIMM32',
+                                    (
+                                        _lit_fields.index(opnd.name)
+                                        if opnd.size == 16
+                                        and self.isa_spec.profile.uses_true16_vop3_opsel
+                                        and self.isa_spec.profile.has_src_modifiers(
+                                            enc.enc_name
+                                        )
+                                        else None
+                                    ),
+                                )
+                                assert fixup is not None
                                 ctor_body_parts.append(
                                     f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
-                                    f'{opnd.name} = Operand({operand_size_exprs[opnd.name]}, OperandType::OPR_SIMM32, '
-                                    f'static_cast<int>(reinterpret_cast<const {_lit_struct}*>(inst)->simm32));'
+                                    f'{fixup}'
                                 )
                                 if _supports_simm64_literals:
                                     ctor_body_parts.append(
@@ -5804,6 +6132,7 @@ class CodeGenerator:
                                     opnd,
                                     _lit_struct,
                                     operand_size_exprs.get(opnd.name),
+                                    inst_sem,
                                 )
                                 if fixup:
                                     ctor_body_parts.append(fixup)
@@ -6505,6 +6834,21 @@ class CodeGenerator:
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
                                 f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
+                                f'}}'
+                            )
+                        )
+                    if _partial_def_outputs:
+                        _pd_body = ''.join(
+                            f'  if (auto r = {name}.to_register_ref())\n'
+                            f'    uses.expand(*r);\n'
+                            for name in _partial_def_outputs
+                        )
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'{_pd_body}'
                                 f'}}'
                             )
                         )
@@ -7784,6 +8128,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
+        # In wave32, EXEC_HI remains addressable as scalar scratch even though
+        # it is not part of the active-lane mask. Wave64-only ISAs can keep the
+        # conventional EXEC accessors in their generated operand code.
+        exec_register = (
+            'exec_raw()' if self.isa_spec.profile.wave_size == 32 else 'exec()'
+        )
+        set_exec_register = (
+            'set_exec_raw' if self.isa_spec.profile.wave_size == 32 else 'set_exec'
+        )
 
         switch_cases = []
         ref_switch_cases = []
@@ -7864,7 +8217,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if t == 'OPR_SIMM32':
                 switch_cases.append(
                     f'case OperandType::{t}: '
-                    f'return std::format("0x{{:x}}", encoding_value_);'
+                    f'return std::format("0x{{:x}}", static_cast<uint32_t>(encoding_value_));'
                 )
             elif t == 'OPR_WAITCNT':
                 wc = self.isa_spec.profile.waitcnt_decode
@@ -7893,6 +8246,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'std::string Operand::name() const {{\n'
             f'if (has_literal64_)\n'
             f'  return std::format("0x{{:x}}", literal64_value_);\n'
+            f'if (has_literal16_display_)\n'
+            f'  return std::format("0x{{:x}}", literal16_display_value_);\n'
             f'{packed_16bit_name_check}'
             f'switch (opr_type_) {{\n'
             f'{switch_body}\n'
@@ -7952,6 +8307,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 'class Operand : public AmdgpuIsaOperand<Isa> {\n'
                 'public:\n'
                 f'{operand_ctor_decl}'
+                '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+                '          uint16_t literal16_display_value, bool has_literal16_display);\n'
                 '  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);\n'
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
@@ -7966,6 +8323,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
                 '  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
                 'private:\n'
+                '  uint16_t literal16_display_value_ = 0;\n'
+                '  bool has_literal16_display_ = false;\n'
                 '  uint64_t literal64_value_ = 0;\n'
                 '  bool has_literal64_ = false;\n'
                 f'{packed_16bit_field}'
@@ -8010,6 +8369,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '}'
             ),
             *packed_16bit_ctor_impl,
+            cgen.Line(
+                'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+                '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
+                '    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),\n'
+                '      literal16_display_value_(literal16_display_value),\n'
+                '      has_literal16_display_(has_literal16_display) {\n'
+                '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                '}'
+            ),
             cgen.Line(
                 'Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)\n'
                 '    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),\n'
@@ -8355,7 +8723,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '  if (ev == 126)\n'
             '    return static_cast<uint32_t>(wf.exec());\n'
             '  if (ev == 127)\n'
-            '    return static_cast<uint32_t>(wf.exec() >> 32);\n'
+            f'    return static_cast<uint32_t>(wf.{exec_register} >> 32);\n'
             '  if (ev >= 128 && ev <= 192)\n'
             '    return static_cast<uint32_t>(ev - 128);\n'
             '  if (ev >= 193 && ev <= 208)\n'
@@ -8472,7 +8840,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
-            '    return wf.exec();\n'
+            f'    return wf.{exec_register};\n'
             '  if (ev >= 128 && ev <= 192)\n'
             '    return static_cast<uint64_t>(ev - 128);\n'
             '  if (ev >= 193 && ev <= 208)\n'
@@ -8553,7 +8921,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev == 127) {\n'
-            '    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
+            f'    wf.{set_exec_register}((wf.{exec_register} & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));\n'
@@ -8581,7 +8949,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 124)\n'
             '    return;\n'
             '  if (ev == 126) {\n'
-            '    wf.set_exec(val);\n'
+            f'    wf.{set_exec_register}(val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));\n'

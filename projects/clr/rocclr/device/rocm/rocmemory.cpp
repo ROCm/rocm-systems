@@ -906,6 +906,13 @@ bool Buffer::create(bool alloc_local) {
       flags_ |= HostMemoryDirectAccess;
     }
 
+    // FFM/DTIF fast-copy: when enabled, host can directly access plain device
+    // allocations so hipMemcpy can short-circuit to a host memcpy in CLR
+    // (skipping the rocclr-emitted blit/init kernel).
+    if (HSA_ENABLE_DTIF_FAST_COPY) {
+      flags_ |= HostMemoryDirectAccess;
+    }
+
     if (owner()->getSvmPtr() == reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr)) {
       if (isFineGrain) {
         if (memFlags & CL_MEM_ALLOC_HOST_PTR) {
