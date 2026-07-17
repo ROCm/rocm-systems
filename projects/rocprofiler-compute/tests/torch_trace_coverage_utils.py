@@ -8,6 +8,7 @@ builds arguments or records a skip reason.
 """
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -3792,6 +3793,22 @@ def multiline_coverage_failure_warning(
     return "\n".join(lines)
 
 
+# torch.profiler reports AMD kernel names with a trailing descriptor suffix,
+# either bracketed ("[clone .kd]") or bare (".kd"); rocprof-compute reports the
+# plain symbol. Strip the suffix so both sources use the same name.
+_KERNEL_CLONE_SUFFIX_RE = re.compile(r"\s*(?:\[clone \.[^\]]+\]|\.kd)\s*$")
+
+
+def normalize_kernel_name(name: str) -> str:
+    """Remove the trailing kernel-descriptor suffix from a kernel name."""
+    return _KERNEL_CLONE_SUFFIX_RE.sub("", name)
+
+
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Normalize every kernel name in a set."""
+    return {normalize_kernel_name(name) for name in names}
+
+
 def compare_single_op(
     op: OpEntry,
     ground_truth: Dict[str, Any],
@@ -3820,7 +3837,7 @@ def compare_single_op(
         return OpCompareOutcome("skip", reason, log_lines)
 
     profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
-    profiler_kernel_set = set(profiler_kernels)
+    profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
 
     matched_marker_leaves: List[str] = []
     roctx_kernels: Set[str] = set()
@@ -3828,6 +3845,7 @@ def compare_single_op(
         if marker_matches_op(op.name, observed_marker_leaf):
             matched_marker_leaves.append(observed_marker_leaf)
             roctx_kernels |= roctx_kernels_map.get(observed_marker_leaf, set())
+    roctx_kernels = normalize_kernel_names(roctx_kernels)
     marker_found = bool(matched_marker_leaves)
 
     def _match_verbose_lines() -> Tuple[str, ...]:
@@ -3902,10 +3920,16 @@ def compare_single_op(
             f"roctx={sorted(roctx_kernels)[:6]}"
             f"{'…' if len(roctx_kernels) > 6 else ''})"
         )
+        mismatch_lines = (
+            f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
+            *(f"      {k}" for k in sorted(profiler_kernel_set)),
+            f"    roctx correlated kernels ({len(roctx_kernels)}):",
+            *(f"      {k}" for k in sorted(roctx_kernels)),
+        )
         return OpCompareOutcome(
             "fail",
             reason,
-            coverage_log_fail(op.name, reason) + verbose_tail,
+            coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
         )
 
     if marker_found:
