@@ -186,12 +186,10 @@ This flag is set automatically when the AMD SMI library version is 26.3 or
 later and ``ROCPROFSYS_USE_AINIC=ON`` (the default).
 
 The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only available when
-the ROCm Systems Profiler is compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their presence in
-the output of ``rocprof-sys-avail --settings`` is therefore a direct indicator
-of whether AI NIC support was compiled in. This check requires no AI NIC
+the ROCm Systems Profiler is compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their
+presence in the output of ``rocprof-sys-avail --settings`` is therefore a direct
+indicator of whether AI NIC support was compiled in. This check requires no AI NIC
 hardware.
-
-**Manual check**
 
 .. code-block:: shell
 
@@ -199,22 +197,6 @@ hardware.
 
 If ``ROCPROFSYS_USE_AINIC`` is listed, AI NIC support is compiled in. If the
 command produces no output, the binaries were built without AI NIC support.
-
-**Automated pytest check**
-
-The pytest test suite includes a test that performs the same check:
-
-.. code-block:: shell
-
-   ctest -V -R ainic-settings-present
-
-This test verifies that the AI NIC settings are reported by
-``rocprof-sys-avail --settings``. It does not require AI NIC hardware to be
-present — it is a pure build artifact check.
-
-If the test fails, the build must be reconfigured with a ROCm installation
-where AMD SMI version 26.3 or later is available during the CMake configure
-step, or ``ROCPROFSYS_USE_AINIC`` must be verified to be ``ON``.
 
 List available AI NICs
 ------------------------
