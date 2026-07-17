@@ -98,6 +98,14 @@ public:
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
 
+  /// @brief Add a call edge proven by an external finite-target analysis.
+  ///
+  /// @details Relocation-backed device function tables are discovered after
+  /// ordinary block construction. Their dynamic dispatch remains indirect in
+  /// the instruction stream, but each populated table slot is a concrete
+  /// callee for reachability and kernel-scoped liveness.
+  void add_call_edge(CallEdge edge);
+
   /// @brief Static indirect branch fixup metadata rooted in this block.
   ///
   /// @details BasicBlock::build() computes these while all decoded instructions
@@ -137,7 +145,6 @@ public:
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
   void add_successor(BasicBlock &successor);
-  void add_call_edge(CallEdge edge);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
 
   uint64_t start_offset_;

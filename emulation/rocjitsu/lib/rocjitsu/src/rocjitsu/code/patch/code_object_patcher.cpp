@@ -488,6 +488,59 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   return true;
 }
 
+[[nodiscard]] bool
+relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                               std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                               uint64_t old_text_size, uint64_t new_text_size,
+                               std::span<const TextOffsetRelocation> relocations) {
+  if (relocations.empty() || ehdr.e_type != ET_DYN)
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  target_by_source.reserve(relocations.size());
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return false;
+    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+  }
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t rela_offset = relocs.sh_offset + i * sizeof(Elf64_Rela);
+      Elf64_Rela rela{};
+      std::memcpy(&rela, image.data() + rela_offset, sizeof(rela));
+      if (elf64_relocation_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
+        continue;
+
+      const uint64_t addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < text.sh_addr)
+        continue;
+      const uint64_t source_offset = addend - text.sh_addr;
+      if (source_offset >= old_text_size)
+        continue;
+
+      const auto relocated = target_by_source.find(source_offset);
+      if (relocated == target_by_source.end())
+        continue;
+      if (relocated->second > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+        return false;
+      const uint64_t target_addend = text.sh_addr + relocated->second;
+      if (target_addend > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        return false;
+      rela.r_addend = static_cast<int64_t>(target_addend);
+      std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool relocation_place_was_moved(uint64_t place, std::span<const Elf64_Shdr> shdrs,
                                               const std::vector<bool> &shift_section_vaddr,
                                               uint64_t delta) {
@@ -668,7 +721,8 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
 }
 
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
-                                     std::span<const TextOffsetRelocation> text_relocations) {
+                                     std::span<const TextOffsetRelocation> text_relocations,
+                                     std::span<const PcRelativeDataRelocation> data_relocations) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -694,6 +748,33 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   }
 
   const auto text_header = shdrs[*text_index];
+  struct ResolvedDataRelocation {
+    PcRelativeDataRelocation relocation;
+    size_t target_section = 0;
+    uint64_t target_section_offset = 0;
+  };
+  std::vector<ResolvedDataRelocation> resolved_data_relocations;
+  resolved_data_relocations.reserve(data_relocations.size());
+  for (const PcRelativeDataRelocation &relocation : data_relocations) {
+    if (relocation.target_getpc_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
+        relocation.target_literal_offset > new_text.size() ||
+        sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
+      return false;
+    }
+    const auto section = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &candidate) {
+      return (candidate.sh_flags & SHF_ALLOC) != 0 &&
+             (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
+             relocation.source_target_vaddr >= candidate.sh_addr &&
+             relocation.source_target_vaddr - candidate.sh_addr < candidate.sh_size;
+    });
+    if (section == shdrs.end())
+      return false;
+    resolved_data_relocations.push_back(
+        {.relocation = relocation,
+         .target_section = static_cast<size_t>(section - shdrs.begin()),
+         .target_section_offset = relocation.source_target_vaddr - section->sh_addr});
+  }
   const uint64_t old_text_end_file = text_offset_ + text_size_;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
   const uint64_t growth = new_text.size() - text_size_;
@@ -754,9 +835,32 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   }
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
+  for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
+    if (resolved.target_section >= shdrs.size() ||
+        resolved.target_section_offset >= shdrs[resolved.target_section].sh_size) {
+      return false;
+    }
+    const uint64_t target_vaddr =
+        shdrs[resolved.target_section].sh_addr + resolved.target_section_offset;
+    if (text_header.sh_addr >
+            std::numeric_limits<uint64_t>::max() - resolved.relocation.target_getpc_offset ||
+        text_header.sh_addr + resolved.relocation.target_getpc_offset >
+            std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
+      return false;
+    }
+    const uint64_t getpc_result = text_header.sh_addr +
+                                  resolved.relocation.target_getpc_offset + sizeof(uint32_t);
+    const uint64_t delta = target_vaddr - getpc_result;
+    std::memcpy(image_.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
+                sizeof(delta));
+  }
   shdrs[*text_index].sh_size = new_text.size();
   if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
                              text_relocations)) {
+    return false;
+  }
+  if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
+                                      new_text.size(), text_relocations)) {
     return false;
   }
   // Instrumentation appends a cave without relocating the original body and

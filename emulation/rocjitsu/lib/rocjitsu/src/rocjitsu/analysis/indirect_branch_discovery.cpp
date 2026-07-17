@@ -1586,6 +1586,148 @@ void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
   }
 }
 
+struct VectorLaneSlot {
+  uint16_t vgpr = 0;
+  uint16_t lane = 0;
+
+  friend bool operator==(const VectorLaneSlot &, const VectorLaneSlot &) = default;
+};
+
+struct VectorLaneSlotHash {
+  size_t operator()(const VectorLaneSlot &slot) const {
+    return (static_cast<size_t>(slot.vgpr) << 16) | slot.lane;
+  }
+};
+
+struct StashedPcHalf {
+  PcValue value;
+  bool high = false;
+};
+
+[[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
+  if (operand == nullptr || operand->encoding_value() < kInlineInt0 ||
+      operand->encoding_value() >= kInlineInt0 + 32)
+    return std::nullopt;
+  return static_cast<uint16_t>(operand->encoding_value() - kInlineInt0);
+}
+
+[[nodiscard]] std::optional<RegisterRef> operand_register(const Operand *operand,
+                                                          RegClass cls) {
+  if (operand == nullptr)
+    return std::nullopt;
+  auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != cls || ref->width != 1)
+    return std::nullopt;
+  return ref;
+}
+
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+                                     std::vector<IndirectCallFixup> &recovered) {
+  // gfx1250 device functions sometimes keep a small static call set in one
+  // VGPR: getpc-built low/high halves are written to fixed lanes, then read
+  // back into an SGPR pair immediately before swappc. Track only fixed-lane
+  // writelane/readlane transport. Any ordinary write to the VGPR invalidates
+  // every recorded lane, and any SGPR write invalidates a reconstructed half.
+  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    return;
+
+  BlockState builders;
+  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
+  std::set<uint16_t> active_read_halves;
+
+  for (size_t index = 0; index < ctx.insts.size(); ++index) {
+    const Instruction &inst = *ctx.insts[index];
+    const InstructionFacts &facts = ctx.facts[index];
+    const std::string_view mnemonic = inst.mnemonic();
+
+    if (!active_read_halves.empty()) {
+      ensure_written_sgprs(ctx, index);
+      ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+        read_halves[sgpr].reset();
+        active_read_halves.erase(sgpr);
+      });
+    }
+
+    if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
+      const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+      builders.set_builder(*facts.getpc_sdst,
+                           PcValue{.offset = static_cast<int64_t>(next_offset),
+                                   .source_getpc_offset = inst.src_loc(),
+                                   .source_recovery_begin_offset = next_offset,
+                                   .source_recovery_end_offset = next_offset});
+      continue;
+    }
+    if (try_apply_pair_update(ctx, index, builders))
+      continue;
+
+    if (mnemonic == "v_writelane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      if (dst && src && lane) {
+        const VectorLaneSlot written_slot{dst->index, *lane};
+        slots.erase(written_slot);
+        for (uint16_t pair_lo : builders.active_pairs()) {
+          const PcValue *value = builders.builder(pair_lo);
+          if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+            continue;
+          slots[written_slot] =
+              StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
+          break;
+        }
+      }
+      invalidate_written_sgprs(ctx, index, builders);
+      continue;
+    }
+
+    if (mnemonic == "v_readlane_b32") {
+      const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
+      const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
+      const auto lane = inline_lane(inst.src_operand(1));
+      invalidate_written_sgprs(ctx, index, builders);
+      if (dst && src && lane) {
+        auto slot = slots.find(VectorLaneSlot{src->index, *lane});
+        if (slot != slots.end()) {
+          read_halves[dst->index] = slot->second;
+          active_read_halves.insert(dst->index);
+        }
+      }
+      continue;
+    }
+
+    if (facts.swappc_ssrc && *facts.swappc_ssrc + 1 < read_halves.size()) {
+      const uint16_t pair_lo = *facts.swappc_ssrc;
+      const auto &lo = read_halves[pair_lo];
+      const auto &hi = read_halves[pair_lo + 1];
+      if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
+        if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
+          append_unique(recovered, *fixup);
+      }
+    }
+
+    if (mnemonic != "v_writelane_b32") {
+      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+        const auto dst = operand_register(inst.dst_operand(dst_index), RegClass::VGPR);
+        if (!dst)
+          continue;
+        std::erase_if(slots, [&](const auto &item) { return item.first.vgpr == dst->index; });
+      }
+    }
+
+    if (!builders.active_pairs().empty())
+      invalidate_written_sgprs(ctx, index, builders);
+    if (is_block_terminator(inst)) {
+      builders = BlockState{};
+      read_halves.fill(std::nullopt);
+      active_read_halves.clear();
+    }
+    if (is_program_terminator(inst)) {
+      slots.clear();
+    }
+  }
+}
+
 void recover_signed_delta_templates(const AnalysisContext &ctx,
                                     const std::vector<AnalysisBlock> &blocks,
                                     std::vector<IndirectCallFixup> &recovered) {
@@ -1703,6 +1845,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     return recovered;
 
   AnalysisContext ctx = build_context(insts, text, arch);
+  recover_vector_lane_stashed_pcs(ctx, recovered);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {

@@ -664,6 +664,36 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
+  // s[0:1] builds target 0x38, is stashed in v44 lanes 0:1, then restored
+  // through v_readlane immediately before swappc. This is the finite static
+  // call idiom emitted in RCCL device functions.
+  std::vector<uint32_t> words = {
+      0xBE804700u,                         // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 52u, 0u,               // 0x04: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu, 0x02010000u,            // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu, 0x02010201u,            // 0x18: v_writelane_b32 v44, s1, 1.
+      0xD7600000u, 0x0201012Cu,            // 0x20: v_readlane_b32 s0, v44, 0.
+      0xD7600001u, 0x0201032Cu,            // 0x28: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                         // 0x30: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x34: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *consumer = block_starting_at(blocks, 48);
+  auto *target = block_starting_at(blocks, 56);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 56u);
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+}
+
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {
   auto blocks =
       build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});
@@ -1032,6 +1062,24 @@ constexpr uint32_t kVop1MovWord0Sdwa = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 
 std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
+  // v_cmp_eq_u32_e64 s53, 32, v4. MI400 is wave32-only, so the comparison
+  // mask occupies s53 and must not make liveness treat the adjacent s54 as
+  // clobbered.
+  auto inst = decode_gfx1250({0xD44A0035u, 0x020208A0u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmp_eq_u32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 53, 1}));
+  EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
 // DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],

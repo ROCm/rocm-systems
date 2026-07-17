@@ -7,6 +7,7 @@ rj_add_object_library(rocjitsu_code
     executable.cpp
     file_io.cpp
     kernel_symbol.cpp
+    relocation_function_table.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
     dbt/gfx1250_b0_to_a0.cpp

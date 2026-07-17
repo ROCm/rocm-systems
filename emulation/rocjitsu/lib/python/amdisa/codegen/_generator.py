@@ -5972,6 +5972,21 @@ class CodeGenerator:
                             )
                         if opnd_size_expr is None:
                             opnd_size_expr = str(opnd.size)
+                        # The gfx1250 MRISA describes VOP3 compare masks with
+                        # the legacy 64-bit width. MI400 is wave32-only: V_CMP
+                        # writes one 32-bit SGPR, including when VOP3 selects an
+                        # arbitrary SGPR through VDST. Keeping the legacy width
+                        # here makes def/use and liveness falsely clobber the
+                        # following SGPR.
+                        if (
+                            self.isa_spec.arch_name == 'gfx1250'
+                            and inst_sem is not None
+                            and inst_sem.semantic_class
+                            in ('vector_cmp', 'vector_cmp_class')
+                            and opnd.is_output
+                            and opnd.operand_type == 'OPR_SREG'
+                        ):
+                            opnd_size_expr = '32'
                         operand_size_exprs[opnd.name] = opnd_size_expr
                         if opnd.is_input:
                             opnd_body.append(

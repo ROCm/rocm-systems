@@ -25,6 +25,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
+#include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -318,6 +319,47 @@ build_block_position_index(const std::vector<std::unique_ptr<BasicBlock>> &block
   return block;
 }
 
+[[nodiscard]] std::unordered_set<uint64_t> attach_relocation_table_call_edges(
+    const BlockOffsetIndex &block_index, std::span<const RelocationFunctionTable> tables,
+    std::span<const RelocationTableDispatch> dispatches) {
+  std::unordered_set<uint64_t> accepted_calls;
+  for (const RelocationTableDispatch &dispatch : dispatches) {
+    if (dispatch.table_index >= tables.size())
+      continue;
+    BasicBlock *source = block_for_offset(block_index, dispatch.source_call_offset);
+    if (source == nullptr || source->terminator() == nullptr ||
+        source->terminator()->src_loc() != dispatch.source_call_offset)
+      continue;
+    BasicBlock *continuation = block_for_offset(block_index, source->end_offset());
+    if (continuation == nullptr || continuation->start_offset() != source->end_offset())
+      continue;
+
+    std::vector<BasicBlock *> callees;
+    callees.reserve(tables[dispatch.table_index].entries.size());
+    bool complete = true;
+    for (const RelocationFunctionPointer &entry : tables[dispatch.table_index].entries) {
+      BasicBlock *callee = block_for_offset(block_index, entry.target_text_offset);
+      if (callee == nullptr || callee->start_offset() != entry.target_text_offset) {
+        complete = false;
+        break;
+      }
+      callees.push_back(callee);
+    }
+    if (!complete || callees.empty())
+      continue;
+
+    for (BasicBlock *callee : callees) {
+      source->add_call_edge({.kind = BasicBlock::CallEdgeKind::IndirectSwapPc,
+                             .callee = callee,
+                             .continuation = continuation,
+                             .source_call_offset = dispatch.source_call_offset,
+                             .return_sreg = dispatch.return_sreg});
+    }
+    accepted_calls.insert(dispatch.source_call_offset);
+  }
+  return accepted_calls;
+}
+
 [[nodiscard]] std::vector<BasicBlock *>
 reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         const BlockOffsetIndex &block_index,
@@ -574,6 +616,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
 [[nodiscard]] std::optional<std::vector<uint8_t>> materialize_translated_code_object(
     CodeObjectPatcher patcher, std::vector<uint8_t> translated_text, uint64_t original_text_size,
     std::span<const TextOffsetRelocation> text_relocations,
+    std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
@@ -597,7 +640,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     }
   }
 
-  if (!patcher.replace_text(translated_text, text_relocations)) {
+  if (!patcher.replace_text(translated_text, text_relocations, data_relocations)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -875,7 +918,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
+  const auto relocation_function_tables = discover_relocation_function_tables(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
+  for (const RelocationFunctionTable &table : relocation_function_tables) {
+    for (const RelocationFunctionPointer &entry : table.entries)
+      block_leaders.push_back(entry.target_text_offset);
+  }
+  std::ranges::sort(block_leaders);
+  block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
 
   // Phase 2: build a CFG over .text, including recovered indirect targets as
   // block leaders, then compute one source-reachable block set per descriptor
@@ -885,6 +935,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // map without borrowing another kernel's return continuation.
   auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
+  const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
+  const auto relocation_table_dispatches = discover_relocation_table_dispatches(
+      blocks, relocation_function_tables, text_vaddr);
+  const auto relocation_table_calls = attach_relocation_table_call_edges(
+      block_index, relocation_function_tables, relocation_table_dispatches);
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
 
   if (can_emit_sidecar_descriptors) {
@@ -1134,6 +1189,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
 
   std::vector<TextOffsetRelocation> text_relocations;
+  std::vector<PcRelativeDataRelocation> data_relocations;
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
@@ -1377,10 +1433,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
         const auto recovered_it = recovered_indirect_by_call.find(offset);
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
+        const bool has_relocation_table_call = relocation_table_calls.contains(offset);
         const bool recovered_indirect_return = valid_call_return_offsets.contains(offset);
         const auto direct_branch_delta = inst.branch_offset_bytes();
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
-            !has_recovered_indirect_call && !recovered_indirect_return && !direct_branch_delta) {
+            !has_recovered_indirect_call && !has_relocation_table_call &&
+            !recovered_indirect_return && !direct_branch_delta) {
           auto failure = make_kernel_failure(
               DiagnosticKind::Legalization,
               "indirect branch or call target recovery is not implemented for relocated kernel "
@@ -1662,6 +1720,24 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       text_relocations.push_back(
           {.source_offset = source_offset, .target_offset = target_offset + target_delta});
     }
+    for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
+      if (!target_offset_by_source_offset.contains(dispatch.source_call_offset))
+        continue;
+      const auto getpc = target_offset_by_source_offset.find(dispatch.source_getpc_offset);
+      const auto add = target_offset_by_source_offset.find(dispatch.source_address_add_offset);
+      if (getpc == target_offset_by_source_offset.end() ||
+          add == target_offset_by_source_offset.end()) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "relocation-table GOT address builder is not fully present in the relocated "
+                     "body",
+                     dispatch.source_call_offset, "s_swap_pc_i64");
+        return leave_unchanged();
+      }
+      data_relocations.push_back(
+          {.target_getpc_offset = getpc->second + target_delta,
+           .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+           .source_target_vaddr = dispatch.got_slot_vaddr});
+    }
 
     // Phase 5: now that every emitted source block has a final target offset,
     // patch explicit direct branches, recovered source-side builders, and
@@ -1840,7 +1916,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // and sidecar metadata construction into the per-kernel lowering transaction.
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
-      descriptor_translations, host_arch_, target_mach_, result.diagnostics);
+      data_relocations, descriptor_translations, host_arch_, target_mach_, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);

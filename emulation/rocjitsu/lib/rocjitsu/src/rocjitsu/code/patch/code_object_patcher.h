@@ -26,6 +26,13 @@ struct TextOffsetRelocation {
   uint64_t target_offset = 0;
 };
 
+/// @brief One relocated literal64 PC builder whose target is outside `.text`.
+struct PcRelativeDataRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t source_target_vaddr = 0;
+};
+
 /// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
 struct AppendedSidecarDescriptor {
   uint64_t file_offset = 0;
@@ -50,7 +57,8 @@ public:
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  std::span<const TextOffsetRelocation> text_relocations = {});
+                                  std::span<const TextOffsetRelocation> text_relocations = {},
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {});
 
   void update_elf_flags(uint32_t new_flags);
 
