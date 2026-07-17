@@ -17,6 +17,14 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
+from utils.comgr_detect import (
+    double_comgr_error_message,
+    find_workload_comgr_dynamic,
+    find_workload_comgr_static,
+    output_indicates_double_comgr,
+    resolve_tool_comgr,
+    tool_path_from_preload,
+)
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -217,6 +225,7 @@ def run_prof(
     output_path = Path(workload_dir + "/out/pmc_1")
     output_path.mkdir(parents=True, exist_ok=True)
 
+    app_cmd = None
     if get_rocprof_cmd() == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
@@ -270,6 +279,16 @@ def run_prof(
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
+        if output_indicates_double_comgr(output):
+            tool_comgr = resolve_tool_comgr(
+                tool_path_from_preload(new_env.get("LD_PRELOAD"))
+            )
+            workload_comgrs = find_workload_comgr_dynamic(
+                new_env
+            ) or find_workload_comgr_static(app_cmd or [])
+            console_error(
+                double_comgr_error_message(tool_comgr, workload_comgrs), exit=False
+            )
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"

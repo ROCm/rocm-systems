@@ -9,6 +9,7 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from utils.comgr_detect import detect_and_log_double_comgr
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
@@ -31,6 +32,12 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     ) -> dict[str, Union[str, list[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
+
+        if app_cmd and not getattr(self, "_comgr_checked", False):
+            detect_and_log_double_comgr(
+                app_cmd, args.rocprofiler_sdk_tool_path, dict(os.environ)
+            )
+            self._comgr_checked = True
 
         # Build LD_PRELOAD: preserve user's existing, then append our libs
         # Order: [user's existing LD_PRELOAD] : [our profiler libs]
