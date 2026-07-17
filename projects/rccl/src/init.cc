@@ -200,6 +200,7 @@ RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
+RCCL_PARAM_DECLARE(ForceCe);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -2322,6 +2323,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Call devCommSetup before the last barrier, making sure we don't have a thread running in front and starting to
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
+
+  // Eagerly initialize the CE runtime so ceARTmpBuf is ready before any
+  // collective runs. Required for both the CTA_POLICY_ZERO path and the
+  // RCCL_FORCE_CE path (unregistered user buffers), which can run without
+  // CTA_POLICY_ZERO and would otherwise hit "CE AllReduce invoked before CE
+  // init" because the enqueue-time trigger never drains before doLaunches.
+  if (comm->symmetricSupport && comm->nNodes == 1 &&
+      (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCe()) &&
+      comm->ceColl.baseUCSymReadyPtr == NULL) {
+    NCCLCHECKGOTO(ncclCeInit(comm), ret, fail);
+  }
 
   timers[TIMER_INIT_CONNECT] = clockNano() - timers[TIMER_INIT_CONNECT];
 

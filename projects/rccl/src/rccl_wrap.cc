@@ -601,6 +601,9 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
     return false;
   }
 
+  // if graph capture, CE AllReduce is not supported
+  if (ncclCudaGraphValid(comm->planner.capturingGraph)) return false;
+
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) return false;
   if (comm->nNodes != 1) return false;

@@ -3632,7 +3632,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // the CE runtime (ceARTmpBuf stays NULL).
       if (ncclCeImplemented(info->coll, info->op, info->datatype) &&
           comm->symmetricSupport && comm->nNodes == 1 &&
-          comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO &&
+          (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCe()) &&
           comm->ceColl.baseUCSymReadyPtr == NULL &&
           ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
         if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
@@ -3650,7 +3650,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
-      bool ceAllReduceFits = true;
+      bool ceAllReduceFits = false;
       bool graphCapture = ncclCudaGraphValid(comm->planner.capturingGraph);
       if (info->coll == ncclFuncAllReduce) {
         if (graphCapture || (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
@@ -3658,8 +3658,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else {
           // check if we want to force CE AllReduce without symmetric window registration
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCe()) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCe() || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
+          } else {
+            ceAllReduceFits = true;
           }
         }
       }
@@ -3667,7 +3669,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
         INFO(NCCL_COLL, "CE Path: appending CE Collective task, count=%zu", info->count);
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
-      } else if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
+      } else if (ceAllReduceFits && !hasSysmemSegment) {
         INFO(NCCL_COLL, "CE AllReduce Path without symmetric memory registration, count=%zu", info->count);
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       } else {
