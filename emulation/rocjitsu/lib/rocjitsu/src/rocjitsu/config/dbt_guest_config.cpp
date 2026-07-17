@@ -11,6 +11,7 @@
 #include "simulation_config_generated.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -19,6 +20,16 @@
 namespace rocjitsu {
 namespace config {
 namespace {
+
+DbtExecutionBackend execution_backend_from_fb(fb::DbtExecutionBackend backend) {
+  switch (backend) {
+  case fb::DbtExecutionBackend_hardware:
+    return DbtExecutionBackend::Hardware;
+  case fb::DbtExecutionBackend_simulator:
+    return DbtExecutionBackend::Simulator;
+  }
+  throw std::runtime_error("dbt_guest.execution_backend is invalid");
+}
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
@@ -40,6 +51,33 @@ void validate_guest_device_geometry(const KfdDeviceConfig &device) {
 
 } // namespace
 
+void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
+                                          const KfdDeviceConfig &simulator_device) {
+  if (!guest.enabled || guest.host.backend != DbtExecutionBackend::Simulator)
+    return;
+  if (!guest.guest_device.present || !simulator_device.present)
+    throw std::runtime_error("simulator-backed dbt_guest requires guest and simulator devices");
+
+  const auto require_at_most = [](const char *name, uint32_t guest_value,
+                                  uint32_t simulator_value) {
+    if (guest_value <= simulator_value)
+      return;
+    throw std::runtime_error("dbt_guest.guest_device." + std::string(name) + " (" +
+                             std::to_string(guest_value) + ") exceeds simulator device capacity (" +
+                             std::to_string(simulator_value) + ")");
+  };
+  require_at_most("lds_size_kb", guest.guest_device.lds_size_kb, simulator_device.lds_size_kb);
+  require_at_most("max_slots_scratch_cu", guest.guest_device.max_slots_scratch_cu,
+                  simulator_device.max_slots_scratch_cu);
+  require_at_most("max_waves_per_simd", guest.guest_device.max_waves_per_simd,
+                  simulator_device.max_waves_per_simd);
+  if (guest.guest_device.wave_front_size != simulator_device.wave_front_size)
+    throw std::runtime_error("dbt_guest.guest_device.wave_front_size (" +
+                             std::to_string(guest.guest_device.wave_front_size) +
+                             ") must match simulator device wave_front_size (" +
+                             std::to_string(simulator_device.wave_front_size) + ")");
+}
+
 DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   DbtGuestConfig config;
   if (guest == nullptr)
@@ -49,19 +87,51 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   if (guest->guest_isa())
     config.guest_isa = guest->guest_isa()->str();
   if (guest->host_isa())
-    config.host_isa = guest->host_isa()->str();
-  config.host_gpu_id = guest->host_gpu_id();
+    config.host.isa = guest->host_isa()->str();
+  config.host.gpu_id = guest->host_gpu_id();
+  config.host.backend = execution_backend_from_fb(guest->execution_backend());
+  if (guest->simulator_config())
+    config.host.simulator_config_path = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
   validate_guest_device_geometry(config.guest_device);
+  if (config.enabled && config.host.backend == DbtExecutionBackend::Hardware &&
+      !config.host.simulator_config_path.empty())
+    throw std::runtime_error("dbt_guest.simulator_config requires execution_backend=\"simulator\"");
   return config;
 }
 
+std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
+                                         const std::string &host_config_path) {
+  const std::filesystem::path dbt_path(dbt_config_path);
+  if (host_config_path.empty())
+    return dbt_path.lexically_normal().string();
+
+  const std::filesystem::path host_path(host_config_path);
+  if (host_path.is_absolute())
+    return host_path.lexically_normal().string();
+  return (dbt_path.parent_path() / host_path).lexically_normal().string();
+}
+
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
+  const std::string json = read_config_file(path);
+  bool has_dbt_guest = false;
+  DbtGuestConfig parsed = with_parsed_simulation_config_json(
+      json, rocjitsu::kEmbeddedSchema, [&has_dbt_guest](const fb::SimulationConfig *config) {
+        has_dbt_guest = config->dbt_guest() != nullptr;
+        return dbt_guest_from_fb(config->dbt_guest());
+      });
+  if (!has_dbt_guest)
+    return parsed;
+
+  // Simulation configs remain forward-compatible with unknown fields, but a
+  // DBT guest block selects execution behavior and must reject misspelled keys
+  // instead of silently falling back to the hardware backend.
   return with_parsed_simulation_config_json(
-      read_config_file(path), rocjitsu::kEmbeddedSchema,
-      [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); });
+      json, rocjitsu::kEmbeddedSchema,
+      [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); },
+      false);
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {

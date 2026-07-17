@@ -63,8 +63,25 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
 
   while (!stop.stop_requested() && connected) {
     RpcHeader hdr{};
-    if (!rpc_recv_exact(client_fd, &hdr, sizeof(hdr)))
-      break;
+    // Capture an optional SCM_RIGHTS fd the client attaches to the message (the
+    // debugger notifier pipe on DBG_TRAP ENABLE). A received fd is owned here
+    // and must be closed if not adopted by the debug session.
+    int in_fd = -1;
+    {
+      int in_fds[1] = {-1};
+      size_t num_in_fds = 1;
+      ssize_t hdr_bytes = rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds);
+      if (num_in_fds > 0)
+        in_fd = in_fds[0];
+      // A short read means the peer truncated the header (or closed); drop the
+      // connection instead of acting on a partial header, reclaiming any fd that
+      // arrived with it. (rpc_recv_exact did this implicitly; recvmsg does not.)
+      if (hdr_bytes != static_cast<ssize_t>(sizeof(hdr))) {
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
+    }
 
     switch (hdr.opcode) {
     case RPC_HANDSHAKE: {
@@ -188,7 +205,13 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
+      cmd.in_handle = in_fd;
+      in_fd = -1; // ownership passes to cmd; execute clears it on adoption
       rj_vm_execute_as(vm, process_id, &cmd);
+      // The debug session adopts the notifier fd on success (in_handle cleared);
+      // reclaim it otherwise.
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
 
       RpcHeader resp{};
       resp.opcode = RPC_IOCTL;
@@ -215,6 +238,11 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       connected = false;
       break;
     }
+
+    // Safety net: reclaim any notifier fd attached to a non-ioctl message (the
+    // client only sends one on DBG_TRAP ENABLE).
+    if (in_fd >= 0)
+      ::close(in_fd);
   }
 
   if (process_id != 0)
@@ -468,11 +496,11 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
 /// the config to name the shared KFD gpu_id so every layer routes to the same
 /// physical GPU.
 bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
-  if (dbt_guest.host_gpu_id != 0)
+  if (dbt_guest.host.gpu_id != 0)
     return true;
 
   std::optional<uint32_t> target_version =
-      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
   if (!target_version)
     return true;
 
@@ -486,7 +514,7 @@ bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest)
 
   std::cerr << std::format(
       "rocjitsu: dbt_guest.host_isa '{}' matches {} host GPUs; set host_gpu_id to one of:",
-      dbt_guest.host_isa, matching_gpu_ids.size());
+      dbt_guest.host.isa, matching_gpu_ids.size());
   for (uint32_t gpu_id : matching_gpu_ids)
     std::cerr << ' ' << gpu_id;
   std::cerr << '\n';
@@ -522,16 +550,16 @@ void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &d
     return;
 
   uint32_t host_ordinal = 0;
-  if (dbt_guest.host_gpu_id != 0) {
+  if (dbt_guest.host.gpu_id != 0) {
     auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
-      return gpu.gpu_id == dbt_guest.host_gpu_id;
+      return gpu.gpu_id == dbt_guest.host.gpu_id;
     });
     if (match == gpus.end())
       return;
     host_ordinal = match->ordinal;
   } else {
     std::optional<uint32_t> target_version =
-        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
     if (!target_version)
       return;
 
@@ -675,7 +703,7 @@ int main(int argc, char *argv[]) {
 
   std::string hooks_path;
   if (dbt_guest_mode) {
-    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host_isa.empty()) {
+    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host.isa.empty()) {
       std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
       return 1;
     }

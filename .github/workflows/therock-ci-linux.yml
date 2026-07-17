@@ -7,6 +7,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_type:
+        type: string
+        default: "standard"
       package_version:
         type: string
         required: true
@@ -139,6 +142,7 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
+      test_type: ${{ inputs.test_type }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

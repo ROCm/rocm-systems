@@ -39,6 +39,7 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+  case AMDKFD_IOC_DBG_TRAP:
     return true;
   case AMDKFD_IOC_SVM:
     // SVM's variable-length attribute array is part of the ioctl payload, not a
@@ -373,6 +374,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_events_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
+  uint64_t saved_dbg_rinfo_ptr = 0;
+  uint32_t saved_dbg_rinfo_size = 0;
+  uint64_t saved_dbg_snapshot_ptr = 0;
+  size_t saved_dbg_snapshot_cap = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -387,6 +392,23 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       saved_device_ids_ptr =
           static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr;
       break;
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+      switch (dbg->op) {
+      case KFD_IOC_DBG_TRAP_ENABLE:
+        saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
+        saved_dbg_rinfo_size = dbg->enable.rinfo_size;
+        break;
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_cap =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+        break;
+      default:
+        break;
+      }
+      break;
+    }
     default:
       break;
     }
@@ -424,6 +446,25 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       buf.resize(buf.size() + aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures));
       break;
     }
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(args_base);
+      size_t inline_size = 0;
+      switch (dbg->op) {
+      case KFD_IOC_DBG_TRAP_ENABLE:
+        inline_size =
+            std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
+        break;
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        inline_size =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+        break;
+      default:
+        break;
+      }
+      if (inline_size > 0)
+        buf.resize(buf.size() + inline_size);
+      break;
+    }
     default:
       break;
     }
@@ -439,8 +480,29 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   ireq->ioctl_cmd = static_cast<uint32_t>(request);
   ireq->args_bytes = static_cast<uint32_t>(buf.size() - prefix);
 
-  if (!rpc_send_exact(sock_, buf.data(), buf.size()))
-    return -1;
+  // For DBG_TRAP ENABLE, hand the debugger's notifier pipe write-end to the
+  // daemon as an SCM_RIGHTS fd. The daemon substitutes it into the ioctl's
+  // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
+  // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
+  // casts to -1 and is not sent.
+  int send_fd = -1;
+  if (request == AMDKFD_IOC_DBG_TRAP) {
+    auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
+      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+  }
+  if (send_fd >= 0) {
+    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+      // Preserve the transport errno — e.g. EBADF when the client handed us a
+      // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
+      // interposer would surface as EPERM (-EPERM == -1).
+      int err = errno;
+      return err > 0 ? -err : -1;
+    }
+  } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
+    int err = errno;
+    return err > 0 ? -err : -1;
+  }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
@@ -477,6 +539,20 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr =
             saved_device_ids_ptr;
         break;
+      case AMDKFD_IOC_DBG_TRAP: {
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        switch (dbg->op) {
+        case KFD_IOC_DBG_TRAP_ENABLE:
+          dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+          dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+          break;
+        default:
+          break;
+        }
+        break;
+      }
       default:
         break;
       }
@@ -497,6 +573,37 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             reinterpret_cast<void *>(aperture_args->kfd_process_device_apertures_ptr),
             payload.data() + arg_size,
             std::min(aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures), extra));
+        break;
+      }
+      case AMDKFD_IOC_DBG_TRAP: {
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        void *dst = nullptr;
+        size_t copy_len = 0;
+        switch (dbg->op) {
+        case KFD_IOC_DBG_TRAP_ENABLE:
+          // Only propagate runtime-info bytes on success; a failed op (e.g.
+          // -EBADF from a rejected notifier fd) must not mutate caller memory
+          // or dereference the saved output pointer, matching local mode.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_rinfo_size),
+                                std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
+          }
+          break;
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+          // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
+          // must not mutate caller memory or dereference the saved output
+          // pointer. Clamp any successful copy to the original buffer capacity.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+            copy_len = std::min(saved_dbg_snapshot_cap, extra);
+          }
+          break;
+        default:
+          break;
+        }
+        if (dst != nullptr && copy_len > 0)
+          std::memcpy(dst, payload.data() + arg_size, copy_len);
         break;
       }
       default:

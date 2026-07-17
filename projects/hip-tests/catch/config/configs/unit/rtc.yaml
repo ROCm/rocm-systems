@@ -227,3 +227,9 @@ rtc:
   Unit_hiprtc_fp8_simple:
     <<: *level_2
     tags: [compile]
+  Unit_hiprtc_spirv_compilation:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_spirv_linker:
+    <<: *level_2
+    tags: [link]

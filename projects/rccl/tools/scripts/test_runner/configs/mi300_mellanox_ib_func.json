@@ -1142,6 +1142,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaAlltoAllThresholdTest",
+          "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
+          "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
         }
       ]
     },

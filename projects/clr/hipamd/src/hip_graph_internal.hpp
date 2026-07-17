@@ -652,9 +652,6 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
-    if (captureDeviceId_ != -1) {
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->release();
-    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -1019,6 +1016,17 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExecBase() {
+    for (auto& streams : parallel_streams_) {
+      for (auto stream : streams.second) {
+        if (stream != nullptr) {
+          stream->finish();
+          stream->vdev()->UnpinQueue();
+          constexpr bool kForceDestroy = true;
+          hip::Stream::Destroy(stream, kForceDestroy);
+        }
+      }
+    }
+    parallel_streams_.clear();
     std::scoped_lock lock(graphExecSetLock_);
     // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
     graphExecSet_.erase(this);
@@ -1070,19 +1078,7 @@ class GraphExecClassic : public GraphExecBase {
  public:
   bool graph_dumped_ = false;
   GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
-  ~GraphExecClassic() {
-    for (auto& streams : parallel_streams_) {
-      for (auto stream : streams.second) {
-        if (stream != nullptr) {
-          stream->finish();
-          stream->vdev()->UnpinQueue();
-          constexpr bool kForceDestroy = true;
-          hip::Stream::Destroy(stream, kForceDestroy);
-        }
-      }
-    }
-    parallel_streams_.clear();
-  }
+  ~GraphExecClassic() {}
 
   hipError_t Init() override;
   hipError_t Run(hip::Stream* launch_stream) override;
