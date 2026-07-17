@@ -74,7 +74,17 @@ jobs:
             enable_tsan: 0
             enable_msan: 0
             enable_expensive_checks: 1
-            sanitize_shared: 0
+            sanitize_shared: 1
+          - name: tsan
+            allow_failure: true
+            test_regex: ''
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitize_shared: 1
           - name: asan-ubsan-gcc
             allow_failure: true
             test_regex: ''
