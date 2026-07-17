@@ -86,7 +86,7 @@ class RunConfig:
     # Forces `mnctl --rebuild` (full `docker build --no-cache`).
     force_rebuild: bool = field(default_factory=lambda: _env("MNCTL_REBUILD", "0") == "1")
 
-    shared_fs_root: str = field(default_factory=lambda: _env("SHARED_FS_ROOT", os.path.expanduser("~")))
+shared_fs_root: str = field(default_factory=lambda: os.path.expanduser(_env("SHARED_FS_ROOT") or "~"))
     shared_dir: str = ""
     builds_dir: str = ""
 
@@ -165,7 +165,7 @@ class RunConfig:
             NIC_TYPE=self.nic_type, NODES=str(self.nodes), PARTITION=self.partition,
             ACCOUNT=self.account, GPUS_PER_NODE=str(self.gpus_per_node),
             TIME_LIMIT=self.time_limit, RESERVATION=self.reservation,
-            CONTAINER=self.container, HOSTFILE=self.hostfile, RCCL_DIR=self.rccl_dir,
+            MNCTL_CONTAINER_NAME=self.container, HOSTFILE=self.hostfile, RCCL_DIR=self.rccl_dir,
             MNCTL_DIR=self.mnctl_dir, SHARED_FS_ROOT=self.shared_fs_root,
             EXTRA_VOLUMES=self.extra_volumes,
         )

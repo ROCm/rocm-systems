@@ -177,9 +177,13 @@ def _validate(clusters: dict, targets: list) -> None:
             raise SystemExit(f"Target {t.get('name', '?')!r} missing keys: {missing}")
         for k, pat in _TARGET_VALUE_RE.items():
             _check_value(f"target {t.get('name', '?')!r}", k, t[k], pat)
-        for pk, pv in (t.get("params") or {}).items():
+        params = t.get("params") or {}
+        for pk, pv in params.items():
             _check_value(f"target {t['name']!r} params", pk, pv, _PARAM_VALUE_RE)
-        # Only enabled targets must resolve to a real cluster (disabled rows may be WIP).
+        reserved = set(_REQUIRED_TARGET_KEYS) | set(_CLUSTER_FIELDS)
+        overlap = reserved & set(params)
+        if overlap:
+            raise SystemExit(f"Target {t['name']!r} params contains reserved keys: {sorted(overlap)}")
         if t["enabled"] and t["cluster"] not in clusters:
             raise SystemExit(
                 f"Target {t['name']!r} references unknown cluster {t['cluster']!r}; "

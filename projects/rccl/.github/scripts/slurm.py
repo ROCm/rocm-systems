@@ -194,10 +194,10 @@ def resolve_nodelist() -> Tuple[List[str], str]:
     nodelist = os.environ.get("SLURM_JOB_NODELIST", "")
     if not nodelist:
         out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "-o", "%i %N"],
-                             capture_output=True, text=True).stdout.strip().splitlines()
+                             capture_output=True, text=True, check=True).stdout.strip().splitlines()
         if not out:
             sys.exit("ERROR: no running SLURM allocation found")
-        jobid, nodelist = sorted(out, reverse=True)[0].split(maxsplit=1)
+        jobid, nodelist = max((line.split(maxsplit=1) for line in out), key=lambda t: int(t[0]))
         log(f"Attaching to existing job {jobid}")
     names = subprocess.run(["scontrol", "show", "hostnames", nodelist],
                            capture_output=True, text=True, check=True).stdout.split()
@@ -206,7 +206,9 @@ def resolve_nodelist() -> Tuple[List[str], str]:
 
 def write_hostfile(path: str, hosts: List[str], gpus_per_node: int) -> None:
     """Write an MPI-style hostfile (`<node> slots=<gpus>`)."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
     with open(path, "w") as f:
         for h in hosts:
             f.write(f"{h} slots={gpus_per_node}\n")
