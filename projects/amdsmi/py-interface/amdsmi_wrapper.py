@@ -3217,12 +3217,6 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_get_gpu_vram_vendor = _libraries['libamd_smi.so'].amdsmi_get_gpu_vram_vendor
-    amdsmi_get_gpu_vram_vendor.restype = amdsmi_status_t
-    amdsmi_get_gpu_vram_vendor.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), uint32_t]
-except AttributeError:
-    pass
-try:
     amdsmi_get_gpu_subsystem_id = _libraries['libamd_smi.so'].amdsmi_get_gpu_subsystem_id
     amdsmi_get_gpu_subsystem_id.restype = amdsmi_status_t
     amdsmi_get_gpu_subsystem_id.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint16)]
@@ -3863,6 +3857,12 @@ try:
     amdsmi_get_gpu_ecc_enabled = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_enabled
     amdsmi_get_gpu_ecc_enabled.restype = amdsmi_status_t
     amdsmi_get_gpu_ecc_enabled.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_gpu_ecc_supported = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_supported
+    amdsmi_get_gpu_ecc_supported.restype = amdsmi_status_t
+    amdsmi_get_gpu_ecc_supported.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
 except AttributeError:
     pass
 try:
@@ -5300,7 +5300,8 @@ __all__ = \
     'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_device_bdf',
     'amdsmi_get_gpu_device_uuid', 'amdsmi_get_gpu_driver_info',
     'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
-    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_ecc_supported',
+    'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
@@ -5332,8 +5333,8 @@ __all__ = \
     'amdsmi_get_gpu_vendor_name',
     'amdsmi_get_gpu_virtualization_mode',
     'amdsmi_get_gpu_volt_metric', 'amdsmi_get_gpu_vram_info',
-    'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_vram_vendor',
-    'amdsmi_get_gpu_xcd_counter', 'amdsmi_get_gpu_xgmi_link_status',
+    'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_xcd_counter',
+    'amdsmi_get_gpu_xgmi_link_status',
     'amdsmi_get_hsmp_metrics_table',
     'amdsmi_get_hsmp_metrics_table_version', 'amdsmi_get_lib_version',
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',

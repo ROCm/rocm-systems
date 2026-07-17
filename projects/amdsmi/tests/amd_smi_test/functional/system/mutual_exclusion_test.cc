@@ -375,8 +375,9 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "0", VERB(STANDARD));
-    ret = amdsmi_get_gpu_vram_vendor(processor_handles_[0], dmy_str, 10);
+    amdsmi_vram_info_t vram_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_info", "0", VERB(STANDARD));
+    ret = amdsmi_get_gpu_vram_info(processor_handles_[0], &vram_info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
@@ -469,8 +470,8 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "0", VERB(STANDARD));
-    ret = amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_supported", "0", VERB(STANDARD));
+    ret = amdsmi_get_gpu_ecc_supported(processor_handles_[0], &dmy_ui64);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
@@ -488,7 +489,7 @@ void TestMutualExclusion::Run(void) {
     amdsmi_dev_firmware_version_get
     amdsmi_dev_name_get
     amdsmi_dev_brand_get
-    amdsmi_get_gpu_vram_vendor
+    amdsmi_get_gpu_vram_info
     amdsmi_get_gpu_subsystem_name
     amdsmi_get_gpu_vendor_name
     amdsmi_get_gpu_pci_bandwidth
