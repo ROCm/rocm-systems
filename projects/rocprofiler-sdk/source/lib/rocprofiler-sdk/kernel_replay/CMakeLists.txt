@@ -7,3 +7,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES kernel_replay.cpp memory_snapshot.cpp
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES}
                                            ${ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS})
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
