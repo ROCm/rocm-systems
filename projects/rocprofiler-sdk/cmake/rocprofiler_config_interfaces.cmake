@@ -136,11 +136,19 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 
 # ----------------------------------------------------------------------------------------#
 #
-# Advanced thread trace decoder
+# rocprof-trace-decoder
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocprof-trace-decoder 0.2.1 CONFIG)
+if(NOT ROCPROFILER_DISABLE_TRACE_DECODER AND NOT TARGET
+                                             rocprof-trace-decoder::rocprof-trace-decoder)
+    if(ROCPROF_TRACE_DECODER_DIR)
+        find_package(rocprof-trace-decoder 0.2 REQUIRED CONFIG HINTS
+                     ${ROCPROF_TRACE_DECODER_DIR} NO_DEFAULT_PATH)
+    else()
+        find_package(rocprof-trace-decoder 0.2 REQUIRED CONFIG)
+    endif()
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

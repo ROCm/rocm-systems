@@ -26,7 +26,6 @@
 #include "kernel_symbol_info.hpp"
 #include "node_info.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -375,7 +374,7 @@ code_object_load_info_vec_t
 metadata::get_code_object_load_info() const
 {
     auto _data = code_object_load.rlock([](const auto& _data_v) {
-        auto _info = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>{};
+        auto _info = std::vector<CodeobjLoadInfo>{};
         _info.reserve(_data_v.size());
         for(const auto& itr : _data_v)
             _info.emplace_back(itr);
@@ -389,8 +388,8 @@ metadata::get_code_object_load_info() const
     ROCP_WARNING_IF((_sz + 1) - _data.size() > 1000) << fmt::format(
         "Spares index detected for code object load info: {} < {}", _data.size(), _sz);
 
-    auto _code_obj_data = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>{};
-    _code_obj_data.resize(_sz + 1, rocprofiler::att_wrapper::CodeobjLoadInfo{});
+    auto _code_obj_data = std::vector<CodeobjLoadInfo>{};
+    _code_obj_data.resize(_sz + 1, CodeobjLoadInfo{});
     // index by the code object id
     for(auto& itr : _data)
         _code_obj_data.at(itr.id) = itr;

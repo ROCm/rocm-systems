@@ -34,9 +34,9 @@
 
 namespace Callbacks
 {
-rocprofiler_thread_trace_decoder_id_t decoder{};
-std::atomic<size_t>                   latency{0};
-std::atomic<bool>                     has_sdata{false};
+rocprof_trace_decoder_handle_t decoder{};
+std::atomic<size_t>            latency{0};
+std::atomic<bool>              has_sdata{false};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -54,18 +54,17 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
-        DECODER_CALL(
-            rocprofiler_thread_trace_decoder_codeobj_unload(decoder, data->code_object_id));
+        DECODER_CALL(rocprof_trace_decoder_codeobj_unload(decoder, data->code_object_id));
         return;
     }
 
-    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(
-        decoder,
-        data->code_object_id,
-        data->load_delta,
-        data->load_size,
-        reinterpret_cast<const void*>(data->memory_base),
-        data->memory_size));
+    DECODER_CALL(
+        rocprof_trace_decoder_codeobj_load(decoder,
+                                           data->code_object_id,
+                                           data->load_delta,
+                                           data->load_size,
+                                           reinterpret_cast<const void*>(data->memory_base),
+                                           data->memory_size));
 }
 
 void
@@ -75,7 +74,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
-                    void* /* userdata */) {
+                    void* /* userdata */) -> rocprofiler_thread_trace_decoder_status_t {
         if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
         {
             const auto* events =
@@ -84,24 +83,27 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                 if(events[i].value == SDATA_RECORD) has_sdata = true;
         }
 
-        if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
-
-        for(size_t w = 0; w < trace_size; w++)
+        if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE)
         {
-            auto* wave = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(trace_events);
-            for(size_t i = 0; i < wave->instructions_size; i++)
-                latency += wave->instructions_array[i].duration;
+            auto* waves = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(trace_events);
+            for(size_t w = 0; w < trace_size; w++)
+            {
+                for(size_t i = 0; i < waves[w].instructions_size; i++)
+                    latency += waves[w].instructions_array[i].duration;
+            }
         }
+
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
     };
-    DECODER_CALL(
-        rocprofiler_trace_decode(decoder, parse, shader_data.data, shader_data.data_size, nullptr));
+    auto* data = static_cast<char*>(shader_data.data) + shader_data.read_offset;
+    auto  size = shader_data.data_size - shader_data.read_offset;
+    DECODER_CALL(rocprof_trace_decoder_parse(decoder, data, size, parse, nullptr));
 }
 
 void
 init()
 {
-    // const char* decoder_lib = std::getenv("ROCPROF_TRACE_DECODER_PATH");
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+    DECODER_CALL(rocprof_trace_decoder_create_handle(&decoder));
 }
 
 void
@@ -122,7 +124,7 @@ finalize(void* /* tool_data */)
         // if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
     }
 
-    rocprofiler_thread_trace_decoder_destroy(decoder);
+    DECODER_CALL(rocprof_trace_decoder_destroy_handle(decoder));
 }
 
 }  // namespace Callbacks

@@ -10,12 +10,18 @@ set(TOOL_HEADERS att_no_intercept.hpp att_no_intercept_impl.hpp config.hpp
 set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp
                  stream_stack.cpp)
 
-if(rocprof-trace-decoder_FOUND)
+if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
+    find_package(rocprof-trace-decoder REQUIRED)
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
 endif()
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
+
+if(ROCPROFILER_DISABLE_TRACE_DECODER)
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFILER_DISABLE_TRACE_DECODER=1)
+endif()
 
 target_link_libraries(
     rocprofiler-sdk-tool
@@ -30,12 +36,11 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-sqlite3)
 
-if(rocprof-trace-decoder_FOUND)
+if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
     target_link_libraries(rocprofiler-sdk-tool
-                          PRIVATE rocprof-trace-decoder::rocprof-trace-decoder)
+                          PRIVATE rocprofiler-sdk::rocprofiler-sdk-att-parser)
     target_compile_definitions(rocprofiler-sdk-tool
                                PRIVATE ROCPROFILER_ATT_QUICK_SCAN_ENABLED=1)
 else()

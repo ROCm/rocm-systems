@@ -183,7 +183,7 @@ configure(shader_data_forwarder_t forwarder, std::unordered_set<size_t> filter_r
 {
     ROCP_FATAL_IF(!backend_supported())
         << "--att-no-intercept was requested, but this rocprofv3 build was configured with "
-           "ROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON and does not include "
+           "ROCPROFILER_DISABLE_TRACE_DECODER=ON and does not include "
            "rocprof-trace-decoder quick-scan support";
 
     ROCP_FATAL_IF(forwarder == nullptr)

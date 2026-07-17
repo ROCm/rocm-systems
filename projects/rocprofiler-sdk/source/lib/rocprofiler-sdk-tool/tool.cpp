@@ -30,7 +30,9 @@
 #include "helper.hpp"
 #include "stream_stack.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#if !defined(ROCPROFILER_DISABLE_TRACE_DECODER)
+#    include "lib/att-tool/att_lib_wrapper.hpp"
+#endif
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -3778,8 +3780,12 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 
     if(tool::get_config().advanced_thread_trace)
     {
-        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
+#if defined(ROCPROFILER_DISABLE_TRACE_DECODER)
+        ROCP_WARNING << "rocprof-trace-decoder support is disabled in this build; skipping ATT "
+                        "post-processing. Raw thread-trace data was still collected.";
+#else
+        auto decoder = rocprofiler::att_wrapper::ATTDecoder();
+        ROCP_FATAL_IF(!decoder.valid()) << "Failed to create the ATT decoder";
 
         auto codeobj     = tool_metadata->get_code_object_load_info();
         auto output_path = tool::format_path(tool::get_config().output_path);
@@ -3808,6 +3814,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 
             decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
         }
+#endif
     }
 
     run_cleanup();

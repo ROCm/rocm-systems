@@ -20,6 +20,7 @@ set(common_sources
     uuid_v7.cpp)
 set(common_headers
     abi.hpp
+    codeobj_load_info.hpp
     defines.hpp
     demangle.hpp
     dl.hpp

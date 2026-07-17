@@ -35,6 +35,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -42,6 +44,7 @@
 #include <iostream>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
@@ -55,11 +58,11 @@
     }
 
 #define DECODER_CALL(result)                                                                       \
-    if(auto ec = (result); ec != ROCPROFILER_STATUS_SUCCESS)                                       \
+    if(auto ec = (result); ec != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)                  \
     {                                                                                              \
         std::cerr << "Decoder error at " << __FILE__ << ":" << __LINE__ << std::endl;              \
-        std::cerr << "rocprofiler-sdk error code " << ec << ": "                                   \
-                  << rocprofiler_get_status_string(ec) << std::endl;                               \
+        std::cerr << "Decoder error code " << ec << ": "                                           \
+                  << rocprof_trace_decoder_get_status_string(ec) << std::endl;                     \
     }
 
 #define CHECK_NOTNULL(x)                                                                           \
@@ -67,6 +70,12 @@
     {                                                                                              \
         abort();                                                                                   \
     };
+
+inline bool
+operator<(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
+{
+    return std::tie(lhs.code_object_id, lhs.address) < std::tie(rhs.code_object_id, rhs.address);
+}
 
 namespace
 {
@@ -150,7 +159,7 @@ gen_output_stream()
 
 namespace Decoder
 {
-rocprofiler_thread_trace_decoder_id_t decoder{};
+rocprof_trace_decoder_handle_t decoder{};
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -175,12 +184,12 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
         CHECK_NOTNULL(memorybase);
 
-        DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                                   data->code_object_id,
-                                                                   data->load_delta,
-                                                                   data->load_size,
-                                                                   memorybase,
-                                                                   data->memory_size));
+        DECODER_CALL(rocprof_trace_decoder_codeobj_load(decoder,
+                                                        data->code_object_id,
+                                                        data->load_delta,
+                                                        data->load_size,
+                                                        memorybase,
+                                                        data->memory_size));
 
         Results::table->addDecoder(
             memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
@@ -196,7 +205,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
                     uint64_t                                       num_events,
-                    void* /* userdata */) {
+                    void* /* userdata */) -> rocprofiler_thread_trace_decoder_status_t {
         if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
         {
             for(size_t i = 0; i < num_events; i++)
@@ -216,24 +225,27 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
             }
         }
 
-        if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
-
-        for(size_t w = 0; w < num_events; w++)
+        if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE)
         {
-            auto* wave = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
-            for(size_t i = 0; i < wave->instructions_size; i++)
+            auto* waves = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
+            for(size_t w = 0; w < num_events; w++)
             {
-                auto& inst    = wave->instructions_array[i];
-                auto& latency = (*Results::latencies)[inst.pc];
-                latency.latency += inst.duration;
-                latency.hitcount += 1;
+                for(size_t i = 0; i < waves[w].instructions_size; i++)
+                {
+                    auto& inst    = waves[w].instructions_array[i];
+                    auto& latency = (*Results::latencies)[inst.pc];
+                    latency.latency += inst.duration;
+                    latency.hitcount += 1;
+                }
             }
         }
+
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
     };
 
     auto* data = static_cast<char*>(shader_data.data) + shader_data.read_offset;
     auto  size = shader_data.data_size - shader_data.read_offset;
-    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, data, size, nullptr));
+    DECODER_CALL(rocprof_trace_decoder_parse(decoder, data, size, parse, nullptr));
 }
 
 }  // namespace Decoder
@@ -301,12 +313,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     Results::latencies = new Results::LatencyTable{};
     Results::table     = new Results::AddressTable{};
 
-    // This is set by ctests: TODO: move to client.cpp
-    // If nullptr, searches rocprofiler-sdk install location
-    const char* lib_path = std::getenv("ROCPROFILER_TRACE_DECODER_LIB_PATH");
-    if(lib_path == nullptr) lib_path = "/opt/rocm/lib";
-
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&Decoder::decoder, lib_path));
+    DECODER_CALL(rocprof_trace_decoder_create_handle(&Decoder::decoder));
 
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
@@ -350,7 +357,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 void
 tool_fini(void* /* tool_data */)
 {
-    rocprofiler_thread_trace_decoder_destroy(Decoder::decoder);
+    DECODER_CALL(rocprof_trace_decoder_destroy_handle(Decoder::decoder));
 
     Results::gen_output_stream();
 

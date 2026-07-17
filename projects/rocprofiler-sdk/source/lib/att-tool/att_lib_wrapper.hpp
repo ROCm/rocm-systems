@@ -23,9 +23,10 @@
 #pragma once
 
 #include "lib/att-tool/util.hpp"
+#include "lib/common/codeobj_load_info.hpp"
 #include "lib/common/filesystem.hpp"
 
-#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
+#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
 
 #include <algorithm>
 #include <fstream>
@@ -37,20 +38,13 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-using Fspath = rocprofiler::common::filesystem::path;
-
-struct CodeobjLoadInfo
-{
-    std::string name{};
-    size_t      id{0};
-    size_t      addr{0};
-    size_t      size{0};
-};
+using Fspath          = rocprofiler::common::filesystem::path;
+using CodeobjLoadInfo = rocprofiler::tool::CodeobjLoadInfo;
 
 class ATTDecoder
 {
 public:
-    ATTDecoder(const std::string& path);
+    ATTDecoder();
     ~ATTDecoder();
 
     /**
@@ -71,7 +65,7 @@ public:
     bool valid() const;
 
 protected:
-    rocprofiler_thread_trace_decoder_id_t decoder{};
+    rocprof_trace_decoder_handle_t decoder{};
 };
 
 class ATTFileMgr
@@ -79,9 +73,9 @@ class ATTFileMgr
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    ATTFileMgr(Fspath                                _dir,
-               std::vector<std::string>              _counters,
-               rocprofiler_thread_trace_decoder_id_t _decoder);
+    ATTFileMgr(Fspath                         _dir,
+               std::vector<std::string>       _counters,
+               rocprof_trace_decoder_handle_t _decoder);
     ~ATTFileMgr();
 
     void addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, uint64_t memsize);
@@ -98,7 +92,7 @@ public:
     std::map<size_t, std::vector<trace_event_t>> events{};
     std::map<size_t, std::vector<dispatch_t>>    dispatches{};
     std::vector<uint64_t>                        codeobjs_to_delete{};
-    rocprofiler_thread_trace_decoder_id_t        decoder{};
+    rocprof_trace_decoder_handle_t               decoder{};
 
     std::array<std::shared_ptr<class WstatesFile>, ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST>
         wstates;

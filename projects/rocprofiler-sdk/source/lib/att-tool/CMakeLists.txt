@@ -40,6 +40,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf)
+            rocprofiler-sdk::rocprofiler-sdk-elf
+    PUBLIC rocprof-trace-decoder::rocprof-trace-decoder)
 
 add_subdirectory(waitcnt)

@@ -38,8 +38,10 @@ rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
                        ${ROCPROFILER_BUILD_CI})
-
 rocprofiler_add_option(ROCPROFILER_BUILD_BENCHMARK "Enable building the benchmarks" OFF)
+rocprofiler_add_option(
+    ROCPROFILER_DISABLE_TRACE_DECODER
+    "Disable rocprof-trace-decoder integration (legacy/backward-compat mode)" OFF)
 rocprofiler_add_option(
     ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS
     "Disable adjusting for clock skew b/t CPU and GPU timestamps" OFF ADVANCED)
@@ -52,6 +54,9 @@ rocprofiler_add_option(
     "Use (internal) <rocprofiler-sdk/rccl/details/api_trace.h> instead of RCCL-provided <rccl/amd_detail/api_trace.h>. Note: this should never be used in production"
     OFF
     ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
+    "Disable ATT event and dispatch records in occupancy.json" OFF ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS

@@ -29,7 +29,6 @@
 
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <dlfcn.h>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -41,9 +40,9 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-ATTFileMgr::ATTFileMgr(Fspath                                _dir,
-                       std::vector<std::string>              _counters,
-                       rocprofiler_thread_trace_decoder_id_t _decoder)
+ATTFileMgr::ATTFileMgr(Fspath                         _dir,
+                       std::vector<std::string>       _counters,
+                       rocprof_trace_decoder_handle_t _decoder)
 : dir(std::move(_dir))
 , decoder(_decoder)
 {
@@ -62,8 +61,9 @@ ATTFileMgr::~ATTFileMgr()
 {
     for(auto id : codeobjs_to_delete)
     {
-        auto status = rocprofiler_thread_trace_decoder_codeobj_unload(decoder, id);
-        ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "unable to delete codeobj " << id;
+        auto status = rocprof_trace_decoder_codeobj_unload(decoder, id);
+        ROCP_ERROR_IF(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+            << "unable to delete codeobj " << id;
     }
 
     OccupancyFile::OccupancyFile(dir, table, occupancy, events, dispatches);
@@ -87,9 +87,10 @@ ATTFileMgr::addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, ui
         file.read(buffer.data(), buffer.size());
     }
 
-    auto status = rocprofiler_thread_trace_decoder_codeobj_load(
+    auto status = rocprof_trace_decoder_codeobj_load(
         decoder, id, load_addr, memsize, buffer.data(), buffer.size());
-    ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Unable to load codeobj: " << filepath;
+    ROCP_ERROR_IF(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        << "Unable to load codeobj: " << filepath;
 
     codeobjs_to_delete.push_back(id);
     table->addDecoder(buffer.data(), buffer.size(), id, load_addr, memsize);
@@ -124,13 +125,14 @@ get_shader_id(const std::string& name)
     return std::stoi(std::string(stripped.substr(se_number_pos + 1)));
 }
 
-ATTDecoder::ATTDecoder(const std::string& path)
+ATTDecoder::ATTDecoder()
 {
-    auto status = rocprofiler_thread_trace_decoder_create(&decoder, path.c_str());
-    ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Error loading decoder: " << status;
+    auto status = rocprof_trace_decoder_create_handle(&decoder);
+    ROCP_FATAL_IF(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        << "Error creating decoder: " << status;
 };
 
-ATTDecoder::~ATTDecoder() { rocprofiler_thread_trace_decoder_destroy(decoder); }
+ATTDecoder::~ATTDecoder() { rocprof_trace_decoder_destroy_handle(decoder); }
 
 void
 ATTDecoder::parse(const Fspath&                       input_dir,

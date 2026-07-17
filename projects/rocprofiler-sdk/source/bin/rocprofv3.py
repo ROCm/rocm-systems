@@ -315,46 +315,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
     return val
 
 
-def get_att_paths(args):
-
-    ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
-    ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
-    if args.rocm_root is not None:
-        ROCM_DIR = os.path.abspath(args.rocm_root)
-
-    library_paths = []
-
-    if args.att_library_path:
-        library_paths.extend(args.att_library_path)
-    elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
-    else:
-        default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
-            f"{ROCM_DIR}/lib"
-        ]
-        for itr in default_lib_path_env:
-            if itr not in library_paths:
-                library_paths += [itr]
-
-    return library_paths
-
-
-def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
-
-    library_paths = get_att_paths(args)
-
-    for path in library_paths:
-        for root, dirs, files in os.walk(path, topdown=True):
-            for itr in files:
-                if att_lib_name in itr:
-                    args.att_library_path = resolve_library_path(
-                        root, args, is_sdk_lib=False
-                    )
-                    return True
-
-    return False
-
-
 class booleanArgAction(argparse.Action):
     def __call__(self, parser, args, value, option_string=None):
         setattr(args, self.dest, strtobool(value))
@@ -1136,13 +1096,6 @@ For attachment profiling of running processes:
         att_options,
         "--att-no-intercept",
         help="Enables ATT quick-scan mode without kernel-dispatch interception.",
-    )
-
-    att_options.add_argument(
-        "--att-library-path",
-        help="Search path to decoder library.",
-        default=None,
-        nargs="+",
     )
 
     att_options.add_argument(
@@ -2295,17 +2248,6 @@ def run(app_args, args, **kwargs):
                 args.att_gpu_index,
                 overwrite=True,
             )
-        if check_att_capability(args):
-            update_env(
-                "ROCPROF_ATT_LIBRARY_PATH",
-                args.att_library_path,
-                overwrite=True,
-            )
-        elif not args.att_no_intercept:
-            fatal_error(
-                f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
-            )
-
         if args.att_perfcounters:
             if args.pmc:
                 fatal_error("ATT perfcounters cannot be enabled with PMC")

@@ -27,14 +27,14 @@
 #define TOOL_VERSION_REV   0
 #define TOOL_VERSION       "3.1.0"
 
-#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
+#include <rocprof_trace_decoder/trace_decoder_types.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
 #include "lib/common/logging.hpp"
 
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 template <>
 struct std::hash<rocprofiler_thread_trace_decoder_pc_t>
@@ -44,6 +44,18 @@ struct std::hash<rocprofiler_thread_trace_decoder_pc_t>
         return (a.code_object_id << 32) ^ (a.code_object_id >> 32) ^ a.address;
     }
 };
+
+inline bool
+operator==(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
+{
+    return std::tie(lhs.code_object_id, lhs.address) == std::tie(rhs.code_object_id, rhs.address);
+}
+
+inline bool
+operator<(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
+{
+    return std::tie(lhs.code_object_id, lhs.address) < std::tie(rhs.code_object_id, rhs.address);
+}
 
 namespace rocprofiler
 {

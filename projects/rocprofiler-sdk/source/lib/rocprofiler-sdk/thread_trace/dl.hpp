@@ -23,36 +23,11 @@
 #pragma once
 
 #include "lib/aqlprofile/aqlprofile.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/trace_decoder_api.h"
 
 namespace rocprofiler
 {
 namespace thread_trace
 {
-class DL
-{
-    using ParseFn  = decltype(rocprof_trace_decoder_parse_data);
-    using InfoFn   = decltype(rocprof_trace_decoder_get_info_string);
-    using StatusFn = decltype(rocprof_trace_decoder_get_status_string);
-
-public:
-    DL(const char* libpath);
-    ~DL();
-    DL(DL&)        = delete;
-    DL(DL&& other) = delete;
-
-    bool valid() const
-    {
-        return handle != nullptr && att_parse_data_fn != nullptr && att_info_fn != nullptr &&
-               att_status_fn != nullptr;
-    };
-
-    ParseFn*  att_parse_data_fn = nullptr;
-    InfoFn*   att_info_fn       = nullptr;
-    StatusFn* att_status_fn     = nullptr;
-    void*     handle            = nullptr;
-};
-
 class AQLProfileDL
 {
     using GetBufferPacketsFn   = decltype(aqlprofile_att_get_buffer_packets);

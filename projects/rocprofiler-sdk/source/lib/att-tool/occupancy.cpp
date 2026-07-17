@@ -109,11 +109,11 @@ event_to_json(const trace_event_t& event)
         {"byte_offset", event.byte_offset},
     };
 
-    if(event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD ||
-       event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD)
+    if(event.type == ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD ||
+       event.type == ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD)
         json_event["code_object_id"] = event.payload.code_object_id;
 
-    if(event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CLUSTER_BARRIER)
+    if(event.type == ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BARRIER)
     {
         json_event["cluster_id"] = event.payload.cluster_barrier.cluster_id;
         json_event["barrier_id"] = event.payload.cluster_barrier.barrier_id;

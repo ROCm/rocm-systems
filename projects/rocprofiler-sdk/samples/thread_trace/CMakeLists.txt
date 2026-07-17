@@ -21,6 +21,7 @@ project(rocprofiler-sdk-samples-thread-trace LANGUAGES CXX HIP)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
+find_package(rocprof-trace-decoder 0.2 REQUIRED CONFIG)
 find_package(
     amd_comgr
     REQUIRED
@@ -55,32 +56,13 @@ target_link_libraries(
     thread-trace-sample
     PUBLIC rocprofiler-sdk::samples-build-flags
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr)
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr
+            rocprof-trace-decoder::rocprof-trace-decoder)
 
 add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
-
-set(IS_DISABLED ON)
-if(attdecoder_FOUND)
-    set(IS_DISABLED OFF)
-endif()
-
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
-list(APPEND PRELOAD_ENV "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}")
 
 set_tests_properties(
     thread-trace-sample PROPERTIES TIMEOUT 60 ENVIRONMENT "${PRELOAD_ENV}" LABELS
-                                   "samples;thread-trace" DISABLED ${IS_DISABLED})
+                                   "samples;thread-trace")

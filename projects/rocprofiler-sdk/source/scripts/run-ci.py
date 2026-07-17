@@ -573,7 +573,10 @@ def parse_args(args=None):
             ctest_args += ["-L", "tests"]
 
     if cdash_args.linter == "clang-tidy":
-        cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]
+        cmake_args += [
+            "-DROCPROFILER_ENABLE_CLANG_TIDY=ON",
+            "-DROCPROFILER_DISABLE_TRACE_DECODER=ON",
+        ]
 
     if (
         cdash_args.mode == "Nightly"

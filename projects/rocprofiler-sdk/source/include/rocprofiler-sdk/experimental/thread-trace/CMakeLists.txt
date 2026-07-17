@@ -1,5 +1,4 @@
-set(ROCPROFILER_EXPERIMENTAL_THREAD_TRACE_HEADER_FILES
-    core.h agent.h dispatch.h trace_decoder_types.h trace_decoder.h)
+set(ROCPROFILER_EXPERIMENTAL_THREAD_TRACE_HEADER_FILES core.h agent.h dispatch.h)
 
 install(
     FILES ${ROCPROFILER_EXPERIMENTAL_THREAD_TRACE_HEADER_FILES}

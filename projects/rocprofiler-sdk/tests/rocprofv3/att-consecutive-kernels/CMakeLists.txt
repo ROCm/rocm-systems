@@ -25,8 +25,6 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-include(FindPackageHandleStandardArgs)
-
 project(
     rocprofiler-sdk-tests-rocprofv3-att
     LANGUAGES CXX
@@ -41,26 +39,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
-
-set(IS_DISABLED ON)
-if(attdecoder_FOUND)
-    set(IS_DISABLED OFF)
-    set(ATT_LIB --att-library-path ${attdecoder_LIB_DIR})
-endif()
-
+set(IS_DISABLED OFF)
 if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
     set(IS_DISABLED ON)
 endif()
@@ -69,9 +48,9 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-consecutive-kernels
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${ATT_LIB} --att
-        --att-consecutive-kernels 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out
-        --log-level env -- $<TARGET_FILE:vector-ops>
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-consecutive-kernels 8 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --log-level env --
+        $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
