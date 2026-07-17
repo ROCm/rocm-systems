@@ -1138,7 +1138,6 @@ static constexpr uint32_t kLeg_flow_dir = 13;  // uint32 — FlowDirection: OUT=
 
 // DebugAnnotation (debug_annotation.proto)
 static constexpr uint32_t kAnn_name_iid = 1;   // uint64 interned name reference
-[[maybe_unused]] static constexpr uint32_t kAnn_uint = 3;  // uint64 uint_value
 static constexpr uint32_t kAnn_str_val  = 6;   // string string_value
 
 // InternedData (interned_data.proto) in TracePacket — string intern table
