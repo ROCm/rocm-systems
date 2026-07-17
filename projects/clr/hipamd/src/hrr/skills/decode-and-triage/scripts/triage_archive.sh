@@ -1,37 +1,24 @@
 #!/usr/bin/env bash
-# Decode + optional full replay + structured finding. Primary entry for agent triage.
+# HRR triage: optional GPU replay + structured finding. Sole agent entry point.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DECODE="$SCRIPT_DIR/decode_finding.sh"
-REPLAY="$SCRIPT_DIR/run_hrr_replay.sh"
+ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+ANALYZER="$SCRIPT_DIR/analyze_replay_finding.py"
+ENSURE="$SCRIPT_DIR/ensure_playback.sh"
+REPLAY_DOCKER="$SCRIPT_DIR/replay_docker.sh"
 
 ARCHIVE=""
-REPLAY_MODE="skip"   # skip | auto | native | docker
+REPLAY_MODE="auto"
 OUTPUT=""
 FORMAT="markdown"
-
-finding_ext() {
-  if [[ "$FORMAT" == "json" ]]; then
-    echo ".finding.json"
-  else
-    echo ".finding.md"
-  fi
-}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --archive) ARCHIVE="$2"; shift 2 ;;
     --replay)
-      if [[ $# -lt 2 || "$2" == --* ]]; then
-        REPLAY_MODE="native"
-        shift
-      else
-        REPLAY_MODE="$2"
-        shift 2
-      fi
-      ;;
+      if [[ $# -lt 2 || "$2" == --* ]]; then REPLAY_MODE="native"; shift
+      else REPLAY_MODE="$2"; shift 2; fi ;;
     --no-replay) REPLAY_MODE="skip"; shift ;;
     -o|--output) OUTPUT="$2"; shift 2 ;;
     --format) FORMAT="$2"; shift 2 ;;
@@ -48,66 +35,91 @@ ts="$(date -u +%Y%m%dT%H%M%SZ)"
 WORKDIR="${HRR_TRIAGE_WORKDIR:-$(pwd)}"
 mkdir -p "$WORKDIR"
 LOG=""
-FINDING=""
+ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
+FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
 
 pick_replay_mode() {
-  if [[ "$REPLAY_MODE" != "auto" ]]; then
-    echo "$REPLAY_MODE"
-    return
+  if [[ "$REPLAY_MODE" != "auto" ]]; then echo "$REPLAY_MODE"; return; fi
+  if [[ -n "${HRR_DOCKER_IMAGE:-}" ]]; then echo "docker"
+  elif [[ -r /dev/kfd ]]; then echo "native"
+  else echo "skip"; fi
+}
+
+setup_library_path() {
+  local play="$1" bin_dir lib_dirs=() p seen="" clr built=""
+  bin_dir="$(cd "$(dirname "$play")" && pwd)"
+  if [[ "$bin_dir" == *"/hipamd/src/hrr/playback" ]]; then
+    lib_dirs+=("$(cd "$bin_dir/../../../lib" && pwd)")
   fi
-  if [[ -r /dev/kfd ]]; then
-    # Prefer docker recipe when project script exists (MAF/vLLM captures).
-    local docker_script="${HRR_ROOT:-$WORKDIR}/scripts/maf-hrr-docker-playback.sh"
-    if [[ -f "$docker_script" ]] && command -v docker >/dev/null 2>&1; then
-      echo "docker"
-      return
-    fi
-    echo "native"
-    return
+  clr="$(cd "$SCRIPT_DIR/../../../../../" 2>/dev/null && pwd || true)"
+  for p in "${ROCR_LIB:-}" "${clr:+$clr/../rocr-runtime/build-local/rocr/lib}"; do
+    [[ -n "$p" && -f "$p/libhsa-runtime64.so.1" ]] || continue
+    lib_dirs+=("$p"); break
+  done
+  lib_dirs+=("$ROCM_PATH/lib")
+  for p in "${lib_dirs[@]}"; do
+    [[ -d "$p" ]] || continue
+    [[ ":$seen:" == *":$p:"* ]] && continue
+    seen="${seen:+$seen:}$p"
+    built="${built:+$built:}$p"
+  done
+  export LD_LIBRARY_PATH="${built}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH:-}}"
+}
+
+pick_gpu() {
+  [[ -n "${GPU:-}" ]] && { echo "$GPU"; return; }
+  if command -v rocm-smi >/dev/null 2>&1; then
+    local best="" best_free=-1 idx free
+    while read -r idx free; do
+      [[ -n "$idx" ]] || continue
+      (( free > best_free )) && { best_free=$free; best=$idx; }
+    done < <(rocm-smi --showmeminfo vram 2>/dev/null | awk '
+      /GPU\[/ { gsub(/[^0-9]/,"",$1); idx=$1 }
+      /Used Memory/ { used=$NF }
+      /Total Memory/ { total=$NF; if (idx!="") { print idx, total-used; idx="" } }')
+    [[ -n "$best" ]] && { echo "[triage] GPU $best (most free VRAM)" >&2; echo "$best"; return; }
   fi
-  echo "skip"
+  echo "0"
+}
+
+run_native_replay() {
+  local play="$1" log="$2" gpu
+  setup_library_path "$play"
+  gpu="$(pick_gpu)"
+  [[ -r /dev/kfd ]] || { echo "error: /dev/kfd not accessible" >&2; return 1; }
+  echo "[triage] native replay playback=$play GPU=$gpu" >&2
+  set +e
+  ROCR_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
+    "$play" "$ARCHIVE" 2>&1 | tee "$log"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  echo "[triage] native replay exit=$rc" >&2
+  return "$rc"
 }
 
 mode="$(pick_replay_mode)"
-echo "[triage_archive] archive=$ARCHIVE replay=$mode" >&2
+echo "[triage] archive=$ARCHIVE replay=$mode" >&2
 
-if [[ "$mode" == "docker" ]]; then
-  HRR_ROOT="${HRR_ROOT:-$WORKDIR}"
-  if [[ -z "${CLR_BUILD:-}" && -x "$SCRIPT_DIR/ensure_playback.sh" ]]; then
-    play="$("$SCRIPT_DIR/ensure_playback.sh")" || play=""
-    [[ -n "$play" ]] && export CLR_BUILD="$(cd "$(dirname "$play")/../../../.." && pwd)"
-  fi
-  export CLR_BUILD="${CLR_BUILD:-}"
-  LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
-  echo "[triage_archive] docker replay -> $LOG" >&2
-  set +e
-  if sudo -n true 2>/dev/null; then
-    sudo -n -E GPU="${GPU:-1}" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-      bash "$HRR_ROOT/scripts/maf-hrr-docker-playback.sh" "$ARCHIVE" \
-      2>&1 | tee "$LOG"
-  else
-    echo "error: docker replay requires passwordless sudo (sudo -n); use --replay native or --no-replay" >&2
+if [[ "$mode" != "skip" && -x "$ENSURE" ]]; then
+  HRR_PLAYBACK="$("$ENSURE" --build)" || {
+    echo "error: ensure_playback.sh --build failed (see SKILL.md; do not patch source)" >&2
     exit 1
-  fi
-  RC=${PIPESTATUS[0]}
-  set -e
-  echo "[triage_archive] replay exit=$RC" >&2
-elif [[ "$mode" == "native" ]]; then
-  LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
-  set +e
-  "$REPLAY" --archive "$ARCHIVE" --log "$LOG"
-  RC=$?
-  set -e
-  echo "[triage_archive] replay exit=$RC" >&2
-else
-  echo "[triage_archive] skipping GPU replay (no /dev/kfd or --no-replay)" >&2
+  }
+  export HRR_PLAYBACK
 fi
 
-FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}$(finding_ext)}"
-DECODE_ARGS=(--archive "$ARCHIVE" -o "$FINDING" --format "$FORMAT")
-[[ -n "$LOG" && -f "$LOG" ]] && DECODE_ARGS+=(--log "$LOG")
+if [[ "$mode" == "docker" ]]; then
+  LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
+  set +e; "$REPLAY_DOCKER" --archive "$ARCHIVE" --log "$LOG" --gpu "${GPU:-0}"; set -e
+elif [[ "$mode" == "native" ]]; then
+  LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
+  set +e; run_native_replay "$HRR_PLAYBACK" "$LOG"; set -e
+fi
 
-"$DECODE" "${DECODE_ARGS[@]}"
+CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
+[[ -n "${HRR_PLAYBACK:-}" ]] && CMD+=(--hrr-playback "$HRR_PLAYBACK")
+[[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
+"${CMD[@]}"
 
-echo "[triage_archive] finding=$FINDING" >&2
+echo "[triage] finding=$FINDING" >&2
 cat "$FINDING"

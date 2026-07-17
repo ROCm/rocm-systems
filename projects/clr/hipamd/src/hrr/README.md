@@ -62,7 +62,8 @@ export LD_LIBRARY_PATH=<clr-build>/hipamd/lib
 hrr-playback ./my_capture.hrr/pid-<pid>/
 ```
 
-or use a containerized replay that injects the matching HIP/HSA libraries (recommended when the host `/opt/rocm` install differs from the capture/build). The decode-and-triage skill supports `triage_archive.sh --replay docker` when a project docker script is available.
+Point `LD_LIBRARY_PATH` at the same `<clr-build>/hipamd/lib` used for capture when
+`/opt/rocm/lib` triggers a symbol/version mismatch.
 
 Useful flags when debugging a fault or hang: `--sync-after-launch`, `--sync-watchdog-ms N`, `--progress-seconds S`, `--trace-kernels`. See [Configuration reference](#configuration-reference) below.
 
