@@ -381,9 +381,9 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
     const auto& m       = gpu_pmc.metric_values;
     const auto& enabled = gpu_pmc.enabled_metric;
 
-    auto insert_scalar = [&](const char* name, const std::string& track, bool is_enabled,
-                             double value) {
-        insert_event_and_sample(is_enabled, name, track.c_str(), value);
+    auto insert_scalar = [&](const char* metric_name, const std::string& track,
+                             bool is_enabled, double value) {
+        insert_event_and_sample(is_enabled, metric_name, track.c_str(), value);
     };
 
     insert_scalar(trait::name<category::amd_smi_gfx_busy>::value,
@@ -429,8 +429,9 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
                 {
                     continue;
                 }
-                auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
-                insert_event_and_sample(true, name.c_str(), name.c_str(),
+                auto metric_name =
+                    format_name(static_cast<int>(xcp), static_cast<int>(i));
+                insert_event_and_sample(true, metric_name.c_str(), metric_name.c_str(),
                                         static_cast<double>(arr[i]));
             }
         }
