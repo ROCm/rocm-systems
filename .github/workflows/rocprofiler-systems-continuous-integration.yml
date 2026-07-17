@@ -119,7 +119,6 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
-            .gitmodules
           submodules: recursive
 
       - name: Setup Environment
