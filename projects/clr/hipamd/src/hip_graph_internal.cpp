@@ -2216,6 +2216,10 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
         }
       }
 
+      // Metadata-prefetch packets are kept parallel to dispatchPackets; the vector is
+      // empty when the gfx1250 prefetch path is inactive.
+      const bool hasMetadata = !packetBatch.dispatchMetadataPackets.empty();
+
       // Update dispatch packets (always update regardless of enabled state)
       // The enabled/disabled check happens during dispatch, not here
       for (size_t i = 0; i < range.packetCount && i < newPackets.size(); ++i) {
@@ -2224,7 +2228,7 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
         uint8_t* newPkt = newPackets[i];
         packetBatch.dispatchPackets[packetIndex] = newPkt;
         packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
-        if (packetIndex < packetBatch.dispatchMetadataPackets.size()) {
+        if (hasMetadata) {
           packetBatch.dispatchMetadataPackets[packetIndex] =
               (i < newMetadataPackets.size()) ? newMetadataPackets[i] : nullptr;
         }
