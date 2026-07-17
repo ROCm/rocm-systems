@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -86,6 +87,7 @@ namespace type_traits
 template <typename T>
 concept thread_state_policy = requires(state::thread::State state_to_set) {
     { T::scoped(state_to_set) };
+    { T::Internal } -> std::convertible_to<state::thread::State>;
 };
 }  // namespace type_traits
 
@@ -159,7 +161,7 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        auto _thread_state_guard = ThreadStatePolicy::scoped(state::thread::Internal);
+        auto _thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
@@ -183,7 +185,7 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        auto _thread_state_guard = ThreadStatePolicy::scoped(state::thread::Internal);
+        auto _thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard guard{ m_mutex };
 
         size_t _head = m_head;

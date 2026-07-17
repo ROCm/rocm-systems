@@ -7,8 +7,6 @@
 #include "logger/debug.hpp"
 #include "utility.hpp"
 
-#include <spdlog/fmt/bundled/base.h>
-#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <atomic>
@@ -152,7 +150,14 @@ public:
     using Mode          = mode::process;
     using CausalBackend = backend::causal;
     using CausalMode    = mode::process_causal;
-    using enum process_lifecycle;
+
+    // Explicit aliases instead of `using enum` — GCC added `using enum`
+    // support only in GCC 11; the CI matrix still builds with GCC 10.3.
+    static constexpr State PreInit   = State::PreInit;
+    static constexpr State Init      = State::Init;
+    static constexpr State Active    = State::Active;
+    static constexpr State Finalized = State::Finalized;
+    static constexpr State Disabled  = State::Disabled;
 
     process()                          = delete;
     process(const process&)            = delete;
@@ -201,7 +206,13 @@ class thread final
 {
 public:
     using State = thread_lifecycle;
-    using enum thread_lifecycle;
+
+    // Explicit aliases instead of `using enum` — GCC added `using enum`
+    // support only in GCC 11; the CI matrix still builds with GCC 10.3.
+    static constexpr State Enabled   = State::Enabled;
+    static constexpr State Internal  = State::Internal;
+    static constexpr State Completed = State::Completed;
+    static constexpr State Disabled  = State::Disabled;
 
     thread()                         = delete;
     thread(const thread&)            = delete;

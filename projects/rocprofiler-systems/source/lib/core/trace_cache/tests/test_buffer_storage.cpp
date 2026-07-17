@@ -100,6 +100,9 @@ std::unique_ptr<::testing::StrictMock<gmock_thread_state_policy_t>>
 
 struct mock_thread_state_policy_t
 {
+    static constexpr rocprofsys::state::thread::State Internal =
+        rocprofsys::state::thread::Internal;
+
     static mock_scoped_guard_t scoped(rocprofsys::state::thread::State state_to_set)
     {
         return g_mock_thread_state_policy->scoped(state_to_set);
