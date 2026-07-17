@@ -45,12 +45,18 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -58,6 +64,9 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include "core/inc/hotswap_gfx_query.hpp"
@@ -70,6 +79,11 @@ namespace {
 #ifdef ROCR_HOTSWAP_TESTING
 std::atomic<bool> g_force_retarget_code_object_failure_for_testing{false};
 #endif
+
+// Absolute path of the COMGR library actually loaded by GetComgrApi(), captured
+// once at load time and read by the disk cache to derive its toolchain salt.
+// Empty until COMGR is loaded (see EnsureComgrLoadedForSalt).
+std::string g_comgr_lib_path;
 
 constexpr char kGfx1250[] = "gfx1250";
 constexpr char kGfx1250B0Feature[] = ":gfx1250-b0-specific+";
@@ -249,7 +263,21 @@ ComgrApi* GetComgrApi() {
 
       if (ResolveComgrApi(lib, &api)) {
         ready = true;
-        HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", name);
+        // Resolve the absolute path the loader actually mapped so the disk
+        // cache salt's stat() can find it (a bare soname would not resolve).
+        // dladdr on a resolved symbol yields the real file; fall back to the
+        // candidate name only if that fails.
+#if !defined(_WIN32) && !defined(_WIN64)
+        Dl_info info = {};
+        g_comgr_lib_path =
+            (dladdr(reinterpret_cast<void*>(api.create_data), &info) != 0 &&
+             info.dli_fname && info.dli_fname[0] != '\0')
+                ? info.dli_fname
+                : name;
+#else
+        g_comgr_lib_path = name;
+#endif
+        HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", g_comgr_lib_path.c_str());
         return true;
       }
 
@@ -340,7 +368,416 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   return decision;
 }
 
+
+// -- Content hash for the disk-cache key (independent of the in-memory
+//    single-flight cache's internal content hashing). --------------------
+uint64_t FnvHash(const void* data, size_t size) {
+  constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
+  constexpr uint64_t kFnvPrime = 1099511628211ULL;
+  uint64_t hash = kFnvOffset;
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  for (size_t i = 0; i < size; ++i) {
+    hash ^= bytes[i];
+    hash *= kFnvPrime;
+  }
+  return hash;
+}
+
+uint64_t ComputeRetargetCacheKey(const void* elf_data, size_t elf_size,
+                                 const std::string& source_isa,
+                                 const std::string& target_isa,
+                                 bool entry_trampolines, bool strict_mode) {
+  uint64_t hash = FnvHash(elf_data, elf_size);
+  hash ^= FnvHash(source_isa.data(), source_isa.size()) * 31;
+  hash ^= FnvHash(target_isa.data(), target_isa.size()) * 37;
+  hash ^= entry_trampolines ? 0xDEADBEEF12345678ULL : 0x0ULL;
+  hash ^= strict_mode ? 0x9E3779B97F4A7C15ULL : 0x0ULL;
+  return hash;
+}
+
+
+
+#if !defined(_WIN32) && !defined(_WIN64)
+#define HOTSWAP_DISK_CACHE_SUPPORTED 1
+#else
+#define HOTSWAP_DISK_CACHE_SUPPORTED 0
+#endif
+
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+
+constexpr char kDiskCacheMagic[8] = {'H', 'S', 'H', 'O', 'T', 'S', 'W', '3'};
+constexpr uint32_t kDiskCacheFormatVersion = 1;
+
+struct DiskCacheHeader {
+  char magic[8];
+  uint32_t format_version;
+  uint32_t reserved;
+  uint64_t comgr_salt;
+  uint64_t payload_size;
+};
+// The header is written and read as a raw byte image; its layout must be
+// stable. 8 + 4 + 4 + 8 + 8 = 32 with no padding on any supported ABI.
+static_assert(sizeof(DiskCacheHeader) == 32,
+              "DiskCacheHeader layout must be exactly 32 bytes");
+
+bool IsDiskCacheDisabledByEnv() {
+  if (!os::IsEnvVarSet("HSA_HOTSWAP_DISK_CACHE")) {
+    return false;
+  }
+  std::string value = os::GetEnvVar("HSA_HOTSWAP_DISK_CACHE");
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return value == "0" || value == "off" || value == "false" || value == "no" ||
+         value == "n" || value == "f";
+}
+
+// Resolves the cache root directory, or "" if none is usable.
+std::string GetDiskCacheDir() {
+  if (os::IsEnvVarSet("HSA_HOTSWAP_CACHE_DIR")) {
+    const std::string dir = os::GetEnvVar("HSA_HOTSWAP_CACHE_DIR");
+    if (!dir.empty()) {
+      return dir;
+    }
+  }
+  if (os::IsEnvVarSet("XDG_CACHE_HOME")) {
+    const std::string base = os::GetEnvVar("XDG_CACHE_HOME");
+    if (!base.empty()) {
+      return base + "/rocm/hotswap";
+    }
+  }
+  if (os::IsEnvVarSet("HOME")) {
+    const std::string home = os::GetEnvVar("HOME");
+    if (!home.empty()) {
+      return home + "/.cache/rocm/hotswap";
+    }
+  }
+  return {};
+}
+
+// Ensures COMGR has been loaded so g_comgr_lib_path is populated before the
+// salt is derived. Without this, the first (cold) load computes the salt before
+// GetComgrApi() runs, persisting under a wrong/empty-path salt that later reads
+// (post-COMGR-load) never match. Returns true if a usable lib path is known.
+bool EnsureComgrLoadedForSalt() {
+  GetComgrApi();  // idempotent; populates g_comgr_lib_path on success
+  return !g_comgr_lib_path.empty();
+}
+
+// Derives a stable per-toolchain salt from the loaded COMGR library identity.
+// Returns 0 if the library path is unknown or cannot be stat'd, which callers
+// treat as "disk cache unavailable this run" rather than persisting unsalted.
+uint64_t ComgrIdentitySalt() {
+  if (g_comgr_lib_path.empty()) {
+    return 0;
+  }
+  struct stat st;
+  if (stat(g_comgr_lib_path.c_str(), &st) != 0) {
+    HOTSWAP_LOG("hotswap: disk cache disabled (cannot stat COMGR lib %s)\n",
+                g_comgr_lib_path.c_str());
+    return 0;
+  }
+  uint64_t salt = static_cast<uint64_t>(kDiskCacheFormatVersion) * 1000003ULL;
+  salt ^= FnvHash(g_comgr_lib_path.data(), g_comgr_lib_path.size());
+  salt ^= static_cast<uint64_t>(st.st_size) * 2654435761ULL;
+  salt ^= static_cast<uint64_t>(st.st_mtime) * 40503ULL;
+  // 0 is the "salt unavailable" sentinel used by callers; force any real salt
+  // to be nonzero so a valid toolchain can never masquerade as unavailable.
+  return salt == 0 ? 1 : salt;
+}
+
+// Recursive mkdir (like `mkdir -p`); tolerates existing dirs. Best-effort.
+bool MakeDirs(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  std::string partial;
+  partial.reserve(path.size());
+  for (size_t i = 0; i < path.size(); ++i) {
+    partial.push_back(path[i]);
+    const bool at_end = (i + 1 == path.size());
+    if (path[i] == '/' || at_end) {
+      if (partial == "/" || partial.empty()) {
+        continue;
+      }
+      if (mkdir(partial.c_str(), 0755) != 0 && errno != EEXIST) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+std::string ToHex(uint64_t v) {
+  char buf[17];
+  std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(v));
+  return std::string(buf);
+}
+
+std::string DiskCacheSubdir(const std::string& dir, uint64_t salt) {
+  return dir + "/" + ToHex(salt);
+}
+
+std::string DiskCachePath(const std::string& dir, uint64_t key, uint64_t salt) {
+  return DiskCacheSubdir(dir, salt) + "/" + ToHex(key) + ".co";
+}
+
+// Reads and validates a disk cache entry. On success returns the payload as a
+// shared buffer; on any mismatch or I/O failure returns nullptr (cold miss).
+std::shared_ptr<std::vector<uint8_t>> ReadDiskCache(const std::string& path,
+                                                    uint64_t salt) {
+  FILE* f = std::fopen(path.c_str(), "rb");
+  if (f == nullptr) {
+    return nullptr;
+  }
+  DiskCacheHeader header;
+  if (std::fread(&header, sizeof(header), 1, f) != 1) {
+    std::fclose(f);
+    return nullptr;
+  }
+  if (std::memcmp(header.magic, kDiskCacheMagic, sizeof(kDiskCacheMagic)) != 0 ||
+      header.format_version != kDiskCacheFormatVersion ||
+      header.comgr_salt != salt || header.payload_size == 0) {
+    std::fclose(f);
+    return nullptr;
+  }
+  // Bound the declared payload_size against the actual file size before
+  // allocating, so a corrupt/garbage header cannot drive a multi-TB malloc.
+  // The file must contain exactly header + payload_size bytes.
+  struct stat st;
+  if (fstat(fileno(f), &st) != 0 ||
+      static_cast<uint64_t>(st.st_size) !=
+          sizeof(DiskCacheHeader) + header.payload_size) {
+    std::fclose(f);
+    return nullptr;
+  }
+  std::shared_ptr<std::vector<uint8_t>> bytes;
+  try {
+    bytes = std::make_shared<std::vector<uint8_t>>(header.payload_size);
+  } catch (const std::bad_alloc&) {
+    std::fclose(f);
+    return nullptr;
+  }
+  const size_t read =
+      std::fread(bytes->data(), 1, header.payload_size, f);
+  std::fclose(f);
+  if (read != header.payload_size) {
+    return nullptr;
+  }
+  return bytes;
+}
+
+// Writes an entry atomically: header + payload to a unique temp file, then
+// rename() into place. Best-effort; removes the temp on any failure.
+void WriteDiskCache(const std::string& dir, uint64_t key, uint64_t salt,
+                    const std::vector<uint8_t>& payload) {
+  const std::string subdir = DiskCacheSubdir(dir, salt);
+  if (!MakeDirs(subdir)) {
+    HOTSWAP_LOG("hotswap: disk cache mkdir failed for %s\n", subdir.c_str());
+    return;
+  }
+  const std::string final_path = DiskCachePath(dir, key, salt);
+  // Temp name is unique per (pid, key, monotonic counter) so two writers in the
+  // same process (e.g. the async writer and a synchronous test hook) targeting
+  // the same key never share an in-progress temp file.
+  static std::atomic<uint64_t> tmp_counter{0};
+  const uint64_t uniq = tmp_counter.fetch_add(1, std::memory_order_relaxed);
+  // ".<pid>.<key:16>.<uniq:16>.tmp": up to 1+10+1+16+1+16+1+4 = 50 chars + NUL.
+  char tmp[64];
+  std::snprintf(tmp, sizeof(tmp), ".%d.%016llx.%016llx.tmp",
+                static_cast<int>(getpid()),
+                static_cast<unsigned long long>(key),
+                static_cast<unsigned long long>(uniq));
+  const std::string tmp_path = final_path + tmp;
+
+  FILE* f = std::fopen(tmp_path.c_str(), "wb");
+  if (f == nullptr) {
+    HOTSWAP_LOG("hotswap: disk cache tmp open failed for %s\n", tmp_path.c_str());
+    return;
+  }
+  DiskCacheHeader header;
+  std::memcpy(header.magic, kDiskCacheMagic, sizeof(kDiskCacheMagic));
+  header.format_version = kDiskCacheFormatVersion;
+  header.reserved = 0;
+  header.comgr_salt = salt;
+  header.payload_size = payload.size();
+
+  bool ok = std::fwrite(&header, sizeof(header), 1, f) == 1;
+  if (ok && !payload.empty()) {
+    ok = std::fwrite(payload.data(), 1, payload.size(), f) == payload.size();
+  }
+  // Flush libc buffers, then fsync the file's data to stable storage before the
+  // rename publishes it, so a crash can't expose a correctly-named but
+  // partially-written entry. (The directory entry from rename is not itself
+  // fsync'd, so the entry's existence isn't crash-durable; that's acceptable
+  // for a best-effort read-many cache — a lost entry is just a future miss.)
+  if (ok) {
+    ok = (std::fflush(f) == 0);
+  }
+  if (ok) {
+    ok = (fsync(fileno(f)) == 0);
+  }
+  std::fclose(f);
+  if (!ok) {
+    std::remove(tmp_path.c_str());
+    HOTSWAP_LOG("hotswap: disk cache write failed for %s\n", tmp_path.c_str());
+    return;
+  }
+  if (std::rename(tmp_path.c_str(), final_path.c_str()) != 0) {
+    std::remove(tmp_path.c_str());
+    HOTSWAP_LOG("hotswap: disk cache rename failed for %s\n", final_path.c_str());
+    return;
+  }
+  HOTSWAP_LOG("hotswap: disk cache stored key=0x%llx bytes=%zu\n",
+              static_cast<unsigned long long>(key), payload.size());
+}
+
+// -- Background disk writer (owned by ROCr Runtime lifecycle) -----------------
+//
+// A single writer thread drains a queue of pending writes so the ~6s disk
+// persist stays off the load critical path. Each task holds a shared_ptr to the
+// payload, so an in-memory eviction before the write completes cannot lose the
+// bytes. Started by HotswapCacheStartup() (Runtime::Load) and stopped by
+// HotswapCacheShutdown() (Runtime::Unload) using ROCr's standard
+// stop-flag + condition-variable pattern.
+//
+// The writer is compiled only into the real runtime, not the unit-test binary:
+// it depends on ROCr's os:: thread layer (core/util/lnx/os_linux.cpp), which
+// pulls in the full Runtime graph and is not linked by the standalone
+// hotswap_rewrite test. Unit tests exercise the disk format synchronously via
+// DiskCacheWriteForTesting/DiskCacheReadForTesting; the async writer path is
+// covered by the real hsa-runtime64 build and on-device runtime testing.
+struct DiskWriteTask {
+  std::string dir;
+  uint64_t key;
+  uint64_t salt;
+  std::shared_ptr<std::vector<uint8_t>> payload;
+};
+
+// Background writer that persists retarget results off the load critical path.
+//
+// Uses std::thread (not ROCr's os:: layer) so the identical code compiles and
+// runs in both the real runtime and the standalone hotswap_rewrite unit test —
+// the concurrency logic (drain-at-shutdown, enqueue/stop ordering) is therefore
+// directly unit-tested rather than only exercised on device.
+//
+// Synchronization uses a std::condition_variable so the wait predicate
+// (queue non-empty OR stopping) and every mutation of queue_/stopping_ share
+// mutex_ in a single critical section. Shutdown is race-free: no wakeup can be
+// lost, the cv/thread lifetimes are tied to the object, and any task enqueued
+// before the thread exits is guaranteed to be drained.
+class DiskWriter {
+ public:
+  ~DiskWriter() { Stop(); }
+
+  void Start() {
+    std::scoped_lock lock(mutex_);
+    if (running_) {
+      return;  // already started
+    }
+    stopping_ = false;
+    try {
+      thread_ = std::thread([this] { DrainLoop(); });
+      running_ = true;
+    } catch (const std::system_error&) {
+      HOTSWAP_LOG("hotswap: disk writer thread creation failed; writes disabled\n");
+    }
+  }
+
+  void Stop() {
+    {
+      std::scoped_lock lock(mutex_);
+      if (!running_) {
+        return;
+      }
+      // Signal shutdown under the lock, then notify: the drain loop's predicate
+      // is evaluated while holding mutex_, so this notify cannot be lost.
+      stopping_ = true;
+      cv_.notify_all();
+    }
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+    std::scoped_lock lock(mutex_);
+    running_ = false;
+    stopping_ = false;  // ready for a clean restart on a later Start()
+  }
+
+  // Enqueues a write. If the writer isn't running (creation failed, not
+  // started, or already stopping), silently drops the task — persistence is
+  // best-effort.
+  void Enqueue(DiskWriteTask task) {
+    std::scoped_lock lock(mutex_);
+    if (!running_ || stopping_) {
+      return;
+    }
+    try {
+      queue_.push_back(std::move(task));
+    } catch (const std::bad_alloc&) {
+      HOTSWAP_LOG("hotswap: disk write enqueue OOM; dropping task\n");
+      return;
+    }
+    cv_.notify_one();
+  }
+
+ private:
+  void DrainLoop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    for (;;) {
+      // Wait until there is work or we are stopping. Predicate + wait share the
+      // lock, so no enqueue/stop between the check and the wait can be missed.
+      cv_.wait(lock, [this] { return !queue_.empty() || stopping_; });
+
+      // Drain all queued tasks — even while stopping — so pending writes land.
+      while (!queue_.empty()) {
+        DiskWriteTask task = std::move(queue_.front());
+        queue_.pop_front();
+        lock.unlock();  // perform the large write without holding the lock
+        WriteDiskCache(task.dir, task.key, task.salt, *task.payload);
+        lock.lock();
+      }
+
+      // Exit only once the queue is fully drained AND shutdown was requested.
+      // A task enqueued during the unlocked write above is caught by the
+      // while-loop re-check before this test.
+      if (stopping_) {
+        return;
+      }
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::list<DiskWriteTask> queue_;
+  std::thread thread_;
+  bool running_ = false;
+  bool stopping_ = false;
+};
+
+DiskWriter& GetDiskWriter() {
+  static DiskWriter writer;
+  return writer;
+}
+
+#endif  // HOTSWAP_DISK_CACHE_SUPPORTED
+
+
 }  // namespace
+
+void HotswapCacheStartup() {
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+  if (IsDiskCacheDisabledByEnv()) {
+    return;
+  }
+  GetDiskWriter().Start();
+#endif
+}
+
+void HotswapCacheShutdown() {
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+  // Always safe to call: Stop() is a no-op if the writer was never started.
+  GetDiskWriter().Stop();
+#endif
+}
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size) {
   ComgrApi* api = GetComgrApi();
@@ -519,9 +956,74 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
 #endif
     const void* source_data = source_snapshot ? source_snapshot->data() : code_object.data;
     const size_t source_size = source_snapshot ? source_snapshot->size() : code_object.size;
-    return RetargetCodeObject(source_data, source_size, decision->source_isa.c_str(),
-                              decision->target_isa.c_str(), decision->request_entry_trampolines,
-                              decision->request_strict_mode, source_snapshot);
+
+    // This producer runs only on the single-flight leader, outside all cache
+    // mutexes, so the disk read/write below is coalesced across waiters and
+    // never serializes the in-memory cache.
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+    const uint64_t disk_key = ComputeRetargetCacheKey(
+        source_data, source_size, decision->source_isa, decision->target_isa,
+        decision->request_entry_trampolines, decision->request_strict_mode);
+    std::string disk_dir;
+    uint64_t salt = 0;
+    bool disk_ok = false;
+    if (!IsDiskCacheDisabledByEnv() && EnsureComgrLoadedForSalt()) {
+      disk_dir = GetDiskCacheDir();
+      salt = ComgrIdentitySalt();
+      disk_ok = (!disk_dir.empty() && salt != 0);
+    }
+
+    // Disk hit: build a RetargetedElf from the persisted bytes, WITHOUT COMGR.
+    // It must carry `source_snapshot` so GetOrCompute's snapshot-identity check
+    // accepts it.
+    if (disk_ok) {
+      std::shared_ptr<std::vector<uint8_t>> disk_bytes =
+          ReadDiskCache(DiskCachePath(disk_dir, disk_key, salt), salt);
+      if (disk_bytes) {
+        const size_t n = disk_bytes->size();
+        OwnedElfBuffer buf(std::malloc(n), &std::free);
+        if (buf) {
+          std::memcpy(buf.get(), disk_bytes->data(), n);
+          try {
+            RetargetedElfRef elf = std::make_shared<const RetargetedElf>(
+                std::move(buf), n, source_snapshot);
+            HOTSWAP_LOG("hotswap: disk cache hit key=0x%llx out=%zu\n",
+                        (unsigned long long)disk_key, n);
+            return {std::move(elf), RetargetError::kNone};
+          } catch (const std::bad_alloc&) {
+            // Fall through to a fresh COMGR retarget.
+          }
+        }
+      }
+    }
+#endif  // HOTSWAP_DISK_CACHE_SUPPORTED
+
+    RetargetOperationResult result =
+        RetargetCodeObject(source_data, source_size, decision->source_isa.c_str(),
+                           decision->target_isa.c_str(), decision->request_entry_trampolines,
+                           decision->request_strict_mode, source_snapshot);
+
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+    // Cold COMGR success: persist to disk on the background writer. The task
+    // owns its own copy of the bytes so its lifetime is independent of the
+    // RetargetedElf and the cache.
+    if (result.succeeded() && disk_ok) {
+      const auto* ebytes = static_cast<const uint8_t*>(result.elf->data());
+      const size_t esize = result.elf->size();
+      try {
+        DiskWriteTask task;
+        task.dir = disk_dir;
+        task.key = disk_key;
+        task.salt = salt;
+        task.payload =
+            std::make_shared<std::vector<uint8_t>>(ebytes, ebytes + esize);
+        GetDiskWriter().Enqueue(std::move(task));
+      } catch (const std::bad_alloc&) {
+        // Persistence is best-effort; skip on OOM.
+      }
+    }
+#endif  // HOTSWAP_DISK_CACHE_SUPPORTED
+    return result;
   };
 
   ContentRetargetCache* cache = code_object.retarget_cache;
@@ -655,6 +1157,75 @@ bool HotswapRewriteWithOptionsAvailableForTesting() {
 
 void ForceRetargetCodeObjectFailureForTesting(bool force) {
   g_force_retarget_code_object_failure_for_testing.store(force, std::memory_order_relaxed);
+}
+
+// Synchronously writes a disk cache entry under `dir` (bypasses the async
+// writer) so the disk format/salt/atomic-publish path can be tested directly.
+// Returns false if disk cache support is compiled out.
+bool DiskCacheWriteForTesting(const std::string& dir, uint64_t key,
+                              uint64_t salt,
+                              const std::vector<uint8_t>& payload) {
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+  WriteDiskCache(dir, key, salt, payload);
+  return true;
+#else
+  (void)dir; (void)key; (void)salt; (void)payload;
+  return false;
+#endif
+}
+
+// Reads a disk cache entry written under `dir`. Returns true and fills
+// `out_payload` on a validated hit; false on miss/mismatch/unsupported.
+bool DiskCacheReadForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+                            std::vector<uint8_t>* out_payload) {
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+  const std::string path = DiskCachePath(dir, key, salt);
+  std::shared_ptr<std::vector<uint8_t>> bytes = ReadDiskCache(path, salt);
+  if (!bytes) {
+    return false;
+  }
+  if (out_payload != nullptr) {
+    *out_payload = *bytes;
+  }
+  return true;
+#else
+  (void)dir; (void)key; (void)salt; (void)out_payload;
+  return false;
+#endif
+}
+
+// Drives the background DiskWriter directly: starts it, enqueues `n` writes of
+// `payload` under `dir` (keys 0..n-1, salt fixed), then Stop() which must drain
+// all pending writes before joining. Returns the number of entries that are
+// readable back afterward (should equal `n` if the drain-at-shutdown path is
+// correct). Exercises the real async writer concurrency logic.
+int DiskWriterDrainRoundTripForTesting(const std::string& dir, int n,
+                                       const std::vector<uint8_t>& payload) {
+#if HOTSWAP_DISK_CACHE_SUPPORTED
+  constexpr uint64_t kSalt = 0xA5A5A5A5A5A5A5A5ULL;
+  DiskWriter& writer = GetDiskWriter();
+  writer.Start();
+  for (int i = 0; i < n; ++i) {
+    DiskWriteTask task;
+    task.dir = dir;
+    task.key = static_cast<uint64_t>(i);
+    task.salt = kSalt;
+    task.payload = std::make_shared<std::vector<uint8_t>>(payload);
+    writer.Enqueue(std::move(task));
+  }
+  writer.Stop();  // must drain every enqueued task before returning
+  int found = 0;
+  for (int i = 0; i < n; ++i) {
+    if (ReadDiskCache(DiskCachePath(dir, static_cast<uint64_t>(i), kSalt),
+                      kSalt) != nullptr) {
+      ++found;
+    }
+  }
+  return found;
+#else
+  (void)dir; (void)n; (void)payload;
+  return -1;
+#endif
 }
 
 #endif

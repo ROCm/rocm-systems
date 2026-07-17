@@ -51,6 +51,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/inc/amd_hsa_loader.hpp"
 #include "inc/hsa.h"
@@ -273,6 +274,13 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_loaded_code_object_t* loaded_code_object,
     const LoadAgentCodeObjectCallbacks& callbacks);
 
+// Lifecycle hooks for the background disk-cache writer thread. Called by the
+// ROCr Runtime: HotswapCacheStartup() from Runtime::Load(), and
+// HotswapCacheShutdown() from Runtime::Unload(). Both are idempotent and safe
+// to call when the disk cache is unsupported/disabled (they become no-ops).
+void HotswapCacheStartup();
+void HotswapCacheShutdown();
+
 #ifdef ROCR_HOTSWAP_TESTING
 std::optional<RewriteDecision> DecideHotswapRewriteForTesting(const AgentGfxRevision& gfx,
                                                               const std::string& source_isa,
@@ -280,6 +288,19 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(const AgentGfxRevi
                                                               const RewriteOptions& options);
 bool HotswapRewriteWithOptionsAvailableForTesting();
 void ForceRetargetCodeObjectFailureForTesting(bool force);
+// Synchronously writes a disk cache entry under `dir` (bypasses the async
+// writer). Returns false if disk cache support is compiled out.
+bool DiskCacheWriteForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+                              const std::vector<uint8_t>& payload);
+// Reads a disk cache entry; returns true and fills `out_payload` on a validated
+// hit, false on miss/mismatch/unsupported.
+bool DiskCacheReadForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+                             std::vector<uint8_t>* out_payload);
+// Drives the async DiskWriter: start, enqueue `n` writes, Stop() (must drain
+// all before joining), then count readable-back entries. Returns that count
+// (== n if the drain-at-shutdown path is correct), or -1 if unsupported.
+int DiskWriterDrainRoundTripForTesting(const std::string& dir, int n,
+                                       const std::vector<uint8_t>& payload);
 #endif
 
 }  // namespace hotswap

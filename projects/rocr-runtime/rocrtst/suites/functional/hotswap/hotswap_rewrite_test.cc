@@ -28,9 +28,12 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -858,5 +861,187 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) 
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_TRUE(load.retained_owners.empty());
 }
+
+
+#if !defined(_WIN32) && !defined(_WIN64)
+namespace {
+int g_next_test_dir_counter = 0;
+
+// A temp dir that removes itself on scope exit, so the disk-cache tests never
+// leak /tmp/hotswap-disk-test-* directories. Naming follows the rocrtst
+// convention (/tmp/<name>_<pid>, cf. gpu_coredump.cc) plus a counter so tests
+// in the same process don't collide.
+class ScopedTempDir {
+ public:
+  ScopedTempDir()
+      : path_("/tmp/hotswap-disk-test-" +
+              std::to_string(static_cast<long>(::getpid())) + "-" +
+              std::to_string(g_next_test_dir_counter++)) {}
+  ~ScopedTempDir() {
+    std::error_code ec;
+    std::filesystem::remove_all(path_, ec);  // best-effort; ignore errors
+  }
+  const std::string& str() const { return path_; }
+
+ private:
+  std::string path_;
+};
+}  // namespace
+
+TEST(RetargetDiskCache, WriteThenReadRoundTrips) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, /*key=*/0xABC,
+                                                      /*salt=*/0x555, payload));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(
+      rocr::hotswap::DiskCacheReadForTesting(dir, 0xABC, 0x555, &out));
+  EXPECT_EQ(out, payload);
+}
+
+TEST(RetargetDiskCache, SaltMismatchIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {1, 2, 3, 4};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 0x1, 0xAAAA, payload));
+  // Reading with a different salt (simulating a toolchain change) must miss.
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xBBBB, &out));
+  // Correct salt still hits.
+  EXPECT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xAAAA, &out));
+}
+
+TEST(RetargetDiskCache, MissingEntryIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0xDEADBEEF, 0x1, &out));
+}
+
+TEST(RetargetDiskCache, DistinctKeysDoNotCollide) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> a = {0xAA, 0xAA};
+  std::vector<uint8_t> b = {0xBB, 0xBB, 0xBB};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 1, 0x9, a));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 2, 0x9, b));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 1, 0x9, &out));
+  EXPECT_EQ(out, a);
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 2, 0x9, &out));
+  EXPECT_EQ(out, b);
+}
+
+TEST(RetargetDiskCache, OverwriteSameKeyIsIdempotent) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> v1 = {1, 1, 1};
+  std::vector<uint8_t> v2 = {2, 2, 2, 2, 2};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v1));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v2));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 7, 0x3, &out));
+  EXPECT_EQ(out, v2);
+}
+
+// Exercises the real async DiskWriter: many enqueued writes must ALL be
+// persisted, including the drain-at-shutdown path in Stop(). This is the
+// concurrency logic the adversarial review flagged (lost-task-at-shutdown).
+TEST(RetargetDiskCache, AsyncWriterDrainsAllOnShutdown) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  // Enqueue many sizeable writes so a good fraction are still queued when Stop()
+  // is entered, exercising the drain-at-shutdown path rather than only the
+  // already-drained happy path.
+  std::vector<uint8_t> payload(64 * 1024, 0x7E);
+  constexpr int kN = 512;
+  const int found =
+      rocr::hotswap::DiskWriterDrainRoundTripForTesting(dir, kN, payload);
+  EXPECT_EQ(found, kN);  // every enqueued write survived start->enqueue->stop
+}
+
+// Integration: when the disk tier is consulted inside the single-flight
+// producer, a burst of concurrent readers of the same content coalesces onto
+// ONE producer, which does ONE disk read; the N-1 waiters share its result.
+// This proves disk I/O is single-flighted, not repeated per reader.
+TEST(RetargetDiskCache, DiskHitIsSingleFlighted) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+
+  // Pre-populate a disk entry the producer will read back.
+  constexpr uint64_t kKey = 0x1234ABCD;
+  constexpr uint64_t kSalt = 0x99887766ULL;
+  const std::vector<uint8_t> payload(4096, 0x5A);
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, kKey, kSalt, payload));
+
+  rocr::hotswap::ContentRetargetCache cache;
+  const rocr::hotswap::RetargetCacheKey key{
+      "amdgcn-amd-amdhsa--gfx1250:src", "amdgcn-amd-amdhsa--gfx1250:tgt", false,
+      false};
+  const std::vector<unsigned char> source(1024, 0x21);
+
+  constexpr int kThreads = 8;
+  std::atomic<int> disk_reads{0};
+  // Block the leader's producer until every other thread has registered as a
+  // waiter, so the burst genuinely coalesces (N-1 waiters) rather than letting
+  // the leader finish before the others enter and be served as ready hits.
+  std::atomic<bool> release_producer{false};
+  auto producer =
+      [&](const rocr::hotswap::SourceSnapshotRef& snapshot)
+      -> rocr::hotswap::RetargetOperationResult {
+    while (!release_producer.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    // The disk read the real producer would do; single-flight guarantees only
+    // the leader runs this.
+    std::vector<uint8_t> out;
+    const bool hit =
+        rocr::hotswap::DiskCacheReadForTesting(dir, kKey, kSalt, &out);
+    disk_reads.fetch_add(1, std::memory_order_relaxed);
+    if (!hit) return {{}, rocr::hotswap::RetargetError::kComgrFailure};
+    rocr::hotswap::OwnedElfBuffer bytes(std::malloc(out.size()), &std::free);
+    if (!bytes) return {{}, rocr::hotswap::RetargetError::kOutOfResources};
+    std::memcpy(bytes.get(), out.data(), out.size());
+    // MUST carry the snapshot so GetOrCompute's identity check accepts it.
+    return {std::make_shared<const rocr::hotswap::RetargetedElf>(
+                std::move(bytes), out.size(), snapshot),
+            rocr::hotswap::RetargetError::kNone};
+  };
+
+  std::vector<std::thread> threads;
+  std::vector<rocr::hotswap::RetargetOperationResult> results(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    threads.emplace_back([&, i] {
+      results[i] = cache.GetOrCompute(source.data(), source.size(),
+                                      /*reader_id=*/i + 1, key, producer);
+    });
+  }
+  // Wait until the leader is running the producer and the other N-1 threads have
+  // registered as waiters, then release the leader.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (cache.WaiterCountForTesting(source.data(), source.size(), key) <
+             static_cast<size_t>(kThreads - 1) &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  release_producer.store(true, std::memory_order_release);
+  for (auto& t : threads) t.join();
+
+  const rocr::hotswap::RetargetCacheMetrics metrics = cache.SnapshotMetrics();
+  EXPECT_EQ(disk_reads.load(std::memory_order_relaxed), 1);  // one disk read
+  EXPECT_EQ(metrics.producer_calls, 1u);
+  EXPECT_EQ(metrics.producer_failures, 0u);
+  EXPECT_EQ(metrics.coalesced_results, static_cast<uint64_t>(kThreads - 1));
+  const void* first = nullptr;
+  for (const auto& r : results) {
+    ASSERT_TRUE(r.succeeded());
+    if (!first) first = r.elf->data();
+    EXPECT_EQ(r.elf->data(), first);  // all share one buffer
+  }
+}
+#endif  // POSIX
+
 
 }  // namespace
