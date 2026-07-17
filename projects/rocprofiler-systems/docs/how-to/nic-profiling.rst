@@ -185,8 +185,8 @@ AI NIC metric collection requires ``ROCPROFSYS_BUILD_AINIC=ON`` at build time.
 This flag is set automatically when the AMD SMI library version is 26.3 or
 later and ``ROCPROFSYS_USE_AINIC=ON`` (the default).
 
-The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only registered when
-the binaries are compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their presence in
+The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only available when
+the ROCm Systems Profiler is compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their presence in
 the output of ``rocprof-sys-avail --settings`` is therefore a direct indicator
 of whether AI NIC support was compiled in. This check requires no AI NIC
 hardware.
