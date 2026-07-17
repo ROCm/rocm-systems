@@ -61,10 +61,11 @@ struct AgentGfxRevision;
 // Retargeted code objects are shared, not uniquely owned: a single retarget
 // result is handed to every agent that loads the same code object (e.g. all
 // GPUs in a multi-GPU job) and is simultaneously held by the in-memory retarget
-// cache, so consumers reference-count one buffer instead of each holding a
-// private copy. The loader consumes the ELF read-only (it copies segments out
-// into its own memory and applies relocations there), so sharing one immutable
-// buffer across concurrent loads is safe.
+// cache (and, when persisted, is the same buffer written to disk), so consumers
+// reference-count one buffer instead of each holding a private copy. The loader
+// consumes the ELF read-only (it copies segments out into its own memory and
+// applies relocations there), so sharing one immutable buffer across concurrent
+// loads is safe.
 using ElfBufferRef = std::shared_ptr<std::vector<uint8_t>>;
 
 struct CodeObjectView {
@@ -143,6 +144,19 @@ void RetainRewrittenElfBuffer(hsa_executable_t executable,
                               ElfBufferRef elf_buffer);
 void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
 
+// Lifecycle hooks for the background disk-cache writer thread. Called by the
+// ROCr Runtime: HotswapCacheStartup() from Runtime::Load(), and
+// HotswapCacheShutdown() from Runtime::Unload(). Both are idempotent and safe
+// to call when the disk cache is unsupported/disabled (they become no-ops).
+//
+// Fork note: like ROCr generally, the writer is not fork-safe. A child forked
+// while a write is in flight inherits a locked mutex and no writer thread; the
+// child must not call these or trigger a retarget until it re-inits the runtime
+// (Runtime::Unload/Load). HotswapCacheShutdown() in the child is unsafe if the
+// mutex was held at fork; a fresh Runtime init in the child starts a new writer.
+void HotswapCacheStartup();
+void HotswapCacheShutdown();
+
 #ifdef ROCR_HOTSWAP_TESTING
 std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
     const AgentGfxRevision& gfx, const std::string& source_isa,
@@ -152,6 +166,34 @@ bool HotswapRewriteWithOptionsAvailableForTesting();
 void ForceRetargetCodeObjectFailureForTesting(bool force);
 size_t RetargetCacheSizeForTesting();
 void ClearRetargetCacheForTesting();
+// Bytes currently held by the in-memory retarget cache.
+size_t RetargetCacheBytesForTesting();
+// Sets the in-memory cache byte budget and re-evicts to honor it immediately.
+void SetRetargetCacheByteBudgetForTesting(size_t budget);
+// Inserts a synthetic success entry of `size` zero-filled bytes under `key`.
+void PutSyntheticRetargetCacheEntryForTesting(uint64_t key, size_t size);
+// Inserts a failure sentinel (no buffer, consumes no budget) under `key`.
+void PutFailureRetargetCacheEntryForTesting(uint64_t key);
+// Returns true if `key` is currently resident in the in-memory cache.
+bool RetargetCacheContainsForTesting(uint64_t key);
+// Performs a real cache Get (refreshes LRU recency) for `key`; returns true on
+// a success hit and, if `out_bytes` is non-null, the shared buffer handle.
+bool RetargetCacheGetForTesting(uint64_t key,
+                                std::shared_ptr<std::vector<uint8_t>>* out_bytes);
+// Synchronously writes a disk cache entry under `dir` (bypasses the async
+// writer). Returns false if disk cache support is compiled out.
+bool DiskCacheWriteForTesting(const std::string& dir, uint64_t key,
+                              uint64_t salt,
+                              const std::vector<uint8_t>& payload);
+// Reads a disk cache entry; returns true and fills `out_payload` on a validated
+// hit, false on miss/mismatch/unsupported.
+bool DiskCacheReadForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+                             std::vector<uint8_t>* out_payload);
+// Drives the async DiskWriter: start, enqueue `n` writes, Stop() (must drain
+// all before joining), then count readable-back entries. Returns that count
+// (== n if the drain-at-shutdown path is correct), or -1 if unsupported.
+int DiskWriterDrainRoundTripForTesting(const std::string& dir, int n,
+                                       const std::vector<uint8_t>& payload);
 #endif
 
 }  // namespace hotswap

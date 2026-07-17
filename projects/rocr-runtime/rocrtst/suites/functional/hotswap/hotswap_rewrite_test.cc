@@ -22,9 +22,13 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 
+#include <filesystem>
+#include <memory>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -436,6 +440,7 @@ TEST(HotswapRewrite, RetargetInvalidCodeObjectFails) {
   const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
                                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                                     0x00, 0x00, 0x00, 0x00};
+
   const rocr::hotswap::ElfBufferRef rewritten_elf_buffer =
       rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), kGfx1250Isa,
                                         kGfx1250Isa);
@@ -762,8 +767,8 @@ TEST(HotswapRewrite, CachedLoadsShareOneBufferNoCopy) {
   rocr::hotswap::ClearRetargetCacheForTesting();
   ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
 
-  // First load populates the cache and records the buffer pointer handed to the
-  // loader. Keep the executable's retained reference alive for the comparison.
+  // First load populates the in-memory cache and records the buffer pointer
+  // handed to the loader. Keep the executable's retained reference alive.
   const hsa_executable_t exec_a = MakeTestExecutable(0x610);
   LoadRecorder load_a;
   ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(
@@ -773,8 +778,8 @@ TEST(HotswapRewrite, CachedLoadsShareOneBufferNoCopy) {
   ASSERT_EQ(load_a.calls.size(), 1u);
   ASSERT_EQ(load_a.calls[0].path, LoadPath::kRewritten);
 
-  // Second load of the identical code object hits the cache. With zero-copy
-  // sharing the loader must receive the SAME buffer pointer, not a fresh copy.
+  // Second load of the identical code object hits the in-memory cache. With
+  // zero-copy sharing the loader must receive the SAME buffer pointer.
   const hsa_executable_t exec_b = MakeTestExecutable(0x611);
   LoadRecorder load_b;
   ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(
@@ -784,12 +789,8 @@ TEST(HotswapRewrite, CachedLoadsShareOneBufferNoCopy) {
   ASSERT_EQ(load_b.calls.size(), 1u);
   ASSERT_EQ(load_b.calls[0].path, LoadPath::kRewritten);
 
-  // Same underlying buffer (shared, not copied) and equal size.
   EXPECT_EQ(load_a.calls[0].code_object, load_b.calls[0].code_object);
   EXPECT_EQ(load_a.calls[0].code_object_size, load_b.calls[0].code_object_size);
-
-  // Both executables retain a reference to that one buffer; it stays valid until
-  // the last executable releases it.
   EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(exec_a), 1u);
   EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(exec_b), 1u);
   rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(exec_a);
@@ -852,5 +853,237 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) 
   EXPECT_EQ(
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
+
+// --- In-memory LRU byte-budget cache unit tests -----------------------------
+//
+// These exercise the RetargetCache eviction/accounting logic directly through
+// synthetic-entry hooks; they need neither a real code object nor COMGR.
+
+namespace {
+// Restores an empty cache and a large budget so a test's synthetic budget
+// changes do not leak into unrelated tests.
+void ResetRetargetCacheForBudgetTest() {
+  rocr::hotswap::ClearRetargetCacheForTesting();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(
+      static_cast<size_t>(1) << 40);  // 1 TiB — effectively unbounded for tests
+}
+}  // namespace
+
+TEST(RetargetCacheLru, TracksBytesAndSize) {
+  ResetRetargetCacheForBudgetTest();
+  ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+  ASSERT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 0u);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 250);
+
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 2u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 350u);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, EvictsLeastRecentlyUsedWhenOverBudget) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);  // LRU
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);  // MRU, total=300
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 3u);
+
+  // Inserting a 4th 100-byte entry pushes total to 400 > 300; key 1 (LRU) goes.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 300u);
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(3));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(4));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, AccessRefreshesRecency) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);
+
+  // Touch key 1 so it is now most-recently-used; key 2 becomes the LRU.
+  std::shared_ptr<std::vector<uint8_t>> bytes;
+  ASSERT_TRUE(rocr::hotswap::RetargetCacheGetForTesting(1, &bytes));
+
+  // Insert a 4th entry: key 2 (now LRU) should be evicted, key 1 retained.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(3));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(4));
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, OversizedEntryIsRetainedAlone) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+
+  // A single entry larger than the whole budget still gets stored (everything
+  // else is evicted); refusing it would force a COMGR re-run on every load.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 5000);
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(2));
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 5000u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, ReplacingKeyUpdatesBytesNotCount) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(1, 400);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 400u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, ZeroBudgetIsUnbounded) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(0);
+  for (uint64_t k = 1; k <= 50; ++k) {
+    rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(k, 1000);
+  }
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 50u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 50000u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+TEST(RetargetCacheLru, FailureSentinelConsumesNoBytesButParticipatesInLru) {
+  ResetRetargetCacheForBudgetTest();
+  rocr::hotswap::SetRetargetCacheByteBudgetForTesting(300);
+
+  // A cached failure holds no buffer: it counts toward entry count/LRU order
+  // but not toward the byte budget.
+  rocr::hotswap::PutFailureRetargetCacheEntryForTesting(1);  // LRU, 0 bytes
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 0u);
+  EXPECT_TRUE(rocr::hotswap::RetargetCacheContainsForTesting(1));
+
+  // Fill the byte budget with success entries; the failure sentinel is the LRU
+  // tail and must be evicted first when we go over budget.
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(2, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(3, 100);
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(4, 100);  // total=300
+  rocr::hotswap::PutSyntheticRetargetCacheEntryForTesting(5, 100);  // over -> evict LRU
+
+  EXPECT_FALSE(rocr::hotswap::RetargetCacheContainsForTesting(1));  // sentinel gone
+  EXPECT_EQ(rocr::hotswap::RetargetCacheBytesForTesting(), 300u);
+  ResetRetargetCacheForBudgetTest();
+}
+
+// --- Disk tier round-trip unit tests (POSIX only) ---------------------------
+//
+// Exercise the disk write/read format, salt validation, and atomic publish in
+// isolation via the synchronous testing hooks. No COMGR or device needed.
+
+#if !defined(_WIN32) && !defined(_WIN64)
+namespace {
+int g_next_test_dir_counter = 0;
+
+// A temp dir that removes itself on scope exit, so the disk-cache tests never
+// leak /tmp/hotswap-disk-test-* directories. Naming follows the rocrtst
+// convention (/tmp/<name>_<pid>, cf. gpu_coredump.cc) plus a counter so tests
+// in the same process don't collide.
+class ScopedTempDir {
+ public:
+  ScopedTempDir()
+      : path_("/tmp/hotswap-disk-test-" +
+              std::to_string(static_cast<long>(::getpid())) + "-" +
+              std::to_string(g_next_test_dir_counter++)) {}
+  ~ScopedTempDir() {
+    std::error_code ec;
+    std::filesystem::remove_all(path_, ec);  // best-effort; ignore errors
+  }
+  const std::string& str() const { return path_; }
+
+ private:
+  std::string path_;
+};
+}  // namespace
+
+TEST(RetargetDiskCache, WriteThenReadRoundTrips) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, /*key=*/0xABC,
+                                                      /*salt=*/0x555, payload));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(
+      rocr::hotswap::DiskCacheReadForTesting(dir, 0xABC, 0x555, &out));
+  EXPECT_EQ(out, payload);
+}
+
+TEST(RetargetDiskCache, SaltMismatchIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> payload = {1, 2, 3, 4};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 0x1, 0xAAAA, payload));
+  // Reading with a different salt (simulating a toolchain change) must miss.
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xBBBB, &out));
+  // Correct salt still hits.
+  EXPECT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xAAAA, &out));
+}
+
+TEST(RetargetDiskCache, MissingEntryIsMiss) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0xDEADBEEF, 0x1, &out));
+}
+
+TEST(RetargetDiskCache, DistinctKeysDoNotCollide) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> a = {0xAA, 0xAA};
+  std::vector<uint8_t> b = {0xBB, 0xBB, 0xBB};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 1, 0x9, a));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 2, 0x9, b));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 1, 0x9, &out));
+  EXPECT_EQ(out, a);
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 2, 0x9, &out));
+  EXPECT_EQ(out, b);
+}
+
+TEST(RetargetDiskCache, OverwriteSameKeyIsIdempotent) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  std::vector<uint8_t> v1 = {1, 1, 1};
+  std::vector<uint8_t> v2 = {2, 2, 2, 2, 2};
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v1));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v2));
+  std::vector<uint8_t> out;
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 7, 0x3, &out));
+  EXPECT_EQ(out, v2);
+}
+
+// Exercises the real async DiskWriter: many enqueued writes must ALL be
+// persisted, including the drain-at-shutdown path in Stop(). This is the
+// concurrency logic the adversarial review flagged (lost-task-at-shutdown).
+TEST(RetargetDiskCache, AsyncWriterDrainsAllOnShutdown) {
+  ScopedTempDir tmp;
+  const std::string& dir = tmp.str();
+  // Enqueue many sizeable writes so a good fraction are still queued when Stop()
+  // is entered, exercising the drain-at-shutdown path rather than only the
+  // already-drained happy path.
+  std::vector<uint8_t> payload(64 * 1024, 0x7E);
+  constexpr int kN = 512;
+  const int found =
+      rocr::hotswap::DiskWriterDrainRoundTripForTesting(dir, kN, payload);
+  EXPECT_EQ(found, kN);  // every enqueued write survived start->enqueue->stop
+}
+#endif  // POSIX
 
 }  // namespace
