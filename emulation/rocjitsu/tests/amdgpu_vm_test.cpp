@@ -1210,19 +1210,22 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   ASSERT_NO_THROW(f.engine->run());
 
   amdgpu::Wavefront *wf = nullptr;
+  amdgpu::ComputeUnitCore *active_cu = nullptr;
   for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
     auto *cu = f.cu(cu_idx);
     for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
       if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+        active_cu = cu;
         wf = cu->wf(wf_idx);
         break;
       }
     }
   }
   ASSERT_NE(wf, nullptr);
+  ASSERT_NE(active_cu, nullptr);
   ASSERT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
   EXPECT_EQ(wf->lds().read32(kAddress), kValue);
-  EXPECT_EQ(wf->cu().read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
+  EXPECT_EQ(active_cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
 }
 
 struct ExecFixture {

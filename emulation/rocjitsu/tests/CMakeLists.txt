@@ -356,6 +356,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    register_access_test.cpp
     instruction_execution_harness_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp

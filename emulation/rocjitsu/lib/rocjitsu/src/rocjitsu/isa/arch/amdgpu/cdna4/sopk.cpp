@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -240,12 +241,12 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(sdst);
   uint32_t imm =
       static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_)));
   uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);
   uint32_t result = static_cast<uint32_t>(wide);
-  sdst.write_scalar(wf, result);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
   wf.write_scc(wide > 0xFFFFFFFFu);
 }
 
@@ -319,7 +320,7 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  sdst.write_scalar(wf, (reg_val >> offset) & mask);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, (reg_val >> offset) & mask);
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
@@ -347,7 +348,7 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = sdst.read_scalar(wf);
+  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
   switch (reg_id) {
   case 1: {
     uint32_t s = wf.status_raw();
@@ -415,7 +416,7 @@ std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
 }
 
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar64(wf, wf.pc + size_);
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }

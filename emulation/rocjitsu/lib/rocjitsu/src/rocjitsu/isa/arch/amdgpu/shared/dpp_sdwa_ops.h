@@ -17,6 +17,7 @@
 
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <bit>
@@ -326,10 +327,13 @@ inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint
   auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
   uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
+  RegisterAccess regs(cu);
+  auto src_region = regs.read_vgpr_region(vbase, 1, lane_mask);
   uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
+    raw[i] = src_region.lane(0, i);
   for (uint32_t i = 0; i < ws; ++i)
     result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
                          bank_mask, bound_ctrl, fi, raw[i], exec_mask);
@@ -357,10 +361,13 @@ inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
   auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
   uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
+  RegisterAccess regs(cu);
+  auto src_region = regs.read_vgpr_region(vbase, 1, lane_mask);
   uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
+    raw[i] = src_region.lane(0, i);
   for (uint32_t lane = 0; lane < ws; ++lane)
     result[lane] = dpp8_read(raw, lane, ws, lane_sel, fi, exec_mask);
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
