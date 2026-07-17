@@ -174,4 +174,4 @@ Runs `hrr-playback --info` (when available) and the parser. Does **not** run ful
 
 ## Knobs (replay / capture)
 
-Environment variables and CLI flags are documented in [DESIGN.md](../../DESIGN.md) (playback options, `HIP_HRR_REPLAY_*`, D2H tolerance, alloc padding). Formal knob reference + tests are tracked as **R9** in the productization roadmap.
+Environment variables and CLI flags are documented in [DESIGN.md](../../DESIGN.md) (playback options, `HIP_HRR_REPLAY_*`, D2H tolerance, alloc padding).

@@ -16,7 +16,7 @@
 
 The user does not mention scripts, `HRR_PLAYBACK`, or GPU numbers.
 
-## What the agent does (A1 read-only)
+## What the agent does
 
 1. Resolves `pid-1842` (or largest `events.bin` if only root given)
 2. Finds `hrr-playback` for `--info` (PATH → `$ROCM_PATH/bin` → user path)
@@ -69,4 +69,4 @@ Agent sets `HRR_PLAYBACK=/home/me/rocm-build/hrr-playback` for that session and 
 
 ## When the user asks for full replay
 
-That is outside A1 (read-only). Point them to [README.md](../../README.md) § Replay on GPU, or run `hrr-playback <archive>` separately, then feed the resulting log back into this skill.
+That is outside the default read-only path. Point them to [README.md](../../README.md) § Replay on GPU, or run `hrr-playback <archive>` separately, then feed the resulting log back into this skill.

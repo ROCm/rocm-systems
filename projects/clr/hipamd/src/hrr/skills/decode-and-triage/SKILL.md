@@ -9,7 +9,7 @@ description: >-
   (capture.hrr, pid-*, hrr-playback, memory access fault).
 ---
 
-# HRR Decode & Triage (A1)
+# HRR Decode & Triage
 
 Decode an HRR archive, optionally replay it on GPU, and produce a structured **Finding** plus a **capture explainer**. **Always print the finding summary in your chat reply** — the user must not need to open a file.
 
