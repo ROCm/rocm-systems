@@ -908,10 +908,21 @@ void GpuAgent::InitDma() {
     return queue;
   };
 
+  // Enable profiling on the internal blit copy queues right after creation so that
+  // copy completion timestamps are always available regardless of when async-copy
+  // profiling is later turned on (e.g. a profiler attaching after copies have run).
   // Dedicated compute queue for host-to-device blits.
-  queues_[QueueBlitOnly].reset(queue_lambda);
+  queues_[QueueBlitOnly].reset([queue_lambda]() {
+    auto queue = queue_lambda();
+    queue->SetProfiling(true);
+    return queue;
+  });
   // Share utility queue with device-to-host blits.
-  queues_[QueueUtility].reset(queue_lambda);
+  queues_[QueueUtility].reset([queue_lambda]() {
+    auto queue = queue_lambda();
+    queue->SetProfiling(true);
+    return queue;
+  });
 
   // Dedicated compute queue for PC Sampling CP-DMA commands. We need a dedicated queue that runs at
   // highest priority because we do not want the CP-DMA commands to be delayed/blocked due to
