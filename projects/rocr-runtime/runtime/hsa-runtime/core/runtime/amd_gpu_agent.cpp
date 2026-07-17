@@ -64,6 +64,7 @@
 #include "core/inc/default_signal.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/isa.h"
+#include "core/inc/hotswap_env.hpp"
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
 #include "core/util/atomic_helpers.h"
@@ -74,6 +75,10 @@
 #include "core/inc/amd_trap_handler_v1.h"
 #include "core/inc/amd_blit_shaders.h"
 #include "core/inc/hsa_api_trace_int.h"
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+#include "loader/executable.hpp"
+#include "loader/hotswap_kernel_registry.h"
+#endif
 // Generated header
 #include "amd_trap_handler_v2.h"
 #include "amd_blit_shaders_v2.h"
@@ -113,6 +118,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_bus_width_(0),
       memory_max_frequency_(0),
       enum_index_(index),
+      isa_(nullptr),
+      presented_isa_(nullptr),
       ape1_base_(0),
       pending_copy_req_ref_(0),
       pending_copy_stat_check_ref_(0),
@@ -187,36 +194,69 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                       : core::IsaFeature::Disabled;
   }
 
-  const core::Isa* isa;
   if (node_props.OverrideEngineId.Value != 0) {
-    isa = core::IsaRegistry::GetIsa(
+    isa_ = core::IsaRegistry::GetIsa(
           core::Isa::Version(node_props.OverrideEngineId.ui32.Major, node_props.OverrideEngineId.ui32.Minor,
                              node_props.OverrideEngineId.ui32.Stepping), sramecc, xnack);
   } else {
   // Set instruction set architecture via node property, only on GPU device.
-    isa = core::IsaRegistry::GetIsa(
+    isa_ = core::IsaRegistry::GetIsa(
           core::Isa::Version(node_props.EngineId.ui32.Major, node_props.EngineId.ui32.Minor,
                              node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
-  assert(isa != nullptr && "ISA registry inconsistency.");
+  assert(isa_ != nullptr && "ISA registry inconsistency.");
 
-  supported_isas_.push_back(isa);
+  supported_isas_.push_back(isa_);
   if (!supported_isas_[0]->GetIsaGeneric().empty()) {
     supported_isas_.push_back(core::IsaRegistry::GetIsa(supported_isas_[0]->GetIsaGeneric()));
   }
 
-  if (supported_isas_[0]->GetMajorVersion() == 12 && supported_isas_[0]->GetMinorVersion() >= 5) {
+  const char *PresentIsa = std::getenv("HSA_HOTSWAP_PRESENT_ISA");
+  const bool PresentIsaRequested =
+      !rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE") &&
+      rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_PRESENT_ISA");
+#ifndef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (PresentIsaRequested) {
+    throw AMD::hsa_exception(
+        HSA_STATUS_ERROR_INVALID_ISA,
+        "Agent creation failed.\n"
+        "HSA_HOTSWAP_PRESENT_ISA requires ROCR_HOTSWAP_COMGR_ADAPTER.\n");
+  }
+#else
+  if (PresentIsaRequested) {
+    std::string PresentName(PresentIsa);
+    if (PresentName.rfind("amdgcn-amd-amdhsa--", 0) != 0)
+      PresentName = "amdgcn-amd-amdhsa--" + PresentName;
+    presented_isa_ = core::IsaRegistry::GetIsa(PresentName);
+    if (!presented_isa_) {
+      throw AMD::hsa_exception(
+          HSA_STATUS_ERROR_INVALID_ISA,
+          "Agent creation failed.\nHSA_HOTSWAP_PRESENT_ISA is not supported.\n");
+    }
+    presented_isas_.push_back(presented_isa_);
+    if (!presented_isa_->GetIsaGeneric().empty()) {
+      const core::Isa *GenericIsa = core::IsaRegistry::GetIsa(presented_isa_->GetIsaGeneric());
+      if (GenericIsa)
+        presented_isas_.push_back(GenericIsa);
+    }
+  }
+#endif
+
+  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
     extended_aql_dispatch_supported_ = true;
     workgroup_clusters_supported_ = true;
   }
+
+  if (isa_->GetMajorVersion() >= 12)
+    kern_cluster_max_dim_ = { UINT32_MAX, UINT16_MAX, UINT16_MAX };
 
   if (workgroup_clusters_supported_) {
     const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
     cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
-  max_wave_scratch_ = (supported_isas_[0]->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
+  max_wave_scratch_ = (isa_->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
 
   current_coherency_type((profile_ == HSA_PROFILE_FULL)
                              ? HSA_AMD_COHERENCY_TYPE_COHERENT
@@ -380,7 +420,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
 
   ASICShader* asic_shader = NULL;
 
-  switch (supported_isas()[0]->GetMajorVersion()) {
+  switch (isa_->GetMajorVersion()) {
     case 7:
       asic_shader = &compiled_shader_it->second.compute_7;
       break;
@@ -388,28 +428,28 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       asic_shader = &compiled_shader_it->second.compute_8;
       break;
     case 9:
-      if((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
+      if ((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
-      } else if(supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5) {
+      } else if (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5) {
         asic_shader = &compiled_shader_it->second.compute_942;
       } else {
         asic_shader = &compiled_shader_it->second.compute_9;
       }
       break;
     case 10:
-      if(supported_isas()[0]->GetMinorVersion() == 1)
+      if (isa_->GetMinorVersion() == 1)
         asic_shader = &compiled_shader_it->second.compute_1010;
       else
         asic_shader = &compiled_shader_it->second.compute_10;
       break;
     case 11:
-        asic_shader = &compiled_shader_it->second.compute_11;
+      asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        if(supported_isas()[0]->GetMinorVersion() >= 5)
-          asic_shader = &compiled_shader_it->second.compute_1250;
-        else
-          asic_shader = &compiled_shader_it->second.compute_12;
+      if (isa_->GetMinorVersion() >= 5)
+        asic_shader = &compiled_shader_it->second.compute_1250;
+      else
+        asic_shader = &compiled_shader_it->second.compute_12;
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
@@ -450,7 +490,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     // ENABLE_WAVEFRONT_SIZE32 must match the wavefront size used to compile blit shaders.
     AMD_HSA_BITS_SET(header->kernel_code_properties,
                      AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32,
-                     supported_isas()[0]->GetWavefront().IsWavefrontSize64() ? 0 : 1);
+                     isa_->GetWavefront().IsWavefrontSize64() ? 0 : 1);
     AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
                      AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT,
                      gran_sgprs);
@@ -467,9 +507,9 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
                      AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
     // gfx90a, gfx942, gfx950
-    if ((supported_isas()[0]->GetMajorVersion() == 9) &&
-        (((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) ||
-        (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5))) {
+    if ((isa_->GetMajorVersion() == 9) &&
+        (((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) ||
+        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
       // Program COMPUTE_PGM_RSRC3.ACCUM_OFFSET for 0 ACC VGPRs on gfx90a.
       // FIXME: Assemble code objects from source at build time
       int gran_accvgprs = ((gran_vgprs + 1) * 8) / 4 - 1;
@@ -514,7 +554,7 @@ void GpuAgent::InitRegionList() {
 
           if (region->IsLocalMemory()) {
             // Extended Fine-Grain memory
-            if (!(supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() == 0))
+            if (!(isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() == 0))
               regions_.push_back(
                   std::make_shared<MemoryRegion>(false, false, false, true, true, this, mem_props[mem_idx]));
 
@@ -725,7 +765,9 @@ hsa_status_t GpuAgent::IterateSupportedIsas(
                     hsa_status_t (*callback)(hsa_isa_t isa, void* data),
                                                           void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
-  for (const auto& isa : supported_isas()) {
+  const auto& PublicIsas =
+      presented_isas_.empty() ? supported_isas_ : presented_isas_;
+  for (const auto& isa : PublicIsas) {
     hsa_status_t stat = call(core::Isa::Handle(isa), data);
     if (stat != HSA_STATUS_SUCCESS) return stat;
   }
@@ -817,23 +859,23 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
    */
   auto isDXG = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
 
-  switch (supported_isas()[0]->GetMajorVersion()) {
+  switch (isa_->GetMajorVersion()) {
     case 9:
       sdma = new BlitSdmaV4();
-      copy_size_override = (supported_isas()[0]->GetMinorVersion() >= 4 ||
-                            (supported_isas()[0]->GetMinorVersion() == 0 && supported_isas()[0]->GetStepping() == 10)) ?
+      copy_size_override = (isa_->GetMinorVersion() >= 4 ||
+                            (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10)) ?
                             copy_size_overrides[1] : copy_size_overrides[0];
       break;
     case 10:
       sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
-      copy_size_override = supported_isas()[0]->GetMinorVersion() < 3 ? copy_size_overrides[0] :
+      copy_size_override = isa_->GetMinorVersion() < 3 ? copy_size_overrides[0] :
                                                          copy_size_overrides[1];
       break;
     case 11:
     case 12:
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
-      } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
+      } else if (isa_->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
       } else {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV5());
@@ -923,19 +965,19 @@ void GpuAgent::InitDma() {
 
     // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
     bool use_sdma =
-        ((supported_isas()[0]->GetMajorVersion() != 8) && (supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3)));
+        ((isa_->GetMajorVersion() != 8) && (isa_->GetVersion() != std::make_tuple(10, 1, 3)));
     if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
 
     if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
       // On gfx90a ensure that HostToDevice queue is created first and so is placed on SDMA0.
-      if ((!prefer_xgmi) && (!isHostToDev) && (supported_isas()[0]->GetMajorVersion() == 9) &&
-          (supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
+      if ((!prefer_xgmi) && (!isHostToDev) && (isa_->GetMajorVersion() == 9) &&
+          (isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         GetBlitObject(BlitHostToDev);
         *blits_[BlitHostToDev];
       }
 
       // gfx94x is more efficient with reverse order of SDMA0/1 for host<->device copies
-      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4)
+      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4)
         rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
 
       // Check support for targeted SDMA engines
@@ -947,8 +989,8 @@ void GpuAgent::InitDma() {
 
       // Observing strange behavior when fixing host<->device engines
       // on GFX9 devices older than GFX90a, so bypass engine fix.
-      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() == 0
-          && supported_isas()[0]->GetStepping() < 10)
+      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0
+          && isa_->GetStepping() < 10)
         rec_eng = -1;
 
       // devices without dedicated xGMI SDMA engines should not target specific
@@ -1140,7 +1182,7 @@ void GpuAgent::RegisterRecSdmaEngIdMaskPeer(core::Agent& peer, uint32_t rec_sdma
   uses_rec_sdma_eng_id_mask_ = (kfd_version.KernelInterfaceMajorVersion > 1 ||
                                  (kfd_version.KernelInterfaceMajorVersion == 1 &&
                                   kfd_version.KernelInterfaceMinorVersion >= 17)) &&
-                               supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
+                               isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4 &&
                                IsPowerOfTwo(rec_sdma_eng_id_mask) && rec_eng_enabled;
 
   rec_sdma_eng_id_peers_info_[peer.public_handle().handle] = uses_rec_sdma_eng_id_mask_ ?
@@ -1306,7 +1348,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
       dst_agent.device_type() == core::Agent::kAmdGpuDevice);
-    bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
+    bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
     if ((p2p_engine_is_mandatory && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
@@ -1390,7 +1432,7 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
       dst_agent.device_type() == core::Agent::kAmdGpuDevice);
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
-    bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
+    bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Check if H2D is free
     if (DmaEngineIsFree(BlitHostToDev)) {
@@ -1418,16 +1460,24 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
-  // gfx125+: all SDMA engines are equivalent — return all engines regardless of direction.
-  if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
-    uint32_t total = num_h2d_d2h_engines_ + num_p2p_engines_;
-    *recommended_ids_mask = (1u << total) - 1;
+  // gfx1250+: all SDMA engines are equivalent and there are no XGMI engines, we prefer first 2 engines
+  // for h2d/d2h and remaining for p2p.
+  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+    bool is_p2p = (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+                  dst_agent.device_type() == core::Agent::kAmdGpuDevice);
+
+    if (is_p2p) {
+      *recommended_ids_mask = ((1u << num_p2p_engines_) - 1) << (DefaultBlitCount - 1);
+    } else {
+      *recommended_ids_mask = (1u << num_h2d_d2h_engines_) - 1;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
 
   // From the collected data, gfx94x performance is better only for first 3 SDMA engines
-  bool isGfx94x = (supported_isas()[0]->GetMajorVersion() == 9 &&
-                  (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5));
+  bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
+                  (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
 
   if (isGfx94x &&
       ((src_agent.device_type() == core::Agent::kAmdCpuDevice &&
@@ -2131,7 +2181,7 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
                                    const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
-  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (isa_->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -2211,7 +2261,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
-      const std::string& name = supported_isas()[0]->GetProcessorName();
+      const core::Isa *InfoIsa = presented_isa_ ? presented_isa_ : isa_;
+      const std::string& name = InfoIsa->GetProcessorName();
       const size_t n = std::min(name.size(), hsa_name_size);
       std::memset(value, 0, hsa_name_size + 1);
       std::memcpy(value, name.data(), n);
@@ -2237,7 +2288,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
           HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
-      if (supported_isas()[0]->GetMajorVersion() >= 8) {
+      if (isa_->GetMajorVersion() >= 8) {
         *((bool*)value) = true;
       } else {
         *((bool*)value) = false;
@@ -2247,7 +2298,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((hsa_profile_t*)value) = profile_;
       break;
     case HSA_AGENT_INFO_WAVEFRONT_SIZE:
-      *((uint32_t*)value) = properties_.WaveFrontSize;
+      *((uint32_t*)value) =
+          presented_isa_ ? (presented_isa_->GetWavefront().IsWavefrontSize64() ? 64 : 32)
+                         : properties_.WaveFrontSize;
       break;
     case HSA_AGENT_INFO_WORKGROUP_MAX_DIM: {
       // TODO: must be per-device
@@ -2319,7 +2372,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
     } break;
     case HSA_AGENT_INFO_ISA:
-      *((hsa_isa_t*)value) = core::Isa::Handle(supported_isas()[0]);
+      *((hsa_isa_t*)value) =
+          core::Isa::Handle(presented_isa_ ? presented_isa_ : isa_);
       break;
     case HSA_AGENT_INFO_EXTENSIONS: {
       memset(value, 0, sizeof(uint8_t) * 128);
@@ -2335,7 +2389,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         setFlag(HSA_EXTENSION_FINALIZER);
       }
 
-      if (core::hsa_internal_api_table().image_api.hsa_ext_image_create_fn != NULL) {
+      if (core::hsa_internal_api_table().image_api.hsa_ext_image_create_fn != NULL &&
+          (!presented_isa_ || presented_isa_->HasImageSupport())) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
@@ -2366,23 +2421,23 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS:
-      if (!supported_isas()[0]->HasImageSupport())
+      if (!(presented_isa_ ? presented_isa_ : isa_)->HasImageSupport())
         *((uint32_t*)value) = 0;
       else
         return hsa_amd_image_get_info_max_dim(public_handle(), attribute, value);
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES:
       // TODO: hardcode based on OCL constants.
-      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 128 : 0;
+      *((uint32_t*)value) = (presented_isa_ ? presented_isa_ : isa_)->HasImageSupport() ? 128 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES:
-      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 64 : 0;
+      *((uint32_t*)value) = (presented_isa_ ? presented_isa_ : isa_)->HasImageSupport() ? 64 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
-      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 16 : 0;
+      *((uint32_t*)value) = (presented_isa_ ? presented_isa_ : isa_)->HasImageSupport() ? 16 : 0;
       break;
     case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
-      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport();
+      *((uint32_t*)value) = (presented_isa_ ? presented_isa_ : isa_)->HasImageSupport();
       break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
@@ -2489,8 +2544,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
 
       if (core::Runtime::runtime_singleton_->flag().coop_cu_count() &&
-          (supported_isas()[0]->GetMajorVersion() == 9) && (supported_isas()[0]->GetMinorVersion() == 0) &&
-          (supported_isas()[0]->GetStepping() == 10)) {
+          (isa_->GetMajorVersion() == 9) && (isa_->GetMinorVersion() == 0) &&
+          (isa_->GetStepping() == 10)) {
         uint32_t count = 0;
         [[maybe_unused]] hsa_status_t cu_err =
             GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &count);
@@ -2613,7 +2668,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint64_t*)value) = cluster_max_dim_.x;
       break;
     case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
-      if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
+      if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
         *((uint32_t*)value) = AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS;
       } else {
         *((uint32_t*)value) = 0;
@@ -2634,6 +2689,13 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
                                    bool metadata_queue, core::Queue** queue) {
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (rocr::amd::hsa::loader::ShouldCheckHotSwapDispatchKernelObjects() &&
+      !rocr::amd::hsa::loader::IsHotSwapQueueTypeSupported(queue_type)) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+  }
+#endif
+
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
     std::lock_guard<std::mutex> lock(gws_queue_.lock_);
@@ -2777,7 +2839,7 @@ void GpuAgent::UnregisterAqlQueue(core::Queue* queue) {
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   assert(scratch.main_queue_base == nullptr &&
          "AcquireQueueMainScratch called while holding scratch.");
-  bool need_queue_scratch_base = (supported_isas()[0]->GetMajorVersion() > 8);
+  bool need_queue_scratch_base = (isa_->GetMajorVersion() > 8);
 
   if (scratch.main_size == 0) {
     scratch.main_size = queue_scratch_len_;
@@ -2824,7 +2886,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
             ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
              scratch.main_size) > small_limit));
 
-  if ((supported_isas()[0]->GetMajorVersion() < 8) ||
+  if ((isa_->GetMajorVersion() < 8) ||
       core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
     large = false;
     use_reclaim = false;
@@ -3283,7 +3345,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
 }
 
 void GpuAgent::BindTrapHandler() {
-  if (supported_isas()[0]->GetMajorVersion() == 7) {
+  if (isa_->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
     return;
   }
@@ -3296,11 +3358,11 @@ void GpuAgent::BindTrapHandler() {
     AssembleShader("TrapHandlerKfdExceptions", AssembleTarget::ISA, trap_code_buf_,
                    trap_code_buf_size_);
   } else {
-    if (supported_isas()[0]->GetMajorVersion() >= 11 ||
-       (supported_isas()[0]->GetMajorVersion() == 9 &&
-        (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
-       (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
-        supported_isas()[0]->GetStepping() == 6)) {
+    if (isa_->GetMajorVersion() >= 11 ||
+       (isa_->GetMajorVersion() == 9 &&
+        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ||
+       (isa_->GetMajorVersion() == 10 && isa_->GetMinorVersion() == 3 &&
+        isa_->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
       // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
       return;
@@ -3332,17 +3394,17 @@ void GpuAgent::BindTrapHandler() {
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
-  if (supported_isas()[0]->GetMajorVersion() == 7) {
+  if (isa_->GetMajorVersion() == 7) {
     if (properties_.EngineId.ui32.uCode < 420) {
       // Microcode is handling code cache invalidation.
       return;
     }
-  } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
+  } else if (isa_->GetMajorVersion() == 8 && isa_->GetMinorVersion() == 0) {
     if (properties_.EngineId.ui32.uCode < 685) {
       // Microcode is handling code cache invalidation.
       return;
     }
-  } else if (supported_isas()[0]->GetMajorVersion() > 12) {
+  } else if (isa_->GetMajorVersion() > 12) {
     assert(false && "Code cache invalidation not implemented for this agent");
   }
 
@@ -3355,7 +3417,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   uint32_t cache_inv[8] = {0};
   uint32_t cache_inv_size_dw;
 
-  if (supported_isas()[0]->GetMajorVersion() < 10) {
+  if (isa_->GetMajorVersion() < 10) {
       cache_inv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA |
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_KCACHE_ACTION_ENA |
@@ -3375,7 +3437,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   }
 
   cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
-             supported_isas()[0]->GetMajorVersion());
+             isa_->GetMajorVersion());
 
   if (ptr) {
     size_t size_granule = (size + 0xFF) >> 8;
@@ -4617,7 +4679,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   memset(cmd_data, 0, cmd_data_sz);
 
   // ATOMIC_MEM: Atomically swap buf_write_val, return old value
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, supported_isas()[0]->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, isa_->GetMajorVersion());
   cmd_data[i++] = PM4_ATOMIC_MEM_DW1_ATOMIC(PM4_ATOMIC_MEM_GL2_OP_ATOMIC_SWAP_RTN_64);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW2_ADDR_LO(buf_write_val_addr);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW3_ADDR_HI(buf_write_val_addr >> 32);
@@ -4626,7 +4688,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   i += 3;  // Reserved DWORDs
 
   // COPY_DATA: Copy atomic return value to host-accessible old_val
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, isa_->GetMajorVersion());
   cmd_data[i++] =
       PM4_COPY_DATA_DW1(PM4_COPY_DATA_SRC_SEL_ATOMIC_RETURN_DATA | PM4_COPY_DATA_DST_SEL_TC_12 |
                         PM4_COPY_DATA_COUNT_SEL | PM4_COPY_DATA_WR_CONFIRM);
@@ -4643,7 +4705,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   // 2. Each XCC thread submits to the shared queue independently (no lock contention)
   // 3. The per-XCC threading model still provides parallelism at the thread level
   if (properties_.NumXcc > 1) {
-    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
                   PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
@@ -4719,7 +4781,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // WAIT_REG_MEM: Wait for trap handler to finish writing samples
   cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, isa_->GetMajorVersion());
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
@@ -4731,10 +4793,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
   // ACQUIRE_MEM: Flush L2 cache for GFX12 before DMA copy
-  if (supported_isas()[0]->GetMajorVersion() == 12 &&
-      (supported_isas()[0]->GetMinorVersion() == 0 || supported_isas()[0]->GetMinorVersion() == 5)) {
+  if (isa_->GetMajorVersion() == 12 &&
+      (isa_->GetMinorVersion() == 0 || isa_->GetMinorVersion() == 5)) {
     cmd_data[i++] =
-        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
     cmd_data[i++] = 0;                                // DW1: COHER_CNTL
     cmd_data[i++] = 0;                                // DW2: COHER_SIZE
     cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
@@ -4756,7 +4818,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   auto emit_dma_data = [&](uint8_t* src, uint8_t* dst, size_t bytes, bool is_last) {
     while (bytes > 0) {
       uint32_t chunk = std::min(bytes, (size_t)CP_DMA_DATA_TRANSFER_CNT_MAX);
-      cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
+      cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
       cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
                                        PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
       cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO((uint64_t)src);
@@ -4786,7 +4848,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   }
 
   // WRITE_DATA: Reset buf_written_val for next cycle
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, isa_->GetMajorVersion());
   cmd_data[i++] = PM4_WRITE_DATA_DW1(PM4_WRITE_DATA_DST_SEL_TC_L2 |
                                      PM4_WRITE_DATA_WR_CONFIRM_WAIT_CONFIRMATION);
   cmd_data[i++] = PM4_WRITE_DATA_DW2_DST_MEM_ADDR_LO(buf_written_val_addr[which_buffer]);
@@ -4795,7 +4857,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // Add PRED_EXEC wrapper for multi-XCC (see atomic swap comment for rationale)
   if (properties_.NumXcc > 1) {
-    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
                   PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }

@@ -44,9 +44,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   
   // Find wave occupancy per CU => simd_per_cu * GPR usage
   // Limited by SPI 32 per CU, hence 8 per SIMD
-  const size_t MaxWavesPerSimd = (device.isa().versionMajor() <= 9) ? 8 : 16;
+  const size_t MaxWavesPerSimd = (device.executionIsa().versionMajor() <= 9) ? 8 : 16;
   const size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
-  const bool adjust_for_wave64 = device.isa().versionMajor() >= 10 && wavefrontSize == 64;
+  const bool adjust_for_wave64 = device.executionIsa().versionMajor() >= 10 && wavefrontSize == 64;
   const uint32_t VgprGranularity = adjust_for_wave64
       ? device.info().vgprAllocGranularity_ >> 1
       : device.info().vgprAllocGranularity_;
@@ -72,8 +72,8 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // on kernel metadata, multiply the number of SIMDs by 2, to account for
   // 2CUs in 1 WGP.
   const uint32_t simdPerCU = wrkGrpInfo->isWGPMode_
-      ? device.isa().simdPerCU() * 2
-      : device.isa().simdPerCU();
+      ? device.executionIsa().simdPerCU() * 2
+      : device.executionIsa().simdPerCU();
 
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
@@ -487,7 +487,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
       staticSharedMemoryUsage * std::min(numBlocks, maxNumBlocks);
   const int maxDynamicSmemSize = std::min(maxSharedMemoryPerMultiProcessor / maxNumBlocks,
                                           maxDynamicSharedSizeBytes);
-  const int alignmentSize = device.isa().ldsAlignment();
+  const int alignmentSize = device.executionIsa().ldsAlignment();
 
   const int dynamic_smem_size = std::max(maxDynamicSmemSize,
                                          std::min(maxSharedMemoryPerMultiProcessor / numBlocks,
@@ -723,7 +723,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
 
   constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  if (device->isa().versionMajor() >= 12 &&
+  if (device->executionIsa().versionMajor() >= 12 &&
       (gridDim.y > gridDimYZmax || gridDim.z > gridDimYZmax)) {
     return hipErrorInvalidConfiguration;
   }

@@ -28,36 +28,58 @@
 namespace amd {
 namespace hotswap {
 
-inline bool Enabled() {
-  const char* disable = std::getenv("HSA_HOTSWAP_DISABLE");
-  if (disable == nullptr || disable[0] == '\0') {
-    return true;
-  }
+// On when this tool is loaded via HSA_TOOLS_LIB (name must match ROCR LoadTools).
+inline constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
 
-  std::string value(disable);
-  std::transform(value.begin(), value.end(), value.begin(),
+inline bool EnvEnabled(const char* name) {
+  const char* value = std::getenv(name);
+  if (!value || !value[0]) return false;
+  std::string normalized(value);
+  std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  return value == "0" || value == "off" || value == "false" ||
-         value == "no" || value == "n" || value == "f";
+  return normalized != "0" && normalized != "off" && normalized != "false" &&
+         normalized != "no" && normalized != "n" && normalized != "f";
 }
 
-// Allowlist of (source -> device) gfx pairs native HotSwap handles; only these
-// are forwarded. gfx1250 -> gfx1250 selects the B0 gfx1250 bundle; ROCR leaves
-// it on the normal loader path for B0-on-B0 and rewrites it only for B0-to-A0.
-struct SourceTargetPair {
-  const char* source;  // gfx processor, e.g. "gfx1250"
-  const char* target;  // gfx processor, e.g. "gfx950"
+inline bool Disabled() { return EnvEnabled("HSA_HOTSWAP_DISABLE"); }
+
+inline const char* PresentedIsaEnv() { return std::getenv("HSA_HOTSWAP_PRESENT_ISA"); }
+
+inline const char* TargetIsaEnv() {
+  const char* target = std::getenv("HSA_HOTSWAP_TARGET");
+  if (!target || !target[0]) target = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+  return target;
+}
+
+inline bool PresentationEnabled() {
+  return EnvEnabled("HSA_HOTSWAP_PRESENT_ISA") && !Disabled();
+}
+
+inline bool ToolLoaded() {
+  const char* tools_lib = std::getenv("HSA_TOOLS_LIB");
+  return tools_lib != nullptr &&
+         std::string(tools_lib).find(kHotswapToolLib) != std::string::npos;
+}
+
+inline bool Enabled() { return PresentationEnabled() || (!Disabled() && ToolLoaded()); }
+
+// Allowlist for forwarding source-ISA fatbin bundles to a CLR-visible device ISA.
+// In presentation mode the visible ISA is the presented source ISA; the physical
+// execution ISA is resolved later by ROCr from HSA_HOTSWAP_TARGET.
+struct SourcePresentedPair {
+  const char* source;     // bundle gfx processor, e.g. "gfx1250"
+  const char* presented;  // CLR-visible gfx processor, e.g. "gfx1250"
 };
 
-inline constexpr SourceTargetPair kSupportedPairs[] = {
+inline constexpr SourcePresentedPair kSourceForwardingPairs[] = {
     {"gfx1250", "gfx1250"},
 };
 
-// True if (source_gfx -> target_gfx) is a supported pair.
-inline bool IsSupportedPair(const std::string& source_gfx,
-                            const std::string& target_gfx) {
-  for (const SourceTargetPair& p : kSupportedPairs) {
-    if (source_gfx == p.source && target_gfx == p.target) {
+// True if `source_gfx` may be forwarded for a device presented as `presented_gfx`.
+inline bool IsSourceForwardingPair(const std::string& source_gfx,
+                                   const std::string& presented_gfx) {
+  for (const SourcePresentedPair& p : kSourceForwardingPairs) {
+    if (source_gfx == p.source && presented_gfx == p.presented) {
       return true;
     }
   }

@@ -17,6 +17,7 @@
 
 #include "vdi_common.hpp"
 #include "device/comgrctx.hpp"
+#include "device/hotswap.hpp"
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocblit.hpp"
@@ -49,6 +50,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cinttypes>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -84,6 +86,62 @@ std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
 address Device::mg_sync_ = nullptr;
+
+namespace {
+
+std::string canonicalIsaName(const char* isa) {
+  std::string isaName(isa ? isa : "");
+  if (!isaName.empty() && isaName.rfind("amdgcn-amd-amdhsa--", 0) != 0) {
+    isaName = "amdgcn-amd-amdhsa--" + isaName;
+  }
+  return isaName;
+}
+
+std::string processorNameFromHotSwapEnv(const char* value) {
+  std::string isaName = canonicalIsaName(value);
+  const amd::Isa* isa = amd::Isa::findIsa(isaName.c_str());
+  return isa ? isa->processorName() : std::string();
+}
+
+const amd::Isa* settingsIsaForHotSwap(const amd::Isa& presentedIsa) {
+  const char* presented = amd::hotswap::PresentedIsaEnv();
+  if (!amd::hotswap::PresentationEnabled()) return &presentedIsa;
+
+  const std::string presentedProcessor = processorNameFromHotSwapEnv(presented);
+  if (presentedProcessor.empty() || presentedProcessor != presentedIsa.processorName()) {
+    LogPrintfError("HSA_HOTSWAP_PRESENT_ISA (%s) must match the presented device ISA %s",
+                   presented, presentedIsa.isaName().c_str());
+    return nullptr;
+  }
+
+  const char* target = amd::hotswap::TargetIsaEnv();
+  if (!target || !target[0] || std::strcmp(target, "0") == 0 ||
+      std::strcmp(target, "1") == 0) {
+    LogError("HSA_HOTSWAP_TARGET must name the execution ISA when HSA_HOTSWAP_PRESENT_ISA is set");
+    return nullptr;
+  }
+
+  std::string isaName = canonicalIsaName(target);
+  const std::string targetProcessor = processorNameFromHotSwapEnv(target);
+  if (targetProcessor.empty()) {
+    LogPrintfError("HSA_HOTSWAP_TARGET does not resolve to a known ISA: %s", isaName.c_str());
+    return nullptr;
+  }
+  if (targetProcessor == presentedProcessor) {
+    LogError("HSA_HOTSWAP_TARGET must differ from HSA_HOTSWAP_PRESENT_ISA");
+    return nullptr;
+  }
+  const amd::Isa* targetIsa = amd::Isa::findIsa(isaName.c_str());
+  if (!targetIsa) {
+    LogPrintfError("HSA_HOTSWAP_TARGET does not resolve to a known ISA: %s", isaName.c_str());
+    return nullptr;
+  }
+  // Any distinct, resolvable execution ISA is accepted here; the COMGR HotSwap
+  // path refuses translations it cannot perform at load/dispatch time.
+  return targetIsa;
+}
+
+}  // namespace
 
 bool NullDevice::create(const amd::Isa& isa) {
   if (!isa.runtimeRocSupported()) {
@@ -643,9 +701,11 @@ bool Device::create() {
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
-  if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
-                                           isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+  const amd::Isa* settingsIsa = settingsIsaForHotSwap(*isa);
+  if (!settingsIsa) return false;
+  if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *settingsIsa,
+                                           settingsIsa->xnack() == amd::Isa::Feature::Enabled,
+                                           coop_groups, isXgmi_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -657,6 +717,7 @@ bool Device::create() {
     return false;
   }
 
+  setExecutionIsa(*settingsIsa);
   if (!amd::Device::create(*isa)) {
     LogPrintfError("Unable to setup device for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
@@ -1098,8 +1159,8 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   if (info_.globalMemCacheLineSize_ < 256 &&
-      (isa().versionMajor() >= 13 ||
-       (isa().versionMajor() == 12 && isa().versionMinor() >= 5))) {
+      (executionIsa().versionMajor() >= 13 ||
+       (executionIsa().versionMajor() == 12 && executionIsa().versionMinor() >= 5))) {
     info_.globalMemCacheLineSize_ = 256;
   }
 
@@ -1566,15 +1627,15 @@ bool Device::populateOCLDeviceConstants() {
       info_.svmCapabilities_ |= CL_DEVICE_SVM_FINE_GRAIN_SYSTEM;
     }
     if (amd::IS_HIP) {
-      if (info_.iommuv2_ || isa().versionMajor() >= 8) {
+      if (info_.iommuv2_ || executionIsa().versionMajor() >= 8) {
         info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
       }
     }
   }
 
   if (settings().checkExtension(ClAmdDeviceAttributeQuery)) {
-    info_.simdWidth_ = isa().simdWidth();
-    info_.simdInstructionWidth_ = isa().simdInstructionWidth();
+    info_.simdWidth_ = executionIsa().simdWidth();
+    info_.simdInstructionWidth_ = executionIsa().simdInstructionWidth();
     if (HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_WAVEFRONT_SIZE, &info_.wavefrontWidth_)) {
       return false;
@@ -1637,9 +1698,9 @@ bool Device::populateOCLDeviceConstants() {
     info_.l2CacheSize_ = cache_sizes[1];
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;
-    info_.globalMemChannelBankWidth_ = isa().memChannelBankWidth();
-    info_.localMemSizePerCU_ = isa().localMemSizePerCU();
-    info_.localMemBanks_ = isa().localMemBanks();
+    info_.globalMemChannelBankWidth_ = executionIsa().memChannelBankWidth();
+    info_.localMemSizePerCU_ = executionIsa().localMemSizePerCU();
+    info_.localMemBanks_ = executionIsa().localMemBanks();
     info_.numAsyncQueues_ = kMaxAsyncQueues;
     info_.numRTQueues_ = info_.numAsyncQueues_;
     info_.numRTCUs_ = info_.maxComputeUnits_;
@@ -1666,7 +1727,7 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxOnDeviceEvents_ = settings().numDeviceEvents_;
 
   std::string addressableNumVGPRs, totalNumVGPRs, vGPRAllocGranule;
-  std::string isaName = isa().isaName();
+  std::string isaName = executionIsa().isaName();
   info_.availableVGPRs_ =
       amd::device::getValueFromIsaMeta(isaName, "AddressableNumVGPRs", addressableNumVGPRs)
       ? atoi(addressableNumVGPRs.c_str())
@@ -1790,9 +1851,9 @@ bool Device::populateOCLDeviceConstants() {
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;
 
-  if (isa().versionMajor() < 8) {
+  if (executionIsa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;
-  } else if (isa().versionMajor() < 10) {
+  } else if (executionIsa().versionMajor() < 10) {
     info_.sgprsPerSimd_ = 800;
   } else {
     info_.sgprsPerSimd_ =
@@ -2452,7 +2513,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+  if (flags.uncached_ && executionIsa().versionMajor() == 12) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 

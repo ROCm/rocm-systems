@@ -1390,7 +1390,7 @@ bool KernelBlitManager::copyBufferToImageKernel(
   amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(dstImage->getImageFormat());
   bool swapLayer =
-      (dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().executionIsa().versionMajor() >= 10);
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1577,7 +1577,7 @@ bool KernelBlitManager::copyImageToBufferKernel(
   amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(srcImage->getImageFormat());
   bool swapLayer =
-      (srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().executionIsa().versionMajor() >= 10);
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1839,14 +1839,14 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // Program source origin
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
-  if ((srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10)) {
+  if ((srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().executionIsa().versionMajor() >= 10)) {
     srcOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 2, sizeof(srcOrg), srcOrg);
 
   // Program destinaiton origin
   int32_t dstOrg[4] = {(int32_t)dstOrigin[0], (int32_t)dstOrigin[1], (int32_t)dstOrigin[2], 0};
-  if ((dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10)) {
+  if ((dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().executionIsa().versionMajor() >= 10)) {
     dstOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 3, sizeof(dstOrg), dstOrg);
@@ -3332,7 +3332,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   amd::Image* image = static_cast<amd::Image*>(memory.owner());
   amd::Image::Format newFormat(image->getImageFormat());
   bool swapLayer =
-      (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().executionIsa().versionMajor() >= 10);
 
   // Program the kernels workload depending on the fill dimensions
   fillType = FillImage;

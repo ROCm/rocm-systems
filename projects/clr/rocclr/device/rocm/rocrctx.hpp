@@ -9,20 +9,22 @@
 #include <mutex>
 #include "top.hpp"
 
-#if defined(ROCR_DYN_DLL) || defined(ROCR_STATIC_OPEN)
+#if __has_include("hsa.h")
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ext_amd.h"
 #include "amd_hsa_signal.h"
 #include "hsa_ven_amd_loader.h"
 #include "hsa_ven_amd_aqlprofile.h"
-#else
+#elif __has_include("hsa/hsa.h")
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_image.h"
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/amd_hsa_signal.h"
 #include "hsa/hsa_ven_amd_loader.h"
 #include "hsa/hsa_ven_amd_aqlprofile.h"
+#else
+#error "ROCr HSA headers were not found"
 #endif
 
 typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(

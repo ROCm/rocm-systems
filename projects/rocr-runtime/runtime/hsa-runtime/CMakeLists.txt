@@ -263,6 +263,37 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_options.cpp
            libamdhsacode/amd_hsa_code.cpp)
 
+## Optional: HotSwap lazy per-kernel ISA translation through COMGR.
+option(ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER
+  "Enable ROCr loader integration with COMGR HotSwap transpilation" OFF)
+if(ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER)
+  find_package(amd_comgr REQUIRED CONFIG)
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE amd_comgr)
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE
+    ROCR_HOTSWAP_COMGR_ADAPTER=1)
+endif()
+
+option(ROCR_BUILD_HOTSWAP_UNIT_TESTS
+  "Build ROCr HotSwap runtime unit tests"
+  ${ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER})
+if(ROCR_BUILD_HOTSWAP_UNIT_TESTS)
+  add_executable(hotswap-runtime-unit-tests
+    tests/hotswap_runtime_test.cpp)
+  target_include_directories(hotswap-runtime-unit-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libhsakmt/include)
+  target_compile_definitions(hotswap-runtime-unit-tests PRIVATE
+    "${HSA_COMMON_DEFS}" __linux__ HSA_DEPRECATED=
+    ROCR_HOTSWAP_COMGR_ADAPTER=1)
+  target_compile_options(hotswap-runtime-unit-tests PRIVATE ${HSA_CXX_FLAGS})
+  if(UNIX)
+    target_link_libraries(hotswap-runtime-unit-tests PRIVATE pthread rt)
+  endif()
+  enable_testing()
+  add_test(NAME hotswap-runtime-unit-tests
+           COMMAND hotswap-runtime-unit-tests)
+endif()
+
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
 	     libamdhsacode/lnx/amd_core_dump.cpp)

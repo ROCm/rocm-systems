@@ -107,6 +107,7 @@ class Program {
       uint32_t isHIP_ : 1;            //!< Determine if the program is for HIP
       uint32_t coLoaded_ : 1;         //!< Has the code objected been loaded
       uint32_t trapHandler_ : 1;      //!< It is a trap handler for debugger
+      uint32_t hotSwapSource_ : 1;    //!< HotSwap source object awaiting per-kernel translation
     };
     uint32_t flags_;  //!< Program flags
   };
@@ -226,6 +227,9 @@ class Program {
 
   //! Returns TRUE if the program is a trap handler for debugger support
   bool isTrapHandler() const { return trapHandler_; }
+
+  //! Returns TRUE if this is a HotSwap source object loaded for lazy translation
+  bool isHotSwapSource() const { return hotSwapSource_; }
 
   amd_comgr_metadata_node_t metadata() const { return metadata_; }
 

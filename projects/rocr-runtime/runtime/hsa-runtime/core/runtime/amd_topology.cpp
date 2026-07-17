@@ -161,11 +161,11 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 
     // Check for sramecc incompatibility due to sramecc not being reported correctly in kfd before
     // 1.4.
-    if (gpu->supported_isas()[0]->IsSrameccSupported() &&
+    if (gpu->execution_isas()[0]->IsSrameccSupported() &&
          (kfd_version.KernelInterfaceMajorVersion <= 1 &&
               kfd_version.KernelInterfaceMinorVersion < 4)) {
       // gfx906 has both sramecc modes in use.  Suppress the device.
-      if ((gpu->supported_isas()[0]->GetProcessorName() == "gfx906") &&
+      if ((gpu->execution_isas()[0]->GetProcessorName() == "gfx906") &&
           core::Runtime::runtime_singleton_->flag().check_sramecc_validity()) {
         char name[64];
         gpu->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_PRODUCT_NAME, name);
@@ -178,7 +178,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
       }
 
       // gfx908 always has sramecc set to on in vbios.  Set mode bit to on and recreate the device.
-      if (gpu->supported_isas()[0]->GetProcessorName() == "gfx908") {
+      if (gpu->execution_isas()[0]->GetProcessorName() == "gfx908") {
         node_prop.Capability.ui32.SRAM_EDCSupport = 1;
         delete gpu;
         gpu = new GpuAgent(node_id, node_prop, xnack_mode,

@@ -16,6 +16,7 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include "hsa_ext_amd.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
