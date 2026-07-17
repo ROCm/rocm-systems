@@ -12,12 +12,6 @@
 #
 # ----------------------------------------------------------------------------------------#
 
-option(
-    PROFILER_HUB_USE_SYSTEM_SQLITE3
-    "Use system-installed SQLite3 if available"
-    OFF
-)
-
 set(SQLITE3_GIT_URL
     "https://github.com/sqlite/sqlite.git"
     CACHE STRING
