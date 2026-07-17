@@ -182,6 +182,15 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
 
 HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
   RequireDevice();
+
+  // The invalid-input rejection contracts for hipStreamGetAttribute are only
+  // exercised on AMD. On NVIDIA hipStreamGetAttribute maps to
+  // cudaStreamGetAttribute, which does not validate the value-out pointer and
+  // dereferences it - a null pointer faults instead of returning a defined
+  // error - so the rejection contract cannot be evaluated safely there. The
+  // unknown-attribute sub-check additionally uses hipLaunchAttributeMax, a
+  // sentinel defined only on AMD.
+#ifdef __HIP_PLATFORM_AMD__
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
@@ -194,16 +203,17 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
       hipStreamGetAttribute(stream, hipStreamAttributePriority, nullptr);
   REQUIRE(null_out_status == hipErrorInvalidValue);
 
-#ifdef __HIP_PLATFORM_AMD__
   // An attribute id that is not a valid stream attribute must be rejected with
   // hipErrorInvalidValue. hipLaunchAttributeMax is the one-past-the-end sentinel
   // of the launch attribute enum, so it is guaranteed to be an unknown attribute
-  // id. This sentinel is only defined on the AMD backend, so the sub-check is
-  // compiled only there.
+  // id.
   hipStreamAttrValue get_value{};
   const hipStreamAttrID invalid_attr = static_cast<hipStreamAttrID>(hipLaunchAttributeMax);
   const hipError_t invalid_attr_status =
       hipStreamGetAttribute(stream, invalid_attr, &get_value);
   REQUIRE(invalid_attr_status == hipErrorInvalidValue);
+#else
+  HIP_SKIP_TEST("hipStreamGetAttribute does not validate the value-out pointer on the NVIDIA "
+                "backend; the invalid-input rejection contract cannot be exercised safely.");
 #endif  // __HIP_PLATFORM_AMD__
 }
