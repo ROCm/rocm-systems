@@ -888,10 +888,10 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
   const size_t NUM_SLOTS       = NCCL_CE_NUM_SLOTS;
   const size_t maxChunkBytes = (NCCL_CE_AR_MAX_MSG_BYTES) / comm->nRanks;
   size_t chunkBytes = 0;
-  if (maxChunkBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-    chunkBytes = chooseChunkBytes(shardBytes, maxChunkBytes);
+  if (shardBytes <= maxChunkBytes) {
+    chunkBytes = shardBytes;
   } else {
-    chunkBytes = maxChunkBytes;
+    chunkBytes = chooseChunkBytes(shardBytes, maxChunkBytes);
   }
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = maxChunkBytes / eltSize;
