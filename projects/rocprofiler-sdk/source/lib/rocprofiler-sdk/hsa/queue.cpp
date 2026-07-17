@@ -42,6 +42,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -172,7 +173,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         });
 
         // Services migrated off the callback registry (see WriteInterceptor) are invoked
-        // explicitly here, ordered by client id (hsa/queue_hooks/client_ids.hpp).
+        // explicitly here, ordered by client id (hsa/queue_hooks/client_ids.hpp). With all four
+        // migrated, the loop above no longer has any registered clients to iterate.
         counters::signal_completion_hook(queue_info_session.queue,
                                          packet.kernel_packet,
                                          _session,
@@ -193,6 +195,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                             packet,
                                             packet.instrumentation_packets,
                                             dispatch_time);
+
+        spm::signal_completion_hook(queue_info_session.queue,
+                                    packet.kernel_packet,
+                                    _session,
+                                    packet,
+                                    packet.instrumentation_packets,
+                                    dispatch_time);
 
         if(packet.is_serialized)
         {
@@ -333,13 +342,15 @@ WriteInterceptor(const void* packets,
     const bool graph_launch_active = (gls != nullptr);
     // The migrated services no longer register queue-controller callbacks, so they do not count
     // toward get_notifiers(); detect each explicitly so a run using only those services still
-    // enters the interceptor.
+    // enters the interceptor. With all four migrated, get_notifiers() has no remaining producers
+    // and the first term is always true.
     // Note the granularity mismatch: PC sampling answers per agent, the others answer globally,
-    // so a counters/ATT context on any agent still pulls every agent's queues in here.
+    // so a counters/ATT/SPM context on any agent still pulls every agent's queues in here.
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !counters::is_any_active() &&
          !thread_trace::is_any_active() &&
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
+         !spm::is_any_active() &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
@@ -675,6 +686,16 @@ WriteInterceptor(const void* packets,
                                      _packet_data.instrumentation_packets,
                                      _packet_data.is_serialized);
 
+            spm::write_hook(queue,
+                            kernel_packet,
+                            kernel_id,
+                            dispatch_id,
+                            &_packet_data.user_data,
+                            _packet_data.tracing_data.external_correlation_ids,
+                            corr_id,
+                            _packet_data.instrumentation_packets,
+                            _packet_data.is_serialized);
+
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
@@ -810,7 +831,8 @@ WriteInterceptor(const void* packets,
     });
 
     // The migrated services require per-packet mode; they no longer participate in the registry.
-    if(counters::is_any_active() || thread_trace::is_any_active()) should_batch_packets = false;
+    if(counters::is_any_active() || thread_trace::is_any_active() || spm::is_any_active())
+        should_batch_packets = false;
 
     if(should_batch_packets)
     {
