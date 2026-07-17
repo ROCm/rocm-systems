@@ -67,54 +67,60 @@ __global__ void SdmaPingPongTest(int loop, int skip,
     anvil::SdmaQueueDeviceHandle *handle =
         sdma.deviceHandles_d[target_local_pe * sdma.numChannels + 0];
 
+    int wg_id = hipBlockIdx_x;
+
     char *my_base = base_ctx->ipcImpl_.ipc_bases[pe];
     char *remote_base = base_ctx->ipcImpl_.ipc_bases[target];
-    uint64_t r_offset = r_buf - my_base;
-    uint64_t sig_offset =
-        reinterpret_cast<char *>(sig_addr) - my_base;
 
+    char *my_s = s_buf + size * wg_id;
+    char *my_r = r_buf + size * wg_id;
+    uint64_t r_offset = my_r - my_base;
     void *remote_r_buf = remote_base + r_offset;
-    uint64_t *remote_sig = reinterpret_cast<uint64_t *>(remote_base + sig_offset);
 
-    int *r_int = reinterpret_cast<int *>(r_buf);
-    int *s_int = reinterpret_cast<int *>(s_buf);
+    uint64_t *my_sig = &sig_addr[wg_id];
+    uint64_t sig_offset_bytes =
+        reinterpret_cast<char *>(my_sig) - my_base;
+    uint64_t *remote_sig = reinterpret_cast<uint64_t *>(remote_base + sig_offset_bytes);
+
+    int *r_int = reinterpret_cast<int *>(my_r);
+    int *s_int = reinterpret_cast<int *>(my_s);
 
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
-        start_time[0] = wall_clock64();
+        start_time[wg_id] = wall_clock64();
       }
 
       if (op_type <= 1) {
         int val = i + 1;
-        *s_int = val;
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
         if (pe == 0) {
-          anvil::put(*handle, remote_r_buf, s_buf, sizeof(int));
-          anvil::quiet(*handle);
+          *s_int = val;
+          __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+          anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
           while (uncached_load(r_int) != val) {}
         } else {
           while (uncached_load(r_int) != val) {}
-          anvil::put(*handle, remote_r_buf, s_buf, sizeof(int));
-          anvil::quiet(*handle);
+          *s_int = val;
+          __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+          anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
         }
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          anvil::put(*handle, remote_r_buf, s_buf, size);
+          anvil::put(*handle, remote_r_buf, my_s, size);
           anvil::quiet(*handle);
           __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
                                  __HIP_MEMORY_SCOPE_SYSTEM);
-          anvil::waitSignal(sig_addr, expected);
+          anvil::waitSignal(my_sig, expected);
         } else {
-          anvil::waitSignal(sig_addr, expected);
-          anvil::put(*handle, remote_r_buf, s_buf, size);
+          anvil::waitSignal(my_sig, expected);
+          anvil::put(*handle, remote_r_buf, my_s, size);
           anvil::quiet(*handle);
           __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
                                  __HIP_MEMORY_SCOPE_SYSTEM);
         }
       }
     }
-    end_time[0] = wall_clock64();
+    end_time[wg_id] = wall_clock64();
 
     anvil::quiet(*handle);
   }
@@ -126,9 +132,9 @@ __global__ void SdmaPingPongTest(int loop, int skip,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 SdmaPingPongTester::SdmaPingPongTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)alloc_test_buffer(max_msg_size);
-  r_buf = (char *)alloc_test_buffer(max_msg_size);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
+  s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
   bw_factor = 2;
 }
@@ -140,10 +146,9 @@ SdmaPingPongTester::~SdmaPingPongTester() {
 }
 
 void SdmaPingPongTester::resetBuffers(size_t size) {
-  memset(s_buf, 0, size);
-  memset(r_buf, 0, size);
-  uint64_t zero = 0;
-  memcpy(sig_addr, &zero, sizeof(uint64_t));
+  memset(s_buf, 0, size * args.num_wgs);
+  memset(r_buf, 0, size * args.num_wgs);
+  memset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs);
 }
 
 void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

@@ -58,19 +58,22 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
       int target = 1 - pe;
 
       if (op_type == 2) {
+        char *my_data_s = data_s_buf + size * wg_id;
+        char *my_data_r = data_r_buf + size * wg_id;
+        uint64_t *my_sig = &sig_addr[wg_id];
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          rocshmem_ctx_putmem_signal(ctx, data_r_buf, data_s_buf, size,
-                                     sig_addr, 1, ROCSHMEM_SIGNAL_ADD, target);
+          rocshmem_ctx_putmem_signal(ctx, my_data_r, my_data_s, size,
+                                     my_sig, 1, ROCSHMEM_SIGNAL_ADD, target);
           rocshmem_ulong_wait_until(
-              reinterpret_cast<unsigned long *>(sig_addr),
-              ROCSHMEM_CMP_GE, expected);
+              reinterpret_cast<unsigned long *>(my_sig),
+              ROCSHMEM_CMP_EQ, expected);
         } else {
           rocshmem_ulong_wait_until(
-              reinterpret_cast<unsigned long *>(sig_addr),
-              ROCSHMEM_CMP_GE, expected);
-          rocshmem_ctx_putmem_signal(ctx, data_r_buf, data_s_buf, size,
-                                     sig_addr, 1, ROCSHMEM_SIGNAL_ADD, target);
+              reinterpret_cast<unsigned long *>(my_sig),
+              ROCSHMEM_CMP_EQ, expected);
+          rocshmem_ctx_putmem_signal(ctx, my_data_r, my_data_s, size,
+                                     my_sig, 1, ROCSHMEM_SIGNAL_ADD, target);
         }
       } else {
         if (pe == 0) {
@@ -110,9 +113,9 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
   r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
   s_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
-  data_s_buf = (char *)alloc_test_buffer(max_msg_size);
-  data_r_buf = (char *)alloc_test_buffer(max_msg_size);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
+  data_s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  data_r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
   bw_factor = 2;
 }
@@ -128,10 +131,9 @@ PingPongTester::~PingPongTester() {
 void PingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);
   memset(s_buf, 0, sizeof(int) * args.num_wgs);
-  memset(data_s_buf, 0xAB, size);
-  memset(data_r_buf, 0, size);
-  uint64_t zero = 0;
-  memcpy(sig_addr, &zero, sizeof(uint64_t));
+  memset(data_s_buf, 0xAB, size * args.num_wgs);
+  memset(data_r_buf, 0, size * args.num_wgs);
+  memset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs);
 }
 
 void PingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

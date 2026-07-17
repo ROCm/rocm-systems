@@ -60,14 +60,16 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
         reinterpret_cast<uintptr_t>(dest) - local_base;
     void *remote_addr = reinterpret_cast<void *>(remote_base + offset);
 
+    int wg_id = hipBlockIdx_x;
+
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
-        start_time[0] = wall_clock64();
+        start_time[wg_id] = wall_clock64();
       }
       qp.put_nbi_single(remote_addr, source, size, true);
       qp.quiet_single();
     }
-    end_time[0] = wall_clock64();
+    end_time[wg_id] = wall_clock64();
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -100,7 +102,7 @@ void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                      _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop;
+  num_timed_msgs = loop * gridSize.x;
 }
 
 void QpPutNbiTester::verifyResults([[maybe_unused]] size_t size) {}

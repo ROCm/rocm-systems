@@ -65,54 +65,56 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
     uintptr_t remote_base =
         reinterpret_cast<uintptr_t>(gda_ctx->base_heap[target]);
 
+    int wg_id = hipBlockIdx_x;
+
     uintptr_t r_buf_offset =
-        reinterpret_cast<uintptr_t>(&r_buf[0]) - local_base;
+        reinterpret_cast<uintptr_t>(&r_buf[wg_id]) - local_base;
     void *remote_r_buf = reinterpret_cast<void *>(remote_base + r_buf_offset);
 
+    char *my_data_s = data_s_buf + size * wg_id;
     uintptr_t data_r_offset =
-        reinterpret_cast<uintptr_t>(data_r_buf) - local_base;
+        reinterpret_cast<uintptr_t>(data_r_buf + size * wg_id) - local_base;
     void *remote_data_r = reinterpret_cast<void *>(remote_base + data_r_offset);
 
+    uint64_t *my_sig = &sig_addr[wg_id];
     uintptr_t sig_offset =
-        reinterpret_cast<uintptr_t>(sig_addr) - local_base;
+        reinterpret_cast<uintptr_t>(my_sig) - local_base;
     void *remote_sig = reinterpret_cast<void *>(remote_base + sig_offset);
 
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
-        start_time[0] = wall_clock64();
+        start_time[wg_id] = wall_clock64();
       }
 
       int val = i + 1;
 
       if (op_type <= 1) {
         void *src = (op_type == 0) ? static_cast<void *>(&val)
-                                   : static_cast<void *>(data_s_buf);
+                                   : static_cast<void *>(my_data_s);
         if (op_type == 1) {
-          *reinterpret_cast<int *>(data_s_buf) = val;
+          *reinterpret_cast<int *>(my_data_s) = val;
         }
         if (pe == 0) {
           qp.put_nbi_single(remote_r_buf, src, sizeof(int), true);
-          while (uncached_load(&r_buf[0]) != val) {}
+          while (uncached_load(&r_buf[wg_id]) != val) {}
         } else {
-          while (uncached_load(&r_buf[0]) != val) {}
+          while (uncached_load(&r_buf[wg_id]) != val) {}
           qp.put_nbi_single(remote_r_buf, src, sizeof(int), true);
         }
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
-          qp.put_nbi_single(remote_data_r, data_s_buf, size, true);
-          qp.quiet_single();
+          qp.put_nbi_single(remote_data_r, my_data_s, size, false);
           qp.atomic_nofetch_single(remote_sig, 1);
-          while (uncached_load(sig_addr) < expected) {}
+          while (uncached_load(my_sig) < expected) {}
         } else {
-          while (uncached_load(sig_addr) < expected) {}
-          qp.put_nbi_single(remote_data_r, data_s_buf, size, true);
-          qp.quiet_single();
+          while (uncached_load(my_sig) < expected) {}
+          qp.put_nbi_single(remote_data_r, my_data_s, size, false);
           qp.atomic_nofetch_single(remote_sig, 1);
         }
       }
     }
-    end_time[0] = wall_clock64();
+    end_time[wg_id] = wall_clock64();
 
     qp.quiet_single();
   }
@@ -125,9 +127,9 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 QpPingPongTester::QpPingPongTester(TesterArguments args) : Tester(args) {
   r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
-  data_s_buf = (char *)alloc_test_buffer(max_msg_size);
-  data_r_buf = (char *)alloc_test_buffer(max_msg_size);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
+  data_s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  data_r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
   bw_factor = 2;
 }
@@ -141,10 +143,9 @@ QpPingPongTester::~QpPingPongTester() {
 
 void QpPingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);
-  memset(data_s_buf, 0xAB, size);
-  memset(data_r_buf, 0, size);
-  uint64_t zero = 0;
-  memcpy(sig_addr, &zero, sizeof(uint64_t));
+  memset(data_s_buf, 0xAB, size * args.num_wgs);
+  memset(data_r_buf, 0, size * args.num_wgs);
+  memset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs);
 }
 
 void QpPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

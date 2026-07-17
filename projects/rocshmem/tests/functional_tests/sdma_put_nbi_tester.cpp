@@ -64,14 +64,16 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
     uint64_t offset = dest - my_base;
     void *remote_dest = remote_base + offset;
 
+    int wg_id = hipBlockIdx_x;
+
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
-        start_time[0] = wall_clock64();
+        start_time[wg_id] = wall_clock64();
       }
       anvil::put(*handle, remote_dest, source, size);
       anvil::quiet(*handle);
     }
-    end_time[0] = wall_clock64();
+    end_time[wg_id] = wall_clock64();
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -104,7 +106,7 @@ void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                      s_buf, r_buf, size, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop;
+  num_timed_msgs = loop * gridSize.x;
 }
 
 void SdmaPutNbiTester::verifyResults([[maybe_unused]] size_t size) {}
