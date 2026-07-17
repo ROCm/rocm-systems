@@ -591,17 +591,10 @@ TEST(spm_core, start_stop_callback_ctx)
     EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->record_callback_args, (void*) 0x54321);
     EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->context.handle, get_client_ctx().handle);
 
+    // #8730-style: SPM no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and spm::is_any_active()).
     bool found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
@@ -659,17 +652,10 @@ TEST(spm_core, start_stop_buffered_ctx)
     ASSERT_TRUE(ctx.dispatch_spm->callbacks.at(0)->buffer);
     EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->buffer->handle, opt_buff_id.handle);
 
+    // #8730-style: SPM no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and spm::is_any_active()).
     bool found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
@@ -942,28 +928,12 @@ TEST(spm_core, stop_context_removes_callbacks)
     ASSERT_TRUE(ctx.dispatch_spm);
     ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
 
-    auto pre_stop_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
-    bool found             = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == pre_stop_queue_id) found = true;
-    });
-    EXPECT_TRUE(found) << "Callback should be registered after start";
-
-    // Stop exercises queue_controller_sync + remove_callback
+    // Stop exercises queue_controller_sync + context teardown.
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     bool enabled = true;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { enabled = data; });
     EXPECT_FALSE(enabled);
-
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->queue_id, hsa::ClientID{-1})
-        << "queue_id should be reset to -1 after stop";
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == pre_stop_queue_id) found = true;
-    });
-    EXPECT_FALSE(found) << "Callback should be removed from queue controller after stop";
 
     registration::set_init_status(1);
     registration::finalize();
@@ -997,8 +967,6 @@ TEST(spm_core, stop_context_sync_and_restart)
     auto& ctx = *ctx_p;
     ASSERT_TRUE(ctx.dispatch_spm);
 
-    auto pre_stop_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
-
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     // Restart to verify queue controller is in a clean state after sync + teardown
@@ -1007,18 +975,6 @@ TEST(spm_core, stop_context_sync_and_restart)
     bool enabled = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { enabled = data; });
     EXPECT_TRUE(enabled) << "Context should be enabled after restart";
-
-    auto post_restart_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
-    EXPECT_NE(post_restart_queue_id, hsa::ClientID{-1})
-        << "Restarted context should have a valid queue_id";
-    EXPECT_NE(post_restart_queue_id, pre_stop_queue_id)
-        << "Restarted context should get a fresh callback ID";
-
-    bool found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == post_restart_queue_id) found = true;
-    });
-    EXPECT_TRUE(found) << "New callback should be registered after restart";
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context final");
 
