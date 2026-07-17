@@ -239,15 +239,15 @@ class PCSampleState(Base):
     )
 
 
-class PCSampleStallReasonType(Base):
-    __tablename__ = f"{PREFIX}pc_sample_stall_reason_type"
+class PCSampleStallReasonLookup(Base):
+    __tablename__ = f"{PREFIX}pc_sample_stall_reason_lookup"
 
-    pc_sample_stall_reason_type_uuid = Column(Integer, primary_key=True)
+    pc_sample_stall_reason_lookup_uuid = Column(Integer, primary_key=True)
     # Deduplicated: one row per distinct stall-reason string.
     text = Column(String, unique=True)
 
     stall_reasons = relationship(
-        "PCSampleStallReason", back_populates="stall_reason_type"
+        "PCSampleStallReason", back_populates="stall_reason_lookup"
     )
 
 
@@ -260,30 +260,30 @@ class PCSampleStallReason(Base):
         ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
         nullable=False,
     )
-    pc_sample_stall_reason_type_uuid = Column(
+    pc_sample_stall_reason_lookup_uuid = Column(
         Integer,
         ForeignKey(
-            f"{PREFIX}pc_sample_stall_reason_type.pc_sample_stall_reason_type_uuid"
+            f"{PREFIX}pc_sample_stall_reason_lookup.pc_sample_stall_reason_lookup_uuid"
         ),
         nullable=False,
     )
     count = Column(Integer)
 
     pc_sample_state = relationship("PCSampleState", back_populates="stall_reasons")
-    stall_reason_type = relationship(
-        "PCSampleStallReasonType", back_populates="stall_reasons"
+    stall_reason_lookup = relationship(
+        "PCSampleStallReasonLookup", back_populates="stall_reasons"
     )
 
 
-class InstructionSampleType(Base):
-    __tablename__ = f"{PREFIX}instruction_sample_type"
+class InstructionSampleLookup(Base):
+    __tablename__ = f"{PREFIX}instruction_sample_lookup"
 
-    instruction_sample_type_uuid = Column(Integer, primary_key=True)
+    instruction_sample_lookup_uuid = Column(Integer, primary_key=True)
     # Deduplicated: one row per distinct instruction-type string.
     text = Column(String, unique=True)
 
     instruction_samples = relationship(
-        "InstructionSample", back_populates="instruction_sample_type"
+        "InstructionSample", back_populates="instruction_sample_lookup"
     )
 
 
@@ -296,9 +296,9 @@ class InstructionSample(Base):
         ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
         nullable=False,
     )
-    instruction_sample_type_uuid = Column(
+    instruction_sample_lookup_uuid = Column(
         Integer,
-        ForeignKey(f"{PREFIX}instruction_sample_type.instruction_sample_type_uuid"),
+        ForeignKey(f"{PREFIX}instruction_sample_lookup.instruction_sample_lookup_uuid"),
         nullable=False,
     )
     count = Column(Integer)
@@ -306,8 +306,8 @@ class InstructionSample(Base):
     pc_sample_state = relationship(
         "PCSampleState", back_populates="instruction_samples"
     )
-    instruction_sample_type = relationship(
-        "InstructionSampleType", back_populates="instruction_samples"
+    instruction_sample_lookup = relationship(
+        "InstructionSampleLookup", back_populates="instruction_samples"
     )
 
 
@@ -550,14 +550,14 @@ class Database:
             select(
                 PCSampleStallReason.pc_sample_state_uuid,
                 func.json_group_object(
-                    PCSampleStallReasonType.text, PCSampleStallReason.count
+                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
                 ).label("stall_reason"),
             )
             .select_from(PCSampleStallReason)
             .join(
-                PCSampleStallReasonType,
-                PCSampleStallReason.pc_sample_stall_reason_type_uuid
-                == PCSampleStallReasonType.pc_sample_stall_reason_type_uuid,
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
             )
             .group_by(PCSampleStallReason.pc_sample_state_uuid)
         ).subquery()

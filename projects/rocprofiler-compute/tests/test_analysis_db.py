@@ -911,7 +911,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     stalled = next(line for line in lines if line.code_object_offset == 0x10)
     assert stalled.pc_sample_state.stall_count == 1
     assert {
-        r.stall_reason_type.text for r in stalled.pc_sample_state.stall_reasons
+        r.stall_reason_lookup.text for r in stalled.pc_sample_state.stall_reasons
     } == {"WAITCNT"}
 
 

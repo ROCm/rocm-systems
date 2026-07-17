@@ -440,8 +440,8 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.PCSampleStallReason(
                     pc_sample_state=sample_state,
-                    stall_reason_type=Database.get_or_create_type(
-                        orm.PCSampleStallReasonType, text
+                    stall_reason_lookup=Database.get_or_create_type(
+                        orm.PCSampleStallReasonLookup, text
                     ),
                     count=count,
                 )
@@ -450,8 +450,8 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.InstructionSample(
                     pc_sample_state=sample_state,
-                    instruction_sample_type=Database.get_or_create_type(
-                        orm.InstructionSampleType, text
+                    instruction_sample_lookup=Database.get_or_create_type(
+                        orm.InstructionSampleLookup, text
                     ),
                     count=count,
                 )

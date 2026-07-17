@@ -15,7 +15,7 @@ from utils.analysis_orm import (
     InstructionLine,
     Kernel,
     PCSampleStallReason,
-    PCSampleStallReasonType,
+    PCSampleStallReasonLookup,
     PCSampleState,
     Workload,
 )
@@ -140,10 +140,10 @@ def test_duplicate_dispatch_rejected(db_session):
         db_session.commit()
 
 
-def test_duplicate_stall_reason_type_rejected(db_session):
-    """A second stall-reason type with the same text is rejected."""
-    db_session.add(PCSampleStallReasonType(text="WAITCNT"))
-    db_session.add(PCSampleStallReasonType(text="WAITCNT"))
+def test_duplicate_stall_reason_lookup_rejected(db_session):
+    """A second stall-reason lookup with the same text is rejected."""
+    db_session.add(PCSampleStallReasonLookup(text="WAITCNT"))
+    db_session.add(PCSampleStallReasonLookup(text="WAITCNT"))
     with pytest.raises(IntegrityError):
         db_session.commit()
 
@@ -167,25 +167,25 @@ def test_get_view_sql_returns_copy(db_session):
 
 def test_get_or_create_type_dedups(db_session):
     """The same text returns one cached row; a new text creates another."""
-    first = Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
-    again = Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
-    other = Database.get_or_create_type(PCSampleStallReasonType, "BARRIER_WAIT")
+    first = Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
+    again = Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
+    other = Database.get_or_create_type(PCSampleStallReasonLookup, "BARRIER_WAIT")
     db_session.commit()
 
     assert first is again
     assert other is not first
-    assert db_session.query(PCSampleStallReasonType).count() == 2
+    assert db_session.query(PCSampleStallReasonLookup).count() == 2
 
 
 def test_get_or_create_type_dedups_across_calls(db_session):
     """Reusing a text after a commit (e.g. a second workload) creates no
     duplicate row, respecting the unique constraint."""
-    Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
     db_session.commit()
-    Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    Database.get_or_create_type(PCSampleStallReasonLookup, "WAITCNT")
     db_session.commit()
 
-    assert db_session.query(PCSampleStallReasonType).count() == 1
+    assert db_session.query(PCSampleStallReasonLookup).count() == 1
 
 
 # =============================================================================
@@ -216,11 +216,11 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
         total_count=3, issue_count=1, stall_count=2, instruction_line=line
     )
     db_session.add(state)
-    reason_type = PCSampleStallReasonType(text="WAITCNT")
-    db_session.add(reason_type)
+    reason_lookup = PCSampleStallReasonLookup(text="WAITCNT")
+    db_session.add(reason_lookup)
     db_session.add(
         PCSampleStallReason(
-            pc_sample_state=state, stall_reason_type=reason_type, count=2
+            pc_sample_state=state, stall_reason_lookup=reason_lookup, count=2
         )
     )
     Database.create_views()

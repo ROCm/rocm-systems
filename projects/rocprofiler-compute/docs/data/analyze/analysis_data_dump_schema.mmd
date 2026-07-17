@@ -62,27 +62,27 @@ erDiagram
         int stall_count
     }
 
-    compute_pc_sample_stall_reason_type {
-        int pc_sample_stall_reason_type_uuid PK
+    compute_pc_sample_stall_reason_lookup {
+        int pc_sample_stall_reason_lookup_uuid PK
         string text
     }
 
     compute_pc_sample_stall_reason {
         int pc_sample_stall_reason_uuid PK
         int pc_sample_state_uuid FK
-        int pc_sample_stall_reason_type_uuid FK
+        int pc_sample_stall_reason_lookup_uuid FK
         int count
     }
 
-    compute_instruction_sample_type {
-        int instruction_sample_type_uuid PK
+    compute_instruction_sample_lookup {
+        int instruction_sample_lookup_uuid PK
         string text
     }
 
     compute_instruction_sample {
         int instruction_sample_uuid PK
         int pc_sample_state_uuid FK
-        int instruction_sample_type_uuid FK
+        int instruction_sample_lookup_uuid FK
         int count
     }
 
@@ -146,8 +146,8 @@ erDiagram
     compute_instruction_line ||--o| compute_pc_sample_state : instruction_uuid
     compute_pc_sample_state ||--o{ compute_pc_sample_stall_reason : pc_sample_state_uuid
     compute_pc_sample_state ||--o{ compute_instruction_sample : pc_sample_state_uuid
-    compute_pc_sample_stall_reason_type ||--o{ compute_pc_sample_stall_reason : pc_sample_stall_reason_type_uuid
-    compute_instruction_sample_type ||--o{ compute_instruction_sample : instruction_sample_type_uuid
+    compute_pc_sample_stall_reason_lookup ||--o{ compute_pc_sample_stall_reason : pc_sample_stall_reason_lookup_uuid
+    compute_instruction_sample_lookup ||--o{ compute_instruction_sample : instruction_sample_lookup_uuid
 
     compute_metric_definition ||--o{ compute_kernel_metric_value : metric_uuid
     compute_metric_definition ||--o{ compute_workload_metric_value : metric_uuid
