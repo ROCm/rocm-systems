@@ -13,17 +13,17 @@ environment variables in HIP are collected in the following table.
 
     * - | ``ROCR_VISIBLE_DEVICES``
         | A list of device indices or UUIDs that will be exposed to applications.
-      - :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`, :doc:`Setting the number of compute units <rocm:how-to/setting-cus>`
+      - :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`, :doc:`Setting the number of compute units <rocm:reference/environment-variables/setting-cus>`
       - Example: ``0,GPU-4b2c1a9f-8d3e-6f7a-b5c9-2e4d8a1f6c3b``
 
     * - | ``GPU_DEVICE_ORDINAL``
         | Devices indices exposed to OpenCL and HIP applications.
-      - :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`
+      - :doc:`GPU isolation <rocm:reference/system-optimization/gpu-isolation>`
       - Example: ``0,2``
 
     * - | ``HIP_VISIBLE_DEVICES`` or ``CUDA_VISIBLE_DEVICES``
         | Device indices exposed to HIP applications.
-      - :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`, :doc:`HIP debugging <hip:how-to/debugging>`
+      - :doc:`GPU isolation <rocm:reference/system-optimization/gpu-isolation>`, :doc:`HIP debugging <hip:how-to/debugging>`
       - Example: ``0,2``
 
 .. admonition:: Recommendation

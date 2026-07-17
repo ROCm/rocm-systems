@@ -1,6 +1,6 @@
 The debugging environment variables in HIP are collected in the following table. For
 more information, check :doc:`hip:how-to/logging`, :doc:`hip:how-to/debugging`
-and :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`.
+and :doc:`GPU isolation <rocm:reference/system-optimization/gpu-isolation>`.
 
 .. _hip-env-debug:
 .. list-table::

@@ -186,7 +186,7 @@ be used in the kernel. The amount of registers that can be used at most is
 but it might also have other, architecture specific, restrictions.
 
 The available registers per Compute Unit are listed in
-:doc:`rocm:reference/gpu-arch-specs`. Beware that these values are per Compute
+:doc:`rocm:reference/gpu-specs`. Beware that these values are per Compute
 Unit, not per Execution Unit. On AMD GPUs a Compute Unit consists of 4 Execution
 Units, also known as SIMDs, each with their own register file. For more
 information see :doc:`../understand/hardware_implementation`.
@@ -906,6 +906,8 @@ The different shuffle functions behave as following:
   smaller than ``warpSize``, the threads can read values from subgroups before
   the current subgroup. If it tries to read values from later subgroups, the
   function returns the ``var`` of the calling thread.
+
+.. _warp_reduction_functions:
 
 Warp reduction functions
 -------------------------------------------------------------------------------------------------------------

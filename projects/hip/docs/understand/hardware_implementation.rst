@@ -312,8 +312,8 @@ bandwidth.
 From the compiler's perspective, these operations map to specific AMDGPU ISA
 instructions, such as:
 
-* ``v_exp_f32`` - compute exponential base e
-* ``v_log_f32`` - compute natural logarithm
+* ``v_exp_f32`` - compute exponential base 2
+* ``v_log_f32`` - compute base 2 logarithm
 * ``v_sin_f32``, ``v_cos_f32`` - compute sine and/or cosine
 * ``v_rsq_f32``, ``v_rcp_f32`` - compute reciprocal and/or reciprocal square
   root

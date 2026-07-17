@@ -176,8 +176,8 @@ Library and driver equivalents
 
 ROCm provides libraries to ease porting of code relying on CUDA libraries or the CUDA driver API.
 Most CUDA libraries have a corresponding HIP library. For more information,
-see either :doc:`ROCm libraries <rocm:reference/api-libraries>` or :doc:`HIPIFY CUDA compatible libraries <hipify:reference/supported_apis>`.
-
+see either `ROCm Core SDK components <https://rocm.docs.amd.com/en/latest/components/core.html>`__
+or :doc:`HIPIFY CUDA compatible libraries <hipify:reference/supported_apis>`.
 
 ROCm provides two categories of libraries: those prefixed with ``hip`` and those prefixed
 with ``roc``. While both are implemented using HIP, the ``roc`` libraries are optimized

@@ -150,7 +150,7 @@ Hardware and software requirements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Your system needs ROCm 6.2 or later with the hipFFT library installed. The tutorial works on
-all :doc:`supported AMD GPUs <rocm-install-on-linux:reference/system-requirements>`, though at least 4 GiB of GPU
+all :ref:`supported GPUs <rocm:rocm-install-selector>`, though at least 4 GiB of GPU
 memory are recommended for comfortable performance with the reconstruction workload. You will also need
 `git <https://git-scm.com/>`__ to check out the code repository, `CMake <https://www.cmake.org>`__ 3.21 or later to
 build the code, along with a CMake generator that supports the HIP language such as GNU Make or Ninja.

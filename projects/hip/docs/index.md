@@ -77,6 +77,5 @@ The HIP documentation is organized into the following categories:
 Known issues are listed on the [HIP GitHub repository](https://github.com/ROCm/HIP/issues).
 
 To contribute features or functions to the HIP project, refer to [Contributing to HIP](https://github.com/ROCm/HIP/blob/develop/CONTRIBUTING.md).
-To contribute to the documentation, refer to {doc}`Contributing to ROCm docs <rocm:contribute/contributing>` page.
 
 You can find licensing information on the [Licensing](https://rocm.docs.amd.com/en/latest/about/license.html) page.
