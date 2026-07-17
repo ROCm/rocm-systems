@@ -70,6 +70,7 @@ endfunction()
 #   rj_find_sanitizer_shared_libraries(
 #       <libraries-out-var>
 #       <asan-out-var>
+#       <tsan-out-var>
 #       COMPILER <compiler-path>
 #       COMPILER_ID <compiler-id>
 #       [COMPILER_ARG1 <compiler-arg1>]
@@ -78,9 +79,14 @@ endfunction()
 #   )
 #
 # The first result contains all resolved shared sanitizer runtime paths. The
-# second result contains the ASan runtime path when AddressSanitizer is enabled,
-# because tests that LD_PRELOAD rocjitsu need that exact library first.
-function(rj_find_sanitizer_shared_libraries libraries_out_var asan_out_var)
+# second result contains the ASan runtime path when AddressSanitizer is enabled.
+# The third result contains the TSan runtime path when ThreadSanitizer is enabled.
+function(
+    rj_find_sanitizer_shared_libraries
+    libraries_out_var
+    asan_out_var
+    tsan_out_var
+)
     set(oneValueArgs COMPILER COMPILER_ARG1 COMPILER_ID SYSTEM_PROCESSOR)
     set(multiValueArgs SANITIZERS)
     cmake_parse_arguments(
@@ -94,6 +100,7 @@ function(rj_find_sanitizer_shared_libraries libraries_out_var asan_out_var)
     if(NOT RJ_SANI_LIB_SANITIZERS)
         set(${libraries_out_var} "" PARENT_SCOPE)
         set(${asan_out_var} "" PARENT_SCOPE)
+        set(${tsan_out_var} "" PARENT_SCOPE)
         return()
     endif()
 
@@ -104,6 +111,7 @@ function(rj_find_sanitizer_shared_libraries libraries_out_var asan_out_var)
 
     set(_sanitizer_shared_libraries)
     set(_asan_shared_library "")
+    set(_tsan_shared_library "")
     if(RJ_SANI_LIB_COMPILER_ID MATCHES "Clang")
         set(_sanitizer_arch "${RJ_SANI_LIB_SYSTEM_PROCESSOR}")
         if(NOT _sanitizer_arch)
@@ -192,9 +200,12 @@ function(rj_find_sanitizer_shared_libraries libraries_out_var asan_out_var)
         list(APPEND _sanitizer_shared_libraries "${_runtime_library}")
         if(_sanitizer STREQUAL "address")
             set(_asan_shared_library "${_runtime_library}")
+        elseif(_sanitizer STREQUAL "thread")
+            set(_tsan_shared_library "${_runtime_library}")
         endif()
     endforeach()
 
     set(${libraries_out_var} "${_sanitizer_shared_libraries}" PARENT_SCOPE)
     set(${asan_out_var} "${_asan_shared_library}" PARENT_SCOPE)
+    set(${tsan_out_var} "${_tsan_shared_library}" PARENT_SCOPE)
 endfunction()

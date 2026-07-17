@@ -169,6 +169,7 @@ if(_rj_sanitizer_count GREATER 0)
     set(RJ_SANITIZER_LINK_OPTIONS)
     set(RJ_SANITIZER_SHARED_LIBRARIES)
     set(RJ_ASAN_SHARED_LIBRARY "")
+    set(RJ_TSAN_SHARED_LIBRARY "")
     message(STATUS "Sanitizer enabled: ${_rj_sanitizer_arg}")
     if(MSVC)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
@@ -205,6 +206,7 @@ if(_rj_sanitizer_count GREATER 0)
             rj_find_sanitizer_shared_libraries(
                 RJ_SANITIZER_SHARED_LIBRARIES
                 RJ_ASAN_SHARED_LIBRARY
+                RJ_TSAN_SHARED_LIBRARY
                 COMPILER ${CMAKE_CXX_COMPILER}
                 COMPILER_ARG1 "${CMAKE_CXX_COMPILER_ARG1}"
                 COMPILER_ID "${CMAKE_CXX_COMPILER_ID}"

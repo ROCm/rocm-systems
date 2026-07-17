@@ -545,7 +545,7 @@ if(RJ_ENABLE_TSAN AND RJ_SANITIZE_SHARED)
         launch_preload_test
         PRIVATE
             RJ_EXPECT_SHARED_TSAN_RUNTIME=1
-            RJ_EXPECTED_SHARED_TSAN_RUNTIME="${RJ_SANITIZER_SHARED_LIBRARIES}"
+            RJ_EXPECTED_SHARED_TSAN_RUNTIME="${RJ_TSAN_SHARED_LIBRARY}"
     )
 endif()
 rj_configure_target(launch_preload_test TEST)
