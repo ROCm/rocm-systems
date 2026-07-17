@@ -172,7 +172,13 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------
-AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA enables one computer to access another computer’s memory directly, without operating-system involvement. This capability provides high-throughput, low‑latency data transfer, which is needed for large-scale clusters and high-performance networking. You can measure AI NIC network performance by using ``amd-smi``. By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
+AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA
+enables one computer to access another computer’s memory directly, without
+operating-system involvement. This capability provides high-throughput, low‑latency
+data transfer, which is needed for large-scale clusters and high-performance
+networking. You can measure AI NIC network performance by using ``amd-smi``.
+By default, AI NIC support is enabled in ROCm Systems Profiler. However, you
+can disable it by setting:
 
 .. code-block:: shell
 
@@ -242,8 +248,9 @@ the AI NIC.
 Sampling the AI NICs
 -----------------------
 
-After the AI NIC support is enabled, specify the names of the AI NICs for which you want
-to track the values. For example, if the host has an AI NIC named ``enp229s0`` there are multiple options to track its performance:
+After the AI NIC support is enabled, specify the names of the AI NICs for which
+you want to track the values. For example, if the host has an AI NIC named ``enp229s0``
+there are multiple options to track its performance:
 
 * **Option 1:** Set ``ROCPROFSYS_SAMPLING_AINICS`` in the configuration file.
 
