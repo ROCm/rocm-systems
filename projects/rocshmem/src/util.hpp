@@ -402,7 +402,7 @@ constexpr bool is_blocking(MemcpyKind k) {
 }
 
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __forceinline__ void copy_bulk(void* dst, void* src,
+__device__ __attribute__((noinline)) void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
@@ -502,7 +502,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 4;
+  constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -548,7 +548,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 4;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -578,7 +578,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 4;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
