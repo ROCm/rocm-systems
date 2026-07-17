@@ -8,6 +8,7 @@
 
 #include "utils/options.hpp"
 #include "rockernel.hpp"
+#include "device/hotswap.hpp"
 
 #include <string>
 #include <vector>
@@ -28,9 +29,15 @@ static inline const char* hsa_strerror(hsa_status_t status) {
 }
 
 Program::~Program() {
+  // Make sure no background preparation is still touching the reader members
+  // (or the source bytes) before we tear them down.
+  waitForCodeObjectPrepare();
   // Destroy the executable.
   if (hsaExecutable_.handle != 0) {
     Hsa::executable_destroy(hsaExecutable_);
+  }
+  if (preparedCodeObjectReader_.handle != 0) {
+    Hsa::code_object_reader_destroy(preparedCodeObjectReader_);
   }
   if (hsaCodeObjectReader_.handle != 0) {
     Hsa::code_object_reader_destroy(hsaCodeObjectReader_);
@@ -41,6 +48,7 @@ Program::~Program() {
 Program::Program(roc::NullDevice& device, amd::Program& owner) : device::Program(device, owner) {
   hsaExecutable_.handle = 0;
   hsaCodeObjectReader_.handle = 0;
+  preparedCodeObjectReader_.handle = 0;
   isHIP_ = (owner.language() == amd::Program::HIP);
 }
 
@@ -219,6 +227,104 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
   return true;
 }
 
+void Program::prepareCodeObjectReader(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
+                                      size_t foffset, std::string uri) {
+  std::call_once(readerOnce_, [&]() {
+    hsa_agent_t agent = rocDevice().getBackendDevice();
+    hsa_status_t status;
+
+    // If we received a file descriptor, hand the code object's file region to
+    // rocr via the vendor extension so it can mmap it itself (and resolve the
+    // URI directly from the fd). Fall back to from_memory when the fd is
+    // invalid or the vendor extension isn't available in the linked rocr.
+    // The fd is owned here in all cases: closed before returning.
+    auto* create_from_file =
+        Device::loaderExtensionTable()
+            .hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+    if (fdesc != amd::Os::FDescInit() && create_from_file != nullptr) {
+      status = create_from_file(fdesc, foffset, binSize, &hsaCodeObjectReader_);
+    } else {
+      status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
+    }
+    if (fdesc != amd::Os::FDescInit()) {
+      amd::Os::CloseFileHandle(fdesc);
+    }
+    if (status != HSA_STATUS_SUCCESS) {
+      buildLog_ += "Error: AMD HSA Code Object Reader create failed: ";
+      buildLog_ += hsa_strerror(status);
+      buildLog_ += "\n";
+      prepareStatus_ = status;
+      readerReady_ = true;
+      return;
+    }
+
+    // HotSwap: ask the loader to prepare (retarget) the code object for this
+    // agent at the common loader boundary, covering both HIP and OpenCL. When a
+    // prepared reader is returned it owns the retargeted artifact and is loaded
+    // in place of the source (bypassing the loader's onLoad interception). When
+    // preparation is not required -- or the prepare API is unavailable in an
+    // older rocr -- the source reader is loaded unchanged, and direct-HSA users
+    // still fall back to the onLoad interception. This is the expensive step
+    // that prepareCodeObjectAsync() moves off the first-load critical path.
+    auto* prepare_code_object =
+        Device::loaderExtensionTable().hsa_ven_amd_loader_code_object_reader_prepare;
+    if (prepare_code_object != nullptr && amd::hotswap::Enabled()) {
+      hsa_code_object_reader_t prepared = {0};
+      status = prepare_code_object(hsaCodeObjectReader_, agent, 0, &prepared);
+      if (status != HSA_STATUS_SUCCESS) {
+        buildLog_ += "Error: HotSwap code object preparation failed: ";
+        buildLog_ += hsa_strerror(status);
+        buildLog_ += "\n";
+        prepareStatus_ = status;
+        readerReady_ = true;
+        return;
+      }
+      if (prepared.handle != 0) {
+        preparedCodeObjectReader_ = prepared;
+      }
+    }
+
+    prepareStatus_ = HSA_STATUS_SUCCESS;
+    readerReady_ = true;
+  });
+}
+
+void Program::prepareCodeObjectAsync() {
+  // Only worth spawning a thread when HotSwap preparation is actually available
+  // and enabled; otherwise setKernels() will create the reader inline for free.
+  if (!device().isOnline()) {
+    return;
+  }
+  auto* prepare_code_object =
+      Device::loaderExtensionTable().hsa_ven_amd_loader_code_object_reader_prepare;
+  if (prepare_code_object == nullptr || !amd::hotswap::Enabled()) {
+    return;
+  }
+
+  // Snapshot the source location from clBinary(); these are the same values
+  // load() would later pass to setKernels(). The bytes/fd remain owned by the
+  // caller (FatBinaryInfo) which joins this future (waitForCodeObjectPrepare)
+  // before releasing them.
+  binary_t bin = binary();
+  finfo_t finfo = BinaryFd();
+  std::string uri = BinaryURI();
+  void* image = const_cast<void*>(bin.first);
+  size_t image_size = bin.second;
+  amd::Os::FileDesc fdesc = finfo.first;
+  size_t foffset = finfo.second;
+
+  prepareFuture_ = std::async(
+      std::launch::async, [this, image, image_size, fdesc, foffset, uri]() {
+        prepareCodeObjectReader(image, image_size, fdesc, foffset, uri);
+      });
+}
+
+void Program::waitForCodeObjectPrepare() {
+  if (prepareFuture_.valid()) {
+    prepareFuture_.wait();
+  }
+}
+
 bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
                          size_t foffset, std::string uri) {
   // Stop compilation if it is an offline device - HSA runtime does not
@@ -239,31 +345,25 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     return false;
   }
 
-  // If we received a file descriptor, hand the code object's file region to
-  // rocr via the vendor extension so it can mmap it itself (and resolve the
-  // URI directly from the fd). Fall back to from_memory when the fd is
-  // invalid or the vendor extension isn't available in the linked rocr.
-  // The fd is owned by setKernels in all cases: closed before returning.
-  auto* create_from_file =
-      Device::loaderExtensionTable()
-          .hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
-  if (fdesc != amd::Os::FDescInit() && create_from_file != nullptr) {
-    status = create_from_file(fdesc, foffset, binSize, &hsaCodeObjectReader_);
-  } else {
-    status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
+  // Consume the reader produced by prepareCodeObjectReader(). When an async
+  // preparation was kicked off (HIP fatbin path) we simply wait for it; the
+  // once-guard makes the inline call below a no-op in that case. Otherwise
+  // (OpenCL, module-substitution, or HotSwap unavailable) we create and prepare
+  // the reader synchronously here.
+  if (prepareFuture_.valid()) {
+    prepareFuture_.wait();
   }
-  if (fdesc != amd::Os::FDescInit()) {
-    amd::Os::CloseFileHandle(fdesc);
-  }
-  if (status != HSA_STATUS_SUCCESS) {
-    buildLog_ += "Error: AMD HSA Code Object Reader create failed: ";
-    buildLog_ += hsa_strerror(status);
-    buildLog_ += "\n";
+  prepareCodeObjectReader(binary, binSize, fdesc, foffset, uri);
+  if (prepareStatus_ != HSA_STATUS_SUCCESS) {
+    // buildLog_ already carries the failure detail from prepareCodeObjectReader.
     return false;
   }
 
-  status = Hsa::executable_load_agent_code_object(hsaExecutable_, agent, hsaCodeObjectReader_,
-                                                 nullptr, nullptr);
+  hsa_code_object_reader_t reader_to_load =
+      preparedCodeObjectReader_.handle != 0 ? preparedCodeObjectReader_ : hsaCodeObjectReader_;
+
+  status = Hsa::executable_load_agent_code_object(hsaExecutable_, agent, reader_to_load, nullptr,
+                                                  nullptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: AMD HSA Code Object loading failed: ";
     buildLog_ += hsa_strerror(status);

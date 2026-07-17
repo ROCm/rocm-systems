@@ -164,6 +164,16 @@ class Program {
   //! Load the device program.
   bool load();
 
+  //! Kick off asynchronous preparation (e.g. HotSwap retargeting) of the code
+  //! object so the expensive work runs off the first-load critical path. The
+  //! prepared result is consumed later by load()/setKernels(). Default no-op.
+  virtual void prepareCodeObjectAsync() {}
+
+  //! Block until any in-flight asynchronous code-object preparation started by
+  //! prepareCodeObjectAsync() has completed. Must be called before the source
+  //! bytes backing this program are released. Default no-op.
+  virtual void waitForCodeObjectPrepare() {}
+
   //! Return the device object, associated with this program.
   const amd::Device& device() const { return device_(); }
 

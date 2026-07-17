@@ -348,6 +348,7 @@ static size_t get_extension_table_length(uint16_t extension, uint16_t major, uin
       {"hsa_ven_amd_loader_1_01_pfn_t", sizeof(hsa_ven_amd_loader_1_01_pfn_t)},
       {"hsa_ven_amd_loader_1_02_pfn_t", sizeof(hsa_ven_amd_loader_1_02_pfn_t)},
       {"hsa_ven_amd_loader_1_03_pfn_t", sizeof(hsa_ven_amd_loader_1_03_pfn_t)},
+      {"hsa_ven_amd_loader_1_04_pfn_t", sizeof(hsa_ven_amd_loader_1_04_pfn_t)},
       {"hsa_ven_amd_aqlprofile_1_00_pfn_t", sizeof(hsa_ven_amd_aqlprofile_1_00_pfn_t)},
       {"hsa_ven_amd_pc_sampling_1_00_pfn_t", sizeof(hsa_ven_amd_pc_sampling_1_00_pfn_t)}};
   static const size_t num_tables = sizeof(sizes) / sizeof(sizes_t);
@@ -475,7 +476,7 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
 
   if (extension == HSA_EXTENSION_AMD_LOADER) {
     if (version_major != 1) return HSA_STATUS_ERROR;
-    hsa_ven_amd_loader_1_03_pfn_t ext_table;
+    hsa_ven_amd_loader_1_04_pfn_t ext_table;
     ext_table.hsa_ven_amd_loader_query_host_address =
         hsa_ven_amd_loader_query_host_address;
     ext_table.hsa_ven_amd_loader_query_segment_descriptors =
@@ -490,6 +491,8 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
         hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
     ext_table.hsa_ven_amd_loader_iterate_executables =
         hsa_ven_amd_loader_iterate_executables;
+    ext_table.hsa_ven_amd_loader_code_object_reader_prepare =
+        hsa_ven_amd_loader_code_object_reader_prepare;
 
     memcpy(table, &ext_table, Min(sizeof(ext_table), table_length));
 
@@ -2360,6 +2363,15 @@ hsa_status_t hsa_executable_load_agent_code_object(
       code_object_reader);
   if (!reader) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  }
+
+  // A reader that already holds a prepared (retargeted) artifact bypasses the
+  // hotswap interception and loads directly: it is the fast path's product and
+  // must not be re-analyzed or re-rewritten.
+  if (reader->IsPrepared()) {
+    hsa_code_object_t code_object = {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
+    return exec->LoadCodeObject(agent, code_object, reader->GetCodeObjectSize(), options,
+                                reader->GetUri(), loaded_code_object);
   }
 
   hotswap::CodeObjectView code_object;

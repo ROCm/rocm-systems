@@ -40,11 +40,15 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "core/inc/hsa_ven_amd_loader_impl.h"
+#include <cstdlib>
+#include <memory>
+#include <utility>
 
-#include "core/inc/runtime.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_hsa_loader.hpp"
+#include "core/inc/hotswap.hpp"
+#include "core/inc/hsa_ven_amd_loader_impl.h"
+#include "core/inc/runtime.h"
 
 namespace rocr {
 
@@ -299,6 +303,78 @@ hsa_ven_amd_loader_iterate_executables(
 
     return GetLoader()->IterateExecutables(callback, data);
   } catch(...) { return AMD::handleException(); }
+}
+
+hsa_status_t hsa_ven_amd_loader_code_object_reader_prepare(
+    hsa_code_object_reader_t code_object_reader, hsa_agent_t agent, uint64_t flags,
+    hsa_code_object_reader_t* prepared_code_object_reader) {
+  try {
+    if (!Runtime::runtime_singleton_->IsOpen()) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+    if (nullptr == prepared_code_object_reader) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    // Default to "no preparation"; only overwritten when a reader is created.
+    prepared_code_object_reader->handle = 0;
+
+    CodeObjectReaderImpl* source = CodeObjectReaderImpl::Object(code_object_reader);
+    if (!source) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+    }
+
+    hotswap::CodeObjectView view;
+    view.data = source->GetCodeObjectMemory();
+    view.size = source->GetCodeObjectSize();
+    view.uri = source->GetUri();
+
+    hotswap::RewriteOptions options;
+    options.entry_trampolines_enabled =
+        (flags & HSA_VEN_AMD_LOADER_CODE_OBJECT_PREPARE_ENTRY_TRAMPOLINES) != 0;
+    options.strict_mode_enabled = (flags & HSA_VEN_AMD_LOADER_CODE_OBJECT_PREPARE_STRICT) != 0;
+
+    hotswap::OwnedElfBuffer prepared_bytes(nullptr, &std::free);
+    size_t prepared_size = 0;
+    const hotswap::PrepareStatus status =
+        hotswap::PrepareRetargetedCodeObject(view, agent, options, &prepared_bytes, &prepared_size);
+
+    switch (status) {
+      case hotswap::PrepareStatus::kNotNeeded:
+        // No preparation required; caller loads the source reader as-is.
+        return HSA_STATUS_SUCCESS;
+      case hotswap::PrepareStatus::kRequiredRewriteFailed:
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      case hotswap::PrepareStatus::kPrepared:
+        break;
+    }
+
+    if (!prepared_bytes || prepared_size == 0) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+
+    // Transfer ownership of the prepared artifact into a shared backing whose
+    // deleter (heap free or mmap release, captured in the OwnedElfBuffer) runs
+    // when the prepared reader is destroyed.
+    void* payload = prepared_bytes.get();
+    auto deleter = prepared_bytes.get_deleter();
+    std::shared_ptr<void> backing(prepared_bytes.release(), std::move(deleter));
+
+    std::unique_ptr<CodeObjectReaderImpl> reader(new (std::nothrow) CodeObjectReaderImpl());
+    if (!reader) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    hsa_status_t st =
+        reader->SetOwnedMemory(payload, prepared_size, std::move(backing), source->GetUri());
+    if (st != HSA_STATUS_SUCCESS) {
+      return st;
+    }
+
+    *prepared_code_object_reader = CodeObjectReaderImpl::Handle(reader.release());
+    return HSA_STATUS_SUCCESS;
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 } // namespace rocr

@@ -43,6 +43,7 @@
 #ifndef AMD_HSA_LOADER_HPP
 #define AMD_HSA_LOADER_HPP
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include "inc/hsa.h"
@@ -142,16 +143,63 @@ struct CodeObjectReaderImpl final {
       const void *_code_object_memory,
       size_t _code_object_size);
 
+  /// @brief Take ownership of a prepared/rewritten artifact. @p backing owns
+  /// the bytes and frees them (via its deleter) when this reader is destroyed;
+  /// @p _code_object_memory points at the code object within that backing
+  /// (it may be offset past a container header). Used for prepared readers
+  /// returned by the hotswap prepare API, which own their backing memory
+  /// independently of the source reader.
+  hsa_status_t SetOwnedMemory(const void* _code_object_memory, size_t _code_object_size,
+                              std::shared_ptr<void> backing, std::string _uri);
+
   const void *GetCodeObjectMemory() const { return code_object_memory; };
   size_t GetCodeObjectSize() const { return code_object_size; }
 
   std::string GetUri() const { return uri; };
+
+  /// @brief True if this reader already holds a prepared (retargeted) artifact.
+  /// Such readers must bypass the hotswap load interception, otherwise the
+  /// already-prepared bytes would be re-analyzed (and, for fixed-stepping
+  /// targets, re-rewritten) since the ELF target-id does not encode the
+  /// stepping feature.
+  bool IsPrepared() const { return is_prepared; }
+
+  /// @brief Full-content digest of this code object, computed once on first
+  /// use and cached. Provides a stable identity that survives across the
+  /// per-agent loads of the same reader (used to key the hotswap retarget
+  /// cache). Returns 0 if the object has no backing memory.
+  uint64_t GetContentDigest() const {
+    // Compute once, then cache. Concurrent per-agent loads may race here, but
+    // all hash the same immutable bytes to the same value, so publishing any
+    // winner's result is correct (a benign duplicate hash at worst).
+    uint64_t cached = content_digest.load(std::memory_order_acquire);
+    if (cached != 0) return cached;
+    if (!code_object_memory || code_object_size == 0) return 0;
+    // FNV-1a over the entire object -- a strong, sampling-free identity.
+    constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
+    constexpr uint64_t kFnvPrime = 1099511628211ULL;
+    uint64_t hash = kFnvOffset;
+    const auto *bytes = static_cast<const uint8_t *>(code_object_memory);
+    for (size_t i = 0; i < code_object_size; ++i) {
+      hash ^= bytes[i];
+      hash *= kFnvPrime;
+    }
+    if (hash == 0) hash = kFnvPrime;  // never publish the "unset" sentinel
+    content_digest.store(hash, std::memory_order_release);
+    return hash;
+  }
 
  private:
   const void *code_object_memory{nullptr};
   size_t code_object_size{0};
   std::string uri{};
   bool is_mmap{false};
+  bool is_prepared{false};
+  // Backing store for prepared/rewritten artifacts (see SetOwnedMemory). When
+  // set, its deleter releases the bytes on destruction; is_mmap stays false so
+  // the destructor's munmap path is not taken.
+  std::shared_ptr<void> owned_backing{};
+  mutable std::atomic<uint64_t> content_digest{0};
 #if defined(_WIN32) || defined(_WIN64)
   // Bookkeeping for MapViewOfFile-backed mappings (file-backed code objects on
   // Windows). map_base is the unadjusted pointer returned by MapViewOfFile and

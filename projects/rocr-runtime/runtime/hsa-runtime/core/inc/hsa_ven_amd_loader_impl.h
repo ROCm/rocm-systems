@@ -84,6 +84,10 @@ namespace rocr {
       hsa_executable_t executable,
       void *data),
     void *data);
+
+  hsa_status_t hsa_ven_amd_loader_code_object_reader_prepare(
+      hsa_code_object_reader_t code_object_reader, hsa_agent_t agent, uint64_t flags,
+      hsa_code_object_reader_t* prepared_code_object_reader);
 }  // namespace rocr
 
 #endif

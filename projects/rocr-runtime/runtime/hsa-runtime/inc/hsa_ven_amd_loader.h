@@ -528,9 +528,82 @@ hsa_ven_amd_loader_iterate_executables(
 //===----------------------------------------------------------------------===//
 
 /**
+ * @brief Rewrite option flags for
+ * ::hsa_ven_amd_loader_code_object_reader_prepare. Passed as a bitmask so new
+ * options can be added without changing the function signature.
+ */
+typedef enum {
+  /**
+   * @brief Request insertion of entry trampolines during preparation. Opt-in
+   * while validation is ongoing.
+   */
+  HSA_VEN_AMD_LOADER_CODE_OBJECT_PREPARE_ENTRY_TRAMPOLINES = 0x1,
+  /**
+   * @brief Request strict-mode rewriting. A strict rewrite that fails is
+   * reported as an error rather than falling back to the source object.
+   */
+  HSA_VEN_AMD_LOADER_CODE_OBJECT_PREPARE_STRICT = 0x2,
+} hsa_ven_amd_loader_code_object_prepare_flag_t;
+
+/**
+ * @brief Prepare (retarget/rewrite) a code object for @p agent, returning a new
+ * code object reader that owns the prepared artifact.
+ *
+ * The runtime owns eligibility, the rewrite engine, and the persistent artifact
+ * store. When the source object needs preparation for @p agent (e.g. a fixed
+ * stepping retarget), the prepared bytes are produced/served from the artifact
+ * store and wrapped in a freshly created reader returned via
+ * @p prepared_code_object_reader. The prepared reader owns its backing memory
+ * and must be released with ::hsa_code_object_reader_destroy, independently of
+ * @p code_object_reader.
+ *
+ * When no preparation is required for @p agent (already-correct object, or an
+ * ineligible agent), the function succeeds and sets
+ * @p prepared_code_object_reader to the null handle (``handle == 0``); the
+ * caller should load @p code_object_reader as-is.
+ *
+ * The caller owns any asynchronous scheduling: this call performs the
+ * preparation on the calling thread. @p agent and @p flags are explicit so the
+ * result is deterministic and independent of which agents happen to be present.
+ *
+ * @param[in] code_object_reader Source code object reader to prepare.
+ *
+ * @param[in] agent Agent the object is being prepared for.
+ *
+ * @param[in] flags Bitmask of
+ * ::hsa_ven_amd_loader_code_object_prepare_flag_t values (0 for defaults).
+ *
+ * @param[out] prepared_code_object_reader On success, either a newly created
+ * reader owning the prepared artifact, or the null handle when no preparation
+ * was required. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER @p code_object_reader
+ * is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT A required rewrite failed or
+ * the prepared object is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p prepared_code_object_reader is
+ * NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to
+ * allocate the required resources.
+ */
+hsa_status_t hsa_ven_amd_loader_code_object_reader_prepare(
+    hsa_code_object_reader_t code_object_reader, hsa_agent_t agent, uint64_t flags,
+    hsa_code_object_reader_t* prepared_code_object_reader);
+
+//===----------------------------------------------------------------------===//
+
+/**
  * @brief Extension version.
  */
-#define hsa_ven_amd_loader 001003
+#define hsa_ven_amd_loader 001004
 
 /**
  * @brief Extension function table version 1.00.
@@ -659,6 +732,41 @@ typedef struct hsa_ven_amd_loader_1_03_pfn_s {
         void *data),
       void *data);
 } hsa_ven_amd_loader_1_03_pfn_t;
+
+/**
+ * @brief Extension function table version 1.04.
+ */
+typedef struct hsa_ven_amd_loader_1_04_pfn_s {
+  hsa_status_t (*hsa_ven_amd_loader_query_host_address)(const void* device_address,
+                                                        const void** host_address);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
+      hsa_ven_amd_loader_segment_descriptor_t* segment_descriptors,
+      size_t* num_segment_descriptors);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_executable)(const void* device_address,
+                                                      hsa_executable_t* executable);
+
+  hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
+      hsa_executable_t executable,
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object, void* data),
+      void* data);
+
+  hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
+      hsa_loaded_code_object_t loaded_code_object,
+      hsa_ven_amd_loader_loaded_code_object_info_t attribute, void* value);
+
+  hsa_status_t (*hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
+      hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t* code_object_reader);
+
+  hsa_status_t (*hsa_ven_amd_loader_iterate_executables)(
+      hsa_status_t (*callback)(hsa_executable_t executable, void* data), void* data);
+
+  hsa_status_t (*hsa_ven_amd_loader_code_object_reader_prepare)(
+      hsa_code_object_reader_t code_object_reader, hsa_agent_t agent, uint64_t flags,
+      hsa_code_object_reader_t* prepared_code_object_reader);
+} hsa_ven_amd_loader_1_04_pfn_t;
 
 #ifdef __cplusplus
 }

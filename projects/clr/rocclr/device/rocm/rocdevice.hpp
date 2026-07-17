@@ -374,7 +374,7 @@ class Device : public NullDevice {
   static hsa_status_t loaderQueryHostAddress(const void* device, const void** host);
 
   //! Returns the AMD HSA loader extension function table.
-  static const hsa_ven_amd_loader_1_03_pfn_t& loaderExtensionTable() {
+  static const hsa_ven_amd_loader_1_04_pfn_t& loaderExtensionTable() {
     return amd_loader_ext_table;
   }
 
@@ -710,7 +710,7 @@ class Device : public NullDevice {
                            int numa_id = kDefaultNumaNode) const;
   static constexpr hsa_signal_value_t InitSignalValue = 1;
 
-  static hsa_ven_amd_loader_1_03_pfn_t amd_loader_ext_table;
+  static hsa_ven_amd_loader_1_04_pfn_t amd_loader_ext_table;
 
   std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure

@@ -7,6 +7,11 @@
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
+#include <algorithm>
+#include <cstdlib>
+#include <string>
+#include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -21,9 +26,10 @@
 #endif
 
 namespace hip {
+
 // Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
-using comgr_helper::ComgrDataSetUniqueHandle;
 using comgr_helper::ComgrActionInfoUniqueHandle;
+using comgr_helper::ComgrDataSetUniqueHandle;
 using comgr_helper::ComgrDataUniqueHandle;
 
 #if ROCM_KPACK_ENABLED
@@ -58,6 +64,19 @@ FatBinaryInfo::FatBinaryInfo(KpackParams kpack_params)
 }
 
 FatBinaryInfo::~FatBinaryInfo() {
+  // Join any background HotSwap preparation kicked off in AddDevProgram before
+  // releasing the programs and freeing the code-object bytes it may still be
+  // reading. The device::Program destructor also waits, but that only helps if
+  // release() destroys it synchronously; wait here explicitly to be safe.
+  for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
+    if (dev_programs_[dev_id] != nullptr && static_cast<size_t>(dev_id) < g_devices.size() &&
+        g_devices[dev_id] != nullptr) {
+      if (device::Program* devProg =
+              dev_programs_[dev_id]->getDeviceProgram(*g_devices[dev_id]->devices()[0])) {
+        devProg->waitForCodeObjectPrepare();
+      }
+    }
+  }
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
@@ -144,7 +163,7 @@ static std::string TargetGenericMap(const std::string& input) {
 }
 
 // For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
+static std::string TargetFeatureCheck(const std::string& input, const std::string& feature) {
   if (input.find(feature) != std::string::npos) {
     auto feature_p = feature + "+";  // feature present eg: xnack+
     auto feature_m = feature + "-";  // feature absent eg: xnack-
@@ -157,7 +176,7 @@ static std::string TargetFeatureCheck(const std::string& input, const std::strin
   return "";
 }
 
-static std::string TargetToGeneric(const std::string &input) {
+static std::string TargetToGeneric(const std::string& input) {
   auto sramecc = TargetFeatureCheck(input, "sramecc");
   auto xnack = TargetFeatureCheck(input, "xnack");
 
@@ -681,8 +700,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else {
         // We found neither a compatible code object nor SPIRV
         LogPrintfError(
-            "No compatible code objects found with HIP_FORCE_SPIRV_CODEOBJECT=%d. Rebuild the application with option --offload-arch=%s",
-             HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
+            "No compatible code objects found with HIP_FORCE_SPIRV_CODEOBJECT=%d. Rebuild the "
+            "application with option --offload-arch=%s",
+            HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
         break;
       }
     }
@@ -744,8 +764,8 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
   // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
   kpack_error_t err =
       kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
-                             static_cast<uint32_t>(params.bundle_index),
-                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+                             static_cast<uint32_t>(params.bundle_index), arch_ptrs.data(),
+                             arch_ptrs.size(), &code_object, &code_object_size);
 
   if (err != KPACK_SUCCESS) {
     LogPrintfError("kpack_load_code_object failed with error: %d", err);
@@ -755,8 +775,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
   // Add code object to all devices. The kpack buffer isn't backed by a file
   // on disk, so no fd is passed.
   for (auto device : devices) {
-    hipError_t hip_err =
-        AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
+    hipError_t hip_err = AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
     if (hip_err != hipSuccess) {
       kpack_free_code_object(code_object);
       return hip_err;
@@ -797,12 +816,23 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
                                       reinterpret_cast<const char*>(image_));
   }
 
-  if (CL_SUCCESS !=
-      program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, out_fdesc, out_foffset, uri_)) {
+  if (CL_SUCCESS != program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false,
+                                              nullptr, nullptr, out_fdesc, out_foffset, uri_)) {
     if (out_fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(out_fdesc);
     return hipErrorInvalidKernelFile;
   }
+
+  // Kick off HotSwap code-object preparation (retargeting) on a background
+  // thread now, at digest time. For statically registered fat binaries this
+  // happens well before the first kernel launch drives BuildProgram()/load(),
+  // so the (potentially expensive) cold retarget overlaps that window instead
+  // of blocking the first setKernels(). No-op when HotSwap is unavailable or
+  // disabled. The future is owned by the device::Program and joined in the
+  // FatBinaryInfo destructor before the source bytes are released.
+  if (device::Program* devProg = program->getDeviceProgram(*ctx->devices()[0])) {
+    devProg->prepareCodeObjectAsync();
+  }
+
   return hipSuccess;
 }
 

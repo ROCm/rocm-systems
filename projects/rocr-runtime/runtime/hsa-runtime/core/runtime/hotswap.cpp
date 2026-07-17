@@ -520,18 +520,16 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   return true;
 }
 
-RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
-                                               hsa_agent_t agent,
-                                               OwnedElfBuffer* out_elf_buffer,
-                                               size_t* out_elf_size) {
-  if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
-    return {};
-  }
+namespace {
 
+// Shared retarget engine used by both the onLoad path (options derived from the
+// environment) and the loader prepare API (explicit, deterministic options).
+RetargetCodeObjectResult RetargetCodeObjectWithOptions(const CodeObjectView& code_object,
+                                                       hsa_agent_t agent,
+                                                       const RewriteOptions& options,
+                                                       OwnedElfBuffer* out_elf_buffer,
+                                                       size_t* out_elf_size) {
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
-  RewriteOptions options;
-  options.entry_trampolines_enabled = AreEntryTrampolinesRequested();
-  options.strict_mode_enabled = IsStrictModeRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return {};
   }
@@ -655,6 +653,43 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
     return {RetargetCodeObjectStatus::kRequiredRewriteFailed, true};
   }
   return {};
+}
+
+}  // namespace
+
+RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
+                                               hsa_agent_t agent,
+                                               OwnedElfBuffer* out_elf_buffer,
+                                               size_t* out_elf_size) {
+  if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
+    return {};
+  }
+  RewriteOptions options;
+  options.entry_trampolines_enabled = AreEntryTrampolinesRequested();
+  options.strict_mode_enabled = IsStrictModeRequested();
+  return RetargetCodeObjectWithOptions(code_object, agent, options, out_elf_buffer, out_elf_size);
+}
+
+// Deterministic entry point behind the loader prepare API: explicit options, no
+// environment-derived option inspection, no implicit agent selection. Reuses
+// the same in-process retarget cache as the onLoad path.
+PrepareStatus PrepareRetargetedCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
+                                          const RewriteOptions& options,
+                                          OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+  if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
+    return PrepareStatus::kNotNeeded;
+  }
+  const RetargetCodeObjectResult result =
+      RetargetCodeObjectWithOptions(code_object, agent, options, out_elf_buffer, out_elf_size);
+  switch (result.status) {
+    case RetargetCodeObjectStatus::kRewritten:
+      return PrepareStatus::kPrepared;
+    case RetargetCodeObjectStatus::kRequiredRewriteFailed:
+      return PrepareStatus::kRequiredRewriteFailed;
+    case RetargetCodeObjectStatus::kSkipped:
+    default:
+      return PrepareStatus::kNotNeeded;
+  }
 }
 
 RetargetCodeObjectResult TryRetargetCodeObject(

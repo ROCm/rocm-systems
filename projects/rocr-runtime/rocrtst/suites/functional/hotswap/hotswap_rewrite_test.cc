@@ -839,4 +839,45 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) 
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
+// PrepareRetargetedCodeObject runs the retarget on the calling thread using
+// explicit options and returns the prepared bytes. This is the engine behind
+// the loader prepare API that FatBinaryInfo/roc::Program drive early.
+TEST(HotswapPrepare, PreparesEligibleObject) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ClearRetargetCacheForTesting();
+
+  rocr::hotswap::CodeObjectView code_object = MakeRealCodeObjectView();
+  rocr::hotswap::RewriteOptions options;
+  rocr::hotswap::OwnedElfBuffer prepared(nullptr, &std::free);
+  size_t prepared_size = 0;
+  const rocr::hotswap::PrepareStatus status = rocr::hotswap::PrepareRetargetedCodeObject(
+      code_object, MakeTestAgent(), options, &prepared, &prepared_size);
+
+  EXPECT_EQ(status, rocr::hotswap::PrepareStatus::kPrepared);
+  EXPECT_NE(prepared.get(), nullptr);
+  EXPECT_GT(prepared_size, 0u);
+}
+
+// A second preparation of the same object is served from the retarget cache:
+// the prepared bytes are produced again but no new cache entry is created.
+TEST(HotswapPrepare, SecondPrepareServedFromCache) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ClearRetargetCacheForTesting();
+
+  rocr::hotswap::CodeObjectView code_object = MakeRealCodeObjectView();
+  rocr::hotswap::RewriteOptions options;
+  for (int i = 0; i < 2; ++i) {
+    rocr::hotswap::OwnedElfBuffer prepared(nullptr, &std::free);
+    size_t prepared_size = 0;
+    EXPECT_EQ(rocr::hotswap::PrepareRetargetedCodeObject(code_object, MakeTestAgent(), options,
+                                                         &prepared, &prepared_size),
+              rocr::hotswap::PrepareStatus::kPrepared);
+    EXPECT_GT(prepared_size, 0u);
+  }
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 1u);
+  rocr::hotswap::ClearRetargetCacheForTesting();
+}
+
 }  // namespace

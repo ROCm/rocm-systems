@@ -124,6 +124,24 @@ RetargetCodeObjectResult TryRetargetCodeObject(
     amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
     OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
+// Outcome of PrepareRetargetedCodeObject.
+enum class PrepareStatus {
+  kNotNeeded,             // No rewrite required; load the source object as-is.
+  kPrepared,              // out_elf_buffer/out_elf_size hold the prepared bytes.
+  kRequiredRewriteFailed  // A required rewrite failed; the caller must error.
+};
+
+// Prepare (retarget) a code object for `agent` using the explicit `options`,
+// returning the prepared artifact bytes in out_elf_buffer/out_elf_size when
+// status == kPrepared. Reuses the in-process retarget cache, so repeat
+// preparations of the same object skip COMGR. Unlike the onLoad engine this
+// takes explicit options (no environment inspection) and never selects an
+// agent implicitly, so the result is deterministic. Preparation runs on the
+// calling thread; callers own any asynchronous scheduling.
+PrepareStatus PrepareRetargetedCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
+                                          const RewriteOptions& options,
+                                          OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,
     const CodeObjectView& code_object, const char* options,

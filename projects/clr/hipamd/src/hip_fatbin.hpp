@@ -13,6 +13,8 @@
 #include "platform/program.hpp"
 
 #include <optional>
+#include <thread>
+#include <vector>
 
 namespace hip {
 

@@ -531,6 +531,23 @@ hsa_status_t CodeObjectReaderImpl::SetMemory(
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t CodeObjectReaderImpl::SetOwnedMemory(const void* _code_object_memory,
+                                                  size_t _code_object_size,
+                                                  std::shared_ptr<void> backing, std::string _uri) {
+  assert(!code_object_memory && "Code object reader wrapper is already set");
+
+  if (!_code_object_memory || _code_object_size == 0 || !backing) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  code_object_memory = _code_object_memory;
+  code_object_size = _code_object_size;
+  owned_backing = std::move(backing);
+  uri = std::move(_uri);
+  is_prepared = true;
+  return HSA_STATUS_SUCCESS;
+}
+
 }  // namespace loader
 }  // namespace hsa
 }  // namespace amd
