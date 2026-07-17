@@ -36,8 +36,10 @@ namespace addc {
 
 // Parses an ADDC error-summary JSON document of the form
 // [{"fru":"..","afid":N}, ..] into the AFIDs it carries. Entries without an
-// "afid" member are skipped. Returns false on malformed JSON (out is cleared);
-// an empty array yields true with an empty result.
+// "afid" member are skipped. Trusting ADDC's fixed schema, it validates only
+// that the root is a JSON array (returns false with out cleared if not) and
+// does not reject otherwise malformed or truncated input. An empty array
+// yields true with an empty result.
 bool parse_afids_from_summary(const std::string& summary_json, std::vector<uint64_t>& out);
 
 #ifdef AMDSMI_ENABLE_ADDC
