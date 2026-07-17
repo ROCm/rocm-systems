@@ -61,7 +61,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--rocpd-disasm-input",
         action="store",
-        help="Path to a rocPD database produced with --pc-sampling-decode-instructions.",
+        help="Path to a rocPD database produced with --complete-isa-decode.",
     )
 
 
@@ -108,13 +108,28 @@ def rocpd2csv_agent_data(request):
 
 
 @pytest.fixture
-def rocpd2csv_pc_sampling_data(request):
+def rocpd2csv_pc_sampling_dataframe(request):
     filename = request.config.getoption("--rocpd2csv-pc-sampling-input")
     if not filename or not os.path.isfile(filename):
         pytest.skip("rocpd2csv PC sampling CSV not found")
 
-    with open(filename, "r", encoding="utf-8") as inp:
-        return list(csv.DictReader(inp))
+    import pandas as pd
+
+    # na_filter/keep_default_na=False keeps undecoded samples' Instruction and
+    # Instruction_Comment as empty strings (not NaN); Exec_Mask is parsed as a full
+    # 64-bit unsigned integer (rocpd stores it as a decimal string to avoid overflow).
+    # Correlation_Id/Dispatch_Id are left to integer inference, which the shared
+    # exec-mask validator requires.
+    return pd.read_csv(
+        filename,
+        na_filter=False,
+        keep_default_na=False,
+        dtype={
+            "Exec_Mask": "uint64",
+            "Instruction": str,
+            "Instruction_Comment": str,
+        },
+    )
 
 
 @pytest.fixture

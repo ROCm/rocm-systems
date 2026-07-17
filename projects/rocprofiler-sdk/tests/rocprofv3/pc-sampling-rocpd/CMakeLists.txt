@@ -42,8 +42,8 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # Produce a stochastic PC-sampling ROCPD database (+ JSON oracle).  No
-# --pc-sampling-decode-instructions here, so instruction text is disassembled on demand
-# during post-processing (the first disassembly path).
+# --complete-isa-decode here, so instruction text is disassembled on demand during
+# post-processing (the first disassembly path).
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd
     COMMAND
@@ -102,15 +102,15 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-rocpd-csv-generation
     DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-# Opt-in disassembly coverage: --pc-sampling-decode-instructions persists the disassembled
-# instruction text at finalization into rocpd_disassembly_data (the second disassembly
-# path); the decoded view then serves the stored text instead of decoding on demand.
+# Opt-in disassembly coverage: --complete-isa-decode persists the disassembled instruction
+# text at finalization into rocpd_disassembly_data (the second disassembly path); the
+# decoded view then serves the stored text instead of decoding on demand.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd-disasm
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
         --kernel-trace --pc-sampling-unit cycles --pc-sampling-method stochastic
-        --pc-sampling-interval 1048576 --pc-sampling-decode-instructions -d
+        --pc-sampling-interval 1048576 --complete-isa-decode -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-disasm-input -o out --output-format
         rocpd -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation

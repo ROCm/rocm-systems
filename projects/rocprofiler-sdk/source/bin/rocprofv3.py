@@ -756,7 +756,7 @@ For attachment profiling of running processes:
 
     add_parser_bool_argument(
         pc_sampling_options,
-        "--pc-sampling-decode-instructions",
+        "--complete-isa-decode",
         help=(
             "Persist instruction text and comments already resolved while processing PC "
             "samples directly in ROCPD output. Default: off (ROCPD post-processing attempts "
@@ -1857,8 +1857,8 @@ def run(app_args, args, **kwargs):
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
     update_env(
-        "ROCPROF_PC_SAMPLING_DECODE_INSTRUCTIONS",
-        args.pc_sampling_decode_instructions,
+        "ROCPROF_COMPLETE_ISA_DECODE",
+        args.complete_isa_decode,
         overwrite=True,
     )
     update_env("ROCPROF_STATS_SUMMARY", args.summary, overwrite_if_true=True)

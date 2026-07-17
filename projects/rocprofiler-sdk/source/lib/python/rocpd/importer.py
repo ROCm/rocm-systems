@@ -385,6 +385,17 @@ def setup_isa_decode_views(conn):
                     metadata["load_size"],
                 )
             elif metadata["storage_type"] == "MEMORY":
+                # Limitation: lazy post-processing decode can only read a
+                # memory-backed code object when its URI resolves to a real
+                # on-disk file. A code object loaded purely from process
+                # memory has a non-file URI (e.g. ``memory://...``) and is
+                # not snapshotted to disk during PC sampling (unlike ATT),
+                # so its bytes are gone once the profiled process exits and
+                # _validated_file_uri raises below -> the decoded view then
+                # reports "Decode unavailable" for those program counters.
+                # Pass --complete-isa-decode at collection time to bake in
+                # the disassembly for such code objects (it disassembles
+                # them in-process from live memory).
                 data = _validated_file_uri(
                     metadata["uri"],
                     read_bytes=True,
@@ -460,7 +471,7 @@ def setup_isa_decode_views(conn):
     )
 
     # Prefer disassembly stored at finalization (opt-in
-    # --pc-sampling-decode-instructions) when the rocpd_disassembly_data table is
+    # --complete-isa-decode) when the rocpd_disassembly_data table is
     # present and populated; otherwise fall back to on-demand disassembly via the
     # scalar UDFs.  Either path yields the same instruction/instruction_comment
     # output columns, so downstream consumers (e.g. csv.py) are unaffected.

@@ -422,10 +422,11 @@ For information about how to analyze stochastic PC sampling data, see :ref:`cdna
 ROCPD output format
 ====================
 
-PC sampling data can be written directly to a ROCPD SQLite database by passing
-``--output-format rocpd`` to ``rocprofv3``. This format stores samples alongside
-all other profiling data (kernel dispatches, memory copies, API traces) in a
-single, queryable ``.db`` file.
+PC sampling data can be written to a ROCPD SQLite database. ``rocpd`` is the
+default output format, so it is used automatically when ``--output-format`` is
+omitted (pass ``--output-format rocpd`` to request it explicitly). This format
+stores samples alongside all other profiling data (kernel dispatches, memory
+copies, API traces) in a single, queryable ``.db`` file.
 
 .. code-block:: bash
 

@@ -1144,12 +1144,12 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
-    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
-    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
     const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&             ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&        graph_launch_gen,
-    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen)
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&      pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>&     pc_sampling_stochastic_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -2216,17 +2216,17 @@ write_rocpd(
     struct pc_sample_extdata_v1
     {
         // hw_id fields
-        uint32_t hw_id_chiplet          = 0;
-        uint32_t hw_id_wave_id          = 0;
-        uint32_t hw_id_simd_id          = 0;
-        uint32_t hw_id_pipe_id          = 0;
-        uint32_t hw_id_cu_or_wgp_id     = 0;
-        uint32_t hw_id_shader_array_id  = 0;
-        uint32_t hw_id_shader_engine_id = 0;
-        uint32_t hw_id_workgroup_id     = 0;
-        uint32_t hw_id_vm_id            = 0;
-        uint32_t hw_id_queue_id         = 0;
-        uint32_t hw_id_microengine_id   = 0;
+        uint8_t hw_id_chiplet          = 0;
+        uint8_t hw_id_wave_id          = 0;
+        uint8_t hw_id_simd_id          = 0;
+        uint8_t hw_id_pipe_id          = 0;
+        uint8_t hw_id_cu_or_wgp_id     = 0;
+        uint8_t hw_id_shader_array_id  = 0;
+        uint8_t hw_id_shader_engine_id = 0;
+        uint8_t hw_id_workgroup_id     = 0;
+        uint8_t hw_id_vm_id            = 0;
+        uint8_t hw_id_queue_id         = 0;
+        uint8_t hw_id_microengine_id   = 0;
         // Generic PC sample fields retained for decode.
         uint32_t wave_in_group  = 0;
         uint32_t workgroup_id_x = 0;
@@ -2257,7 +2257,7 @@ write_rocpd(
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(pc_sample_extdata_v1) == (15 * sizeof(uint32_t) + 21),
+    static_assert(sizeof(pc_sample_extdata_v1) == (4 * sizeof(uint32_t) + 32),
                   "PC sample blob layout changed; update its schema version");
     static_assert(alignof(pc_sample_extdata_v1) == 1, "PC sample blob must remain byte-packed");
     static_assert(std::is_standard_layout_v<pc_sample_extdata_v1>);
@@ -2304,68 +2304,68 @@ write_rocpd(
                          {
                              {"hw_id_chiplet",
                               offsetof(pc_sample_extdata_v1, hw_id_chiplet),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID chiplet index"},
                              {"hw_id_wave_id",
                               offsetof(pc_sample_extdata_v1, hw_id_wave_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID wave slot index"},
                              {"hw_id_simd_id",
                               offsetof(pc_sample_extdata_v1, hw_id_simd_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID SIMD index"},
                              {"hw_id_pipe_id",
                               offsetof(pc_sample_extdata_v1, hw_id_pipe_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID pipe index"},
                              {"hw_id_cu_or_wgp_id",
                               offsetof(pc_sample_extdata_v1, hw_id_cu_or_wgp_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID CU (GFX9) or WGP (GFX10+) index"},
                              {"hw_id_shader_array_id",
                               offsetof(pc_sample_extdata_v1, hw_id_shader_array_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID shader array index"},
                              {"hw_id_shader_engine_id",
                               offsetof(pc_sample_extdata_v1, hw_id_shader_engine_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID shader engine index"},
                              {"hw_id_workgroup_id",
                               offsetof(pc_sample_extdata_v1, hw_id_workgroup_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID workgroup index"},
                              {"hw_id_vm_id",
                               offsetof(pc_sample_extdata_v1, hw_id_vm_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID virtual memory ID"},
                              {"hw_id_queue_id",
                               offsetof(pc_sample_extdata_v1, hw_id_queue_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID queue ID"},
                              {"hw_id_microengine_id",
                               offsetof(pc_sample_extdata_v1, hw_id_microengine_id),
-                              sizeof(uint32_t),
-                              "uint32_t",
+                              sizeof(uint8_t),
+                              "uint8_t",
                               false,
                               "HW ID microengine (ACE) index"},
                              {"wave_in_group",
@@ -2634,18 +2634,18 @@ write_rocpd(
                 // Build the packed extdata blob from hw_id (always present) and
                 // arbiter-state snapshot (stochastic only).
                 auto extdata                  = pc_sample_extdata_v1{};
-                extdata.hw_id_chiplet         = static_cast<uint32_t>(record.hw_id.chiplet);
-                extdata.hw_id_wave_id         = static_cast<uint32_t>(record.hw_id.wave_id);
-                extdata.hw_id_simd_id         = static_cast<uint32_t>(record.hw_id.simd_id);
-                extdata.hw_id_pipe_id         = static_cast<uint32_t>(record.hw_id.pipe_id);
-                extdata.hw_id_cu_or_wgp_id    = static_cast<uint32_t>(record.hw_id.cu_or_wgp_id);
-                extdata.hw_id_shader_array_id = static_cast<uint32_t>(record.hw_id.shader_array_id);
+                extdata.hw_id_chiplet         = static_cast<uint8_t>(record.hw_id.chiplet);
+                extdata.hw_id_wave_id         = static_cast<uint8_t>(record.hw_id.wave_id);
+                extdata.hw_id_simd_id         = static_cast<uint8_t>(record.hw_id.simd_id);
+                extdata.hw_id_pipe_id         = static_cast<uint8_t>(record.hw_id.pipe_id);
+                extdata.hw_id_cu_or_wgp_id    = static_cast<uint8_t>(record.hw_id.cu_or_wgp_id);
+                extdata.hw_id_shader_array_id = static_cast<uint8_t>(record.hw_id.shader_array_id);
                 extdata.hw_id_shader_engine_id =
-                    static_cast<uint32_t>(record.hw_id.shader_engine_id);
-                extdata.hw_id_workgroup_id   = static_cast<uint32_t>(record.hw_id.workgroup_id);
-                extdata.hw_id_vm_id          = static_cast<uint32_t>(record.hw_id.vm_id);
-                extdata.hw_id_queue_id       = static_cast<uint32_t>(record.hw_id.queue_id);
-                extdata.hw_id_microengine_id = static_cast<uint32_t>(record.hw_id.microengine_id);
+                    static_cast<uint8_t>(record.hw_id.shader_engine_id);
+                extdata.hw_id_workgroup_id   = static_cast<uint8_t>(record.hw_id.workgroup_id);
+                extdata.hw_id_vm_id          = static_cast<uint8_t>(record.hw_id.vm_id);
+                extdata.hw_id_queue_id       = static_cast<uint8_t>(record.hw_id.queue_id);
+                extdata.hw_id_microengine_id = static_cast<uint8_t>(record.hw_id.microengine_id);
                 extdata.wave_in_group        = static_cast<uint32_t>(record.wave_in_group);
                 extdata.workgroup_id_x       = static_cast<uint32_t>(record.workgroup_id.x);
                 extdata.workgroup_id_y       = static_cast<uint32_t>(record.workgroup_id.y);
@@ -2731,7 +2731,7 @@ write_rocpd(
 
                     });
 
-                if(cfg.pc_sampling_decode_instructions)
+                if(cfg.complete_isa_decode)
                 {
                     auto _disasm_key =
                         std::make_pair(static_cast<uint64_t>(record.pc.code_object_id),
@@ -2794,20 +2794,16 @@ write_rocpd(
         // The schema covers hw_id (both methods) and arbiter-state snapshot (stochastic only).
         const bool has_pc_sampling =
             !pc_sampling_host_trap_gen.empty() || !pc_sampling_stochastic_gen.empty();
-        const auto ext_schema_id =
-            has_pc_sampling ? register_blob_schema(pc_sample_extdata_v1_schema) : uint64_t{0};
 
-        if(ext_schema_id == 0)
+        if(has_pc_sampling)
         {
-            ROCP_CI_LOG_IF(WARNING, has_pc_sampling)
-                << "PC sampling records were collected but are being skipped in ROCPD output due "
-                   "to schema incompatibility";
-        }
-        else
-        {
-            if(cfg.pc_sampling_decode_instructions)
+            // register_blob_schema flushes the schema row and returns its (nonzero) rowid,
+            // or aborts via ROCP_FATAL_IF if the insert fails; it never returns 0 here.
+            const auto ext_schema_id = register_blob_schema(pc_sample_extdata_v1_schema);
+
+            if(cfg.complete_isa_decode)
                 ROCP_WARNING << "PC sampling instruction disassembly is enabled "
-                                "(--pc-sampling-decode-instructions); the output database size "
+                                "(--complete-isa-decode); the output database size "
                                 "may increase significantly.";
 
             insert_pc_sampling_data(pc_sampling_host_trap_gen, ext_schema_id);

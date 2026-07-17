@@ -59,12 +59,38 @@ def test_rocpd_parent_dispatch_linkage(rocpd_connection):
     assert linked > 0
 
 
-def test_rocpd2csv_pc_sampling_matches_db(rocpd_connection, rocpd2csv_pc_sampling_data):
+def test_rocpd2csv_pc_sampling_matches_db(
+    rocpd_connection, rocpd2csv_pc_sampling_dataframe
+):
     # The stochastic CSV export row count must equal the stochastic samples in the DB.
     stochastic_count = rocpd_connection.execute(
         "SELECT COUNT(*) FROM rocpd_gpu_pc_sample WHERE wave_issued IS NOT NULL"
     ).fetchone()[0]
-    assert len(rocpd2csv_pc_sampling_data) == stochastic_count
+    assert len(rocpd2csv_pc_sampling_dataframe) == stochastic_count
+
+
+def test_validate_rocpd2csv_exec_mask_manipulation(rocpd2csv_pc_sampling_dataframe):
+    # End-to-end data-correctness check (not just row counts): the exec-mask
+    # manipulation workload emits deterministic, verifiable sample values, so the
+    # rocpd -> CSV export must satisfy the same semantic invariants the shared
+    # validator enforces for the direct rocprofv3 CSV -- exec-mask popcount ==
+    # correlation id, the per-CID mask pattern, and v_rcp_f64/v_rcp_f32 instruction
+    # decoding within their source-line ranges.  This exercises the full rocpd
+    # pipeline end to end: blob pack/unpack, on-demand disassembly, and the rocpd2csv
+    # projection.
+    from rocprofiler_sdk.pc_sampling.exec_mask_manipulation.csv import (
+        exec_mask_manipulation_validate_csv,
+    )
+
+    # The producer runs stochastic sampling at --pc-sampling-interval 1048576,
+    # identical to the standalone stochastic exec-mask test (which validates the same
+    # CSV with all_sampled=False).  Sparse sampling means not every kernel or source
+    # line is guaranteed to be sampled, so all_sampled must be False; the last kernel
+    # is heavy enough to always be sampled, which is the only sampling guarantee the
+    # validator relies on.
+    exec_mask_manipulation_validate_csv(
+        rocpd2csv_pc_sampling_dataframe, all_sampled=False
+    )
 
 
 def test_setup_blob_views_decoded_view(rocpd_connection):
@@ -154,7 +180,7 @@ def test_rocpd_stochastic_columns_populated(rocpd_connection):
 
 
 def test_rocpd_on_demand_disassembly(rocpd_connection):
-    # Default path: without --pc-sampling-decode-instructions no instruction text is
+    # Default path: without --complete-isa-decode no instruction text is
     # persisted, so the decoded view must disassemble on demand via the registered SQLite
     # UDFs (rocpd_isa_instruction / rocpd_isa_comment).
     conn = rocpd_connection
@@ -171,7 +197,7 @@ def test_rocpd_on_demand_disassembly(rocpd_connection):
 
 
 def test_rocpd_persisted_disassembly(rocpd_disasm_connection):
-    # Opt-in path: produced with --pc-sampling-decode-instructions, so instruction text is
+    # Opt-in path: produced with --complete-isa-decode, so instruction text is
     # persisted at finalization into rocpd_disassembly_data and served by the decoded view
     # (COALESCE prefers the stored text over on-demand decoding).
     conn = rocpd_disasm_connection

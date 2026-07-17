@@ -58,17 +58,16 @@ output_config::parse_env()
         common::get_env("ROCPROF_PERFETTO_SHMEM_SIZE_HINT_KB", perfetto_shmem_size_hint);
     perfetto_buffer_size = common::get_env("ROCPROF_PERFETTO_BUFFER_SIZE_KB", perfetto_buffer_size);
 
-    output_path    = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
-    output_file    = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
-    tmp_directory  = common::get_env("ROCPROF_TMPDIR", tmp_directory);
-    kernel_rename  = common::get_env("ROCPROF_KERNEL_RENAME", false);
-    group_by_queue = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
-    annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
-    annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
-    annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
-    pc_sampling_decode_instructions =
-        common::get_env("ROCPROF_PC_SAMPLING_DECODE_INSTRUCTIONS", pc_sampling_decode_instructions);
-    auto to_upper = [](std::string val) {
+    output_path         = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
+    output_file         = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
+    tmp_directory       = common::get_env("ROCPROF_TMPDIR", tmp_directory);
+    kernel_rename       = common::get_env("ROCPROF_KERNEL_RENAME", false);
+    group_by_queue      = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
+    annotate_args       = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
+    annotate_kfd        = common::get_env("ROCPROF_ANNOTATE_KFD", false);
+    annotate_pmc        = common::get_env("ROCPROF_ANNOTATE_PMC", false);
+    complete_isa_decode = common::get_env("ROCPROF_COMPLETE_ISA_DECODE", complete_isa_decode);
+    auto to_upper       = [](std::string val) {
         for(auto& vitr : val)
             vitr = toupper(vitr);
         return val;

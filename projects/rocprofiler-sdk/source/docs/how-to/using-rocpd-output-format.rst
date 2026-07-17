@@ -1936,15 +1936,28 @@ human-readable ``inst_type_name`` and ``stall_reason_name`` columns.
 Instruction disassembly
 +++++++++++++++++++++++++
 
-By default, instruction text is decoded lazily during post-processing: ``rocpd``
-disassembles each sampled program counter on demand from the referenced code
-objects, and no instruction text is stored in the database.
+By default, instruction text is decoded lazily during post-processing. Each
+time the ``rocpd_gpu_pc_sample_decoded`` view is queried, ``rocpd``
+disassembles the sampled program counters on demand from the referenced code
+objects and returns the instruction text in the query result. The decoded text
+is only cached in memory for the lifetime of the process and is never written
+back to the database, so the ``.db`` file is left unchanged and no instruction
+text is persisted. Re-running a query re-disassembles the sampled program
+counters.
 
-Passing ``--pc-sampling-decode-instructions`` to ``rocprofv3`` instead persists
+Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
 the disassembly at collection time into the ``rocpd_disassembly_data`` table
-(deduplicated per ``code_object_id`` and ``code_object_offset``). When that
-table is present, the decoded view reads the stored text and only falls back to
-on-demand decoding for program counters that are absent.
+(deduplicated per ``code_object_id`` and ``code_object_offset``). Only the
+sampled program counters that were successfully resolved to an instruction
+during collection are stored. A program counter is absent from the table when
+it could not be disassembled at collection time, for example because the
+referenced code object was no longer loaded when the disassembly pass ran, or
+the address did not map to a decodable instruction. When the table is present,
+the decoded view reads the stored text for the program counters it contains and
+falls back to on-demand decoding (the default lazy behavior described above)
+only for those absent program counters. Because the fallback decodes from the
+same code objects, a query still returns instruction text for those program
+counters as long as the code objects remain accessible.
 
 .. warning::
 
@@ -1952,10 +1965,31 @@ on-demand decoding for program counters that are absent.
    especially for applications with large code objects. Leave the option off
    unless you need the instruction text baked into the database.
 
+.. note::
+
+   Lazy decoding can only disassemble code objects that were loaded from a
+   file on disk (``storage_type = FILE``). Code objects loaded directly from
+   process memory (``storage_type = MEMORY``) are not written to disk during
+   PC sampling, so their instruction bytes are unavailable once the profiled
+   process exits, and the decoded view reports ``Decode unavailable`` for
+   those program counters. To capture disassembly for memory-resident code
+   objects, pass ``--complete-isa-decode`` at collection time; it
+   disassembles them in-process from live memory and persists the text into
+   the database.
+
 Querying PC sampling data
 ++++++++++++++++++++++++++
 
 .. note::
+
+   A *recording* is the profiling data captured by a single ``rocprofv3`` run
+   (one profiled process). Each run writes its own ``.db`` file and stamps every
+   row it produces with a unique ``guid`` (a UUID generated once per process),
+   so within one database all rows share the same ``guid``. Merging or packaging
+   databases (for example, from multiple MPI ranks, GPUs, or repeated runs)
+   combines rows from several recordings, and each retains its original ``guid``.
+   The ``guid`` is therefore what distinguishes one recording from another after
+   the data has been combined.
 
    ``dispatch_id`` is unique only within a single recording (``guid``). When
    querying a database merged from multiple recordings, add a ``guid`` predicate
@@ -2006,7 +2040,7 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
   ORDER BY PK.issued_valu_samples DESC
   LIMIT 20"
 
-**Dispatches with highest stall pressure**:
+**Dispatches with highest execution stall back-pressure**:
 
 .. code-block:: bash
 
@@ -2035,6 +2069,12 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
 
 **Kernels with highest stall ratio**:
 
+This counts a sample as stalled when *every* execution pipeline failed to make
+forward progress in the sampled cycle, that is ``arb_state_issue_PIPE = 0 OR
+arb_state_stall_PIPE = 1`` for all pipes (SIMD latency). It is therefore broader
+than the back-pressure query above, which counts only samples where a pipeline
+backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
+
 .. code-block:: bash
 
   rocpd query -i profile.db --query "
@@ -2043,11 +2083,16 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
       KD.kernel_id,
       COUNT(*) AS samples,
       SUM(CASE WHEN
-            S.arb_state_stall_valu=1 OR S.arb_state_stall_matrix=1 OR
-            S.arb_state_stall_lds=1 OR S.arb_state_stall_lds_direct=1 OR
-            S.arb_state_stall_scalar=1 OR S.arb_state_stall_vmem_tex=1 OR
-            S.arb_state_stall_flat=1 OR S.arb_state_stall_exp=1 OR
-            S.arb_state_stall_misc=1 OR S.arb_state_stall_brmsg=1
+            (S.arb_state_issue_valu=0       OR S.arb_state_stall_valu=1) AND
+            (S.arb_state_issue_matrix=0     OR S.arb_state_stall_matrix=1) AND
+            (S.arb_state_issue_lds=0        OR S.arb_state_stall_lds=1) AND
+            (S.arb_state_issue_lds_direct=0 OR S.arb_state_stall_lds_direct=1) AND
+            (S.arb_state_issue_scalar=0     OR S.arb_state_stall_scalar=1) AND
+            (S.arb_state_issue_vmem_tex=0   OR S.arb_state_stall_vmem_tex=1) AND
+            (S.arb_state_issue_flat=0       OR S.arb_state_stall_flat=1) AND
+            (S.arb_state_issue_exp=0        OR S.arb_state_stall_exp=1) AND
+            (S.arb_state_issue_misc=0       OR S.arb_state_stall_misc=1) AND
+            (S.arb_state_issue_brmsg=0      OR S.arb_state_stall_brmsg=1)
           THEN 1 ELSE 0 END) AS stall_samples
     FROM rocpd_gpu_pc_sample_decoded S
     INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id

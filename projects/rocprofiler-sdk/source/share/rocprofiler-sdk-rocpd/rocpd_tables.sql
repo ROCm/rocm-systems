@@ -314,7 +314,7 @@ CREATE TABLE IF NOT EXISTS
     );
 
 -- Disassembled instruction text for sampled program counters.  Only populated
--- when the --pc-sampling-decode-instructions knob is enabled (opt-in).  By
+-- when the --complete-isa-decode knob is enabled (opt-in).  By
 -- default instructions are disassembled on demand during post-processing.  Rows
 -- are deduplicated per (code_object_id, code_object_offset).
 CREATE TABLE IF NOT EXISTS
