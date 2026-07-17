@@ -1763,7 +1763,7 @@ class Device : public RuntimeObject {
   static constexpr size_t kP2PStagingSize = 4 * Mi;
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
-  static constexpr size_t kSGInfoSize = kMGSyncDataSize;
+  static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
