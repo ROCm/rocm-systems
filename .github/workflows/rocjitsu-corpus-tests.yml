@@ -185,7 +185,7 @@ jobs:
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
-          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          WORKERS="$(( ($(nproc) + 1) / 3 ))"
           echo "WORKERS=${WORKERS}"
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
