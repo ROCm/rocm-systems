@@ -87,7 +87,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the PC sample generation frequency. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="11">Basic tracing</th>
+                    <th rowspan="12">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
                     <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofv3, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
@@ -129,6 +129,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <td>--rocdecode-trace [BOOL]</td>
                     <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--ompt-trace [CATEGORY ...]</td>
+                    <td>Collects OMPT (OpenMP Tools) traces from applications linked against an OMPT-capable OpenMP runtime (e.g. LLVM-based <code>libomp</code> from AOMP / ROCm). Captures host parallel regions, tasks, sync, mutex, and target-offload events. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#ompt-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="10">Granular tracing</th>

@@ -43,6 +43,7 @@ static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 constexpr uint32_t kMaxVgprGranulatedField = 63;
 constexpr uint32_t kMaxSgprGranulatedField = 15;
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -296,9 +297,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
 
-      const auto *desc = reinterpret_cast<const KD *>(image.data() + file_off);
+      KD desc;
+      std::memcpy(&desc, image.data() + file_off, sizeof(desc));
       const int64_t entry_vaddr_signed =
-          static_cast<int64_t>(symtab[j].st_value) + desc->kernel_code_entry_byte_offset;
+          static_cast<int64_t>(symtab[j].st_value) + desc.kernel_code_entry_byte_offset;
+
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
@@ -306,7 +309,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, entry_text_offset, *desc);
+      callback(file_off, entry_text_offset, desc);
     }
   }
 }
@@ -333,6 +336,10 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] uint32_t user_sgpr_count(const KD &desc) {
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+}
+
+[[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
 }
 
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
@@ -520,6 +527,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
+  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
+  result.kernarg_preload_entry_text_offset =
+      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not

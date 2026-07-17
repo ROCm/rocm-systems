@@ -2,20 +2,20 @@
    :description: Tutorial walking through asynchronous multi-stream I/O with registered streams using hipFile.
    :keywords: hipFile, ROCm, async, multi-stream, GPU I/O, hipFileReadAsync, hipFileWriteAsync, hipFileStreamRegister, tutorial
 
-****************************************************
+******************************************************
 Asynchronous multi-stream I/O with registered streams
-****************************************************
+******************************************************
 
 `roundtrip-async-multi-stream-registered.cpp <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/examples/async/roundtrip-async-multi-stream-registered.cpp>`_ reads a file into GPU memory,
 writes it back out, and splits the work across multiple HIP streams that run
-concurrently. 
+concurrently.
 
 .. note::
 
   Asynchronous I/O does not currently support the fastpath backend and will perform fallback I/O using a CPU bounce buffer.
 
 When to use this pattern
-************************
+=========================
 
 Use multi-stream registered asynchronous I/O when you need to:
 
@@ -24,7 +24,7 @@ Use multi-stream registered asynchronous I/O when you need to:
 - Pipeline storage I/O with GPU compute on separate streams.
 
 Prerequisites
-*************
+===============
 
 Verify you have:
 
@@ -35,7 +35,7 @@ Verify you have:
   ``examples/common/``.
 
 Step-by-step walkthrough
-************************
+===========================
 
 Select the GPU and seed the input file
 --------------------------------------
@@ -129,7 +129,7 @@ track partial setup. If the setup loop fails partway through, only resources
 that were created get torn down.
 
 Stream ordering
-***************
+=================
 
 This example depends on HIP stream ordering:
 
@@ -144,7 +144,7 @@ Increasing ``NUM_STREAMS`` adds more concurrent slices. Each stream touches a
 disjoint region of the file, so you don't need cross-stream coordination.
 
 Running the example
-*******************
+=======================
 
 .. code:: shell
 

@@ -451,7 +451,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative) {
 
   SECTION("hipStreamAttachMemAsync") {
     HIP_CHECK_ERROR(
-        hipStreamAttachMemAsync(detached, managed_ptr, kBytes, hipMemAttachSingle),
+        hipStreamAttachMemAsync(detached, reinterpret_cast<hipDeviceptr_t*>(managed_ptr), kBytes, hipMemAttachSingle),
         hipErrorStreamDetached);
   }
 

@@ -1,0 +1,76 @@
+#!/bin/sh
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Unified post-installation entry point for amdcuid.
+# Template processed by CMake to generate the installed 'amdcuid_postinst.sh'.
+# Do not edit the generated script directly; edit this '.in' template instead.
+#
+# Always runs the library post-install (provisions the HMAC key).
+# Automatically runs the daemon post-install when the daemon binary is present.
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+LIB_POSTINST="$SCRIPT_DIR/amdcuid_setup_hmac.sh"
+DAEMON_POSTINST="$SCRIPT_DIR/amdcuid_daemon_postinst.sh"
+DAEMON_BIN="$SCRIPT_DIR/../../bin/amdcuid_daemon"
+
+echo "=== amdcuid post-installation ==="
+
+# --- Library post-install (always required) ---
+echo ""
+echo "Step 1: Running library post-install (HMAC key provisioning)..."
+if [ -x "$LIB_POSTINST" ]; then
+    "$LIB_POSTINST"
+    LIB_RC=$?
+    if [ $LIB_RC -ne 0 ]; then
+        echo "ERROR: Library post-install failed (exit code $LIB_RC)." >&2
+        exit $LIB_RC
+    fi
+    echo "Library post-install complete."
+else
+    echo "ERROR: Library post-install script not found at $LIB_POSTINST." >&2
+    exit 1
+fi
+
+# --- Daemon post-install (only when daemon is installed) ---
+echo ""
+if [ -x "$DAEMON_BIN" ]; then
+    echo "Step 2: Daemon binary detected at $DAEMON_BIN."
+    echo "        Running daemon post-install (udev rules / systemd service)..."
+    if [ -x "$DAEMON_POSTINST" ]; then
+        "$DAEMON_POSTINST"
+        DAEMON_RC=$?
+        if [ $DAEMON_RC -ne 0 ]; then
+            echo "ERROR: Daemon post-install failed (exit code $DAEMON_RC)." >&2
+            exit $DAEMON_RC
+        fi
+        echo "Daemon post-install complete."
+    else
+        echo "ERROR: Daemon post-install script not found at $DAEMON_POSTINST." >&2
+        exit 1
+    fi
+else
+    echo "Step 2: Daemon binary not found — skipping daemon post-install."
+    echo "        To add daemon support later, install the daemon component and"
+    echo "        re-run this script."
+fi
+
+echo ""
+echo "=== amdcuid post-installation complete ==="

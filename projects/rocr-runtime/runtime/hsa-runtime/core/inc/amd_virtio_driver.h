@@ -79,9 +79,9 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const;
   hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                              size_t size, uint32_t agent_node_id) override;
-  hsa_status_t FreeMemory(void* mem, size_t size) override;
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t agent_node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const;
   hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
   hsa_status_t DeregisterMemory(void* ptr) const override;
@@ -102,17 +102,15 @@ class KfdVirtioDriver final : public core::Driver {
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;
   hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                  core::ShareType type, uint32_t flags, void* export_handle,
-                                  uint64_t* export_offset = nullptr) override;
+                                  core::ShareType type, void* export_handle) override;
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
-  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
-                   hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size) override;
-  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+                   hsa_access_permission_t perms, uint32_t node_id) override;
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size, uint32_t node_id) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const;
   hsa_status_t SPMAcquire(uint32_t node_id) const override;
@@ -124,6 +122,8 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const;
   hsa_status_t IsModelEnabled(bool* enable) const override;
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 };
 
 }  // namespace AMD

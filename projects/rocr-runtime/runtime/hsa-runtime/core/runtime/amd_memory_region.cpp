@@ -133,14 +133,16 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
-  return AllocateImpl(size, alloc_flags, mem, agent_node_id);
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, uint32_t agent_node_id,
+                                    core::DriverMemoryHandle* handle) const {
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
+  return AllocateImpl(size, alloc_flags, agent_node_id, handle);
 }
 
 hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
-                                        void** mem, int agent_node_id) const {
-  if (mem == NULL) {
+                                        uint32_t agent_node_id,
+                                        core::DriverMemoryHandle* handle) const {
+  if (handle == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -150,33 +152,36 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
-  const bool is_dxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
   if (IsSystem() && (size > max_sysmem_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
-  if (!IsSystem() && !is_dxg && (size > max_single_alloc_size_)) {
+  if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, size, agent_node_id, handle);
 }
 
-hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
-  return FreeImpl(address, size);
+hsa_status_t MemoryRegion::Free(const core::DriverMemoryHandle& handle) const {
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
+  return FreeImpl(handle);
 }
 
-hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
-  if (fragment_allocator_.free(address)) return HSA_STATUS_SUCCESS;
+hsa_status_t MemoryRegion::FreeImpl(const core::DriverMemoryHandle& handle) const {
+  // The fragment allocator (KFD/virtio only) keys on the allocation's virtual
+  // address, which is the driver handle word for those backends. Other drivers, e.g., XDNA, do not
+  // use the fragment allocator.
+  if (fragment_allocator_.free(reinterpret_cast<void*>(handle.handle))) return HSA_STATUS_SUCCESS;
 
-  return owner()->driver().FreeMemory(address, size);
+  return owner()->driver().FreeMemory(handle);
 }
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }
@@ -641,17 +646,19 @@ hsa_status_t MemoryRegion::AssignAgent(void* ptr, size_t size,
 void MemoryRegion::Trim() const { fragment_allocator_.trim(); }
 
 void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
-  void* ret;
   size_t bsize = AlignUp(request_size, block_size());
 
+  // The block's driver identity is reconstructed from base address and length
+  // on free (see BlockAllocator::free), so the handle is not retained here.
+  core::DriverMemoryHandle handle{};
   hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, 0);
+      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, 0, &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
-  assert(ret != nullptr && "Region returned nullptr on success.");
+  assert(handle.vaddr != nullptr && "Region returned nullptr on success.");
 
   allocated_size = bsize;
-  return ret;
+  return handle.vaddr;
 }
 
 }  // namespace amd

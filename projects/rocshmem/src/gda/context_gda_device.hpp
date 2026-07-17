@@ -144,12 +144,29 @@ class GDAContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
-  template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
-                            int nelems, int pe_root);
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
 
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
+                            int nelems, int pe_root);
+
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source, 
+                                  int nelement, int PE_root);
+
+  template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void* source, int nelement, int PE_root);
+
+  template <typename T>
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
                            int nelems);
 
   template <typename T>
@@ -174,9 +191,25 @@ class GDAContext : public Context {
                                 const size_t source_displs[]);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems);
+
+  template <typename T>
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
@@ -252,30 +285,62 @@ class GDAContext : public Context {
  private:
 
   //internal functions used by collective operations
+  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
+
+  __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
   template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems,
+  __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, int PE_start, int logPE_stride, int PE_size,
       ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
-  template <typename T>
-  __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
-      const T *source, int nelems);
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info);
 
   template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
+  __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
+      const T *source, int nelems);
+      
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
+
+  __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
+
+  template <typename T>
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
     const T *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                              const T *source, int nelems);
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
+                                              const void *source, int nelems);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);

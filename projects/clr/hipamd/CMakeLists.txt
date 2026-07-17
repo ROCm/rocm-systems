@@ -33,11 +33,6 @@ option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
   "Stamp git revisions into generated library version metadata"
   ON)
 
-if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
-endif()
-
 # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
 set(HIPCC_BIN_DIR "${ROCM_PATH}/bin" CACHE STRING "HIPCC and HIPCONFIG binary directories")
 

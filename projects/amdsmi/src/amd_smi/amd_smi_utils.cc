@@ -41,12 +41,15 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
@@ -640,7 +643,10 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   std::string empty = "";
   std::strncpy(version, empty.c_str(), len - 1);
   openFileAndModifyBuffer("/sys/module/amdgpu/version", version, static_cast<size_t>(len));
-  if (version[0] == '\0') return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+  if (version[0] == '\0') {
+    std::strncpy(version, "N/A", len - 1);
+    version[len - 1] = '\0';
+  }
 
   return status;
 }
@@ -1408,5 +1414,63 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) 
       return "pp_dpm_dclk1";
     default:
       return nullptr;
+  }
+}
+
+// Gfx activity can be silenced (forced to the uint-max N/A sentinel). The
+// affected graphics/RLC-firmware combo is flagged once per handle and cached.
+namespace {
+constexpr uint64_t kFlaggedGfxVersion = 0x1250;  // gfx1250
+constexpr uint64_t kFlaggedRlcFwMin = 0x18;      // RLC fw 24..29
+constexpr uint64_t kFlaggedRlcFwMax = 0x1d;
+
+bool has_flagged_gfx_fw(amdsmi_processor_handle processor_handle) {
+  static std::unordered_map<amdsmi_processor_handle, bool> cache;
+  static std::mutex mtx;
+  std::lock_guard<std::mutex> lock(mtx);
+  auto it = cache.find(processor_handle);
+  if (it != cache.end()) return it->second;
+
+  bool flagged = false;
+  amdsmi_asic_info_t asic{};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic) == AMDSMI_STATUS_SUCCESS &&
+      asic.target_graphics_version == kFlaggedGfxVersion) {
+    amdsmi_fw_info_t fw{};
+    if (amdsmi_get_fw_info(processor_handle, &fw) == AMDSMI_STATUS_SUCCESS) {
+      for (uint8_t i = 0; i < fw.num_fw_info; ++i) {
+        if (fw.fw_info_list[i].fw_id == AMDSMI_FW_ID_RLC) {
+          uint64_t rlc = fw.fw_info_list[i].fw_version;
+          flagged = rlc >= kFlaggedRlcFwMin && rlc <= kFlaggedRlcFwMax;
+          break;
+        }
+      }
+    }
+  }
+  cache[processor_handle] = flagged;
+  return flagged;
+}
+}  // namespace
+
+bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle) {
+  const char* v = std::getenv("AMDSMI_SILENCE_GFX_ACTIVITY");
+  if (v != nullptr) return std::string(v) == "1";
+  return has_flagged_gfx_fw(processor_handle);
+}
+
+void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
+                                  amdsmi_gpu_metrics_t* metrics) {
+  if (metrics == nullptr) return;
+  if (!is_gfx_activity_silenced(processor_handle)) return;
+
+  metrics->average_gfx_activity = std::numeric_limits<uint16_t>::max();
+  metrics->gfx_activity_acc = std::numeric_limits<uint32_t>::max();
+  // Per-XCP busy fields read the same source as the whole-GPU value.
+  for (auto& xcp : metrics->xcp_stats) {
+    for (auto& busy_inst : xcp.gfx_busy_inst) {
+      busy_inst = std::numeric_limits<uint32_t>::max();
+    }
+    for (auto& busy_acc : xcp.gfx_busy_acc) {
+      busy_acc = std::numeric_limits<uint64_t>::max();
+    }
   }
 }

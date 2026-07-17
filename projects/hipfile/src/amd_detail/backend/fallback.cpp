@@ -42,8 +42,8 @@ using std::unique_ptr;
 static const size_t DefaultChunkSize = 16 * 1024 * 1024;
 
 int
-Fallback::score(std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size, hoff_t file_offset,
-                hoff_t buffer_offset) const
+Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
+                hoff_t file_offset, hoff_t buffer_offset) const
 {
     (void)buffer_offset;
     (void)file;

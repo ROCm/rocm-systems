@@ -34,16 +34,16 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 ```bash
 # Local mode: in-process simulation
-rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --config configs/gfx950_cdna4_kmd.json -- ./app
 
 # Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json
+rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json
 
 # Attach to running daemon
-rocjitsu --attach --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_cdna4_kmd.json -- ./app
 ```
 
 ## Architecture
@@ -280,7 +280,7 @@ kernel 6.12.59+ and 6.15+.
 | `rpc.h` | Protocol types, send/recv helpers |
 | `transport.h/.cpp` | Abstract transport + Unix socket implementation |
 | `remote_driver.h/.cpp` | Client-side RPC stub |
-| `simulated_driver.h/.cpp` | KFD ioctl dispatch, allocation table, events |
+| `simulated_kfd.h/.cpp` | KFD ioctl dispatch, allocation table, events |
 | `interposer.cpp` | LD_PRELOAD syscall intercepts |
 | `events.h/.cpp` | KFD event subsystem (create, set, wait, destroy) |
 | `tools/rocjitsu/main.cpp` | CLI entry point, RPC dispatch loop (daemon mode) |

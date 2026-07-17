@@ -26,6 +26,97 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+.. _gpu-performance-level:
+
+Setting GPU performance level for PMC profiling
+---------------------------------------------
+
+On RDNA3 (Navi3x) and RDNA4 (Navi4x) GPUs, the ``AUTO`` performance mode disables PMC profiling in some GPU hardware blocks:
+the perfmon clock is gated off, which prevents performance counters from functioning. Setting the performance level to
+``STABLE_STD`` turns the perfmon clock back on and enables PMC profiling on all GPU hardware blocks.
+
+This is a hardware feature enablement requirement. Without it, PMC profiling on these GPUs produces no meaningful counter
+data in some GPU hardware blocks.
+
+There are two ways to configure the GPU performance level:
+
+**Option 1: Using the** ``power_dpm_force_performance_level`` **sysfs entry**
+
+Set the performance level to ``profile_standard`` via the sysfs interface. Replace ``<N>`` with
+the card index (for example, ``0`` for ``card0``):
+
+.. code-block:: bash
+
+   sudo chmod 777 /sys/class/drm/card<N>/device/power_dpm_force_performance_level
+   sudo sh -c 'echo profile_standard > /sys/class/drm/card<N>/device/power_dpm_force_performance_level'
+
+To verify the setting:
+
+.. code-block:: bash
+
+   cat /sys/class/drm/card<N>/device/power_dpm_force_performance_level
+
+To restore the default behavior after PMC profiling:
+
+.. code-block:: bash
+
+   sudo sh -c 'echo auto > /sys/class/drm/card<N>/device/power_dpm_force_performance_level'
+
+**Option 2: Using** ``amd-smi``
+
+Alternatively, use the ``amd-smi`` tool installed with ROCm to query and set the performance level.
+
+One advantage of using ``amd-smi`` is that it can be used to query and set the performance level on multiple
+GPUs in a single command. For example, to set the performance level to ``STABLE_STD`` on all GPUs in the
+system, use:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --perf-level STABLE_STD
+   GPU: 0
+       PERFLEVEL: Successfully set performance level STABLE_STD
+   GPU: 1
+       PERFLEVEL: Successfully set performance level STABLE_STD
+
+The following examples show how to query and set the performance level for a specific GPU. Replace ``<N>``
+with the card index:
+
+To check the current performance level:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+
+To set the performance level to ``STABLE_STD`` (the ``amd-smi`` name for ``profile_standard``):
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --gpu <N> --perf-level STABLE_STD
+   GPU: <N>
+       PERFLEVEL: Successfully set performance level STABLE_STD
+
+To verify the change:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_STABLE_STD
+
+To restore the default performance level after PMC profiling:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --gpu <N> --perf-level AUTO
+   GPU: <N>
+       PERFLEVEL: Successfully set performance level AUTO
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+
 .. _application-tracing:
 
 Application tracing
@@ -226,6 +317,78 @@ Here are the contents of ``kernel_trace.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
+HIP graph attribution
++++++++++++++++++++++
+
+When profiling HIP graphs, ``rocprofv3`` can attribute individual GPU
+operations back to the specific graph node that produced them. This enables
+consumers to group dispatches across many graph launches by source node and
+to track per-node statistics over a workload's lifetime.
+
+Graph attribution is emitted by direct JSON output and by the rocpd database.
+For kernel dispatches and memory copies, the graph fields are:
+
+* ``graph_exec_id``: process-monotonic ID assigned per ``hipGraphExec_t``.
+  Zero for operations that did not originate from a graph launch.
+* ``graph_node_id``: 0-based ordinal within a single ``hipGraphLaunch`` call.
+  Zero for non-graph operations.
+
+In direct JSON output, these fields appear as top-level siblings of
+``stream_id``. In rocpd, they are stored on the kernel-dispatch and
+memory-copy tables and exposed through rocpd post-processing. Direct
+``rocprofv3`` CSV, OTF2, and Perfetto output do not carry graph attribution;
+use rocpd conversion for those formats.
+
+A new ``--hip-graph-trace`` flag enables a separate
+``graph_launch`` JSON/rocpd record containing one row per successful
+``hipGraphLaunch`` call, including ``graph_exec_id``,
+``kernel_dispatch_count``, agent, and launch timestamps. This flag is
+independent of ``--kernel-trace`` -- the launch summary records are emitted
+regardless of whether kernel-dispatch tracing is subscribed. Since HIP graphs
+are part of the HIP runtime, ``--hip-graph-trace`` is automatically enabled by
+``--hip-trace`` and ``--hip-runtime-trace`` unless explicitly disabled. For
+CSV, OTF2, and Perfetto views of graph launches, collect rocpd output and
+convert it with the rocpd tools.
+
+Determinism contract
+^^^^^^^^^^^^^^^^^^^^
+
+The ``graph_node_id`` value identifies the same source node across launches of
+the same ``hipGraphExec_t`` **if and only if** all of the following hold:
+
+1. Segmented scheduling is in use (default; suppressed by
+   ``DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0``).
+2. ``AMD_DIRECT_DISPATCH=1`` (default on Linux).
+3. The same host thread is the sole launcher of that ``hipGraphExec_t``.
+4. The graph has not been updated via ``hipGraphExecUpdate`` between launches.
+
+Outside these conditions, attribution may be missing entirely for some or
+all dispatches produced by the launch. The tool maintains the per-thread
+attribution state on the thread that calls ``hipGraphLaunch``; if HIP's
+underlying scheduling writes AQL packets from a different host thread
+(e.g., the classic-path command-processor thread when
+``AMD_DIRECT_DISPATCH=0``, or any worker thread under non-segmented
+scheduling), those packets do not see the attribution state and their
+records are produced with zero ``graph_exec_id`` / ``graph_node_id``
+fields. ``Kernel_Dispatch_Count`` on the ``HIP_GRAPH`` summary record
+may then under-report the actual count. Consumers cannot distinguish
+missing-attribution rows from genuinely non-graph rows.
+
+Limitations
+^^^^^^^^^^^
+
+* On AMD HIP, in-graph memcpy operations are typically dispatched as blit
+  kernels (``__amd_rocclr_copyBuffer``) and surface as kernel dispatches
+  rather than memory-copy records. They are still attributed (via the
+  kernel-dispatch path) but appear as kernel-dispatch records, not
+  memory-copy records.
+* ``graph_exec_id`` is per-``hipGraphExec_t``. Two ``hipGraphInstantiate``
+  calls on the same source ``hipGraph_t`` produce different IDs; consumers
+  wanting cross-instantiation grouping must track that separately.
+* Child graphs nested via ``hipGraphAddChildGraphNode`` are attributed to the
+  outer launch's ``graph_exec_id``; the inner graph's instantiation ID is not
+  surfaced.
+
 Memory copy trace
 +++++++++++++++++++
 
@@ -412,6 +575,21 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :file: /data/rocjpeg_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
+
+OMPT trace
+++++++++++
+
+`OMPT <https://www.openmp.org/spec-html/5.2/openmpch19.html>`_ (OpenMP Tools Interface) is the standard interface exposed by OpenMP runtimes for tools to subscribe to runtime events. This option traces host-side OpenMP execution (parallel regions, work-sharing, tasks, sync regions, mutexes, thread lifecycle) and, for applications that offload to a device, the host-side target events (``target``, ``target_data_op``, ``target_submit``). For end-to-end examples, see :ref:`using-rocprofv3-with-openmp`.
+
+.. code-block:: shell
+
+    rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
+
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+
+.. note::
+
+   Requires an OMPT-capable OpenMP runtime that implements ``ompt_start_tool`` — for example the LLVM-based ``libomp`` shipped with ROCm / AOMP. GCC's ``libgomp`` does not implement the OMPT interface (see the `GOMP status page <https://www.gnu.org/software/gcc/projects/gomp/>`_), so ``g++ -fopenmp`` binaries do not produce OMPT records.
 
 Dynamic process attachment
 +++++++++++++++++++++++++++

@@ -28,7 +28,7 @@ THE SOFTWARE.
 void GcnArchNameFormat(char* gcnArchName, char* out) {
   // this function parses the char array from the device properties into something easier to handle.
   // as the gcnArchName attribute looks something like: "gfx900:xnack+:blah-:etc-"
-  char *gcnArchNameToken = strtok(gcnArchName, ":");
+  char* gcnArchNameToken = strtok(gcnArchName, ":");
   strcpy(out, gcnArchNameToken);
 }
 
@@ -36,20 +36,13 @@ void convertGcnArchToGcnArchName(const char* gcnArch, const char** gcnArchName) 
   // gcnArch is deprecated and we should instead use gcnArchName; however, some data files still have
   // the older gcnArch value.  There's only a handful of architectures that were coded prior to deprecation,
   // so we handle those cases here.
-  if (strcmp(gcnArch, "906") == 0)
-    *gcnArchName = "gfx906";
-  else if (strcmp(gcnArch, "908") == 0)
-    *gcnArchName = "gfx908";
-  else if (strcmp(gcnArch, "910") == 0)
-    *gcnArchName = "gfx90a";
-  else if (strcmp(gcnArch, "942") == 0)
-    *gcnArchName = "gfx942";
-  else if (strcmp(gcnArch, "950") == 0)
-    *gcnArchName = "gfx950";
-  else if (strcmp(gcnArch, "1250") == 0)
-    *gcnArchName = "gfx1250";
-  else
-    *gcnArchName = gcnArch;
+  if (strcmp(gcnArch, "906") == 0) *gcnArchName = "gfx906";
+  else if (strcmp(gcnArch, "908") == 0) *gcnArchName = "gfx908";
+  else if (strcmp(gcnArch, "910") == 0) *gcnArchName = "gfx90a";
+  else if (strcmp(gcnArch, "942") == 0) *gcnArchName = "gfx942";
+  else if (strcmp(gcnArch, "950") == 0) *gcnArchName = "gfx950";
+  else if (strcmp(gcnArch, "1250") == 0) *gcnArchName = "gfx1250";
+  else *gcnArchName = gcnArch;
 }
 
 int GetGcnArchName(int deviceId, char* out) {
@@ -63,14 +56,10 @@ int GetGcnArchName(int deviceId, char* out) {
 double GetDeviceWallClockRateInKhz(int deviceId) {
   char gcn[256];
   GetGcnArchName(deviceId, gcn);
-  if (strncmp("gfx942", gcn, 6) == 0)
-    return 1.0E5;
-  else if(strncmp("gfx950", gcn, 6) == 0)
-    return 1.0E5;
-  else if(strncmp("gfx1250", gcn, 7) == 0)
-    return 1.0E5;
-  else
-    return 2.5E4;
+  if (strncmp("gfx942", gcn, 6) == 0) return 1.0E5;
+  else if (strncmp("gfx950", gcn, 6) == 0) return 1.0E5;
+  else if (strncmp("gfx1250", gcn, 7) == 0) return 1.0E5;
+  else return 2.5E4;
 }
 
 bool IsArchMatch(char const* arch, char const* target) {

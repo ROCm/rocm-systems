@@ -46,9 +46,13 @@ constexpr uint16_t kVopdMulF64 = 34;
 constexpr uint16_t kVopdMaxNumF64 = 35;
 constexpr uint16_t kVopdMinNumF64 = 36;
 
-Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal, uint16_t encoded) {
-  if (use_literal && encoded == 255)
+Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, bool literal_uses_f64_high_bits,
+                  uint32_t literal, uint16_t encoded) {
+  if (use_literal && encoded == 255) {
+    if (literal_uses_f64_high_bits)
+      return Operand(bits, OperandType::OPR_SIMM32, (static_cast<uint64_t>(literal) << 32), true);
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+  }
   return Operand(bits, vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC, encoded);
 }
 
@@ -122,7 +126,7 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
-bool Vopd::is_float32_op(uint16_t op) {
+bool Vopd::uses_src_neg_modifier(uint16_t op) {
   switch (op) {
   case kVopdFmacF32:
   case kVopdFmaakF32:
@@ -135,6 +139,7 @@ bool Vopd::is_float32_op(uint16_t op) {
   case kVopdMaxNumF32:
   case kVopdMinNumF32:
   case kVopdFmaF32:
+  case kVopdCndmaskB32:
     return true;
   default:
     return false;
@@ -206,7 +211,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   uint32_t src0 = slot.src0->read_lane(wf, lane);
   uint32_t src1 = slot.src1->read_lane(wf, lane);
   uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane) : slot.src2_imm;
-  if (is_float32_op(slot.op)) {
+  if (uses_src_neg_modifier(slot.op)) {
     src0 = apply_neg(src0, slot.neg, 0);
     src1 = apply_neg(src1, slot.neg, 1);
     src2 = apply_neg(src2, slot.neg, 2);
@@ -331,8 +336,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
-    srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
+    srcx0_ = make_src0(x_bits, true, false, false, 0, srcx0);
+    srcy0_ = make_src0(y_bits, true, false, false, 0, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
     srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
@@ -363,8 +368,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
-    srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+    srcx0_ = make_src0(x_bits, false, has_literal_, is_float64_op(opx_), literal_, srcx0);
+    srcy0_ = make_src0(y_bits, false, has_literal_, is_float64_op(opy_), literal_, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
   }

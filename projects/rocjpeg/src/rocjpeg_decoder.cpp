@@ -88,7 +88,10 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
     }
     if (backend_ == ROCJPEG_BACKEND_HARDWARE) {
         std::string gpu_uuid(hip_dev_prop_.uuid.bytes, sizeof(hip_dev_prop_.uuid.bytes));
-        rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, device_id_, gpu_uuid);
+        char pci_bus_id[64] = {0};
+        CHECK_HIP(hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_id_));
+        std::string gpu_pci_bdf(pci_bus_id);
+        rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, device_id_, gpu_uuid, gpu_pci_bdf);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
             CriticalLog(g_rocjpeg_logger, "Failed to initialize the VA-API JPEG decoder!");
             FunctionExitLog(g_rocjpeg_logger);
@@ -482,7 +485,8 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
         }
 
         if (destination->pitch[channel_index] == hip_interop_dev_mem.pitch[channel_index]) {
-            uint32_t channel_size = destination->pitch[channel_index] * channel_height;
+            // Compute pitch*height in 64-bit; hipMemcpyDtoDAsync takes size_t.
+            size_t channel_size = static_cast<size_t>(destination->pitch[channel_index]) * static_cast<size_t>(channel_height);
             CHECK_HIP(hipMemcpyDtoDAsync(destination->channel[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, channel_size, hip_stream_));
         } else {
             CHECK_HIP(hipMemcpy2DAsync(destination->channel[channel_index], destination->pitch[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, hip_interop_dev_mem.pitch[channel_index],

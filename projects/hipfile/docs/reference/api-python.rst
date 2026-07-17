@@ -2,9 +2,9 @@
    :description: Python API reference for hipFile, covering Driver, FileHandle, Buffer, HipFileException, enumerations, and module-level functions.
    :keywords: hipFile, Python, API, ROCm, Driver, FileHandle, Buffer, HipFileException, OpError, FileHandleType, GPU, I/O
 
-********************
+*********************
 Python API reference
-********************
+*********************
 
 The hipFile Python package (``hipfile``) provides Cython-backed bindings for
 driver lifecycle management, file handle registration, GPU buffer
@@ -15,7 +15,7 @@ For a guided walkthrough of common operations with these bindings, see
 :doc:`/how-to/use-python-api`.
 
 Module-level functions
-**********************
+======================
 
 ``get_version``
 ---------------
@@ -41,7 +41,7 @@ property names to their integer values.
 Raises ``HipFileException`` if the properties query fails.
 
 ``Driver``
-**********
+============
 
 .. code-block:: python
 
@@ -78,7 +78,7 @@ Close the hipFile driver. Raises ``HipFileException`` on failure.
 Return the current driver reference count as an ``int``.
 
 ``FileHandle``
-**************
+================
 
 .. code-block:: python
 
@@ -185,7 +185,7 @@ system-level I/O error, or ``HipFileException`` on a hipFile or HIP driver
 error.
 
 ``Buffer``
-**********
+===========
 
 .. code-block:: python
 
@@ -244,7 +244,7 @@ Deregister the buffer from the hipFile driver. This is a no-op if the
 buffer is not currently registered. Raises ``HipFileException`` on failure.
 
 ``HipFileException``
-********************
+========================
 
 .. code-block:: python
 
@@ -283,7 +283,7 @@ descriptive string from ``hipFileGetOpErrorString``. When the error is
 ``OpError.HIP_DRIVER_ERROR``, the HIP error code is appended.
 
 Enumerations
-************
+================
 
 ``OpError``
 -----------

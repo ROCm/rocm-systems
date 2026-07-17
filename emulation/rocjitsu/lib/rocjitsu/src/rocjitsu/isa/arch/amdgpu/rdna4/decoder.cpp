@@ -2134,6 +2134,10 @@ std::unique_ptr<Instruction> Decoder::decodeSWaitAluSopp(const MachineInst *opco
   return std::make_unique<SWaitAluSopp>(opcode);
 }
 
+std::unique_ptr<Instruction> Decoder::decodeSWaitcntSopp(const MachineInst *opcode) {
+  return std::make_unique<SWaitcntSopp>(opcode);
+}
+
 std::unique_ptr<Instruction> Decoder::decodeSWaitIdleSopp(const MachineInst *opcode) {
   return std::make_unique<SWaitIdleSopp>(opcode);
 }
@@ -7439,7 +7443,7 @@ const std::array<Decoder::DecodeFunc, 128> Decoder::sub_decode_sopp = {
     &Decoder::decodeInvalid,
     &Decoder::decodeSDelayAluSopp,
     &Decoder::decodeSWaitAluSopp,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeSWaitcntSopp,
     &Decoder::decodeSWaitIdleSopp,
     &Decoder::decodeSWaitEventSopp,
     &Decoder::decodeInvalid,

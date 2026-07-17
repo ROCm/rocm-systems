@@ -35,11 +35,16 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # Built-in variable and denominator definitions
 # ---------------------------------------------------------------------------
 
+# per_kernel denom column, injected at pmc load with 1 per dispatch so
+# SUM($denom) == N and Avg is the mean per dispatch.
+UNIT_COUNTER = "Dispatch_Unit"
+
 SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
+    # A vector, not a scalar, so SUM($denom) == N.
+    "per_kernel": UNIT_COUNTER,
 }
 
 
@@ -76,7 +81,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
                 "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
                 "$max_sclk)), 0)"
             ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
         },
         "rdna35": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
@@ -87,7 +92,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
     if gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
-    elif gpu_series.startswith("NAVI"):
+    elif gpu_series.startswith("RDNA"):
         return build_in_vars["rdna35"]
     else:
         console_error(

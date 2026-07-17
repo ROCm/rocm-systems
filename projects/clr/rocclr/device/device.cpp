@@ -336,7 +336,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -393,6 +393,29 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
     *offset = result.offset;
   }
   return result.memory;
+}
+
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
+  return nullptr;
 }
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
@@ -814,7 +837,20 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
-  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+  // Check if GPU_ENABLE_PAL env var is empty string, consider it as default
+  const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
+  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+
+  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  if (gpu_enable_pal_is_empty_string) {
+    if (IS_WINDOWS) {
+      // Windows default: PAL path
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // Linux default: ROCr path
+      GPU_ENABLE_PAL = 0;
+    }
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
     // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
     // Without this, roc::Device::init() returns true & disables PAL path in below code
     GPU_ENABLE_PAL = 1;
@@ -850,6 +886,7 @@ bool Device::init() {
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
     }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "ROCr backend initialized");
   }
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
@@ -861,6 +898,7 @@ bool Device::init() {
       }
     }
     ret |= PalDeviceLoad();
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "PAL backend initialized");
   }
 #endif  // WITH_PAL_DEVICE
   return ret;

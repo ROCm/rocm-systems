@@ -2,14 +2,14 @@
    :description: Tutorial showing how to query the hipFile library version at compile time and runtime using version macros and the hipFileGetVersion() function.
    :keywords: hipFile, version, HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR, HIPFILE_VERSION_PATCH, hipFileGetVersion, ROCm, tutorial
 
-*************************
+**************************
 Query the hipFile version
-*************************
+**************************
 
 This tutorial demonstrates how to retrieve the hipFile library version using compile-time macros and the runtime ``hipFileGetVersion()`` function. Knowing the library version is useful when you need to conditionally compile code against different hipFile releases. It also lets you confirm that the installed runtime library matches expectations.
 
 Prerequisites
-*************
+================
 
 Before working through this example, verify you have:
 
@@ -18,7 +18,7 @@ Before working through this example, verify you have:
 - The HIP runtime available on your system
 
 When to use each approach
-*************************
+===========================
 
 hipFile provides two ways to query its version:
 
@@ -29,7 +29,7 @@ Runtime function
    ``hipFileGetVersion()`` returns the version of the hipFile shared library that is loaded at runtime. Use this when you need to confirm the version of the library that is actually linked, which might differ from the header version if the library was upgraded independently.
 
 Complete example
-****************
+=================
 
 The following program prints the hipFile version using both methods. This code is adapted from ``examples/api/get-version.cpp`` in the hipFile source tree.
 
@@ -69,7 +69,7 @@ The following program prints the hipFile version using both methods. This code i
    }
 
 Step-by-step walkthrough
-************************
+========================
 
 Include the header
 ------------------
@@ -118,7 +118,7 @@ Query the runtime version
 Always check both fields before using the output values.
 
 Build the example
-*****************
+===================
 
 Use CMake to build the example. If ROCm or hipFile are installed in non-standard locations, pass them through ``CMAKE_PREFIX_PATH``:
 
@@ -128,7 +128,7 @@ Use CMake to build the example. If ROCm or hipFile are installed in non-standard
    cmake --build .
 
 Expected output
-***************
+================
 
 When you run the built ``get-version`` binary, you see output similar to the following:
 

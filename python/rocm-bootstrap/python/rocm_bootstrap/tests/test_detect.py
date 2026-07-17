@@ -23,7 +23,6 @@ from rocm_bootstrap.targets import (
 )
 from rocm_bootstrap.tests.conftest import FakePlatform, clinfo_output
 
-
 # ---------------------------------------------------------------------------
 # KFD properties parser unit tests
 # ---------------------------------------------------------------------------
@@ -278,7 +277,7 @@ class TestCliHierarchy:
     def test_single_gpu(self, fake_platform: FakePlatform, capsys):
         fake_platform.add_gpu_node(1, lookup_target("gfx1151"))
         main(["--hierarchy"])
-        assert capsys.readouterr().out == "gfx1151 gfx11_5 gfx11\n"
+        assert capsys.readouterr().out == "gfx1151 gfx115x gfx11\n"
 
     def test_no_gpus(self, fake_platform: FakePlatform, capsys):
         main(["--hierarchy"])
@@ -310,7 +309,7 @@ class TestCliVerbose:
         main(["-v"])
         out = capsys.readouterr().out
         assert "gfx1151" in out
-        assert "gfx11_5" in out
+        assert "gfx115x" in out
         assert "gfx11" in out
         assert "sub-family" in out
         assert "family" in out

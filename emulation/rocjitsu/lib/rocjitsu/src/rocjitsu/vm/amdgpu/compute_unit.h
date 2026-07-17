@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -20,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -38,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -126,6 +129,12 @@ public:
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool advance() = 0;
 
+  /// @brief End the current functional-mode quantum after this instruction.
+  ///
+  /// Used by wait-like instructions such as s_sleep so other simulated
+  /// components can publish the state on which the wavefront is polling.
+  void request_functional_yield() { functional_yield_requested_ = true; }
+
   /// @brief Signal that work has been dispatched; begin processing.
   ///
   /// @details Schedules an engine event that calls advance() repeatedly
@@ -147,6 +156,23 @@ public:
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
+
+  /// @brief Return the command processor that owns this CU's dispatch stream.
+  CommandProcessor *command_processor() { return cp_; }
+
+  /// @brief Override the cluster LDS multicast backend.
+  ///
+  /// @details Passing nullptr restores the immediate functional backend. Timed
+  /// models can install a shared fabric object here without changing the ISA
+  /// execution path that produces multicast transactions.
+  void set_cluster_lds_multicast_engine(ClusterLdsMulticastEngine *engine) {
+    cluster_lds_multicast_engine_ = engine ? engine : &default_cluster_lds_multicast_engine_;
+  }
+
+  /// @brief Return the active cluster LDS multicast backend.
+  ClusterLdsMulticastEngine &cluster_lds_multicast_engine() {
+    return *cluster_lds_multicast_engine_;
+  }
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
@@ -205,6 +231,7 @@ public:
 
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
+  const Lds &lds() const { return lds_; }
 
   /// @brief Clear LDS contents (zero-fill).
   void clear_lds() { lds_.clear(); }
@@ -218,8 +245,24 @@ public:
     return base;
   }
 
-  /// @brief Reset LDS allocation (called when all WFs retire).
+  /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
   void reset_lds_alloc() { next_lds_alloc_ = 0; }
+
+  /// @brief Hold LDS allocation state while a workgroup cluster is resident.
+  ///
+  /// @details Cluster multicast can target peer workgroups after the source WG
+  /// halts. Keep the per-CU LDS allocator pinned until the whole peer cluster
+  /// completes so a later WG cannot reuse LDS while peer multicast writes are
+  /// still possible, but larger dispatches can reclaim LDS between clusters.
+  void pin_lds_until_cluster_retired(uint64_t cluster_key) {
+    lds_pinned_clusters_.insert(cluster_key);
+  }
+
+  /// @brief Release the LDS allocation pin for a retired workgroup cluster.
+  void unpin_lds_for_cluster(uint64_t cluster_key) { lds_pinned_clusters_.erase(cluster_key); }
+
+  /// @brief Return true while any cluster can still receive multicast LDS writes.
+  bool lds_allocation_pinned() const { return !lds_pinned_clusters_.empty(); }
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
@@ -474,16 +517,16 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   Lds lds_;
+  ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
+  ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
+  std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   CommandProcessor *cp_ = nullptr;
 
-  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
-    return (uint64_t(dispatch_id) << 32) | wg_id;
-  }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
   uint64_t shared_aperture_base_ = 0;
@@ -501,6 +544,7 @@ protected:
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
+  bool functional_yield_requested_ = false;
 };
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -520,7 +564,11 @@ public:
   /// @brief Execute work up to the quantum limit, then yield.
   bool advance() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
+      // A request left by direct step() execution must not shorten this quantum.
+      functional_yield_requested_ = false;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+        if (std::exchange(functional_yield_requested_, false))
+          break;
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.

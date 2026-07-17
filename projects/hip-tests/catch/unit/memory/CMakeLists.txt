@@ -41,6 +41,7 @@ set(TEST_SRC
     hipMemcpyHtoA_old.cc
     hipMemcpyAllApiNegative.cc
     hipMemcpy_MultiThread.cc
+    hipMemcpyDynamicQueueChurn.cc
     hipHostRegister.cc
     hipHostUnregister.cc
     hipHostGetFlags.cc
@@ -197,6 +198,7 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
+    hipMipmappedArrayMemoryLeak.cc
     hipHostAlloc.cc
     hipMemSetMemPool.cc
     hipMemGetMemPool.cc)

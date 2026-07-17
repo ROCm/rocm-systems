@@ -1141,7 +1141,6 @@ HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
   SECTION("MulCodeObj - new") {
     REQUIRE(true == TestAlloc_Load_MultKernels(TEST_NEW_DELETE, INT_MAX));
   }
-}
 
 #if HT_NVIDIA
 /**
@@ -1188,8 +1187,8 @@ HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
   SECTION("double with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<double>(TEST_NEW_DELETE, true));
   }
-}
 #endif
+}
 
 /**
  * Scenario: This test validates device allocation and deallocation

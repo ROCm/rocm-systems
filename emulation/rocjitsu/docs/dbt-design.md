@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pair is CDNA4 (GFX950) → RDNA4 (GFX1200/1201), but the architecture is designed to support any directional ISA pair.
+The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pairs are CDNA4 (GFX950) → RDNA4 (GFX1200/1201) and CDNA4 (GFX950) → CDNA3 (GFX942), but the architecture is designed to support any directional ISA pair.
 
 The translation pipeline is organized into layers with clear responsibility boundaries. The binary translator orchestrates the process without owning ISA-specific policy. The encoding translator handles per-instruction binary format conversion. The semantic translator handles instruction-level behavioral differences. The kernel descriptor translator handles descriptor ABI and resource differences.
 
@@ -35,6 +35,31 @@ The translation pipeline is organized into layers with clear responsibility boun
 └───────────────────────────────────────────────────────────────┘
 ```
 
+### Runtime host configuration
+
+DBT guest mode keeps the synthetic guest identity separate from the target that
+runs translated code. `DbtGuestConfig` describes the advertised guest ISA and
+device, while its `DbtHostConfig` describes the host ISA, topology GPU ID, and
+execution backend. The backend is an enum with two modes:
+
+- `hardware` forwards execution-facing operations to a real host GPU.
+- `simulator` delegates host KFD execution to `SimulatedKfd` and runs the
+  translated code on a RocJITsu VM.
+
+A simulator-backed DBT config supports two layouts. When `simulator_config` is
+set, it names an external host simulator config; relative paths are resolved
+beside the DBT guest config, and that external file overrides any simulator
+VM/topology in the DBT guest file. This is the normal composition form and lets
+`guest_gfx950_on_simulated_gfx942.json` reuse the golden
+`gfx942_cdna3_kmd.json` config. When `simulator_config` is omitted, the DBT
+guest block and simulator VM/topology are read from the same file. The
+self-contained form is useful for tests and generated temporary configs.
+
+Both layouts use the same translation and validation path. Before discovery,
+the runtime rejects guest execution limits that the selected simulator device
+cannot provide, including LDS size, scratch slots, waves per SIMD, and wavefront
+size.
+
 ---
 
 ## Binary Translator
@@ -66,6 +91,52 @@ relocated fallthrough instruction. The `s_branch` target is computed as
 `(target - (branch_pc + 4)) / 4` per the AMDGPU branch encoding. Because each
 cave sits next to its kernel body, branch reach is bounded by one kernel instead
 of the entire original `.text`.
+
+### Branch relocation and static PC recovery
+
+Relocation changes instruction offsets, so every explicit control-flow edge is
+fixed up after the compact kernel body and its local cave have final positions.
+Direct PC-relative branches are recorded while emitting the relocated body and
+patched later through the kernel-local source-to-target placement map. The
+translator patches only the immediate field, preserving the already-translated
+target opcode and operands.
+
+Some code generators materialize a static PC-relative target in scalar registers
+and branch through it with `s_setpc_b64` or `s_swappc_b64`. These are indirect
+control-flow instructions in the ISA model, but the target is recoverable when
+the input uses the canonical static builder:
+
+```asm
+s_getpc_b64 s[pc:pc+1]
+s_add_u32  pc, pc, literal
+s_addc_u32 pc+1, pc+1, 0-or-literal
+s_setpc_b64 or s_swappc_b64 s[pc:pc+1]
+```
+
+`BasicBlock::build()` performs this static PC recovery before block splitting.
+Recovered destinations become block leaders before the final `BasicBlock`
+objects are built. Non-returning `s_setpc_b64` targets become ordinary CFG
+successors. Recovered `s_swappc_b64` and direct `s_call_b64` calls are modeled
+separately as `BasicBlock::CallEdge` records when the callee reaches a matching
+`s_setpc_b64` return through the saved return SGPR.
+
+That split is intentional: ordinary successors are context-free direct control
+flow, while call edges carry a callee, a call-site-specific continuation, and the
+return SGPR. Keeping call edges out of the successor list prevents a shared
+helper from gaining every possible return continuation globally; DBT adds the
+temporary call/return edges only inside the kernel scope that owns the call site.
+The source block also stores an `IndirectCallFixup` describing the `s_getpc`,
+the replaceable address-builder byte range, the branch consumer, and the
+recovered source target. DBT only records patterns whose builder range is large
+enough to be replaced in place by the canonical relocated PC-delta builder.
+
+After all reachable blocks have been relocated, `BinaryTranslator` resolves each
+recovered source target through the kernel-local placement map and rewrites the
+old builder range to add the new relocated delta to the original `s_getpc`
+result. Any leftover words in the recorded range are padded with `s_nop`. The
+`s_setpc_b64` / `s_swappc_b64` instruction itself remains in the relocated
+stream. Unrecognized indirect branches still fail closed with a legalization
+diagnostic rather than preserving a stale source PC.
 
 ---
 
@@ -180,14 +251,16 @@ For each code object:
 
 1. **Descriptor translate:** Parse kernel descriptors and compute descriptor byte patches plus any kernel-entry prologue words.
 2. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-3. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
-4. **Per-instruction pass:** For each instruction in each basic block:
+3. **Recover static indirect targets:** During basic-block construction, detect statically-built `s_getpc_b64` targets feeding `s_setpc_b64` / `s_swappc_b64`, add the recovered target as a CFG edge, and retain the address-builder fixup metadata for final relocation.
+4. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
+5. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
    - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, report `ExpandMissing` and leave translation unchanged.
    - If the replacement is larger than the source instruction, create a kernel-local code cave in `.text` with a branch stub and return branch.
-5. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
-6. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
-7. **Emit:** Return the modified ELF bytes.
+6. **Fix branches:** Patch direct branch immediates and rewrite recovered indirect PC builders using final relocated offsets.
+7. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
+8. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
+9. **Emit:** Return the modified ELF bytes.
 
 **Code cave sizing:** Cave bodies are placed in each kernel's local `.text`
 cave, so branch reach no longer depends on the size of the whole original

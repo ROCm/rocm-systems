@@ -243,6 +243,16 @@ From the ``rocdecdecode.cpp`` sample:
 
 Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to destroy the parser, and either ``rocDecDestroyDecoderHost()`` or ``rocDecDestroyDecoder()`` needs to be called to destroy the decoder.
 
+.. note:: 
+
+  To run the sample, you'll need to set the ``ROCM_PATH`` environment variable to point to the location of your ROCm installation, then set ``LD_PRELOAD`` and ``LIBVA_DRIVERS_PATH`` to point to the ROCm systems libraries and drivers:
+
+  .. code:: shell
+
+    export LD_PRELOAD=$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2
+
+    export LIBVA_DRIVERS_PATH=$ROCM_PATH/lib/rocm_sysdeps/lib/
+
 .. |rocdecdecode| replace:: ``rocdecdecode``
 .. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md
 
