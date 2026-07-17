@@ -2,77 +2,56 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests that AI NIC support was compiled into librocprof-sys.so.
+Tests that AI NIC support was compiled into the rocprofiler-systems binaries.
 
-This test does NOT require NIC hardware to be present — it checks the
-binary artifacts for compile-time indicators. It will fail if the library
-was built with ROCPROFSYS_BUILD_AINIC=OFF.
+This test does NOT require NIC hardware to be present. The AI NIC settings
+(e.g. ROCPROFSYS_USE_AINIC) are only registered when the binaries are built
+with ROCPROFSYS_BUILD_AINIC=ON, so their presence in ``rocprof-sys-avail
+--settings`` is a direct indicator of compile-time AI NIC support.
 """
 
 from __future__ import annotations
 
 import subprocess
 import pytest
-from pathlib import Path
 from rocprofsys import RocprofsysConfig
 
-# AI-NIC support is only compiled in when AMD SMI >= 26.3. Skip this build-artifact
-# check on builds against older AMD SMI, where AI-NIC is legitimately disabled.
+# AI NIC support is only compiled in when AMD SMI >= 26.3. Skip this build-artifact
+# check on builds against older AMD SMI, where AI NIC is legitimately disabled.
 pytestmark = [
     pytest.mark.rocprof_binary,
     pytest.mark.amdsmi_min_version("26.3"),
 ]
 
-# Dynamic symbols present in librocprof-sys.so only when
-# ROCPROFSYS_BUILD_AINIC=ON (calls to AMD SMI NIC APIs).
-_AINIC_SYMBOLS = [
-    "amdsmi_get_nic_rdma_port_statistics",
-    "amdsmi_get_nic_rdma_dev_info",
-    "amdsmi_get_nic_port_info",
+# Settings registered only when ROCPROFSYS_BUILD_AINIC=ON (see cmake/Packages.cmake
+# and the guarded ROCPROFSYS_CONFIG_SETTING blocks in config.cpp).
+_AINIC_SETTINGS = [
+    "ROCPROFSYS_USE_AINIC",
+    "ROCPROFSYS_SAMPLING_AINICS",
 ]
 
 
-def _find_librocprof_sys(lib_dir: Path) -> Path:
-    """Return the versioned or unversioned librocprof-sys.so under lib_dir."""
-    for pattern in ("librocprof-sys.so.*", "librocprof-sys.so"):
-        candidates = sorted(lib_dir.glob(pattern))
-        # Prefer the versioned file (largest, most complete)
-        for c in reversed(candidates):
-            if c.is_file() and not c.is_symlink():
-                return c
-        for c in candidates:
-            if c.is_file():
-                return c
-    raise FileNotFoundError(f"librocprof-sys.so not found under {lib_dir}")
-
-
-@pytest.fixture(scope="module")
-def librocprof_sys(rocprof_config: RocprofsysConfig) -> Path:
-    lib = _find_librocprof_sys(rocprof_config.rocprofsys_lib_dir)
-    return lib
-
-
 class TestAiNic:
-    """Verify AI NIC support was compiled into librocprof-sys.so."""
+    """Verify AI NIC support was compiled into the rocprofiler-systems binaries."""
 
-    def test_symbols_present(self, librocprof_sys: Path):
-        """amdsmi NIC API symbols must appear in the dynamic symbol table.
+    def test_settings_present(self, rocprof_config: RocprofsysConfig):
+        """AI NIC settings must be listed by ``rocprof-sys-avail --settings``.
 
-        These symbols are undefined references (U) in librocprof-sys.so —
-        they are resolved at runtime from libamd_smi.so. Their presence
-        proves that the NIC collector code was compiled in.
+        These settings are only registered when the binaries are compiled with
+        ROCPROFSYS_BUILD_AINIC=ON, so their presence proves AI NIC support was
+        compiled in. No NIC hardware is required.
         """
         result = subprocess.run(
-            ["nm", "-D", str(librocprof_sys)],
+            [str(rocprof_config.rocprofsys_avail), "--settings"],
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, f"nm failed: {result.stderr}"
+        assert result.returncode == 0, f"rocprof-sys-avail failed: {result.stderr}"
 
-        dyn_syms = result.stdout
-        missing = [s for s in _AINIC_SYMBOLS if s not in dyn_syms]
+        settings = result.stdout
+        missing = [s for s in _AINIC_SETTINGS if s not in settings]
         assert not missing, (
-            f"AI NIC dynamic symbols not found in {librocprof_sys.name} — "
-            f"was it built with ROCPROFSYS_BUILD_AINIC=OFF?\n"
+            "AI NIC settings not reported by rocprof-sys-avail --settings — "
+            "were the binaries built with ROCPROFSYS_BUILD_AINIC=OFF?\n"
             f"Missing: {missing}"
         )

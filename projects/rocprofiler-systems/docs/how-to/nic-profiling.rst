@@ -183,53 +183,22 @@ Verifying AI NIC compile-time support
 
 AI NIC metric collection requires ``ROCPROFSYS_BUILD_AINIC=ON`` at build time.
 This flag is set automatically when the AMD SMI library version is 26.3 or
-later and ``ROCPROFSYS_USE_AINIC=ON`` (the default). In some build
-environments — for example, builds where ``ROCM_PATH`` is not set — version
-detection may fail silently and produce a binary without AI NIC support, even
-though AMD SMI is present.
+later and ``ROCPROFSYS_USE_AINIC=ON`` (the default).
 
-To verify whether a given binary has AI NIC support compiled in, inspect the
-dynamic symbol table of ``librocprof-sys.so``. The AMD SMI NIC API symbols
-(such as ``amdsmi_get_nic_rdma_port_statistics``) appear as undefined
-references only when the NIC collector was compiled in.
+The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only registered when
+the binaries are compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their presence in
+the output of ``rocprof-sys-avail --settings`` is therefore a direct indicator
+of whether AI NIC support was compiled in. This check requires no AI NIC
+hardware.
 
-**Shell script (manual check)**
-
-A standalone verification script is provided in the repository at
-``tests/check_ainic_support.sh``. Run it by passing the path to
-``librocprof-sys.so``:
+**Manual check**
 
 .. code-block:: shell
 
-   bash tests/check_ainic_support.sh <path/to/librocprof-sys.so>
+   rocprof-sys-avail --settings | grep ROCPROFSYS_USE_AINIC
 
-For example, for an installed ROCm build:
-
-.. code-block:: shell
-
-   bash tests/check_ainic_support.sh /opt/rocm/lib/librocprof-sys.so
-
-Or for a local development build:
-
-.. code-block:: shell
-
-   bash tests/check_ainic_support.sh build/debug/lib/librocprof-sys.so
-
-Example output when AI NIC support **is** compiled in:
-
-.. code-block:: shell
-
-   $ bash check_ainic_support.sh /opt/rocm/lib/librocprof-sys.so
-   Checking: /opt/rocm/lib/librocprof-sys.so
-   PASS: AI NIC support IS compiled in
-
-Example output when AI NIC support **is not** compiled in:
-
-.. code-block:: shell
-
-   $ bash check_ainic_support.sh /opt/rocm/lib/librocprof-sys.so
-   Checking: /opt/rocm/lib/librocprof-sys.so
-   FAIL: AI NIC support is NOT compiled in
+If ``ROCPROFSYS_USE_AINIC`` is listed, AI NIC support is compiled in. If the
+command produces no output, the binaries were built without AI NIC support.
 
 **Automated pytest check**
 
@@ -237,12 +206,11 @@ The pytest test suite includes a test that performs the same check:
 
 .. code-block:: shell
 
-   ctest -V -R ainic-symbols-present
+   ctest -V -R ainic-settings-present
 
-This test verifies that ``amdsmi_get_nic_rdma_port_statistics`` and the
-other AMD SMI NIC API symbols are present in the dynamic symbol table of
-``librocprof-sys.so``. It does not require AI NIC hardware to be present —
-it is a pure build artifact check.
+This test verifies that the AI NIC settings are reported by
+``rocprof-sys-avail --settings``. It does not require AI NIC hardware to be
+present — it is a pure build artifact check.
 
 If the test fails, the build must be reconfigured with a ROCm installation
 where AMD SMI version 26.3 or later is available during the CMake configure
