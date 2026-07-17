@@ -110,6 +110,7 @@ enum class RetargetError {
   kComgrUnavailable,
   kComgrFailure,
   kOutOfResources,
+  kReentrantRequest,
 };
 
 enum class RetargetResultSource {
@@ -144,6 +145,7 @@ struct RetargetCacheMetrics {
   uint64_t ready_hits = 0;
   uint64_t cross_reader_results = 0;
   uint64_t coalesced_results = 0;
+  uint64_t reentrant_rejections = 0;
   uint64_t hash_bytes = 0;
   uint64_t hash_nanoseconds = 0;
   uint64_t exact_compare_bytes = 0;
@@ -175,7 +177,7 @@ class ContentRetargetCache final {
   ContentRetargetCache& operator=(const ContentRetargetCache&) = delete;
 
   RetargetOperationResult GetOrCompute(const void* source_data, size_t source_size,
-                                       const void* reader_identity, const RetargetCacheKey& key,
+                                       uint64_t reader_id, const RetargetCacheKey& key,
                                        const Producer& producer);
 
   RetargetCacheMetrics SnapshotMetrics() const;
@@ -202,7 +204,7 @@ struct CodeObjectView {
   const void* data = nullptr;
   size_t size = 0;
   std::string uri;
-  const void* reader_identity = nullptr;
+  uint64_t reader_id = 0;
   ContentRetargetCache* retarget_cache = nullptr;
 };
 

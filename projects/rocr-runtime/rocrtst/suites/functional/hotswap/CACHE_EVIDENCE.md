@@ -4,7 +4,8 @@ This directory contains the executable and formal evidence for the process-wide,
 content-exact retarget cache:
 
 - `hotswap_cache_test.cc` covers cross-reader reuse, mutation between loads,
-  forced hash collisions, synchronization, failure recovery, and weak lifetime.
+  forced hash collisions, synchronization, reentrancy rejection, failure
+  recovery, and weak lifetime.
 - `model/ContentRetargetCache.tla` specifies the exact-content per-transform
   state machine, including two different contents forced into one hash bucket.
 - `hotswap_cache_benchmark.cc` compares no caching, the lookup/copy behavior
@@ -40,6 +41,9 @@ The content hash is only an index. A weak source-intern table requires an exact
 `size + memcmp` match against an immutable snapshot before returning a source
 identity. Transform ready entries and flights then compare that exact source
 identity. Hash collision cannot change the result selected by a request.
+Reader identity is not part of either key. Each reader receives a monotonic
+numeric ID used only for cross-reader metrics, so cache metadata never retains
+or compares a potentially expired reader pointer.
 
 Each content-hash bucket and hash/transform bucket has its own mutex. Candidate
 collection and source snapshot publication are coordinated within one content
@@ -128,6 +132,18 @@ waiter owns a `shared_ptr` to its flight, so failure removal and a subsequent
 retry cannot destroy or overwrite the generation still observed by old
 waiters. Ready values and returned values are immutable shared objects.
 
+The lock order is table mutex before bucket mutex. Normal lookup releases the
+table mutex before taking a bucket mutex, source and transform bucket mutexes
+are never held together, and no path acquires the table mutex while holding a
+bucket mutex. COMGR and producer callbacks run without cache locks. Predicate
+waits atomically release their bucket mutex. These rules remove every reverse
+lock edge needed to form a cache deadlock cycle.
+
+Each flight records its producer thread. If that thread recursively requests
+the same exact source and transform, the nested request returns
+`kReentrantRequest` rather than joining and waiting on itself. Other threads
+continue to join the flight normally.
+
 The process cache uses `std::call_once` rather than a function-local static.
 This matters because the Unix ROCR build uses `-fno-threadsafe-statics`.
 Construction failure is propagated to the load path, which rewrites without
@@ -138,15 +154,22 @@ identity, then checks one leader per exact key, waiter-generation association,
 success-only ready publication, exact-content result selection, collision
 isolation, failure/retry ordering, weak expiry, and agreement among callers
 observing one generation. Reader identity is intentionally not part of the
-exact key.
+exact key. The model excludes the leader from its waiter set, matching the
+implementation's typed reentrancy rejection.
+
+The safety proof assumes application bytes are not concurrently modified during
+an HSA call. Liveness additionally depends on COMGR returning, the producer
+thread not being asynchronously terminated, and eventual scheduler progress.
+A stalled COMGR call can stall matching waiters without creating a cache lock
+cycle; the cache does not claim wait-freedom or scheduler fairness.
 
 ## Runtime metrics
 
 The counters are present in normal runtime builds and are emitted with
 `HSA_HOTSWAP_VERBOSE=1`:
 
-- producer calls/failures, ready hits, cross-reader results, and coalesced
-  results;
+- producer calls/failures, ready hits, cross-reader results, coalesced results,
+  and reentrant rejections;
 - bytes and time spent hashing and exact-comparing;
 - wait and cache-lock time;
 - source snapshot allocations and cumulative/live/peak source bytes;
@@ -183,7 +206,7 @@ results for content single-flight.
 The current evidence run produced:
 
 - focused rewrite/cache CTests: pass;
-- cache suite: 12 tests pass under GCC ThreadSanitizer, including forced hash
+- cache suite: 13 tests pass under GCC ThreadSanitizer, including forced hash
   collision and randomized schedules through 64 threads;
 - TLC: 510,325 states generated, 121,729 distinct states, complete depth 17,
   with no invariant violation; and
@@ -231,6 +254,7 @@ path with normal CLR reader creation. With verbose metrics enabled it must show:
 ```text
 producer_calls = 1
 cross_reader_results = 3
+reentrant_rejections = 0
 produced_output_bytes = one rewritten ELF
 live_source_snapshot_bytes = one source code object
 live_output_bytes = one rewritten ELF

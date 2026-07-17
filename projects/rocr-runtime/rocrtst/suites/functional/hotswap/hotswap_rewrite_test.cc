@@ -711,13 +711,11 @@ TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
   rocr::hotswap::ContentRetargetCache cache;
-  int first_reader = 0;
-  int second_reader = 0;
   auto first_code_object = MakeRealCodeObjectView();
-  first_code_object.reader_identity = &first_reader;
+  first_code_object.reader_id = 1;
   first_code_object.retarget_cache = &cache;
   auto second_code_object = MakeRealCodeObjectView();
-  second_code_object.reader_identity = &second_reader;
+  second_code_object.reader_id = 2;
   second_code_object.retarget_cache = &cache;
   LoadRecorder first_load;
   LoadRecorder second_load;
@@ -764,7 +762,7 @@ TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
       started.fetch_add(1, std::memory_order_release);
-      results[i] = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+      results[i] = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
                                       key, producer);
     });
   }
@@ -803,13 +801,13 @@ TEST(HotswapRewrite, RetargetCacheRetriesFailures) {
   const rocr::hotswap::RetargetCacheKey key{kGfx1250B0Isa, kGfx1250A0Isa, false, false};
   size_t producer_calls = 0;
 
-  const auto first = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+  const auto first = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
                                        key, [&](const rocr::hotswap::SourceSnapshotRef&) {
     ++producer_calls;
     return rocr::hotswap::RetargetOperationResult{{},
                                                   rocr::hotswap::RetargetError::kOutOfResources};
   });
-  const auto second = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+  const auto second = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), 0,
                                         key, [&](const rocr::hotswap::SourceSnapshotRef& source) {
     ++producer_calls;
     return MakeTestRetargetedElf(source);

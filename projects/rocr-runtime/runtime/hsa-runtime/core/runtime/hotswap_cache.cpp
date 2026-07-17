@@ -52,6 +52,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -212,15 +213,18 @@ struct RetargetCacheBucketKeyHash {
 
 struct RetargetReadyEntry {
   std::weak_ptr<const RetargetedElf> elf;
-  const void* producer_reader_identity = nullptr;
+  uint64_t producer_reader_id = 0;
 };
 
 struct RetargetFlight {
-  RetargetFlight(SourceSnapshotRef source_snapshot, const void* reader_identity)
-      : source(std::move(source_snapshot)), producer_reader_identity(reader_identity) {}
+  RetargetFlight(SourceSnapshotRef source_snapshot, uint64_t reader_id)
+      : source(std::move(source_snapshot)),
+        producer_reader_id(reader_id),
+        producer_thread_id(std::this_thread::get_id()) {}
 
   SourceSnapshotRef source;
-  const void* producer_reader_identity = nullptr;
+  uint64_t producer_reader_id = 0;
+  std::thread::id producer_thread_id;
   bool completed = false;
   size_t waiter_count = 0;
   RetargetOperationResult result;
@@ -256,9 +260,8 @@ RetargetOperationResult RunRetargetProducer(const ContentRetargetCache::Producer
   }
 }
 
-bool IsCrossReader(const void* producer_reader_identity, const void* reader_identity) {
-  return producer_reader_identity != nullptr && reader_identity != nullptr &&
-      producer_reader_identity != reader_identity;
+bool IsCrossReader(uint64_t producer_reader_id, uint64_t reader_id) {
+  return producer_reader_id != 0 && reader_id != 0 && producer_reader_id != reader_id;
 }
 
 }  // namespace
@@ -270,6 +273,7 @@ class RetargetCacheMemoryTracker final {
   std::atomic<uint64_t> ready_hits{0};
   std::atomic<uint64_t> cross_reader_results{0};
   std::atomic<uint64_t> coalesced_results{0};
+  std::atomic<uint64_t> reentrant_rejections{0};
   std::atomic<uint64_t> hash_bytes{0};
   std::atomic<uint64_t> hash_nanoseconds{0};
   std::atomic<uint64_t> exact_compare_bytes{0};
@@ -446,7 +450,7 @@ ContentRetargetCache::ContentRetargetCache(ContentHashFunction hash_function)
 
 RetargetOperationResult ContentRetargetCache::GetOrCompute(const void* source_data,
                                                            size_t source_size,
-                                                           const void* reader_identity,
+                                                           uint64_t reader_id,
                                                            const RetargetCacheKey& key,
                                                            const Producer& producer) {
   const auto run_producer = [&](const SourceSnapshotRef& source) {
@@ -546,7 +550,7 @@ RetargetOperationResult ContentRetargetCache::GetOrCompute(const void* source_da
       }
       if (elf->source().get() == source.get()) {
         impl_->tracker->ready_hits.fetch_add(1, std::memory_order_relaxed);
-        if (IsCrossReader(ready->producer_reader_identity, reader_identity)) {
+        if (IsCrossReader(ready->producer_reader_id, reader_id)) {
           impl_->tracker->cross_reader_results.fetch_add(1, std::memory_order_relaxed);
         }
         AddElapsed(&impl_->tracker->lock_hold_nanoseconds, lock_acquired);
@@ -557,6 +561,12 @@ RetargetOperationResult ContentRetargetCache::GetOrCompute(const void* source_da
 
     for (const auto& candidate : bucket->in_flight) {
       if (candidate->source.get() != source.get()) continue;
+      // A producer cannot wait for the flight that only it can complete.
+      if (candidate->producer_thread_id == std::this_thread::get_id()) {
+        impl_->tracker->reentrant_rejections.fetch_add(1, std::memory_order_relaxed);
+        AddElapsed(&impl_->tracker->lock_hold_nanoseconds, lock_acquired);
+        return {{}, RetargetError::kReentrantRequest};
+      }
 
       flight = candidate;
       ++flight->waiter_count;
@@ -569,14 +579,14 @@ RetargetOperationResult ContentRetargetCache::GetOrCompute(const void* source_da
       RetargetOperationResult result = flight->result;
       result.source = RetargetResultSource::kCoalesced;
       impl_->tracker->coalesced_results.fetch_add(1, std::memory_order_relaxed);
-      if (IsCrossReader(flight->producer_reader_identity, reader_identity)) {
+      if (IsCrossReader(flight->producer_reader_id, reader_id)) {
         impl_->tracker->cross_reader_results.fetch_add(1, std::memory_order_relaxed);
       }
       AddElapsed(&impl_->tracker->lock_hold_nanoseconds, lock_acquired);
       return result;
     }
 
-    flight = std::make_shared<RetargetFlight>(source, reader_identity);
+    flight = std::make_shared<RetargetFlight>(source, reader_id);
     bucket->in_flight.push_back(flight);
     AddElapsed(&impl_->tracker->lock_hold_nanoseconds, lock_acquired);
   } catch (const std::bad_alloc&) {
@@ -598,7 +608,7 @@ RetargetOperationResult ContentRetargetCache::GetOrCompute(const void* source_da
                             bucket->in_flight.end());
     if (result.succeeded()) {
       try {
-        bucket->ready.push_back({result.elf, flight->producer_reader_identity});
+        bucket->ready.push_back({result.elf, flight->producer_reader_id});
       } catch (const std::bad_alloc&) {
         // Active callers and loaded executables still own the result.
       }
@@ -617,6 +627,7 @@ RetargetCacheMetrics ContentRetargetCache::SnapshotMetrics() const {
   metrics.ready_hits = tracker.ready_hits.load(std::memory_order_relaxed);
   metrics.cross_reader_results = tracker.cross_reader_results.load(std::memory_order_relaxed);
   metrics.coalesced_results = tracker.coalesced_results.load(std::memory_order_relaxed);
+  metrics.reentrant_rejections = tracker.reentrant_rejections.load(std::memory_order_relaxed);
   metrics.hash_bytes = tracker.hash_bytes.load(std::memory_order_relaxed);
   metrics.hash_nanoseconds = tracker.hash_nanoseconds.load(std::memory_order_relaxed);
   metrics.exact_compare_bytes = tracker.exact_compare_bytes.load(std::memory_order_relaxed);
@@ -703,6 +714,7 @@ void ContentRetargetCache::ResetMetricsForTesting() {
   tracker.ready_hits.store(0, std::memory_order_relaxed);
   tracker.cross_reader_results.store(0, std::memory_order_relaxed);
   tracker.coalesced_results.store(0, std::memory_order_relaxed);
+  tracker.reentrant_rejections.store(0, std::memory_order_relaxed);
   tracker.hash_bytes.store(0, std::memory_order_relaxed);
   tracker.hash_nanoseconds.store(0, std::memory_order_relaxed);
   tracker.exact_compare_bytes.store(0, std::memory_order_relaxed);

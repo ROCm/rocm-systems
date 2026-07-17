@@ -283,7 +283,7 @@ Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
   rocr::hotswap::RetargetedElfRef warm_owner;
   if (phase == Phase::kWarm) {
     warm_owner = cache
-                     .GetOrCompute(source.data(), source.size(), nullptr, key,
+                     .GetOrCompute(source.data(), source.size(), 0, key,
                                    [&](const SourceSnapshotRef& snapshot) {
                                      return MakeRetargetedElf(snapshot, payload_size, 0);
                                    })
@@ -300,7 +300,7 @@ Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
     threads.emplace_back([&, i] {
       start.ArriveAndWait();
       results[i] = cache.GetOrCompute(
-          source.data(), source.size(), nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+          source.data(), source.size(), 0, key, [&](const SourceSnapshotRef& snapshot) {
             return MakeRetargetedElf(snapshot, payload_size, producer_microseconds);
           });
     });

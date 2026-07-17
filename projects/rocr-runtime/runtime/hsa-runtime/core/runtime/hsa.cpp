@@ -2367,7 +2367,7 @@ hsa_status_t hsa_executable_load_agent_code_object(
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
-  code_object.reader_identity = reader;
+  code_object.reader_id = reader->GetRetargetReaderId();
 
   hotswap::LoadAgentCodeObjectCallbacks callbacks;
   callbacks.context = exec;

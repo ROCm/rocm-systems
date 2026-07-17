@@ -54,9 +54,9 @@ RetargetOperationResult MakeElf(const SourceSnapshotRef& source, size_t size = k
 
 RetargetOperationResult GetOrCompute(ContentRetargetCache* cache,
                                      const std::vector<unsigned char>& source,
-                                     const void* reader_identity, const RetargetCacheKey& key,
+                                     uint64_t reader_id, const RetargetCacheKey& key,
                                      const ContentRetargetCache::Producer& producer) {
-  return cache->GetOrCompute(source.data(), source.size(), reader_identity, key, producer);
+  return cache->GetOrCompute(source.data(), source.size(), reader_id, key, producer);
 }
 
 bool WaitUntil(const std::function<bool()>& predicate,
@@ -91,7 +91,7 @@ TEST(HotswapCache, ConcurrentMissHasOneProducerAndOnePayload) {
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
       results[i] =
-          GetOrCompute(&cache, source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+          GetOrCompute(&cache, source, 0, key, [&](const SourceSnapshotRef& snapshot) {
             producer_calls.fetch_add(1, std::memory_order_relaxed);
             while (!release_producer.load(std::memory_order_acquire)) std::this_thread::yield();
             return MakeElf(snapshot);
@@ -138,16 +138,17 @@ TEST(HotswapCache, DistinctReadersWithIdenticalContentShareOneResult) {
   const auto first_view = MakeSource();
   const auto second_view = first_view;
   const RetargetCacheKey key = MakeKey();
-  int first_reader = 0;
-  int second_reader = 0;
+  constexpr uint64_t kFirstReaderId = 1;
+  constexpr uint64_t kSecondReaderId = 2;
   size_t producer_calls = 0;
 
   const auto first =
-      GetOrCompute(&cache, first_view, &first_reader, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, first_view, kFirstReaderId, key,
+                   [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot);
       });
-  const auto second = GetOrCompute(&cache, second_view, &second_reader, key,
+  const auto second = GetOrCompute(&cache, second_view, kSecondReaderId, key,
                                    [&](const SourceSnapshotRef& snapshot) {
                                      ++producer_calls;
                                      return MakeElf(snapshot, kTestElfSize, 0x99);
@@ -165,17 +166,17 @@ TEST(HotswapCache, MutationBetweenLoadsCreatesANewExactEntry) {
   ContentRetargetCache cache;
   auto source = MakeSource();
   const RetargetCacheKey key = MakeKey();
-  int reader = 0;
+  constexpr uint64_t kReaderId = 1;
   size_t producer_calls = 0;
 
   const auto first =
-      GetOrCompute(&cache, source, &reader, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, source, kReaderId, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot, kTestElfSize, 0x11);
       });
   source[source.size() / 2] ^= 0xff;
   const auto second =
-      GetOrCompute(&cache, source, &reader, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, source, kReaderId, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot, kTestElfSize, 0x22);
       });
@@ -196,17 +197,17 @@ TEST(HotswapCache, ForcedHashCollisionCannotAliasDifferentContent) {
   size_t producer_calls = 0;
 
   const auto first =
-      GetOrCompute(&cache, first_source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, first_source, 0, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot, kTestElfSize, 0x41);
       });
   const auto second =
-      GetOrCompute(&cache, second_source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, second_source, 0, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot, kTestElfSize, 0x42);
       });
   const auto first_again =
-      GetOrCompute(&cache, first_source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, first_source, 0, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot, kTestElfSize, 0x43);
       });
@@ -233,7 +234,7 @@ TEST(HotswapCache, CollidingContentCanProduceConcurrently) {
 
   const auto run = [&](size_t index, const std::vector<unsigned char>& source) {
     results[index] =
-        GetOrCompute(&cache, source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+        GetOrCompute(&cache, source, 0, key, [&](const SourceSnapshotRef& snapshot) {
           active_producers.fetch_add(1, std::memory_order_acq_rel);
           while (!release_producers.load(std::memory_order_acquire)) std::this_thread::yield();
           active_producers.fetch_sub(1, std::memory_order_acq_rel);
@@ -264,7 +265,7 @@ TEST(HotswapCache, FinalOwnerReleaseExpiresPayloadAndSourceSnapshot) {
 
   {
     const auto result =
-        GetOrCompute(&cache, source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+        GetOrCompute(&cache, source, 0, key, [&](const SourceSnapshotRef& snapshot) {
           ++producer_calls;
           return MakeElf(snapshot);
         });
@@ -279,7 +280,7 @@ TEST(HotswapCache, FinalOwnerReleaseExpiresPayloadAndSourceSnapshot) {
   EXPECT_EQ(cache.SnapshotMetrics().live_output_bytes, 0u);
 
   const auto retry =
-      GetOrCompute(&cache, source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, source, 0, key, [&](const SourceSnapshotRef& snapshot) {
         ++producer_calls;
         return MakeElf(snapshot);
       });
@@ -299,7 +300,7 @@ TEST(HotswapCache, ConcurrentFailureWakesEveryWaiterAndRetries) {
 
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
-      results[i] = GetOrCompute(&cache, source, nullptr, key,
+      results[i] = GetOrCompute(&cache, source, 0, key,
                                 [&](const SourceSnapshotRef&) -> RetargetOperationResult {
                                   producer_calls.fetch_add(1, std::memory_order_relaxed);
                                   while (!release_producer.load(std::memory_order_acquire))
@@ -323,7 +324,7 @@ TEST(HotswapCache, ConcurrentFailureWakesEveryWaiterAndRetries) {
   }
 
   const auto retry =
-      GetOrCompute(&cache, source, nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+      GetOrCompute(&cache, source, 0, key, [&](const SourceSnapshotRef& snapshot) {
         producer_calls.fetch_add(1, std::memory_order_relaxed);
         return MakeElf(snapshot);
       });
@@ -333,16 +334,43 @@ TEST(HotswapCache, ConcurrentFailureWakesEveryWaiterAndRetries) {
   EXPECT_EQ(cache.SnapshotMetrics().in_flight_entries, 0u);
 }
 
+TEST(HotswapCache, SameThreadReentrantRequestIsRejectedWithoutWaiting) {
+  ContentRetargetCache cache;
+  const auto source = MakeSource();
+  const RetargetCacheKey key = MakeKey();
+  size_t producer_calls = 0;
+  RetargetOperationResult nested;
+
+  const auto outer = GetOrCompute(
+      &cache, source, 1, key, [&](const SourceSnapshotRef& snapshot) {
+        ++producer_calls;
+        nested = GetOrCompute(
+            &cache, source, 1, key, [&](const SourceSnapshotRef& nested_snapshot) {
+              ++producer_calls;
+              return MakeElf(nested_snapshot);
+            });
+        return MakeElf(snapshot);
+      });
+
+  ASSERT_TRUE(outer.succeeded());
+  EXPECT_FALSE(nested.succeeded());
+  EXPECT_EQ(nested.error, RetargetError::kReentrantRequest);
+  EXPECT_EQ(producer_calls, 1u);
+  const auto metrics = cache.SnapshotMetrics();
+  EXPECT_EQ(metrics.reentrant_rejections, 1u);
+  EXPECT_EQ(metrics.in_flight_entries, 0u);
+}
+
 TEST(HotswapCache, AllocationFailureIsTypedAndRetryable) {
   ContentRetargetCache cache;
   const auto source = MakeSource();
   const RetargetCacheKey key = MakeKey();
 
   const auto failed = GetOrCompute(
-      &cache, source, nullptr, key,
+      &cache, source, 0, key,
       [](const SourceSnapshotRef&) -> RetargetOperationResult { throw std::bad_alloc(); });
   const auto retry =
-      GetOrCompute(&cache, source, nullptr, key,
+      GetOrCompute(&cache, source, 0, key,
                    [](const SourceSnapshotRef& snapshot) { return MakeElf(snapshot); });
 
   EXPECT_FALSE(failed.succeeded());
@@ -367,7 +395,7 @@ TEST(HotswapCache, DifferentContentComputesOutsideOtherBucketLocks) {
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
       results[i] = GetOrCompute(
-          &cache, sources[i], nullptr, MakeKey(i), [&](const SourceSnapshotRef& snapshot) {
+          &cache, sources[i], 0, MakeKey(i), [&](const SourceSnapshotRef& snapshot) {
             const size_t active = active_producers.fetch_add(1, std::memory_order_acq_rel) + 1;
             size_t peak = peak_producers.load(std::memory_order_relaxed);
             while (peak < active &&
@@ -403,7 +431,7 @@ TEST(HotswapCache, DifferentTransformsOfOneContentProduceConcurrently) {
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
       results[i] = GetOrCompute(
-          &cache, source, nullptr, MakeKey(i), [&](const SourceSnapshotRef& snapshot) {
+          &cache, source, 0, MakeKey(i), [&](const SourceSnapshotRef& snapshot) {
             const size_t active = active_producers.fetch_add(1, std::memory_order_acq_rel) + 1;
             size_t peak = peak_producers.load(std::memory_order_relaxed);
             while (peak < active &&
@@ -441,12 +469,12 @@ TEST(HotswapCache, EveryTransformKeyFieldSeparatesReadyEntries) {
 
   for (size_t i = 0; i < keys.size(); ++i) {
     results.push_back(
-        GetOrCompute(&cache, source, nullptr, keys[i], [i](const SourceSnapshotRef& snapshot) {
+        GetOrCompute(&cache, source, 0, keys[i], [i](const SourceSnapshotRef& snapshot) {
           return MakeElf(snapshot, kTestElfSize, static_cast<unsigned char>(i + 1));
         }));
   }
   for (size_t i = 0; i < keys.size(); ++i) {
-    const auto hit = GetOrCompute(&cache, source, nullptr, keys[i], [](const SourceSnapshotRef&) {
+    const auto hit = GetOrCompute(&cache, source, 0, keys[i], [](const SourceSnapshotRef&) {
       return RetargetOperationResult{{}, RetargetError::kComgrFailure};
     });
     ASSERT_TRUE(hit.succeeded());
@@ -487,7 +515,7 @@ TEST(HotswapCache, RandomizedStressPreservesExactContentSingleFlight) {
           if (delay < 4) std::this_thread::yield();
           if (delay == 7) std::this_thread::sleep_for(std::chrono::microseconds(10));
           results[thread].push_back(
-              GetOrCompute(&cache, sources[key], nullptr, keys[key],
+              GetOrCompute(&cache, sources[key], 0, keys[key],
                            [&, key](const SourceSnapshotRef& snapshot) {
                              producer_calls[key].fetch_add(1, std::memory_order_relaxed);
                              std::this_thread::sleep_for(std::chrono::microseconds(50));

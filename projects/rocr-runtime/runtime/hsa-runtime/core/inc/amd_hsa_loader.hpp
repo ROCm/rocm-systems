@@ -130,7 +130,7 @@ struct CodeObjectReaderImpl final {
   }
 
   /// @brief Default constructor.
-  CodeObjectReaderImpl() {}
+  CodeObjectReaderImpl();
 
   /// @brief Default destructor.
   ~CodeObjectReaderImpl();
@@ -146,10 +146,12 @@ struct CodeObjectReaderImpl final {
 
   const void *GetCodeObjectMemory() const { return code_object_memory; };
   size_t GetCodeObjectSize() const { return code_object_size; }
+  uint64_t GetRetargetReaderId() const { return retarget_reader_id; }
 
   std::string GetUri() const { return uri; };
 
  private:
+  const uint64_t retarget_reader_id;
   const void *code_object_memory{nullptr};
   size_t code_object_size{0};
   std::string uri{};

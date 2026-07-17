@@ -532,8 +532,8 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   }
 
   const RetargetOperationResult operation = cache
-      ? cache->GetOrCompute(code_object.data, code_object.size, code_object.reader_identity,
-                            cache_key, producer)
+      ? cache->GetOrCompute(code_object.data, code_object.size, code_object.reader_id, cache_key,
+                            producer)
       : producer({});
 
   HOTSWAP_LOG(
@@ -548,9 +548,9 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
     const RetargetCacheMetrics metrics = cache->SnapshotMetrics();
     fprintf(stderr,
             "hotswap cache: producer_calls=%llu producer_failures=%llu ready_hits=%llu "
-            "cross_reader_results=%llu coalesced_results=%llu hash_bytes=%llu "
-            "hash_nanoseconds=%llu exact_compare_bytes=%llu exact_compare_nanoseconds=%llu "
-            "wait_nanoseconds=%llu lock_hold_nanoseconds=%llu "
+            "cross_reader_results=%llu coalesced_results=%llu reentrant_rejections=%llu "
+            "hash_bytes=%llu hash_nanoseconds=%llu exact_compare_bytes=%llu "
+            "exact_compare_nanoseconds=%llu wait_nanoseconds=%llu lock_hold_nanoseconds=%llu "
             "source_snapshot_allocations=%llu source_snapshot_bytes=%llu "
             "live_source_snapshot_bytes=%llu peak_live_source_snapshot_bytes=%llu "
             "produced_output_bytes=%llu live_output_bytes=%llu peak_live_output_bytes=%llu "
@@ -561,6 +561,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
             static_cast<unsigned long long>(metrics.ready_hits),
             static_cast<unsigned long long>(metrics.cross_reader_results),
             static_cast<unsigned long long>(metrics.coalesced_results),
+            static_cast<unsigned long long>(metrics.reentrant_rejections),
             static_cast<unsigned long long>(metrics.hash_bytes),
             static_cast<unsigned long long>(metrics.hash_nanoseconds),
             static_cast<unsigned long long>(metrics.exact_compare_bytes),
@@ -597,7 +598,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(amd::hsa::loader::CodeObjectReade
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
-  code_object.reader_identity = reader;
+  code_object.reader_id = reader->GetRetargetReaderId();
   return TryRetargetCodeObject(code_object, agent);
 }
 
