@@ -103,10 +103,14 @@ def _sem_key(sem: InstructionSemantics | None) -> tuple[str, str | None, str | N
 def _operand_signature(
     inst: Instruction,
 ) -> tuple[tuple[str, str, int, bool, bool], ...]:
-    """Return a canonical tuple of operand (name, type, size, is_input, is_output)."""
+    """Return a canonical tuple of operand (name, type, size, is_input, is_output).
+
+    TODO: Add fieldless operands.
+    """
     return tuple(
         (op.name, op.operand_type, op.size, op.is_input, op.is_output)
         for op in inst.operands
+        if not op.fieldless
     )
 
 

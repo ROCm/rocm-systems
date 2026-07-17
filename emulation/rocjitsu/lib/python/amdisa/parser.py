@@ -45,7 +45,9 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
     OperandSelector,
+    synthesize_fieldless_name,
 )
+from amdisa.fieldless_policy import validate_fieldless_taxonomy
 from amdisa.isa_profile import IsaProfile
 
 
@@ -131,6 +133,39 @@ def _parse_enc_id_masks(
         )
     dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
     return flat_enc_mask, op_mask, dont_care_bits
+
+
+def _uniquify_fieldless_names(opnds: list[Operand]) -> None:
+    """Make fieldless operand names unique within one instruction, in place.
+
+    Field-bearing operand names come from the encoding and are already unique.
+    Fieldless operands are named from their type and can collide.
+    Disambiguate deterministically: keep the base if free, else append
+        ``_out``/``_in`` by role, else ``_<order>``.
+
+    ``opnds`` must already be sorted by ``order`` so assignment is stable across
+    regenerations.
+    """
+    used = {op.name for op in opnds if not op.fieldless}
+    for op in opnds:
+        if not op.fieldless:
+            continue
+        base = op.name
+        if base not in used:
+            used.add(base)
+            continue
+        role = '_out' if op.is_output and not op.is_input else '_in'
+        for candidate in (f'{base}{role}', f'{base}_{op.order}'):
+            if candidate not in used:
+                op.name = candidate
+                break
+        else:
+            # Extremely defensive: fall back to a guaranteed-unique suffix.
+            suffix = 0
+            while f'{base}_{op.order}_{suffix}' in used:
+                suffix += 1
+            op.name = f'{base}_{op.order}_{suffix}'
+        used.add(op.name)
 
 
 def _collapse_register_ranges(
@@ -323,6 +358,8 @@ class Parser:
         self.parse_insts()
         self._inject_compat_insts()
         self.parse_operand_types()
+        self._collect_fieldless_operand_types()
+        validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
 
     def implicit_operand_accesses(
@@ -362,6 +399,22 @@ class Parser:
             for inst in enc.insts:
                 accesses.setdefault((inst.name, inst.enc_name), (False, False))
         return accesses
+
+    def _collect_fieldless_operand_types(self) -> None:
+        """Record every fieldless operand type seen across all instructions.
+
+        Derived from the fully-parsed instruction list (rather than accumulated
+        at operand construction time) so it is robust against any current or
+        future operand creation path -- the taxonomy gate keys off exactly what
+        ends up in the spec.
+        """
+        self.isa_spec.fieldless_operand_types = {
+            op.operand_type
+            for enc in self.isa_spec.inst_encodings
+            for inst in enc.insts
+            for op in inst.operands
+            if op.fieldless
+        }
 
     def _inject_compat_insts(self) -> None:
         """Add instructions accepted by LLVM but missing from selected XML specs."""
@@ -919,27 +972,36 @@ class Parser:
                     data_format_name_node = opnd.find(xs.DATA_FORMAT_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
+                    # Fieldless operands have no <FieldName> in the MR ISA, so
+                    # synthesize a name; make them unique below.
                     if field_name_node is not None:
-                        field_name = xs.get_node_text(field_name_node).lower()
+                        opnd_name = xs.get_node_text(field_name_node).lower()
                         data_format_name = (
                             xs.get_node_text(data_format_name_node)
                             if data_format_name_node is not None
                             else ''
                         )
-                        opnds.append(
-                            Operand(
-                                field_name,
-                                opnd_size,
-                                opnd_type,
-                                is_in,
-                                is_out,
-                                is_implicit,
-                                is_bin_ucode_required,
-                                order,
-                                data_format_name,
-                            )
+                        is_fieldless = False
+                    else:
+                        opnd_name = synthesize_fieldless_name(opnd_type)
+                        data_format_name = ''
+                        is_fieldless = True
+                    opnds.append(
+                        Operand(
+                            opnd_name,
+                            opnd_size,
+                            opnd_type,
+                            is_in,
+                            is_out,
+                            is_implicit,
+                            is_bin_ucode_required,
+                            order,
+                            data_format_name,
+                            is_fieldless,
                         )
+                    )
                 opnds.sort(key=lambda x: x.order)
+                _uniquify_fieldless_names(opnds)
 
                 enc = self.isa_spec.encoding_map[enc_name]
                 is_implied_literal = (
