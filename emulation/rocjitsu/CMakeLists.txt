@@ -21,7 +21,7 @@ unset(_RJ_ROCM_PATH_EXPLICIT)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.2.0)
+project(rocm_jit_suite VERSION 0.3.0)
 
 include(rj_version)
 
