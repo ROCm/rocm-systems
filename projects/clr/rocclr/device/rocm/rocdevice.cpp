@@ -731,7 +731,7 @@ bool Device::create() {
     return false;
   }
 
-  if (AMD_LOG_LEVEL >= LOG_EXTRA_DEBUG) {
+  if (AMD_LOG_LEVEL >= LOG_EXTRA_EXTRA_DEBUG) {
     uint8_t logMask[8] = {0};
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_AQL);
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_SDMA);
@@ -1913,7 +1913,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D10 device binding
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
     void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
-    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device))) {
+    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device), gfxContext, validateOnly)) {
       LogError("Failed D3D10Interop::associateD3D10Device()");
       success = false;
     }
@@ -1922,7 +1922,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D11 device binding
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
-    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device))) {
+    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device), gfxContext, validateOnly)) {
       LogError("Failed D3D11Interop::associateD3D11Device()");
       success = false;
     }
@@ -1949,12 +1949,12 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
 #ifdef _WIN32
   // Handle D3D10 device cleanup
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
-    D3D10Interop::dissociateD3D10Device(this);
+    D3D10Interop::dissociateD3D10Device(this, gfxDevice, gfxContext);
   }
 
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
-    D3D11Interop::dissociateD3D11Device(this);
+    D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
@@ -2350,6 +2350,63 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
+bool Device::hostVmemSupported(int numaNode) const {
+  if (cpu_agents_.empty()) {
+    return false;
+  }
+  int node = numaNode;
+  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
+    node = static_cast<int>(numa::getCurrentNumaNode());
+  }
+  hsa_agent_t cpu = getCpuAgent(node);
+  bool supported = false;
+  hsa_status_t hsa_status = Hsa::agent_get_info(
+      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
+      &supported);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
+    return false;
+  }
+  return supported;
+}
+
+uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  int node = numaNode;
+  if (node < 0) {
+    node = static_cast<int>(numa::getCurrentNumaNode());
+  }
+  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
+                   cpu_agents_.size());
+    return 0;
+  }
+
+  if (!hostVmemSupported(node)) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
+    return 0;
+  }
+
+  // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
+  const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
+  const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  if (pool.handle == 0) {
+    LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
+    return 0;
+  }
+
+  hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
+  hsa_status_t hsa_status =
+      Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0, &hsa_vmem_handle);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("hostVmemAlloc: hsa_amd_vmem_handle_create failed with status: %d", hsa_status);
+    return 0;
+  }
+
+  return hsa_vmem_handle.handle;
+}
+
 void* Device::reserveMemory(size_t size, size_t alignment) const {
   void* ptr = nullptr;
   // Reserves non registered VA memory using HSA APIs.
@@ -2589,12 +2646,29 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
 
 // ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                          VmmLocationType access_location) {
+                          VmmLocationType access_location, int numaNode) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_memory_access_desc_t desc;
   desc.permissions = static_cast<hsa_access_permission_t>(access_flags);
-  desc.agent_handle =
-      access_location == VmmLocationType::kDevice ? getBackendDevice() : getCpuAgent();
+  // Resolve the agent granted access: the GPU backend for device access, the
+  // default CPU agent for generic/current host access, or the CPU agent of a
+  // specific NUMA node for HostNuma. getCpuAgent(int) clamps an out-of-range node
+  // to the default agent (the HIP layer validates the node id beforehand).
+  switch (access_location) {
+    case VmmLocationType::kDevice:
+      desc.agent_handle = getBackendDevice();
+      break;
+    case VmmLocationType::kHostNuma:
+      desc.agent_handle = getCpuAgent(numaNode);
+      break;
+    case VmmLocationType::kHostNumaCurrent:
+      desc.agent_handle = getCpuAgent(static_cast<int>(numa::getCurrentNumaNode()));
+      break;
+    case VmmLocationType::kHost:
+    default:
+      desc.agent_handle = getCpuAgent();
+      break;
+  }
 
   if ((hsa_status = Hsa::vmem_set_access(va_addr, va_size, &desc, 1)) != HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d", hsa_status);
@@ -2627,15 +2701,16 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
-bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
-                                      amd::Memory::HandleType handle_type) {
+amd::Device::VmmExportStatus Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                void* shareableHandle,
+                                                amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;
 
   if (hsa_vmem_handle.handle == 0) {
     LogError("HSA Handle is not valid");
-    return false;
+    return amd::Device::VmmExportStatus::kError;
   }
 
   if (handle_type == amd::Memory::HandleType::kHandleFabric) { //handle type fabric
@@ -2643,7 +2718,10 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
     if ((hsa_status = Hsa::vmem_export_fabric_handle(&fabric_handle,
                         hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
       LogPrintfError("Failed hsa_vmem_export_fabric_handle with status: %d \n", hsa_status);
-      return false;
+      if (hsa_status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY)) {
+        return amd::Device::VmmExportStatus::kResourceNotReady;
+      }
+      return amd::Device::VmmExportStatus::kError;
     }
     *(reinterpret_cast<hsa_fabric_handle_t*>(shareableHandle)) = fabric_handle;
   } else {
@@ -2651,12 +2729,12 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
     if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd,
                         hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
       LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d \n", hsa_status);
-      return false;
+      return amd::Device::VmmExportStatus::kError;
     }
     *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
   }
 
-  return true;
+  return amd::Device::VmmExportStatus::kSuccess;
 }
 
 // ================================================================================================
@@ -3071,20 +3149,24 @@ void Device::svmFree(void* ptr) const {
 
 // ================================================================================================
 VirtualGPU* Device::xferQueue() const {
-  if (!xferQueue_) {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    Device* thisDevice = const_cast<Device*>(this);
     thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
-    if (!xferQueue_) {
+    if (!thisDevice->xferQueue_) {
       LogError("Couldn't create the device transfer manager!");
-      return nullptr;
+      return;
     }
-    if (xferQueue_->gpu_queue() == nullptr) {
+    if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
       void* md_rb = nullptr;
       auto* queue = thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
                                                    nullptr, nullptr, &md_rb);
-      xferQueue_->SetGpuQueue(queue, md_rb);
+      thisDevice->xferQueue_->SetGpuQueue(queue, md_rb);
     }
+  });
+  if (!xferQueue_) {
+    LogError("Couldn't create the device transfer manager!");
+    return nullptr;
   }
   xferQueue_->enableSyncBlit();
   return xferQueue_;
@@ -3957,6 +4039,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // the packet type so checkGpuTime → addTimestamps only fires for
       // kernel dispatches (not synthetic barriers).
       ps->flags_.done_ = false;
+      // Record the queue this patched dispatch signal runs on (resolved from the
+      // owning segment's stream at launch) so profiling attributes it to the
+      // right stream rather than the graph launch stream.
+      ps->queue_index_ = patch.queue_index;
       uint16_t hdr;
       memcpy(&hdr, patch.packet, sizeof(hdr));
       uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);

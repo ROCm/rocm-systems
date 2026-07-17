@@ -1261,12 +1261,12 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
     for norm_suffix in ('_I16_F16', '_U16_F16', '_I16_F32', '_U16_F32'):
         if name == f'V_CVT_PK_NORM{norm_suffix}':
-            op = norm_suffix[1:3].lower() + '16'  # i16 or u16
+            _, out_ty, in_ty = norm_suffix.split('_')
             return InstructionSemantics(
                 name,
                 'vector_cvt_pknorm',
-                operation=op[:3],
-                data_type=norm_suffix[-3:].lower(),
+                operation=out_ty.lower(),
+                data_type=in_ty.lower(),
             )
 
     # 64-bit multiply-add with carry
@@ -1534,7 +1534,7 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
     if name == 'V_PK_MOV_B32':
-        return InstructionSemantics(name, 'pk_mov_b32', accvgpr_srcs=True)
+        return InstructionSemantics(name, 'pk_mov_b32')
 
     # Packed min3/max3 (CDNA4 / RDNA4)
     if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):

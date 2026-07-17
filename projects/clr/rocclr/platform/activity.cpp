@@ -142,12 +142,19 @@ void ReportActivity(const amd::Command& command) {
     // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
     // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
     // the next timestamp.
+    // Queue id to fall back on when a timestamp did not record its stream.
+    const uint64_t fallback_queue_id = queue->vdev()->index();
     uint32_t ti = 0;
     for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
       if (kernel_names[ki] == nullptr) continue;
-      auto it = timestamps[ti++];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
+      const auto& it = timestamps[ti++];
+      record.begin_ns = it.start;
+      record.end_ns = it.end;
+      // Graph kernels can run on different streams under one command; attribute
+      // each to the queue it actually ran on when known.
+      record.queue_id = (it.queue_index != amd::AccumulateCommand::kInvalidQueueIndex)
+          ? static_cast<uint64_t>(it.queue_index)
+          : fallback_queue_id;
       record.kernel_name = kernel_names[ki]->c_str();
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }

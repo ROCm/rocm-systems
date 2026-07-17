@@ -22,6 +22,7 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
+#include "libhsakmt.h"
 
 pthread_mutex_t dev_mutex = PTHREAD_MUTEX_INITIALIZER;
 vhsakmt_device_handle dev_list = NULL;
@@ -109,10 +110,10 @@ static void vhsakmt_init_vars_from_env(void) {
   char* env_val = NULL;
 
   env_val = getenv("VHSAKMT_USE_SVM");
-  if (env_val && atoi(env_val)) vhsakmt_dev()->use_svm = true;
+  if (env_val && hsakmt_safe_env_to_int(env_val, 0)) vhsakmt_dev()->use_svm = true;
 
   env_val = getenv("VHSAKMT_DEBUG_LEVEL");
-  if (env_val) vhsakmt_debug_level = atoi(env_val);
+  if (env_val) vhsakmt_debug_level = hsakmt_safe_env_to_int(env_val, 0);
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenKFD(void) {

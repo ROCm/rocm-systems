@@ -326,6 +326,7 @@ TEST(codeobj_library, inline_annotation)
 
     CodeobjDecoderComponent comp(objdata.data(), objdata.size());
     ASSERT_FALSE(comp.m_symbol_map.empty());
+    EXPECT_TRUE(comp.m_line_number_map.empty());
 
     constexpr size_t min_depth = 3;  // kernel -> barrier_wrapper -> HIP header(s)
     size_t           max_depth = 0;

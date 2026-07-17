@@ -652,9 +652,6 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
-    if (captureDeviceId_ != -1) {
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->release();
-    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -1019,6 +1016,17 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExecBase() {
+    for (auto& streams : parallel_streams_) {
+      for (auto stream : streams.second) {
+        if (stream != nullptr) {
+          stream->finish();
+          stream->vdev()->UnpinQueue();
+          constexpr bool kForceDestroy = true;
+          hip::Stream::Destroy(stream, kForceDestroy);
+        }
+      }
+    }
+    parallel_streams_.clear();
     std::scoped_lock lock(graphExecSetLock_);
     // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
     graphExecSet_.erase(this);
@@ -1070,19 +1078,7 @@ class GraphExecClassic : public GraphExecBase {
  public:
   bool graph_dumped_ = false;
   GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
-  ~GraphExecClassic() {
-    for (auto& streams : parallel_streams_) {
-      for (auto stream : streams.second) {
-        if (stream != nullptr) {
-          stream->finish();
-          stream->vdev()->UnpinQueue();
-          constexpr bool kForceDestroy = true;
-          hip::Stream::Destroy(stream, kForceDestroy);
-        }
-      }
-    }
-    parallel_streams_.clear();
-  }
+  ~GraphExecClassic() {}
 
   hipError_t Init() override;
   hipError_t Run(hip::Stream* launch_stream) override;
@@ -1476,6 +1472,17 @@ class GraphKernelNode : public GraphNode {
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
     hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(kernelParams_, dev_id_);
     amd::Kernel* kernel = hip::asKernel(func);
+    std::string demangledName;
+    if (capturedKernelName_ != nullptr) {
+      demangledName = *capturedKernelName_;
+    } else {
+      amd::Os::CxaDemangle(kernel->name(), &demangledName);
+    }
+    static constexpr size_t kMaxKernelNameLen = 256;
+    if (demangledName.size() > kMaxKernelNameLen) {
+      demangledName.resize(kMaxKernelNameLen);
+      demangledName += "...";
+    }
     std::string label;
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
@@ -1484,7 +1491,7 @@ class GraphKernelNode : public GraphNode {
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
+              label_, GetID(), demangledName.c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
@@ -1500,7 +1507,7 @@ class GraphKernelNode : public GraphNode {
               "| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} |\n| {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), kernel->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
+              label_, GetID(), demangledName.c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
               kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
               kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
               kernelAttr_.cooperative, kernelAttr_.priority);
@@ -1508,14 +1515,14 @@ class GraphKernelNode : public GraphNode {
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
       sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
-              GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
+              GetID(), demangledName.c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z,
               kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes);
       label = buffer;
     } else {
-      label = std::to_string(GetID()) + "\n" + kernel->name() + "\n";
+      label = std::to_string(GetID()) + "\n" + demangledName + "\n";
     }
     return label;
   }
@@ -2919,8 +2926,10 @@ class GraphHostNode : public GraphNode {
     amd::Command::EventWaitList waitList;
     commands_.reserve(1);
     amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-    // This is just to invoke a callback, so no need to flush caches.
-    command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+    // Use system-scope acquire so preceding GPU writes to CPU-accessible memory
+    // (e.g. blit D2H, kernel writing managed/pinned mem) are flushed before
+    // the host callback reads them.
+    command->setCommandEntryScope(amd::Device::kCacheStateSystem);
     commands_.emplace_back(command);
     return hipSuccess;
   }
