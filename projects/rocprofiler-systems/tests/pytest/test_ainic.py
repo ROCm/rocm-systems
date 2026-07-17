@@ -33,6 +33,8 @@ from rocprofsys import RocprofsysConfig
 # AI NIC support is only compiled in when AMD SMI >= 26.3.
 pytestmark = [
     pytest.mark.amdsmi_min_version("26.3"),
+    pytest.mark.ainic,
+    pytest.mark.network,
 ]
 
 # =============================================================================
@@ -115,7 +117,7 @@ class TestAINIC(RocprofsysTest):
     PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
     PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
 
-    # This test does _not_ requires NIC hardware, so "mark.ainic" is not required.
+    # This test does _not_ requires NIC hardware, so "mark.ainic_required" is not added.
     @pytest.mark.timeout(30)
     def test_settings_present(self, rocprof_config: RocprofsysConfig):
         """AI NIC settings must be listed by ``rocprof-sys-avail --settings``.
@@ -140,8 +142,7 @@ class TestAINIC(RocprofsysTest):
             f"Missing: {missing}"
         )
 
-    @pytest.mark.ainic
-    @pytest.mark.network
+    @pytest.mark.ainic_required
     @pytest.mark.rocpd("ainic_perf_env")
     @pytest.mark.timeout(120)
     def test_performance_tracks(
