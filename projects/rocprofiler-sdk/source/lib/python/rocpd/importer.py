@@ -87,12 +87,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                     raise RuntimeError(
                         f"Multiple schema versions found across input databases: {unique_versions}"
                     )
-                self.schema_version = unique_versions[0] if unique_versions else "0.0.0"
             else:
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
             super(RocpdImportData, self).__init__(_connection, _filenames)
+            self.schema_version = unique_versions[0] if unique_versions else "0.0.0"
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection

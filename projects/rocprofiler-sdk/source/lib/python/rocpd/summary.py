@@ -28,7 +28,7 @@ import os
 import math
 
 from typing import Any, List, Tuple
-from .importer import RocpdImportData, execute_statement, get_schema_version
+from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
 
 __all__ = [
