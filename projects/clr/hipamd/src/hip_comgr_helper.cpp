@@ -28,8 +28,6 @@ size_t constexpr strLiteralLength(char const* str) {
 
 constexpr char const* CLANG_OFFLOAD_BUNDLER_MAGIC_STR = "__CLANG_OFFLOAD_BUNDLE__";
 constexpr char const* OFFLOAD_KIND_HIP = "hip";
-[[maybe_unused]] constexpr char const* OFFLOAD_KIND_HIPV4 = "hipv4";
-[[maybe_unused]] constexpr char const* OFFLOAD_KIND_HCC = "hcc";
 constexpr char const* AMDGCN_TARGET_TRIPLE = "amdgcn-amd-amdhsa-";
 constexpr char const* SPIRV_BUNDLE_ENTRY_ID = "hip-spirv64-amd-amdhsa-unknown-amdgcnspirv";
 
