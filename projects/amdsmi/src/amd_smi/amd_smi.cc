@@ -4020,6 +4020,7 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4038,6 +4039,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4485,15 +4487,41 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
-  return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  if (status == AMDSMI_STATUS_SUCCESS && gpu_busy_percent != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    // Sole output is gfx activity: return the N/A sentinel and report unsupported.
+    *gpu_busy_percent = std::numeric_limits<uint32_t>::max();
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                                              amdsmi_utilization_counter_t utilization_counters[],
                                              uint32_t count, uint64_t* timestamp) {
-  return rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
-                      reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters), count,
-                      timestamp);
+  auto status = rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
+                             reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters),
+                             count, timestamp);
+  if (status == AMDSMI_STATUS_SUCCESS && utilization_counters != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    uint32_t silenced = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+      if (utilization_counters[i].type == AMDSMI_COARSE_GRAIN_GFX_ACTIVITY ||
+          utilization_counters[i].type == AMDSMI_FINE_GRAIN_GFX_ACTIVITY) {
+        utilization_counters[i].value = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value[0] = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value_count = 0;
+        ++silenced;
+      }
+    }
+    // Only unsupported when every requested counter was a silenced gfx type;
+    // a mixed request still returns its non-gfx values.
+    if (count > 0 && silenced == count) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,

@@ -167,6 +167,13 @@ private:
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
+  /// @brief Look up a KfdProcess by its client (Linux) pid. Used by
+  /// AMDKFD_IOC_DBG_TRAP to resolve the debug target, mirroring the kernel's
+  /// kfd_lookup_process_by_pid().
+  /// @param pid Client (Linux) pid of the target process.
+  /// @return The matching KfdProcess, or nullptr if none matches.
+  std::shared_ptr<KfdProcess> find_process_by_client_pid(pid_t pid) const;
+
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
   GpuDevice *find_gpu(uint32_t gpu_id);
   const GpuDevice *find_gpu(uint32_t gpu_id) const;
@@ -218,6 +225,7 @@ private:
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
+  int debug_trap_ioctl(KfdProcess &caller, void *arg);
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
@@ -228,12 +236,43 @@ private:
   /// @retval true fd_ holds a valid descriptor. @retval false memfd_create failed.
   [[nodiscard]] bool ensure_fd_created();
 
+  /// @brief One-time per-GPU CP setup: apertures + interrupt/scratch callbacks.
+  /// @details Idempotent per GpuDevice via the cps_initialized flag. The caller
+  /// MUST hold process_mutex_ so the check-and-set of cps_initialized is atomic
+  /// against concurrent daemon opens that would otherwise both register callbacks.
+  void init_command_processors_locked();
+
   std::vector<GpuDevice> gpus_;
   bool daemon_mode_ = false;
   std::atomic<int> fd_{-1};
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.
+  ///
+  /// Global lock ordering (acquire in this order; never the reverse).
+  /// op_mutex_ (KfdProcess) is the outermost per-process ioctl lock. Under it,
+  /// process_mutex_ and alloc_mutex_ are independent siblings — they are NEVER
+  /// held simultaneously (allocate_scratch_backing and close() both release
+  /// process_mutex_ before taking alloc_mutex_):
+  ///   op_mutex_ < process_mutex_
+  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_mutex_, owned_fds_mutex_}
+  ///   op_mutex_ < runtime_mutex_ < alloc_mutex_        (runtime_enable_ioctl)
+  ///   op_mutex_ < debug_mutex_ < runtime_mutex_        (debug_trap_ioctl)
+  ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
+  /// The op_mutex_ in the debug rule is always the CALLER's, while debug_mutex_/
+  /// runtime_mutex_ may belong to a DIFFERENT process (the debug target resolved
+  /// by client pid). debug_trap_ioctl holds only the caller's op_mutex_ and never
+  /// acquires the target's op_mutex_, so a cross-process attach cannot deadlock.
+  /// interrupt_mutex_ is a leaf: the CP interrupt callback takes it and only
+  /// descends into EventState::mutex_, and close() takes it only after releasing
+  /// process_mutex_, so there is no cycle.
+  /// The CP engine thread acquires hw_queue_mutex_ first, then reaches
+  /// process_mutex_ (scratch resolver) or alloc_mutex_ (scratch allocator) through
+  /// the callbacks — hw_queue_mutex_ -> process_mutex_ and, separately,
+  /// hw_queue_mutex_ -> alloc_mutex_ (never both nested). To avoid an ABBA against
+  /// that thread, an ioctl MUST NOT hold a per-process lock (alloc_mutex_) across a
+  /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
+  /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
   uint32_t next_process_id_ = 1;
