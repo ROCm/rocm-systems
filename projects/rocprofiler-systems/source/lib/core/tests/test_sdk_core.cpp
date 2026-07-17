@@ -85,6 +85,27 @@ struct tagged_backend : ::rocprofsys::rocprofiler_sdk::backend
     {
         g_mock->get_version(major, minor, patch);
     }
+
+#if ROCPROFILER_VERSION < 10000
+    // The installed rocprofiler-sdk predates KFD buffer tracing, so the real backend
+    // (inherited above) declares none of these. Tests force FakeCompileTimeVersion
+    // into the >= 10000 range to exercise sdk_core's KFD code path regardless of what
+    // SDK is actually installed; these placeholders keep that path compilable. Values
+    // only need to be distinct from each other and from real enumerators used in the
+    // same tests.
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_FAULT =
+        static_cast<buffer_tracing_kind>(9001);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_MIGRATE =
+        static_cast<buffer_tracing_kind>(9002);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_QUEUE =
+        static_cast<buffer_tracing_kind>(9003);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_QUEUE =
+        static_cast<buffer_tracing_kind>(9004);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU =
+        static_cast<buffer_tracing_kind>(9005);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
+        static_cast<buffer_tracing_kind>(9006);
+#endif
 };
 
 // ─── Settings mock (Externals::Settings) ──────────────────────────────────────
@@ -861,15 +882,20 @@ TEST_F(sdk_core_domains_test,
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
 //
 // kfd_supported_by_runtime is computed from Wrapper::compile_time_version alone
-// (a compile-time constant), not from the dynamically-queried version — so the
-// "old SDK" test uses a dedicated tag with a lowered FakeCompileTimeVersion while
-// every other test uses the default (real installed SDK, >= 1.2.2 here).
+// (a compile-time constant), not from the dynamically-queried version. These tests
+// force FakeCompileTimeVersion to a fixed value >= the 1.2.2 KFD minimum so their
+// behavior doesn't depend on which rocprofiler-sdk is actually installed in a given
+// build (some CI legs build against SDKs that predate KFD tracing entirely); the
+// "old SDK" test below uses a dedicated tag with a lowered FakeCompileTimeVersion to
+// exercise the "too old" branch instead.
+constexpr std::uint32_t kfd_new_enough_version = 10302u;  // 1.3.2
 
-using buffer_domains_sut = sdk_core<tagged_backend<domains_buffer>, mock_sdk_externals>;
+using buffer_domains_sut =
+    sdk_core<tagged_backend<domains_buffer, kfd_new_enough_version>, mock_sdk_externals>;
 
 TEST_F(sdk_core_domains_test, selects_kinds_bound_to_memory_copy_token)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
 
     buffer_domains_sut::reset_version_cache();
     EXPECT_CALL(*g_mock, get_version)
@@ -894,7 +920,7 @@ TEST_F(sdk_core_domains_test, selects_kinds_bound_to_memory_copy_token)
 TEST_F(sdk_core_domains_test,
        selects_kinds_bound_to_hsa_hip_marker_and_memory_allocation_tokens)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
     using kind_t  = wrapper::buffer_tracing_kind;
 
     struct case_t
@@ -1025,7 +1051,7 @@ TEST_F(sdk_core_domains_test,
 TEST_F(sdk_core_domains_test,
        selects_all_kfd_kinds_for_kfd_events_token_when_runtime_sdk_new_enough)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
 
     buffer_domains_sut::reset_version_cache();
     EXPECT_CALL(*g_mock, get_version)
@@ -1055,7 +1081,7 @@ TEST_F(sdk_core_domains_test,
 
 TEST_F(sdk_core_domains_test, selects_kfd_page_fault_when_runtime_sdk_new_enough)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
 
     buffer_domains_sut::reset_version_cache();
     EXPECT_CALL(*g_mock, get_version)
@@ -1080,7 +1106,7 @@ TEST_F(sdk_core_domains_test, selects_kfd_page_fault_when_runtime_sdk_new_enough
 TEST_F(sdk_core_domains_test,
        selects_each_remaining_kfd_domain_token_when_runtime_sdk_new_enough)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
     using kind_t  = wrapper::buffer_tracing_kind;
 
     const std::vector<std::pair<std::string, kind_t>> cases = {
@@ -1121,7 +1147,7 @@ TEST_F(sdk_core_domains_test,
 TEST_F(sdk_core_domains_test,
        buffer_falls_back_to_name_matched_kind_for_domain_without_binding_entry)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
 
     const auto buffer_info          = wrapper::get_buffer_tracing_names();
     const auto scratch_memory_token = buffer_domains_sut::to_lower(
@@ -1151,7 +1177,7 @@ TEST_F(
     sdk_core_domains_test,
     enables_kfd_page_fault_and_migrate_when_unified_memory_profiling_and_runtime_new_enough)
 {
-    using wrapper = tagged_backend<domains_buffer>;
+    using wrapper = tagged_backend<domains_buffer, kfd_new_enough_version>;
 
     buffer_domains_sut::reset_version_cache();
     EXPECT_CALL(*g_mock, get_version)
