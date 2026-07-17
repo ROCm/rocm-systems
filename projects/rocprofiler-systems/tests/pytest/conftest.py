@@ -252,7 +252,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
-        "ainic",
+        "ainic_required",
     ]
 
     # Informational markers, only used for test labeling
@@ -291,6 +291,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "time_window",
         "transpose",
         "nic",
+        "ainic",
         "network",
         "fork",
         "user_api",
@@ -502,7 +503,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "ainic" in item.keywords:
+        if "ainic_required" in item.keywords:
             _msg = ainic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
