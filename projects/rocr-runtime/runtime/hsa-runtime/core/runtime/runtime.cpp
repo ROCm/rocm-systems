@@ -52,6 +52,11 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
+#include <unistd.h>
+#include <sys/auxv.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23
+#endif
 #endif
 
 #include "core/inc/runtime.h"
@@ -2930,10 +2935,28 @@ void Runtime::LoadTools() {
   uint32_t env_count = 0;
 
   // Load env var tool lib names and determine ordering offset.
+  //
+  // Security: HSA_TOOLS_LIB is user-controlled and fed to dlopen(), so honoring
+  // it in a secure context (setuid/setgid/file-capability) is a privilege-
+  // escalation primitive. glibc scrubs its own env vars (LD_PRELOAD, ...) in
+  // secure-execution mode but not HSA_TOOLS_LIB, so ignore it ourselves here.
   std::string tool_names = flag_.tools_lib_names();
   std::vector<std::string> names;
   if (tool_names != "") {
     names = parse_tool_names(std::move(tool_names));
+
+#if defined(__linux__)
+    const bool secure =
+        (geteuid() != getuid()) || (getegid() != getgid()) || (getauxval(AT_SECURE) != 0);
+    if (secure) {
+      if (!names.empty() && flag().report_tool_load_failures())
+        fprintf(stderr,
+                "HSA_TOOLS_LIB ignored: running in a secure context "
+                "(setuid/setgid or AT_SECURE).\n");
+      names.clear();
+    }
+#endif
+
     env_count = names.size();
   }
 
