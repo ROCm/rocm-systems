@@ -113,6 +113,24 @@ TEST(RjCo, ListsKernelsAndMapsTextLocations) {
   }
 }
 
+TEST(RjCo, ExtractsSelectedCodeObjectBitForBit) {
+  const TempDir temp_dir(std::filesystem::temp_directory_path() /
+                         ("rj_co_input_" + std::to_string(static_cast<long long>(getpid()))));
+  const auto input = temp_dir.path / "missing_wait_gfx1200.co";
+  const auto extracted = temp_dir.path / "extracted.co";
+  const auto image = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  auto [stdout_text, stderr_text] =
+      run_tool(input, "--target gfx1200 --extract-code-object " + shell_quote(extracted.string()));
+
+  EXPECT_TRUE(stdout_text.empty()) << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  ASSERT_TRUE(std::filesystem::exists(extracted));
+  EXPECT_EQ(read_text_file(extracted),
+            std::string(reinterpret_cast<const char *>(image.data()), image.size()));
+}
+
 TEST(RjCo, GroupsWaitcheckDiagnosticsByKernel) {
   const TempDir temp_dir(std::filesystem::temp_directory_path() /
                          ("rj_co_input_" + std::to_string(static_cast<long long>(getpid()))));

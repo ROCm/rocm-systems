@@ -21,6 +21,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -40,6 +41,7 @@ namespace {
 
 constexpr int kUsageError = 1;
 constexpr int kInputError = 2;
+constexpr int kOutputError = 3;
 constexpr uint8_t kElfSymbolTypeFunc = 2;
 using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 
@@ -66,6 +68,7 @@ struct CliOptions {
   bool list_code_objects = false;
   bool list_kernels = false;
   bool run_waitcheck = false;
+  std::optional<std::string> extract_path;
   std::optional<std::string> map_location;
   std::optional<std::string> disassemble_location;
   std::optional<size_t> repro_diagnostic;
@@ -188,6 +191,7 @@ void print_help() {
       << "  --target TARGET          Select target code object\n"
       << "  --code-object-index N    Code-object index for the selected target (default: 0)\n"
       << "  --list-code-objects      List code-object counts by target\n"
+      << "  --extract-code-object P Write the selected raw device ELF to path P\n"
       << "  --list-kernels           List kernels, entry offsets, VAs, file offsets, and sizes\n"
       << "  --map LOC                Map .text+offset, VA, or file offset to section/kernel\n"
       << "  --disassemble-window LOC Decode instructions around LOC (default context: 128 bytes)\n"
@@ -213,6 +217,12 @@ void print_help() {
     }
     if (arg == "--list-kernels") {
       options.list_kernels = true;
+      continue;
+    }
+    if (arg == "--extract-code-object") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      options.extract_path = std::string(value);
       continue;
     }
     if (arg == "--waitcheck") {
@@ -295,8 +305,9 @@ void print_help() {
     std::cerr << "input path is required\n";
     return false;
   }
-  if (!options.list_code_objects && !options.list_kernels && !options.map_location &&
-      !options.disassemble_location && !options.run_waitcheck && !options.repro_diagnostic) {
+  if (!options.list_code_objects && !options.extract_path && !options.list_kernels &&
+      !options.map_location && !options.disassemble_location && !options.run_waitcheck &&
+      !options.repro_diagnostic) {
     options.list_kernels = true;
   }
   return true;
@@ -361,6 +372,15 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
   selected.target = *target_with_objects;
   selected.index = options.code_object_index;
   return selected;
+}
+
+[[nodiscard]] bool extract_code_object(const AmdGpuCodeObject &code_object,
+                                       const std::string &output_path) {
+  std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+  if (!output)
+    return false;
+  output.write(code_object.image_data(), static_cast<std::streamsize>(code_object.image_size()));
+  return output.good();
 }
 
 [[nodiscard]] std::string read_cstr(const char *strtab, size_t strtab_size, uint32_t offset) {
@@ -752,8 +772,9 @@ int main(int argc, char **argv) {
   if (options.list_code_objects)
     list_code_objects(executable);
 
-  if (options.list_code_objects && !options.list_kernels && !options.map_location &&
-      !options.disassemble_location && !options.run_waitcheck && !options.repro_diagnostic) {
+  if (options.list_code_objects && !options.extract_path && !options.list_kernels &&
+      !options.map_location && !options.disassemble_location && !options.run_waitcheck &&
+      !options.repro_diagnostic) {
     return 0;
   }
 
@@ -762,6 +783,11 @@ int main(int argc, char **argv) {
   if (!selected.executable) {
     std::cerr << options.input_path << ": " << error << "\n";
     return kInputError;
+  }
+
+  if (options.extract_path && !extract_code_object(*selected.code_object, *options.extract_path)) {
+    std::cerr << "failed to write extracted code object: " << *options.extract_path << "\n";
+    return kOutputError;
   }
 
   CodeObjectInfo info = inspect_code_object(*selected.code_object);
