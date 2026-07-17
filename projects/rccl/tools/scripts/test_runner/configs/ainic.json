@@ -1,7 +1,7 @@
 {
   "system_configurations": {
-    "name": "RCCL-AINIC-ABC",
-    "description": "AINIC A/B/C test plan. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic. RCCL_MODEL_MATCHING_DISABLE=1 (global env) avoids spurious Rome-preset topology-consensus aborts."
+    "name": "RCCL-AINIC",
+    "description": "AINIC test plan. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -15,8 +15,7 @@
   },
   "env_variables": {
     "NCCL_DEBUG": "INFO",
-    "HSA_NO_SCRATCH_RECLAIM": "1",
-    "RCCL_MODEL_MATCHING_DISABLE": "1"
+    "HSA_NO_SCRATCH_RECLAIM": "1"
   },
   "system_env_variables": {
     "ainic": {

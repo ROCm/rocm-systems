@@ -1243,22 +1243,22 @@ class TestExecutor:
                     env_prefix += f"{key}={value} "
             env_prefix += f"LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']} "
 
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{env_prefix}{exe}"
-                else:
-                    cmd = f"{env_prefix}{exe} --gtest_filter={test_filter}"
-
-                # Add custom arguments if provided
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (binary + args) as one string so the same
+            # locked-memory wrapper used on the MPI path applies here too.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{env_prefix}{exe}"
-                if custom_args:
-                    cmd += f" {custom_args}"
-            cmd += gtest_out_arg
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            program += gtest_out_arg
+
+            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
+            # memory" under SLURM's low inherited locked-memory soft limit, so
+            # raise it before exec. `set -f` keeps gtest filter globs literal.
+            # The env_prefix stays in front so bash inherits the test env vars.
+            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+            cmd = f"{env_prefix}bash -c {shlex.quote(inner)}"
 
         else:
             # MPI test

@@ -1,46 +1,47 @@
-# AINIC RCCL test runner — manual trigger only (non-gate).
+# AINIC RCCL test runner.
 #
-# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl.
-# The test_runner framework lives at
-# projects/rccl/tools/scripts/test_runner/ and its entry point is test_runner.py
-# (run from that directory so its `from lib...` imports resolve, matching the
-# README). The AINIC A/B/C plan is configs/ainic_abc.json.
-# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
-# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
+# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl. The
+# test_runner framework lives at projects/rccl/tools/scripts/test_runner/ and its
+# entry point is test_runner.py (run from that directory so its `from lib...`
+# imports resolve, matching the README). The test plan is configs/ainic.json.
+# Runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner".
 #
-# This workflow is intentionally NOT a merge gate: it has no pull_request trigger
-# and its result does not block any PR. It exists so CI can drive the test runner
-# on demand and collect results as artifacts.
+# Test groups (see configs/ainic.json for the full plan):
+#   Group A - NetIbMPI + GIN component/unit gtests (rccl-UnitTestsMPI binary).
+#   Group B - NCCL_NET plugin x knobs sweep on rccl-tests perf binaries.
+#   Group C - IONIC hardware counter validation.
 #
-# The push trigger below runs this workflow on its own development branch for
-# end-to-end pipeline testing; it targets only that branch, so it is inert on
-# any other branch.
+# Triggers: manual (workflow_dispatch), nightly (schedule) against the default
+# branch, and label-gated on PRs -- add the "ainic-test" label to run a fast
+# smoke subset (Group A + C1). Not a required merge gate.
 #
-# Build strategy: the runner is a SLURM submit node with no local GPUs (and only
-# 8 cores), so everything runs inside one SLURM batch job (sbatch --wait) on the
-# GPU compute nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this
-# run's own checkout on the compute node itself (many cores / large RAM, vs the
-# 8-core submit node -- install.sh defaults -j to $(nproc), using all of the
-# node's cores). test_runner.py then runs twice against that same fresh build:
-# once for Group A (the rccl-UnitTestsMPI gtest binary) and once for Group B/C
-# (the rccl-tests perf binaries, which load the fresh librccl.so at runtime).
+# Build strategy: the runner is a SLURM submit node with no local GPUs, so
+# everything runs inside one SLURM batch job (sbatch --wait) on the GPU compute
+# nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this run's own
+# checkout on the compute node (install.sh defaults -j to $(nproc), using all of
+# the node's cores). Both groups then run against that same fresh build: Group A
+# uses the freshly built rccl-UnitTestsMPI gtest binary; Group B/C uses prebuilt
+# rccl-tests perf binaries that load the fresh librccl.so via LD_LIBRARY_PATH.
 name: AINIC RCCL Test Runner
 
 on:
   workflow_dispatch:
+    # Inputs are left without hardcoded defaults: when empty they fall back to the
+    # env.DEFAULT_* values below (the single source of truth), so nothing is
+    # duplicated between here and the env block.
     inputs:
       workdir:
         description: 'Working directory on the runner for test artifacts/logs (WORKDIR)'
         required: false
-        default: '/it-share/rccl-ci/rocm-systems'
+        default: ''
       mpi_path:
         description: 'MPI install path (MPI_PATH)'
         required: false
-        default: '/it-share/ompi-5.0.8'
+        default: ''
       rocm_path:
         description: 'ROCm toolchain root (ROCM_PATH)'
         required: false
-        default: '/it-share/rccl-ci/rocm_devel'
+        default: ''
       rccl_build_dir:
         description: 'Optional override: prebuilt RCCL lib dir for Group B/C. EMPTY (default) = use the fresh build produced from THIS run''s checkout, so B/C always tests the current repo state.'
         required: false
@@ -50,31 +51,39 @@ on:
         required: false
         default: ''
       salloc_partition:
-        description: 'SLURM partition to allocate GPU nodes from'
+        description: 'SLURM partition to allocate GPU nodes from (empty = env default)'
         required: false
-        default: 'amd-tw'
+        default: ''
       salloc_reservation:
-        description: 'SLURM reservation holding the AINIC GPU nodes'
+        description: 'SLURM reservation holding the AINIC GPU nodes (empty = env default)'
         required: false
-        default: 'rccl_dev'
+        default: ''
       salloc_nodes:
-        description: 'Number of GPU nodes to allocate'
+        description: 'Number of GPU nodes to allocate (empty = env default)'
         required: false
-        default: '2'
+        default: ''
       salloc_time:
-        description: 'Max wall clock for the SLURM allocation (HH:MM:SS)'
+        description: 'Max wall clock for the SLURM allocation, HH:MM:SS (empty = env default)'
         required: false
-        default: '04:00:00'
+        default: ''
       salloc_exclude:
-        description: 'SLURM nodes to exclude from allocation (known-broken hardware)'
+        description: 'SLURM nodes to exclude from allocation (empty = env default, known-broken hardware)'
         required: false
-        default: 'mia1-p01-g[24-25]'
+        default: ''
+  schedule:
+    # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
+    - cron: '0 2 * * *'
+  pull_request:
+    # Label-gated smoke: runs only when the "ainic-test" label is present (see the
+    # job-level `if`). `synchronize` re-runs on new commits while the PR stays
+    # labeled; to re-run without a new commit, remove and re-add the label.
+    types: [labeled, synchronize]
   push:
     branches:
       - users/nikitaxgusev/ainic-test-runner
     paths:
       - '.github/workflows/ainic_test_runner.yml'
-      - 'projects/rccl/tools/scripts/test_runner/configs/ainic_abc.json'
+      - 'projects/rccl/tools/scripts/test_runner/configs/ainic.json'
 
 # Serialise on the shared AINIC nodes: only one run at a time, and never cancel
 # an in-progress allocation (it must finish cleanly to release the nodes).
@@ -92,31 +101,31 @@ env:
   DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
   DEFAULT_MPI_PATH: /it-share/ompi-5.0.8
   DEFAULT_ROCM_PATH: /it-share/rccl-ci/rocm_devel
-  # Both Group A and Group B/C now run against the SAME fresh --enable-mpi-tests
-  # build produced from this run's own checkout (Phase 0), so every run tests the
-  # current repo state -- important for open-PR testing and post-merge. Group A
-  # uses the freshly built rccl-UnitTestsMPI gtest binary; Group B/C uses the
-  # prebuilt rccl-tests perf binaries (all_reduce_perf, alltoall_perf, ...), which
-  # dlopen/link librccl.so at runtime via LD_LIBRARY_PATH, so pointing their
-  # RCCL_BUILD_DIR at the fresh build makes them exercise the fresh library too.
-  # The rccl_build_dir input can still override Group B/C with a prebuilt lib.
+  # Prebuilt rccl-tests perf binaries for Group B/C (they load librccl.so at
+  # runtime via LD_LIBRARY_PATH; see the build-strategy note in the header).
   DEFAULT_RCCL_TESTS_BIN: /it-share/rccl-ci/rccl-tests-2.30.4/bin
-  # SLURM allocation defaults (used when the push trigger fires; workflow_dispatch
-  # inputs override these). The self-hosted runner is a submit node without local
-  # GPUs, so the suite must run inside a SLURM allocation on the AINIC GPU nodes.
+  # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
+  # override them when non-empty).
   DEFAULT_SALLOC_PARTITION: amd-tw
   DEFAULT_SALLOC_RESERVATION: rccl_dev
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
-  # Exclude known-broken GPU nodes: g24 regressed (every rccl-tests perf run
-  # aborts with HIP 'out of memory' even under an --exclusive allocation, a
-  # symptom of leftover/orphaned GPU state), and g25 is its historically-flaky
-  # pair. The rccl_dev reservation still has g27/g29/g30 for the 2-node job.
-  # Clear this (or override the salloc_exclude input) once the nodes recover.
+  # Exclude known-broken GPU nodes: g24 regressed (rccl-tests perf runs abort with
+  # HIP 'out of memory' even under --exclusive, a symptom of leftover GPU state)
+  # and g25 is its historically-flaky pair. The rccl_dev reservation still has
+  # g27/g29/g30 for the 2-node job. Clear this once the nodes recover.
   DEFAULT_SALLOC_EXCLUDE: 'mia1-p01-g[24-25]'
+  # Fast smoke subset for the label-gated PR path: Group A component gtests + the
+  # C1 IONIC counter check (skips the long full-range B perf sweeps).
+  SMOKE_SUITES: 'A. Component*,C1. IONIC counter validation'
 
 jobs:
   ainic-test-runner:
+    # On PRs, run only when the "ainic-test" label is present. All other events
+    # (workflow_dispatch, schedule, push) always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'ainic-test')
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 540
 
@@ -153,7 +162,9 @@ jobs:
           # build for Group A to find its binary). It lives under
           # ${{ github.workspace }} (on /it-share, shared with the compute nodes).
           GROUP_A_RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
-          TEST_SUITES: ${{ github.event.inputs.test_suites || '' }}
+          # PRs run the fast smoke subset; workflow_dispatch honors its input;
+          # schedule/push run the full plan (empty = all enabled suites).
+          TEST_SUITES: ${{ github.event_name == 'pull_request' && env.SMOKE_SUITES || github.event.inputs.test_suites || '' }}
           SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
           SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
           SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
@@ -167,7 +178,7 @@ jobs:
           # different RCCL_BUILD_DIR/RCCL_TESTS_BIN and must run as separate
           # test_runner.py invocations (its build dir is a single global value
           # for the whole process). All Group A test_suites entries are named
-          # "A. Component - ..." in ainic_abc.json.
+          # "A. Component - ..." in ainic.json.
           GROUP_A_FILTER="A. Component*"
           GROUP_BC_FILTER="-A. Component*"
           RUN_GROUP_A=1
@@ -186,20 +197,16 @@ jobs:
             if [ -n "${GROUP_BC_LIST}" ]; then GROUP_BC_FILTER="${GROUP_BC_LIST}"; else RUN_GROUP_BC=0; fi
           fi
 
-          # The self-hosted runner is a SLURM submit node without local GPUs, so
-          # the suite runs inside a SLURM batch job (sbatch) on the AINIC GPU
-          # nodes instead of an interactive salloc. sbatch decouples compute from
-          # the runner's shell: the job runs independently on the compute nodes
-          # (a transient runner hiccup can't tear down the allocation), SLURM
-          # schedules/backfills it normally, and `--wait` makes sbatch's own exit
-          # code equal the job's exit code for gating. Inside the job
+          # Run inside a SLURM batch job (sbatch, not interactive salloc): it
+          # decouples compute from the runner's shell so a transient runner hiccup
+          # can't tear down the allocation, and `--wait` makes sbatch's exit code
+          # equal the job's exit code for gating. Inside the job
           # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
           # `scontrol show hostnames`, and mpirun lands 8 ranks/node on real GPUs.
           # --exclusive gives full CPUs per node so `--bind-to numa` has room. One
-          # job runs both groups (Group A only asks mpirun for 2 ranks) to avoid
-          # double-queuing on the shared reservation. GITHUB_WORKSPACE and
-          # RUNNER_TEMP live under /it-share (shared with the compute nodes), so
-          # the fresh build and the per-group logs are visible from the batch job.
+          # job runs both groups to avoid double-queuing on the shared reservation.
+          # GITHUB_WORKSPACE and RUNNER_TEMP live under /it-share (shared with the
+          # compute nodes), so the fresh build and per-group logs are visible here.
           RESV_ARG=""
           if [ -n "${SALLOC_RESERVATION}" ]; then
             RESV_ARG="--reservation=${SALLOC_RESERVATION}"
@@ -253,7 +260,7 @@ jobs:
             echo "================================================================"
             WORKDIR="${GITHUB_WORKSPACE}/projects/rccl" \
             python3 test_runner.py \
-              --config configs/ainic_abc.json \
+              --config configs/ainic.json \
               --system ainic \
               --skip-tests \
               2>&1 | tee "${RUNNER_TEMP}/ainic_build.log"
@@ -273,7 +280,7 @@ jobs:
             RCCL_BUILD_DIR="${GROUP_A_RCCL_BUILD_DIR}" \
             RCCL_TESTS_BIN="${GROUP_A_RCCL_BUILD_DIR}/test" \
             python3 test_runner.py \
-              --config configs/ainic_abc.json \
+              --config configs/ainic.json \
               --system ainic \
               --no-build \
               --suite-name "${GROUP_A_FILTER}" \
@@ -292,7 +299,7 @@ jobs:
             RCCL_BUILD_DIR="${GROUP_BC_RCCL_BUILD_DIR}" \
             RCCL_TESTS_BIN="${GROUP_BC_RCCL_TESTS_BIN}" \
             python3 test_runner.py \
-              --config configs/ainic_abc.json \
+              --config configs/ainic.json \
               --system ainic \
               --no-build \
               --suite-name "${GROUP_BC_FILTER}" \
@@ -364,7 +371,9 @@ jobs:
             ${{ runner.temp }}/ainic_run_groupA.log
             ${{ runner.temp }}/ainic_run_groupBC.log
             ${{ runner.temp }}/reports
-          if-no-files-found: ignore
+          # warn (not error): a skipped group legitimately produces no log, so
+          # error would false-fail; warn still surfaces a genuinely empty upload.
+          if-no-files-found: warn
 
       - name: Print summary
         if: always()
