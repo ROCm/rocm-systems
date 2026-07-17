@@ -174,12 +174,19 @@ code object or saved device binary, then pass that artifact to `rj_waitcheck`.
 For generated-code triage, `rj_co` is often useful next to `rj_waitcheck`:
 
 ```sh
+rj_co large-fat-binary --target gfx942 --code-object-index 202 \
+  --extract-code-object gfx942-202.hsaco
 rj_co generated-kernel.hsaco --target gfx950 --list-kernels
 rj_co generated-kernel.hsaco --target gfx950 \
   --disassemble-window .text+0xd1b44 --context-bytes 384
 rj_co generated-kernel.hsaco --target gfx950 \
   --waitcheck --repro-diagnostic 0 --max-diagnostics 64
 ```
+
+`--extract-code-object` writes the selected embedded device ELF without
+translation or rewriting. This makes a compact, byte-identical repro from a
+large executable or shared library; analyze the extracted file as code-object
+index 0 while retaining the original `.text` offsets.
 
 The diagnostic location is a section-relative offset such as `.text+0xd1b44`.
 Use `--disassemble-window` to inspect the producer, the consumer, and any waits
