@@ -199,6 +199,9 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    // Keep publication in the page-table critical section. Cached readers
+    // validate this generation while holding the shared side of the same lock;
+    // publishing after unlock would permit a stale-cache hit in between.
     page_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
@@ -207,17 +210,16 @@ public:
     std::unique_lock lock(page_table_mutex_);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_.erase((gpu_va + off) >> kPageShift);
+    // See map_pages(): the mutation and generation publication are one
+    // page-table critical section by design.
     page_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
+  /// @brief Return the mutation counter used by GpuMemory translation caches.
+  std::atomic<uint64_t> *page_table_generation() { return &page_table_generation_; }
+
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
-
-  /// @brief Page table version counter, bumped (release) on every map/unmap.
-  /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
-  ///          this generation; a mismatch on load (acquire) invalidates the
-  ///          cached entry and forces a fresh page-table walk.
-  std::atomic<uint64_t> page_table_generation_{1};
 
   // -- Per-process state --
 
@@ -264,6 +266,11 @@ public:
   DebugSession debug_session_;
 
 private:
+  /// @brief Page table version counter, bumped (release) on every map/unmap.
+  /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
+  ///          this generation; a mismatch on load (acquire) invalidates the
+  ///          cached entry and forces a fresh page-table walk.
+  std::atomic<uint64_t> page_table_generation_{1};
 };
 
 } // namespace rocjitsu

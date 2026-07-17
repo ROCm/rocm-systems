@@ -30,6 +30,8 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
 #include <chrono>
 #include <cstdint>
@@ -43,6 +45,7 @@ RJ_DIAGNOSTIC_POP
 #include <string_view>
 #include <thread>
 #include <sys/mman.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -457,7 +460,7 @@ TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
   page[kOffset] = 0x5a;
   process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          &process.page_table_generation_);
+                          process.page_table_generation());
 
   EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), page.data());
   EXPECT_EQ(memory.read8(kAddr, kPid), page[kOffset]);
@@ -483,7 +486,7 @@ TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches)
 
   auto *first_memory = new (storage) amdgpu::GpuMemory("memory");
   first_memory->register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
-                                 &first_process.page_table_generation_);
+                                 first_process.page_table_generation());
   EXPECT_EQ(first_memory->read8(kAddr, kPid), first_page[kOffset]);
   EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
   first_memory->~GpuMemory();
@@ -496,10 +499,72 @@ TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches)
   auto *second_memory = new (storage) amdgpu::GpuMemory("memory");
   second_memory->register_process(kPid, &second_process.page_table_,
                                   &second_process.page_table_mutex_,
-                                  &second_process.page_table_generation_);
+                                  second_process.page_table_generation());
   EXPECT_EQ(second_memory->read8(kAddr, kPid), second_page[kOffset]);
   EXPECT_EQ(second_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
   second_memory->~GpuMemory();
+}
+
+TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x40000000;
+  constexpr uint32_t kValuePrefix = 0xa5a50000;
+  constexpr uint32_t kReaders = 4;
+  constexpr uint32_t kRemaps = 2000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  auto initial_page = std::make_unique<uint32_t>(kValuePrefix);
+  process.map_pages(kAddr, initial_page.get(), sizeof(*initial_page));
+  std::barrier start(kReaders + 1);
+  std::barrier initial_read(kReaders + 1);
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> mapped_reads{0};
+  std::atomic<uint64_t> invalid_reads{0};
+  std::vector<std::thread> readers;
+  readers.reserve(kReaders);
+  for (uint32_t i = 0; i < kReaders; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      const uint32_t initial_value = memory.read32(kAddr, kPid);
+      if ((initial_value & 0xffff0000) == kValuePrefix)
+        mapped_reads.fetch_add(1, std::memory_order_relaxed);
+      else
+        invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      initial_read.arrive_and_wait();
+      while (!stop.load(std::memory_order_acquire)) {
+        const uint32_t value = memory.read32(kAddr, kPid);
+        if (value == 0)
+          continue;
+        if ((value & 0xffff0000) == kValuePrefix)
+          mapped_reads.fetch_add(1, std::memory_order_relaxed);
+        else
+          invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  initial_read.arrive_and_wait();
+  process.unmap_pages(kAddr, sizeof(*initial_page));
+  initial_page.reset();
+  for (uint32_t i = 0; i < kRemaps; ++i) {
+    auto page = std::make_unique<uint32_t>(kValuePrefix | (i & 0xffff));
+    process.map_pages(kAddr, page.get(), sizeof(*page));
+    std::this_thread::yield();
+    process.unmap_pages(kAddr, sizeof(*page));
+    page.reset();
+  }
+  stop.store(true, std::memory_order_release);
+
+  for (auto &reader : readers)
+    reader.join();
+
+  EXPECT_GT(mapped_reads.load(std::memory_order_relaxed), 0u);
+  EXPECT_EQ(invalid_reads.load(std::memory_order_relaxed), 0u);
 }
 
 TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
@@ -510,7 +575,7 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
 
   KfdProcess process(kPid);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          &process.page_table_generation_);
+                          process.page_table_generation());
 
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
@@ -540,7 +605,7 @@ TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
 
   KfdProcess process(kPid);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          &process.page_table_generation_);
+                          process.page_table_generation());
   memory.set_process_client_pid(kPid, getpid());
 
   constexpr size_t kAccessOffset = KfdProcess::kPageSize - 8;
@@ -2369,9 +2434,9 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
   proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
   proc_b.map_pages(kSharedVa, backing_b.data(), backing_b.size());
   mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_,
-                       &proc_a.page_table_generation_);
+                       proc_a.page_table_generation());
   mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_,
-                       &proc_b.page_table_generation_);
+                       proc_b.page_table_generation());
 
   amdgpu::L2Cache l2("test.l2");
   l2.set_backing_memory(&mem);

@@ -99,7 +99,7 @@ jobs:
             # The simulator-wide stress tests exceed TSan's fixed 128-lock
             # deadlock-tracker capacity; keep the race gate on this change's
             # concurrent SparseMemory surface.
-            test_regex: '^SparseMemory(Threading)?Test\.'
+            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest)\.'
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0

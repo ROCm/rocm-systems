@@ -53,7 +53,9 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// per-set mutex so CPU dispatch workers sharing an XCD-local L2 can make
 /// progress on independent cache sets. Whole-cache maintenance takes all set
 /// mutexes in address-set order to exclude concurrent set operations without
-/// adding a global lock to every cache hit.
+/// adding a global lock to every cache hit. Each line operation is atomic with
+/// respect to other operations on that set; a request spanning multiple lines
+/// is intentionally not an atomic snapshot of the full range.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -205,6 +207,9 @@ private:
   std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
 
   static std::mutex &global_atomic_mutex(uint64_t addr) {
+    // Deliberately process-wide rather than per-L2: separate XCD-local L2s can
+    // target the same backing address, so device-wide atomics must rendezvous
+    // on the same striped lock even when they originate from different L2s.
     static std::array<std::mutex, NUM_SETS> mutexes;
     return mutexes[CacheStore::set_index(addr)];
   }

@@ -66,6 +66,42 @@ TEST(L2CacheThreadingTest, ConcurrentDifferentSetWritesArePreserved) {
   }
 }
 
+TEST(L2CacheThreadingTest, ConcurrentSameSetAccessesPreserveLines) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint32_t kThreads = 8;
+  constexpr uint32_t kIterations = 256;
+  constexpr uint64_t kBase = 0x180000;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(L2Cache::NUM_SETS) * L2Cache::LINE_SIZE;
+
+  std::barrier start(kThreads);
+  std::atomic<uint64_t> mismatches{0};
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    workers.emplace_back([&, tid] {
+      const uint64_t addr = kBase + tid * kSetStride;
+      std::array<uint8_t, L2Cache::LINE_SIZE> line{};
+      std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+      start.arrive_and_wait();
+      for (uint32_t iteration = 0; iteration < kIterations; ++iteration) {
+        line.fill(static_cast<uint8_t>((tid << 4) ^ iteration));
+        l2.write(addr, line.data(), line.size());
+        l2.read(addr, actual.data(), actual.size());
+        if (actual != line)
+          mismatches.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(mismatches.load(std::memory_order_relaxed), 0u);
+}
+
 TEST(L2CacheThreadingTest, ConcurrentAtomicRmwSameLineIsSerialized) {
   GpuMemory memory("memory");
   L2Cache l2("l2");

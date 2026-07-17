@@ -16,12 +16,14 @@
 #include <atomic>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <span>
 #include <string>
 #include <sys/uio.h>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -39,6 +41,8 @@ class GpuMemory : public simdojo::SparseMemory {
 public:
   explicit GpuMemory(std::string name)
       : simdojo::SparseMemory(std::move(name)),
+        // A monotonic lifetime token prevents a thread-local cache from
+        // matching a different GpuMemory later constructed at the same address.
         instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                     simdojo::PortProtocol::MEMORY));
@@ -95,7 +99,10 @@ public:
   /// mapping and is only valid when simulator and target share an address space.
   void set_passthrough(bool v) { passthrough_ = v; }
 
-  /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
+  /// @brief Resolve a GPU VA to a borrowed host-page pointer.
+  /// @details The returned pointer is only valid while page-table remapping and
+  /// process teardown are quiesced. Normal memory operations use an internal
+  /// callback that keeps the page-table shared lock held through the copy.
   uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
     return translate(addr, vmid);
   }
@@ -104,52 +111,10 @@ public:
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
       return Mtype::RW;
-    const uint64_t page_key = addr >> PAGE_SHIFT;
-    struct MtypeCache {
-      const GpuMemory *memory = nullptr;
-      uint64_t memory_instance = 0;
-      uint32_t vmid = 0;
-      uint64_t table_generation = 0;
-      uint64_t page_key = 0;
-      uint64_t generation = 0;
-      Mtype mtype = Mtype::RW;
-      KfdProcess::PageTable *page_table = nullptr;
-      std::shared_mutex *mutex = nullptr;
-      std::atomic<uint64_t> *generation_ptr = nullptr;
-    };
-    static thread_local MtypeCache cache;
-
-    {
-      std::shared_lock lk(vmid_mutex_);
-      uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
-      if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
-          cache.table_generation == table_generation && cache.generation_ptr) {
-        uint64_t generation = cache.generation_ptr->load(std::memory_order_acquire);
-        if (cache.generation == generation && cache.page_key == page_key)
-          return cache.mtype;
-        if (cache.generation == generation && cache.page_table && cache.mutex) {
-          std::shared_lock pt_lk(*cache.mutex);
-          auto pt_it = cache.page_table->find(page_key);
-          cache.page_key = page_key;
-          cache.mtype = pt_it != cache.page_table->end() ? pt_it->second.mtype : Mtype::RW;
-          return cache.mtype;
-        }
-      }
-
-      auto it = vmid_table_.find(vmid);
-      if (it != vmid_table_.end()) {
-        auto &entry = it->second;
-        uint64_t generation =
-            entry.generation ? entry.generation->load(std::memory_order_acquire) : 0;
-        std::shared_lock pt_lk(*entry.mutex);
-        auto pt_it = entry.page_table->find(page_key);
-        Mtype mtype = pt_it != entry.page_table->end() ? pt_it->second.mtype : Mtype::RW;
-        cache = {this,  instance_id_,     vmid,        table_generation, page_key, generation,
-                 mtype, entry.page_table, entry.mutex, entry.generation};
-        return mtype;
-      }
-    }
-    return Mtype::RW;
+    static thread_local PteCache cache;
+    return cached_walk(addr, vmid, cache, [](const KfdProcess::PageTableEntry *pte) {
+      return pte ? pte->mtype : Mtype::RW;
+    });
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
@@ -160,10 +125,8 @@ public:
   void read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
     for_each_page_chunk(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto out = dst.subspan(offset, chunk);
-      if (auto *p = translate(ea, vmid)) {
-        std::memcpy(out.data(), p + (ea & PAGE_MASK), chunk);
+      if (read_mapped(ea, out.data(), chunk, vmid))
         return;
-      }
       if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
@@ -177,10 +140,8 @@ public:
   void write_block(uint64_t addr, std::span<const uint8_t> src, uint32_t vmid = 0) {
     for_each_page_chunk(addr, src.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto in = src.subspan(offset, chunk);
-      if (auto *p = translate(ea, vmid)) {
-        std::memcpy(p + (ea & PAGE_MASK), in.data(), chunk);
+      if (write_mapped(ea, in.data(), chunk, vmid))
         return;
-      }
       if (vmid > 0 && write_client_memory(ea, in.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
@@ -251,7 +212,7 @@ public:
     if (pt_it != entry.page_table->end())
       return "page_found";
     std::string result = "page_missing pt_size=" + std::to_string(entry.page_table->size());
-    uint64_t lo = UINT64_MAX, hi = 0;
+    uint64_t lo = std::numeric_limits<uint64_t>::max(), hi = 0;
     for (auto &[k, v] : *entry.page_table) {
       if (k < lo)
         lo = k;
@@ -263,85 +224,68 @@ public:
   }
 
   uint8_t read8(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid))
-      return p[addr & PAGE_MASK];
     uint8_t val = 0;
+    if (read_mapped(addr, &val, sizeof(val), vmid))
+      return val;
     if (vmid > 0 && read_client_memory(addr, &val, 1, vmid))
       return val;
     return SparseMemory::read8(addr);
   }
 
   uint16_t read16(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
-      uint16_t val;
-      std::memcpy(&val, p + (addr & PAGE_MASK), 2);
-      return val;
-    }
     uint16_t val = 0;
+    if (read_mapped(addr, &val, sizeof(val), vmid))
+      return val;
     if (vmid > 0 && read_client_memory(addr, &val, 2, vmid))
       return val;
     return SparseMemory::read16(addr);
   }
 
   uint32_t read32(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
-      uint32_t val;
-      std::memcpy(&val, p + (addr & PAGE_MASK), 4);
-      return val;
-    }
     uint32_t val = 0;
+    if (read_mapped(addr, &val, sizeof(val), vmid))
+      return val;
     if (vmid > 0 && read_client_memory(addr, &val, 4, vmid))
       return val;
     return SparseMemory::read32(addr);
   }
 
   uint64_t read64(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
-      uint64_t val;
-      std::memcpy(&val, p + (addr & PAGE_MASK), 8);
-      return val;
-    }
     uint64_t val = 0;
+    if (read_mapped(addr, &val, sizeof(val), vmid))
+      return val;
     if (vmid > 0 && read_client_memory(addr, &val, 8, vmid))
       return val;
     return SparseMemory::read64(addr);
   }
 
   void write8(uint64_t addr, uint8_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid)) {
-      p[addr & PAGE_MASK] = val;
+    if (write_mapped(addr, &val, sizeof(val), vmid))
       return;
-    }
     if (vmid > 0 && write_client_memory(addr, &val, 1, vmid))
       return;
     SparseMemory::write8(addr, val);
   }
 
   void write16(uint64_t addr, uint16_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
-      std::memcpy(p + (addr & PAGE_MASK), &val, 2);
+    if (write_mapped(addr, &val, sizeof(val), vmid))
       return;
-    }
     if (vmid > 0 && write_client_memory(addr, &val, 2, vmid))
       return;
     SparseMemory::write16(addr, val);
   }
 
   void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
-      std::memcpy(p + (addr & PAGE_MASK), &val, 4);
+    if (write_mapped(addr, &val, sizeof(val), vmid))
       return;
-    }
     if (vmid > 0 && write_client_memory(addr, &val, 4, vmid))
       return;
     SparseMemory::write32(addr, val);
   }
 
   void write64(uint64_t addr, uint64_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
-      std::memcpy(p + (addr & PAGE_MASK), &val, 8);
+    if (write_mapped(addr, &val, sizeof(val), vmid))
       return;
-    }
     if (vmid > 0 && write_client_memory(addr, &val, 8, vmid))
       return;
     SparseMemory::write64(addr, val);
@@ -360,8 +304,6 @@ private:
 
   static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
-  // Thread-local translation caches keep these pointers only while the simulated
-  // process is active; driver teardown unregisters after GPU work is drained.
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
@@ -369,66 +311,108 @@ private:
     std::atomic<uint64_t> *generation = nullptr;
   };
 
-  uint8_t *translate(uint64_t addr, uint32_t vmid) const {
-    if (vmid == 0)
-      return passthrough_ ? reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK) : nullptr;
+  struct PteCache {
+    const GpuMemory *memory = nullptr;
+    uint64_t memory_instance = 0;
+    uint32_t vmid = 0;
+    uint64_t table_generation = 0;
+    uint64_t page_key = 0;
+    uint64_t generation = 0;
+    bool found = false;
+    KfdProcess::PageTableEntry pte;
+    KfdProcess::PageTable *page_table = nullptr;
+    std::shared_mutex *mutex = nullptr;
+    std::atomic<uint64_t> *generation_ptr = nullptr;
+  };
+
+  /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
+  /// @details The callback runs while both VMID registration and the selected
+  /// page table are shared-locked. This keeps a cached host pointer alive for
+  /// the whole copy and makes translate() and pte_mtype() share one invalidation
+  /// protocol.
+  template <typename F>
+  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
+                   F &&fn) const -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
-    struct TranslationCache {
-      const GpuMemory *memory = nullptr;
-      uint64_t memory_instance = 0;
-      uint32_t vmid = 0;
-      uint64_t table_generation = 0;
-      uint64_t page_key = 0;
-      uint64_t generation = 0;
-      uint8_t *host_ptr = nullptr;
-      KfdProcess::PageTable *page_table = nullptr;
-      std::shared_mutex *mutex = nullptr;
-      std::atomic<uint64_t> *generation_ptr = nullptr;
-    };
-    static thread_local TranslationCache cache;
+    std::shared_lock vmid_lock(vmid_mutex_);
+    const uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
 
-    {
-      std::shared_lock lk(vmid_mutex_);
-      uint64_t table_generation = vmid_table_generation_.load(std::memory_order_acquire);
-      if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
-          cache.table_generation == table_generation && cache.generation_ptr) {
-        uint64_t generation = cache.generation_ptr->load(std::memory_order_acquire);
-        if (cache.generation == generation && cache.page_key == page_key)
-          return cache.host_ptr;
-        if (cache.generation == generation && cache.page_table && cache.mutex) {
-          std::shared_lock pt_lk(*cache.mutex);
-          auto pt_it = cache.page_table->find(page_key);
-          uint8_t *host_ptr = nullptr;
-          if (pt_it != cache.page_table->end())
-            host_ptr = pt_it->second.host_ptr;
-          else if (passthrough_ && addr < kUserSpaceLimit)
-            host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-          cache.page_key = page_key;
-          cache.host_ptr = host_ptr;
-          return host_ptr;
-        }
-      }
-
+    const bool cached_table = cache.memory == this && cache.memory_instance == instance_id_ &&
+                              cache.vmid == vmid && cache.table_generation == table_generation &&
+                              cache.page_table && cache.mutex;
+    if (!cached_table) {
       auto it = vmid_table_.find(vmid);
-      if (it != vmid_table_.end()) {
-        auto &entry = it->second;
-        uint64_t generation =
-            entry.generation ? entry.generation->load(std::memory_order_acquire) : 0;
-        std::shared_lock pt_lk(*entry.mutex);
-        auto pt_it = entry.page_table->find(page_key);
-        uint8_t *host_ptr = nullptr;
-        if (pt_it != entry.page_table->end())
-          host_ptr = pt_it->second.host_ptr;
-        else if (passthrough_ && addr < kUserSpaceLimit)
-          host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-        cache = {this,     instance_id_,     vmid,        table_generation, page_key, generation,
-                 host_ptr, entry.page_table, entry.mutex, entry.generation};
-        return host_ptr;
+      if (it == vmid_table_.end()) {
+        cache = {};
+        return fn(nullptr);
       }
+      cache.memory = this;
+      cache.memory_instance = instance_id_;
+      cache.vmid = vmid;
+      cache.table_generation = table_generation;
+      cache.page_table = it->second.page_table;
+      cache.mutex = it->second.mutex;
+      cache.generation_ptr = it->second.generation;
+      cache.found = false;
     }
-    if (passthrough_ && addr < kUserSpaceLimit)
-      return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-    return nullptr;
+
+    std::shared_lock page_table_lock(*cache.mutex);
+    const uint64_t generation =
+        cache.generation_ptr ? cache.generation_ptr->load(std::memory_order_acquire) : 0;
+    const bool cached_page = cached_table && cache.generation_ptr &&
+                             cache.generation == generation && cache.page_key == page_key;
+    if (!cached_page) {
+      auto it = cache.page_table->find(page_key);
+      cache.page_key = page_key;
+      cache.generation = generation;
+      cache.found = it != cache.page_table->end();
+      if (cache.found)
+        cache.pte = it->second;
+    }
+
+    return fn(cache.found ? &cache.pte : nullptr);
+  }
+
+  template <typename F> bool with_host_ptr(uint64_t addr, uint32_t vmid, F &&fn) const {
+    if (vmid == 0) {
+      if (!passthrough_)
+        return false;
+      fn(reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK));
+      return true;
+    }
+
+    static thread_local PteCache cache;
+    return cached_walk(addr, vmid, cache, [&](const KfdProcess::PageTableEntry *pte) {
+      if (pte) {
+        fn(pte->host_ptr);
+        return true;
+      }
+      if (passthrough_ && addr < kUserSpaceLimit) {
+        fn(reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK));
+        return true;
+      }
+      return false;
+    });
+  }
+
+  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+    if ((addr & PAGE_MASK) + len > PAGE_SIZE)
+      return false;
+    return with_host_ptr(
+        addr, vmid, [&](const uint8_t *page) { std::memcpy(dst, page + (addr & PAGE_MASK), len); });
+  }
+
+  bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+    if ((addr & PAGE_MASK) + len > PAGE_SIZE)
+      return false;
+    return with_host_ptr(addr, vmid,
+                         [&](uint8_t *page) { std::memcpy(page + (addr & PAGE_MASK), src, len); });
+  }
+
+  uint8_t *translate(uint64_t addr, uint32_t vmid) const {
+    uint8_t *host_ptr = nullptr;
+    with_host_ptr(addr, vmid, [&](uint8_t *page) { host_ptr = page; });
+    return host_ptr;
   }
 
   pid_t client_pid_for_vmid(uint32_t vmid) const {
@@ -468,6 +452,8 @@ private:
   }
 
   simdojo::Port *cpl_ = nullptr;
+  // fetch_add is intentional: every object lifetime needs a distinct token;
+  // resetting this atomic would let an address-reused object match stale TLS.
   inline static std::atomic<uint64_t> next_instance_id_{1};
   const uint64_t instance_id_;
   mutable std::shared_mutex vmid_mutex_;
