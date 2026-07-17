@@ -118,12 +118,25 @@ pr:
       - .rs
     # A changed file is treated as a unit test if its basename matches one of
     # these glob patterns (e.g. test_parser.py, parser_test.cpp).
+    #
+    # TWO matching modes are supported:
+    #   1. BASENAME patterns (no '/' in the pattern): matched against the
+    #      filename only, regardless of where it lives in the repo.
+    #   2. PATH patterns (pattern contains '/'): matched against the full
+    #      file path from the repo root. Use these for test directories
+    #      whose files use no special naming convention.
     test_file_patterns:
       - 'test_*'
+      - 'testing_*'
       - '*_test.*'
+      - '*_tests.*'
+      - 'Test*'
+      # hip-tests files are named after the API they test (e.g. atomicAdd.cc,
+      # acquire_release.cc) with no test_* prefix — recognise them by path.
+      - 'projects/hip-tests/**'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.*), not its location.
+    # it is recognised by its name or path pattern, not its location alone.
     # Doc/config files are still skipped by EXTENSION (they are simply not in
     # `code_extensions`), not by path.
     exempt_paths: []
