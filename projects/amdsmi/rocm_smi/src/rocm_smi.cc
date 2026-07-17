@@ -3456,7 +3456,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    // Multiple by 1000 to convert from Centigrade to mCentigrade
+    *temperature = static_cast<int64_t>(val_ui16) * 1000;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "

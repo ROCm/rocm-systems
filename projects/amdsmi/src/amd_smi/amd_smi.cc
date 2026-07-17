@@ -2651,20 +2651,6 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
   return rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0, name, len);
 }
 
-amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
-                                           uint32_t len) {
-  if (brand == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-  amdsmi_vram_info_t info = {};
-  amdsmi_status_t r = amdsmi_get_gpu_vram_info(processor_handle, &info);
-  if (r != AMDSMI_STATUS_SUCCESS) {
-    return r;
-  }
-  snprintf(brand, len, "%s", info.vram_vendor);
-  return r;
-}
-
 amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_vram_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -2692,7 +2678,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   // --- sysfs first: vendor + total size (no DRM dependency) ---
   // The vendor string is only exposed via sysfs (mem_info_vram_vendor); the DRM
   // ioctl carries no vendor field. Read it before attempting the ioctl so callers
-  // (e.g. amdsmi_get_gpu_vram_vendor) still get the vendor when DRM is unavailable.
+  // (e.g. amdsmi_get_gpu_vram_info) still get the vendor when DRM is unavailable.
   char brand[256] = {'\0'};
   amdsmi_status_t vendor_status =
       rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
@@ -3974,13 +3960,22 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
                       static_cast<rsmi_gpu_block_t>(block),
                       reinterpret_cast<rsmi_error_count_t*>(ec));
 }
+
+// Deprecated API, use amdsmi_get_gpu_ecc_supported() instead
 amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
                                            uint64_t* enabled_blocks) {
+  amdsmi_status_t ret = amdsmi_get_gpu_ecc_supported(processor_handle, enabled_blocks);
+  return ret;
+}
+
+amdsmi_status_t amdsmi_get_gpu_ecc_supported(amdsmi_processor_handle processor_handle,
+                                             uint64_t* enabled_blocks) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
 
   return rsmi_wrapper(rsmi_dev_ecc_enabled_get, processor_handle, 0, enabled_blocks);
 }
+
 amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_handle,
                                           amdsmi_gpu_block_t block, amdsmi_ras_err_state_t* state) {
   AMDSMI_CHECK_INIT();
@@ -6737,8 +6732,8 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
   pwreffmode_util = *utilization;
   pwreffmode_pptlimit = *ppt_limit;
 
-  if ((power_efficiency_mode == POWER_EFFICIENCY_MODE_4) ||
-      (power_efficiency_mode == POWER_EFFICIENCY_MODE_5)) {
+  if ((power_efficiency_mode == AMDSMI_POWER_EFFICIENCY_MODE_4) ||
+      (power_efficiency_mode == AMDSMI_POWER_EFFICIENCY_MODE_5)) {
     uint32_t cpu_family;
     uint32_t cpu_model;
     // cpu_family and cpu_model are only needed for mode 4/5 validation
@@ -7869,14 +7864,14 @@ amdsmi_status_t amdsmi_get_cpu_svi3_vr_controller_temp(amdsmi_processor_handle p
   sock_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
 
   // Validate input parameters
-  if ((*rail_selection) > MAX_SVI3_RAIL_SELECTION) {
+  if ((*rail_selection) > AMDSMI_MAX_SVI3_RAIL_SELECTION) {
     return AMDSMI_STATUS_INVAL;
   }
 
   // Prepare ESMI SVI3 structure with input parameters
   svi3_info_.m_svi3_info_inarg.info.svi3_rail_selection = ((*rail_selection) & 0x1);
-  if ((*rail_selection) == MAX_SVI3_RAIL_SELECTION) {
-    if ((*rail_index) > MAX_SVI3_RAIL_INDEX) {
+  if ((*rail_selection) == AMDSMI_MAX_SVI3_RAIL_SELECTION) {
+    if ((*rail_index) > AMDSMI_MAX_SVI3_RAIL_INDEX) {
       return AMDSMI_STATUS_INVAL;
     }
     svi3_info_.m_svi3_info_inarg.info.svi3_rail_index = ((*rail_index) & 0x7);

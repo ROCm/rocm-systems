@@ -84,13 +84,6 @@ typedef enum {
  */
 
 /**
- * @brief Unit conversion factor for HBM temperatures
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-#define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
-
-/**
  * @brief This should match NUM_HBM_INSTANCES
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -196,7 +189,7 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
-#define MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
+#define AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
 
 /**
  * @brief Introduced in gpu metrics v1.9+
@@ -326,10 +319,10 @@ typedef struct {
 #define AMDSMI_MAX_SPD_REG_OFFSET 0x7FF        //!< Maximum SPD register offset [22:12]
 #define AMDSMI_MAX_SPD_REG_SPACE 0x1           //!< Maximum SPD register space [23]
 #define AMDSMI_MAX_SPD_WRITE_DATA 0xFF         //!< Maximum SPD write data [31:24]
-#define MAX_SVI3_RAIL_INDEX 4                  //!< Maximum SVI3 rail index
-#define MAX_SVI3_RAIL_SELECTION 1              //!< Maximum SVI3 rail selection
-#define POWER_EFFICIENCY_MODE_4 0x4            //!< Power Efficiency mode selection
-#define POWER_EFFICIENCY_MODE_5 0x5            //!< Power Efficiency mode selection
+#define AMDSMI_MAX_SVI3_RAIL_INDEX 4           //!< Maximum SVI3 rail index
+#define AMDSMI_MAX_SVI3_RAIL_SELECTION 1       //!< Maximum SVI3 rail selection
+#define AMDSMI_POWER_EFFICIENCY_MODE_4 0x4     //!< Power Efficiency mode selection
+#define AMDSMI_POWER_EFFICIENCY_MODE_5 0x5     //!< Power Efficiency mode selection
 #define AMDSMI_MAX_POWER_EFFICIENCY_UTIL 0x7F  //!< [9:3]=Balanced core mode utilization point(%)
 #define AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT 0x1FFFFF  //!< [30:10]=Balanced core mode PPT limit(mW)
 #define AMDSMI_RAIL_INDEX_NONE 0xFFFFFFFF  //!< Rail Index value defined as maximum when not passed
@@ -3695,38 +3688,6 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
                                            size_t len);
 
 /**
- *  @brief Get the vram vendor string of a device.
- *
- *  @deprecated This API is slated for removal in a future ROCm release;
- *  ::amdsmi_get_gpu_vram_info() should be used instead
- *
- *  @ingroup tagIdentQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details This function retrieves the vram vendor name given a processor handle
- *  @p processor_handle, a pointer to a caller provided
- *  char buffer @p brand, and a length of this buffer @p len, this function
- *  will write the vram vendor of the device (up to @p len characters) to the
- *  buffer @p brand.
- *
- *  If the vram vendor for the device is not found as one of the values
- *  contained within amdsmi_get_gpu_vram_vendor, then this function will return
- *  the string 'unknown' instead of the vram vendor.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in,out] brand a pointer to a caller provided char buffer to which the
- *  vram vendor will be written
- *
- *  @param[in] len the length of the caller provided buffer @p brand.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
-                                           uint32_t len);
-
-/**
  *  @brief Get the subsystem device id associated with the device with
  *  provided processor handle.
  *
@@ -5964,6 +5925,8 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
  *  to learn how these error counts are accessed.
  *
+ *  @deprecated ::amdsmi_get_gpu_ecc_supported() should be used
+ *
  *  @ingroup tagECCInfo
  *
  *  @platform{gpu_bm_linux} @platform{host}
@@ -5991,6 +5954,41 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  */
 amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
                                            uint64_t* enabled_blocks);
+
+/**
+ *  @brief Retrieve the enabled ECC bit-mask. It is not supported on virtual machine guest
+ *
+ *  See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+ *  documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+ *  to learn how these error counts are accessed.
+ *
+ *  @ingroup tagECCInfo
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Given a processor handle @p processor_handle, and a pointer to a uint64_t @p
+ *  enabled_mask, this function will write bits to memory pointed to by
+ *  @p enabled_blocks. Upon a successful call, @p enabled_blocks can then be
+ *  AND'd with elements of the ::amdsmi_gpu_block_t ennumeration to determine if
+ *  the corresponding block has ECC enabled.
+ *
+ *  @note Whether a block has ECC enabled or not in the device is independent
+ *  of whether there is kernel support for error counting for that block.
+ *  Although a block may be enabled, but there may not be kernel support for
+ *  reading error counters for that block.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in,out] enabled_blocks A pointer to a uint64_t to which the enabled
+ *  blocks bits will be written.
+ *  If this parameter is nullptr, this function will return ::AMDSMI_STATUS_INVAL
+ *  if the function is supported with the provided arguments and ::AMDSMI_STATUS_NOT_SUPPORTED
+ *  if it is not supported with the provided arguments.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_ecc_supported(amdsmi_processor_handle processor_handle,
+                                             uint64_t* enabled_blocks);
 
 /**
  *  @brief Returns the total number of ECC errors (correctable,
@@ -6096,8 +6094,8 @@ typedef struct {
  *  uint64_t that may be safely written to the memory pointed to by @p afids. This is the limit
  *  on how many AF IDs will be written to @p afids. On return, @p num_afids will contain the
  *  number of AF IDs written to @p afids, or the number of AF IDs that could have been written
- *  if enough memory had been provided. It is suggest to pass MAX_NUMBER_OF_AFIDS_PER_RECORD for all
- *  AF Ids.
+ *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
+ * for all AF Ids.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
