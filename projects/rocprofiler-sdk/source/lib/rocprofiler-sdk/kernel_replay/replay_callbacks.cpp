@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -32,12 +33,24 @@
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 
+#include <atomic>
+
 namespace rocprofiler
 {
 namespace kernel_replay
 {
 namespace
 {
+// Process-global fast-path gate: false until a tool configures a KERNEL_REPLAY service. Lets
+// has_active_replay_contexts() (called from WriteInterceptor on every dispatch) skip the
+// active-context walk entirely when replay is never used.
+std::atomic<bool>&
+replay_service_configured_flag()
+{
+    static auto*& _v = common::static_object<std::atomic<bool>>::construct(false);
+    return *_v;
+}
+
 template <typename Integral>
 constexpr Integral
 bit_extract(Integral x, int first, int last)
@@ -54,9 +67,17 @@ context_has_kernel_replay(const tracing::context_t* ctx)
 }
 }  // namespace
 
+void
+set_replay_service_configured(bool enabled)
+{
+    replay_service_configured_flag().store(enabled, std::memory_order_relaxed);
+}
+
 bool
 has_active_replay_contexts()
 {
+    // Cheap common-case rejection: if no replay service was ever configured, skip the context walk.
+    if(!replay_service_configured_flag().load(std::memory_order_relaxed)) return false;
     return !context::get_active_contexts(context_has_kernel_replay).empty();
 }
 
