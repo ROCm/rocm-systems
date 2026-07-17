@@ -130,7 +130,10 @@ runs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DHIP_PLATFORM=amd \
+
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_LIBDIR=lib \
