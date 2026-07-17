@@ -93,7 +93,7 @@ for src in /work/rccl /work/rccl-tests; do
     echo "[cleanup] $src/build is compatible; keeping it (incremental build)."
   fi
 done'''
-        orch.ssh_head(f"docker exec -i {shlex.quote(orch.cfg.container)} bash -s <<'REMOTE'\n{script}\nREMOTE")
+        orch.ssh_head(f"docker exec -i -u \"$(id -u)\":\"$(id -g)\" {shlex.quote(orch.cfg.container)} bash -s <<'REMOTE'\n{script}\nREMOTE")
 
     def run(self, orch) -> None:
         c = orch.cfg
@@ -112,8 +112,13 @@ done'''
             f"{filters} --report-suffix {shlex.quote(c.run_id)} "
             "--coverage-report --verbose --emit-results"
         )
+        # Run as the host uid:gid (the entrypoint remaps the container user to
+        # HOST_UID) so builds write into the bind-mounted host repos
+        # (/work/rccl, /work/rccl-tests).  As root, NFS root_squash maps us to
+        # nfsnobody and the build dir creation fails with EACCES.
         docker = (
-            f"docker exec -e RCCL_ARTIFACTS_DIR_FILE={shlex.quote(c.artifacts_pointer_ctr)} "
+            'docker exec -u "$(id -u)":"$(id -g)" '
+            f"-e RCCL_ARTIFACTS_DIR_FILE={shlex.quote(c.artifacts_pointer_ctr)} "
             f"{shlex.quote(c.container)} bash -lc {shlex.quote(inner)}"
         )
         orch.ssh_head(docker)

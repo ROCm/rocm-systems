@@ -69,6 +69,16 @@ class RunConfig:
 
     rccl_dir: str = ""
     mnctl_dir: str = ""
+    # Source strategy for rccl + rccl-tests:
+    #   "clone" (default): sparse+shallow clone the monorepo at the coverage
+    #     branch into src_dir on the login node, then mount that -> portable,
+    #     no dependence on a host working copy / its perms / uid.
+    #   "mount": legacy behavior -- bind-mount the existing host checkout
+    #     (rccl_dir) as-is (used by CI, where actions/checkout pins the ref).
+    src_mode: str = field(default_factory=lambda: _env("RCCL_SRC_MODE", "clone"))
+    repo_url: str = field(default_factory=lambda: _env(
+        "RCCL_REPO_URL", "https://github.com/ROCm/rocm-systems.git"))
+    src_dir: str = ""
     run_id: str = ""
     container: str = ""
     hostfile: str = ""
@@ -122,6 +132,13 @@ class RunConfig:
         self.builds_dir = _env("BUILDS_DIR") or f"{self.shared_fs_root}/.docker-builds/{self.container}"
         self.artifacts_pointer = os.path.join(self.rccl_dir, f".artifacts_{self.run_id}")
         self.artifacts_pointer_ctr = f"/work/rccl/.artifacts_{self.run_id}"
+
+        # Managed clone location (clone mode). Must live on a filesystem visible
+        # to every node (same requirement the bind-mount already had), so anchor
+        # it to the shared-FS root when set, else the home dir.
+        base = self.shared_fs_root or os.path.expanduser("~")
+        self.src_dir = _env("RCCL_SRC_DIR") or os.path.join(
+            base, ".docker-src", self.container)
 
     def _git_branch(self) -> str:
         try:
@@ -333,6 +350,60 @@ class Orchestrator:
         self._run(["rsync", "-a", "--delete", c.mnctl_dir + "/", staged + "/"])
         c.mnctl_dir = staged
 
+    def _resolve_branch(self) -> str:
+        return _env("RCCL_BRANCH") or self.cfg._git_branch() or "develop"
+
+    def prepare_sources(self) -> None:
+        """Sparse + shallow clone of the monorepo at the coverage branch.
+
+        rccl and rccl-tests are subdirectories of one big monorepo
+        (ROCm/rocm-systems), so a single sparse checkout of just those two paths
+        gives both projects at the *same commit* (monorepo coherence for free)
+        without pulling the whole tree.  The clone lands in src_dir on the login
+        node and is bind-mounted into the containers, which makes the run
+        identical on every cluster/Dockerfile: no dependence on a host working
+        copy, its branch, its NFS perms, or the container UID remap.
+
+        No-ops in "mount" mode (legacy bind-mount of an existing checkout).
+        """
+        c = self.cfg
+        if c.src_mode != "clone":
+            return
+        # In CI, actions/checkout already provides the exact ref (incl. PR merge
+        # refs and fork branches not on origin), so prefer it unless the caller
+        # explicitly asked for clone via RCCL_SRC_MODE.
+        if _env("GITHUB_ACTIONS") == "true" and not _env("RCCL_SRC_MODE"):
+            log("CI detected; using actions/checkout sources (mount). "
+                "Set RCCL_SRC_MODE=clone to override.")
+            c.src_mode = "mount"
+            return
+
+        branch = self._resolve_branch()
+        src = c.src_dir
+        log(f"Preparing sources: sparse+shallow {c.repo_url}@{branch} -> {src}")
+
+        if not os.path.isdir(os.path.join(src, ".git")):
+            os.makedirs(src, exist_ok=True)
+            self._run(["git", "clone", "--filter=blob:none", "--no-checkout",
+                      "--depth", "1", "--branch", branch, c.repo_url, src])
+            self._run(["git", "-C", src, "sparse-checkout", "set",
+                      "projects/rccl", "projects/rccl-tests"])
+            self._run(["git", "-C", src, "checkout", branch])
+        else:
+            # Managed clone (not a user's working copy): reset hard to the branch
+            # tip so every run builds the latest pushed commit deterministically.
+            self._run(["git", "-C", src, "fetch", "--depth", "1", "origin", branch])
+            self._run(["git", "-C", src, "checkout", "-B", branch, "FETCH_HEAD"])
+
+        # Repoint the mounted sources at the fresh clone. mnctl_dir is left alone
+        # (the sparse clone has no rccl-utils; mnctl comes from MNCTL_DIR / repo).
+        c.rccl_dir = os.path.join(src, "projects", "rccl")
+        c.artifacts_pointer = os.path.join(c.rccl_dir, f".artifacts_{c.run_id}")
+        rccl_tests = os.path.join(src, "projects", "rccl-tests")
+        if hasattr(self.payload, "rccl_tests_dir"):
+            self.payload.rccl_tests_dir = rccl_tests
+        log(f"Sources ready: {c.rccl_dir} + {rccl_tests}")
+
     def launch_containers(self) -> None:
         c = self.cfg
         mounts = [f"--volume {shlex.quote(c.rccl_dir + ':/work/rccl')}"] + self.payload.mounts(self)
@@ -399,6 +470,7 @@ class Orchestrator:
 
     def run(self) -> None:
         c = self.cfg
+        self.prepare_sources()  # clone mode: sparse checkout before validate/build
         self.core_validate()
         self.payload.validate(self)
         self.maybe_allocate()   # may replace this process or submit+wait via sbatch
