@@ -150,7 +150,7 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
@@ -174,7 +174,7 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         std::lock_guard guard{ m_mutex };
 
         size_t _head = m_head;

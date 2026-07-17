@@ -40,7 +40,7 @@ add_library(parse-numeric-range-tests OBJECT test_parse_numeric_range.cpp)
 
 target_link_libraries(
     parse-numeric-range-tests
-        PRIVATE
+    PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
         rocprofiler-systems-logger
@@ -67,7 +67,6 @@ target_link_libraries(
 
 target_include_directories(
     rank-passes-filter-tests
-    state-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )
 
