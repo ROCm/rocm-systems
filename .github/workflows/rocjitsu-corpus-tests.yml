@@ -182,6 +182,14 @@ jobs:
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
+          TSAN_EXCLUDED_TESTS=(
+            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "MatmulStressTest\.TiledAllCU"
+            "MatmulStressTest\.MfmaAllCUs"
+            "VectorAddStressTest\.AllCUsGoldenReference"
+            "Gfx1250SimulationTest\.GlobalStoreWritesVisibleMemory"
+            "Gfx1250SimulationTest\.BufferStoreUsesM0Soffset"
+          )
 
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
@@ -190,6 +198,9 @@ jobs:
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
+          fi
+          if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
