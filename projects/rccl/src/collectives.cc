@@ -514,8 +514,16 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     return ret;
   }
 #endif
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  bool ceAlltoAllvEligible = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+      ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
 
-  if (comm->nNodes == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+  if (ceAlltoAllvEligible) {
         const size_t nLocal = 4 * (size_t)nRanks;
         const size_t nGather = nLocal * (size_t)nRanks;
 
@@ -539,7 +547,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
 
         return ncclEnqueueCheck(&info);
   } else {
-
     Recorder::instance().skip(true);
     NCCLCHECK(ncclGroupStart());
     for (int r=0; r<nRanks; r++) {
