@@ -564,7 +564,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     if (count == 0) return ncclSuccess;
     struct ncclDevrWindow* recvWin = nullptr;
     NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
-    WARN("CE 2-shot AllReduce: count=%zu rank=%d/%d recvWin=%p userPtr=%p",
+    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu rank=%d/%d recvWin=%p userPtr=%p",
          count, comm->rank, comm->nRanks, (void*)recvWin,
          recvWin ? recvWin->userPtr : nullptr);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, recvWin);

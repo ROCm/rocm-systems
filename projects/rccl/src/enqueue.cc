@@ -3579,6 +3579,8 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
+RCCL_PARAM(ForceCe,"FORCE_CE",0);
+RCCL_PARAM_DECLARE(CeAllReduce);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
@@ -3633,36 +3635,43 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO &&
           comm->ceColl.baseUCSymReadyPtr == NULL &&
           ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-        struct ncclCeInitTask* ceTask;
-        NCCLCHECK(ncclCalloc(&ceTask, 1));
-        ceTask->comm = comm;
-        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+        if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
+          // CE runtime not initialized and we're capturing a graph: symmetric
+          // window registration is illegal during capture. Fall back to legacy.
+          ceAvailable = false;
+        } else {
+          struct ncclCeInitTask* ceTask;
+          NCCLCHECK(ncclCalloc(&ceTask, 1));
+          ceTask->comm = comm;
+          ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+          ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+        }
       }
 
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
-      /*bool ceAllReduceFits = true;
-      if (info->coll == ncclFuncAllReduce && ) {
-        if (!rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+      bool ceAllReduceFits = true;
+      bool graphCapture = ncclCudaGraphValid(comm->planner.capturingGraph);
+      if (info->coll == ncclFuncAllReduce) {
+        if (graphCapture || (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
         } else {
+          // check if we want to force CE AllReduce without symmetric window registration
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCe()) {
             ceAllReduceFits = false;
-            INFO(NCCL_COLL, "CE AllReduce: msg %zu B > cap %zu B, falling back to standard NCCL AllReduce",
-                 totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
-      }*/
-
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment /*&& ceAllReduceFits*/) {
-        INFO(NCCL_COLL, "CE Path: appending CE Collective task");
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
-      // Append kernel-based collective
-      else {
-        INFO(NCCL_COLL, "Legacy Path: appending kernel-based collective task");
+
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
+        INFO(NCCL_COLL, "CE Path: appending CE Collective task, count=%zu", info->count);
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+      } else if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
+        INFO(NCCL_COLL, "CE AllReduce Path without symmetric memory registration, count=%zu", info->count);
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+      } else {
+        INFO(NCCL_COLL, "Legacy Path: appending kernel-based collective task, count=%zu", info->count);
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
         // when src or dst buffers are not registered

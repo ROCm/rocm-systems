@@ -45,6 +45,7 @@ RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+RCCL_PARAM_DECLARE(ForceCe);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -594,6 +595,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
                         ncclDataType_t datatype, ncclRedOp_t op) {
   static int enabled = rcclParamCeAllReduce();
+  static int force = rcclParamForceCe();
   if (!enabled) {
     INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
     return false;
@@ -601,7 +603,6 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) return false;
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
   if (comm->nNodes != 1) return false;
 
   // count must divide evenly so every rank owns an equal shard.
@@ -609,7 +610,13 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 
   // Total message must fit within the pre-allocated staging buffer.
   size_t msgBytes = count * ncclTypeSize(datatype);
+  if (force) {
+    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+    comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  }
   if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
 
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.

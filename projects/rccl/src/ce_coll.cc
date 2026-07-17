@@ -33,12 +33,8 @@ static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char
 ncclResult_t ncclCeLaunchPersistentReduce(
   const void* in, void* out, int nRanks,
   size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard,
-  size_t slotChunkElems,
-  uint32_t* signalBuffer, uint32_t* d_kernelReady,
-  uint32_t readyValue, size_t totalSteps,
-  uint64_t* d_barrierGenBase,
-  uint32_t* d_barrierSync,
-  ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream, int coopLaunch);
+  size_t slotChunkElems, uint32_t* signalBuffer, size_t totalSteps,
+  uint32_t* d_barrierSync, ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream);
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
@@ -120,10 +116,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
   // Local-only control words (no peer access -> no window registration needed).
-  CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_kernelReady, sizeof(uint32_t), hipDeviceMallocUncached), ret, fail);
-  CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierGenBase, sizeof(uint64_t), hipDeviceMallocUncached), ret, fail);
   CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierSync, 2 * sizeof(uint32_t), hipDeviceMallocUncached), ret, fail);
-  comm->ceColl.barrierGenNext = 1;
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.scatterStream, cudaStreamNonBlocking), ret, fail);
   CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.synceEvent, cudaEventDisableTiming), ret, fail);
   // Signal buffer: [NUM_SLOTS][nRanks], indexed slot*nRanks + r. Symmetric window
@@ -199,8 +192,6 @@ fail:
   if (ceDevBase != nullptr) ncclMemFree(ceDevBase);
   if (sigWinDev != nullptr) ncclCommWindowDeregister(comm, sigWinDev);
   if (signalBuf != nullptr) ncclMemFree(signalBuf);
-  if (comm->ceColl.d_kernelReady != nullptr) hipFree(comm->ceColl.d_kernelReady);
-  if (comm->ceColl.d_barrierGenBase != nullptr) hipFree(comm->ceColl.d_barrierGenBase);
   if (comm->ceColl.d_barrierSync != nullptr) hipFree(comm->ceColl.d_barrierSync);
   if (comm->ceColl.scatterStream != nullptr) cudaStreamDestroy(comm->ceColl.scatterStream);
   if (comm->ceColl.synceEvent != nullptr) cudaEventDestroy(comm->ceColl.synceEvent);
@@ -247,11 +238,9 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 
   // Clean up copy streams and events
   ceDestroyCopyStreams(comm, comm->ceColl.nCopyStreams);
-  if (comm->ceColl.d_kernelReady != nullptr) hipFree(comm->ceColl.d_kernelReady);
-  if (comm->ceColl.d_barrierGenBase != nullptr) hipFree(comm->ceColl.d_barrierGenBase);
-  if (comm->ceColl.d_barrierSync != nullptr) hipFree(comm->ceColl.d_barrierSync);
-  if (comm->ceColl.scatterStream != nullptr) cudaStreamDestroy(comm->ceColl.scatterStream);
-  if (comm->ceColl.synceEvent != nullptr) cudaEventDestroy(comm->ceColl.synceEvent);
+  if (comm->ceColl.d_barrierSync != nullptr) CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
+  if (comm->ceColl.scatterStream != nullptr) CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
+  if (comm->ceColl.synceEvent != nullptr) CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
 
 exit:
   return ret;
@@ -908,8 +897,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
   const size_t shardBytes      = totalBytes / comm->nRanks;
   const size_t shardElems      = count / comm->nRanks;
   const size_t NUM_SLOTS       = NCCL_CE_NUM_SLOTS;
-  const size_t maxChunkBytes = NCCL_CE_AR_MAX_MSG_BYTES / comm->nRanks;
-  size_t chunkBytes = chooseChunkBytes(shardBytes, maxChunkBytes);
+  const size_t maxChunkBytes = (NCCL_CE_AR_MAX_MSG_BYTES) / comm->nRanks;
+  size_t chunkBytes = 0;
+ if (shardBytes <= maxChunkBytes) {
+  chunkBytes = shardBytes;
+ } else {
+  chunkBytes = chooseChunkBytes(shardBytes, maxChunkBytes);
+ }
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = maxChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
@@ -923,7 +917,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
   uint32_t* basePeerSignalAddr[comm->nRanks];
   static uint32_t callCounter = 0;
   callCounter++;
-  uint32_t kReadyValue = 1;
   INFO(NCCL_COLL,"CE AllReduce: rank %d totalBytes %zu chunkBytes=%zu baseChunkElems=%zu tailChunkElems=%zu chunksPerShard=%zu", comm->rank, totalBytes , chunkBytes, baseChunkElems, tailChunkElems, chunksPerShard);
   std::vector<hipStreamBatchMemOpParams> waits(comm->nRanks);
   std::vector<hipStreamBatchMemOpParams> writes(comm->nRanks);
@@ -943,11 +936,9 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
   uint8_t* tmpBuf        = ceColl->ceARTmpBuf;
   uint8_t* outShard           = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes; // kernel writes reduced shard here
   uint32_t* signalBuffer       = ceColl->signalBuffer;
-  uint32_t* d_kernelReady      = ceColl->d_kernelReady;
   void* peerSig = nullptr;
   void* peerSignalAddr = nullptr;
-  int coopLaunch = rcclParamCeCoopLaunch();
-
+  bool fastPath = false;
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;
   size_t recvSlotOffset = 0;
@@ -963,46 +954,52 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
   collArgs.sendBuff = (uint8_t*)sendbuff;
   collArgs.recvBuff = (uint8_t*)recvbuff;
   collArgs.recvWin = recvWin;
-  cudaStream_t ceStream = ceColl->scatterStream;
+  cudaStream_t ceStream;
+  if (totalSteps > 1) {
+    ceStream = ceColl->scatterStream;
+  } else {
+    ceStream = stream;
+  }
+  if (recvWin == nullptr) {
+    NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
+  }
+  fastPath = (recvWin != nullptr) &&
+             (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
   collArgs.recvWin = recvWin;
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
   
+  if (totalSteps > 1) {
+    CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
+  }
   NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
-  CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, stream), ret, fail);
-  CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
   // =========================================================================
-  // STEP 1: LAUNCH PERSISTENT REDUCTION KERNEL (ONCE, BEFORE THE LOOP)
+  // STEP 1: LAUNCH PERSISTENT REDUCTION KERNEL (ONCE, BEFORE THE LOOP), IF TOTAL STEPS > 1
   // =========================================================================
-  {
-    CUDACHECKGOTO(cudaMemsetAsync(d_kernelReady, 0, sizeof(uint32_t), stream), ret, fail);
+
+  if (totalSteps > 1) {
     CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0, 2 * sizeof(uint32_t), stream), ret, fail);
-    {
-      const uint64_t startGen = 1;
-      CUDACHECKGOTO(cudaMemcpyAsync(ceColl->d_barrierGenBase, &startGen,
-                                    sizeof(uint64_t), cudaMemcpyHostToDevice, stream), ret, fail);
-    }
     NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(
       tmpBuf, outShard, comm->nRanks,
       baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
-      signalBuffer, d_kernelReady,
-      kReadyValue, totalSteps,
-      ceColl->d_barrierGenBase, ceColl->d_barrierSync,
-      datatype, op, stream, coopLaunch), ret, fail);
+      signalBuffer, totalSteps, ceColl->d_barrierSync,
+      datatype, op, stream), ret, fail);
   }
+  
 
-  // Phase 1: CE Scatter..
-  NCCLCHECKGOTO(ncclMemOpWaitGte(comm, d_kernelReady, kReadyValue, ceStream), ret, fail);
    for (int ch = 0; ch < chunksPerShard; ch++) {
     INFO(NCCL_COLL,"CE AllReduce: Phase 1: rank %d totalBytes=%zu chunkBytes=%zu ch %d", comm->rank, totalBytes, chunkBytes, ch);
     const int slot = (int)(ch % NUM_SLOTS);
     const bool isTail = (ch == chunksPerShard - 1) && (tailChunkElems > 0);
     const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;
-    mySlotOffset = (slot*(size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
-    for (int r = 0; r < comm->nRanks; r++) {
-      if (r != comm->rank) {
+    if (totalSteps > 1) {
+      mySlotOffset = (slot*(size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r != comm->rank) {
           NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
           basePeerSignalAddr[r] = (uint32_t*)peerSig;
+        }
       }
     }
     // A. Verify that the persistent kernel has fully consumed this slot from the prior loop
@@ -1035,69 +1032,99 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
       batchOpsParams.numOps++;
     }
     NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &collArgs, &batchOpsParams, ceStream), ret, fail);
-    // Phase 2: write signal for reduce to start after all scatter operations are complete
-    for (int r = 0; r < comm->nRanks; r++) {
-      if (r == comm->rank) {
-        writes[r].writeValue.address = &signalBuffer[slot*comm->nRanks + comm->rank];
+    if (totalSteps > 1) {
+      // Phase 2: write signal for reduce to start after all scatter operations are complete
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r == comm->rank) {
+          writes[r].writeValue.address = &signalBuffer[slot*comm->nRanks + comm->rank];
+        }
+        else {
+          writes[r].writeValue.address = basePeerSignalAddr[r];
+        }
       }
-      else {
-        writes[r].writeValue.address = basePeerSignalAddr[r];
-      }
+        CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0));
     }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0));
-  }
-  // Phase 3: wait for all chunks to be reduced before starting allgather
-  if (startCh < 0) startCh = 0;
-  for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
-    const int drainSlot = chunkIndex % NUM_SLOTS;
-    const size_t slotOffset = (drainSlot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
-    // wait signal[drainSlot] == 0 on all ranks using slotOffset for peers
-    for (int r = 0; r < comm->nRanks; r++) {
-    
-      if (r == comm->rank) {
-        waits[r].waitValue.address = &signalBuffer[drainSlot*comm->nRanks + comm->rank];
-      }
-      else {
-        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
-        waits[r].waitValue.address = (uint32_t*)peerSig;
-      }
+    if (totalSteps == 1) {
+      NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
+      NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(
+        tmpBuf, outShard, comm->nRanks,
+        baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
+        signalBuffer, totalSteps, ceColl->d_barrierSync,
+        datatype, op, ceStream), ret, fail);
     }
-    CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
   }
-  // Phase 3: allgather
-  batchOpsParams.numOps = 0;  
-  myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
-  recvSlotOffset = (size_t)comm->rank * shardBytes;
+  if (totalSteps > 1) {
+    // Phase 3: wait for all chunks to be reduced before starting allgather
+    if (startCh < 0) startCh = 0;
+    for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
+      const int drainSlot = chunkIndex % NUM_SLOTS;
+      const size_t slotOffset = (drainSlot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
+      // wait signal[drainSlot] == 0 on all ranks using slotOffset for peers
+      for (int r = 0; r < comm->nRanks; r++) {
+      
+        if (r == comm->rank) {
+          waits[r].waitValue.address = &signalBuffer[drainSlot*comm->nRanks + comm->rank];
+        }
+        else {
+          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
+          waits[r].waitValue.address = (uint32_t*)peerSig;
+        }
+      }
+      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+    }
+  }
+  if (fastPath) {
+    // Phase 3: allgather
+    batchOpsParams.numOps = 0;  
+    myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
+    recvSlotOffset = (size_t)comm->rank * shardBytes;
 
-  batchOpsParams.srcs[batchOpsParams.numOps]  = (void*)outShard;
-  batchOpsParams.dsts[batchOpsParams.numOps]  = (void*)myRecvSlot;
-  batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
-  batchOpsParams.numOps++;
-
-  for (int r = 1; r < comm->nRanks; r++) {
-    int targetRank = (comm->rank + r) % comm->nRanks;
-    void* peerRecvBuff;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, recvSlotOffset,
-                  targetRank, &peerRecvBuff), ret, fail);
     batchOpsParams.srcs[batchOpsParams.numOps]  = (void*)outShard;
-    batchOpsParams.dsts[batchOpsParams.numOps]  = peerRecvBuff;
-    batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes; 
+    batchOpsParams.dsts[batchOpsParams.numOps]  = (void*)myRecvSlot;
+    batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
     batchOpsParams.numOps++;
-  }
-  batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
-            chunkBytes * batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);;
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &collArgs, &batchOpsParams, ceStream), ret, fail);
-  NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
 
-  CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
-  CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
+    for (int r = 1; r < comm->nRanks; r++) {
+      int targetRank = (comm->rank + r) % comm->nRanks;
+      void* peerRecvBuff;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, recvSlotOffset,
+                    targetRank, &peerRecvBuff), ret, fail);
+      batchOpsParams.srcs[batchOpsParams.numOps]  = (void*)outShard;
+      batchOpsParams.dsts[batchOpsParams.numOps]  = peerRecvBuff;
+      batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes; 
+      batchOpsParams.numOps++;
+    }
+    batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
+              chunkBytes * batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);;
+    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &collArgs, &batchOpsParams, ceStream), ret, fail);
+    NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
+  } else {
+    struct ncclCeCollArgs agArgs = {};
+      agArgs.func     = ncclFuncAllGather;
+      agArgs.nElts    = shardBytes / eltSize;
+      agArgs.eltSize  = eltSize;
+      agArgs.sendBuff = outShard;
+      agArgs.recvBuff = tmpBuf;
+      agArgs.sendWin  = comm->ceColl.ceARTmpWin;
+      agArgs.recvWin  = comm->ceColl.ceARTmpWin;
+      NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
+
+    // Phase 5 (slow path only): Local Copy — move assembled result from
+    // tmpBuf to user recvbuff.
+    CUDACHECKGOTO(cudaMemcpyAsync(recvbuff, tmpBuf, totalBytes,
+                                  cudaMemcpyDeviceToDevice, ceStream), ret, fail);
+  }
+
+  if (totalSteps > 1) {
+    CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
+  }
   exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
   return ret;
   fail:
   goto exit;
 }
-
 
 ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   ncclResult_t ret = ncclSuccess;

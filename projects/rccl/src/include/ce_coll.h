@@ -53,13 +53,8 @@ struct ncclCeColl {
   struct ncclDevrWindow* ceARTmpWin;
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
-  uint32_t* d_kernelReady;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
-  // Monotonic anvil generation: host reserves a unique range per kernel launch;
-  // device kernel reads the start value and increments locally per barrier.
-  uint64_t* d_barrierGenBase;
-  uint64_t  barrierGenNext;
   cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
   cudaEvent_t  synceEvent;  // join scatterStream back onto the caller's stream
 };
