@@ -24,7 +24,6 @@ sys.path.insert(0, str(THIS_DIR))
 
 import policy_check as pc  # noqa: E402
 
-
 # ----------------------------- helpers ---------------------------------------
 
 _ISSUE_PATTERNS = [
