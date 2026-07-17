@@ -10,7 +10,6 @@ on:
     # adopt pre-commit.
     paths:
       - "emulation/rocjitsu/**"
-      - "projects/clr/hipamd/src/hrr/skills/**"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
 
@@ -30,9 +29,7 @@ jobs:
           # CI job, add its path here. That's the only change needed.
           sparse-checkout: |
             emulation/rocjitsu
-            projects/clr/hipamd/src/hrr/skills
             .github
-            .pre-commit-config.yaml
 
       - uses: actions/setup-python@v5
         with:
