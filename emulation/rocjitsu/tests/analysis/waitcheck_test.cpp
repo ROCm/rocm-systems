@@ -949,6 +949,17 @@ TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeDsReadUse) {
   EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
 }
 
+TEST(WaitcheckTest, Gfx942AcceptsOrderedDsReadOverwrite) {
+  std::vector<uint32_t> program;
+  append_gfx942_ds_read_b32_v4_v0(program);
+  append_gfx942_ds_read_b32_v4_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeScalarLoadUse) {
   std::vector<uint32_t> program;
   append_gfx942_s_load_dword_s4_s0(program);
@@ -1621,6 +1632,37 @@ TEST(WaitcheckTest, ReportsFlatToVmemLoadOverwriteOnBothPossibleFlatCounters) {
   EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[1].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, ReportsFlatToDsLoadOverwriteOnBothPossibleFlatCounters) {
+  std::vector<uint32_t> program;
+  append_inst(program, flat_load_b32(0));
+  append_inst(program, ds_load_b32(0, 4));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+}
+
+TEST(WaitcheckTest, ReportsDsToFlatLoadOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, ds_load_b32(0, 4));
+  append_inst(program, flat_load_b32(0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
 }
 
 TEST(WaitcheckTest, ReportsVmemToFlatLoadOverwrite) {
@@ -3854,7 +3896,7 @@ TEST(WaitcheckTest, ObjectAnalysisAcceptsZeroWaitForMixedLoadOrderAtJoin) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ObjectAnalysisReportsLoopCarriedDsLoadHazards) {
+TEST(WaitcheckTest, ObjectAnalysisReportsLoopCarriedDsLoadUse) {
   std::vector<uint32_t> program;
   append_inst(program, v_mov_b32(1, 0));
   append_inst(program, ds_load_b32(0, 4));
@@ -3864,15 +3906,11 @@ TEST(WaitcheckTest, ObjectAnalysisReportsLoopCarriedDsLoadHazards) {
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
 
   ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 2u);
+  ASSERT_EQ(report.diagnostics.size(), 1u);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
-  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
-  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
-  EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
-  EXPECT_EQ(report.diagnostics[1].reg.index, 0u);
 }
 
 TEST(WaitcheckTest, ObjectAnalysisAcceptsLoopCarriedDsLoadUseAfterWait) {
