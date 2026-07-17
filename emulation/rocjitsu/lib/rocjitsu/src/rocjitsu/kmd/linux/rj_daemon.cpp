@@ -175,202 +175,238 @@ void mark_error(rj_daemon_t *daemon) {
   rj_vm_request_exit(daemon->vm, "daemon transport failure");
 }
 
-void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
-  uint32_t process_id = 0;
-  const rj_client_pid_t client_pid = peer_pid_for_socket(client_fd);
+enum class RequestDisposition { Continue, Disconnect };
 
-  try {
-    while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
-      RpcHeader header{};
-      UniqueFd input_fd;
-      if (!receive_header_with_fd(client_fd, &header, &input_fd))
-        break;
+class ClientSession {
+public:
+  ClientSession(int client_fd, rj_daemon_t *daemon)
+      : client_fd_(client_fd), daemon_(daemon), client_pid_(peer_pid_for_socket(client_fd)) {}
 
-      if (header.reserved != 0)
-        break;
-
-      switch (header.opcode) {
-      case RPC_HANDSHAKE: {
-        if (process_id != 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
-          goto done;
-
-        if (rj_vm_device_open(daemon->vm, client_pid, &process_id) != ROCJITSU_STATUS_SUCCESS) {
-          RpcHeader response{};
-          response.request_id = header.request_id;
-          response.result = -1;
-          rpc_send_exact(client_fd, &response, sizeof(response));
-          goto done;
-        }
-
-        RpcHandshakeResponse handshake{};
-        handshake.version = kRpcProtocolVersion;
-        if (rj_vm_gpu_id(daemon->vm, &handshake.gpu_id) != ROCJITSU_STATUS_SUCCESS ||
-            rj_vm_gpu_info(daemon->vm, &handshake.gpu_info) != ROCJITSU_STATUS_SUCCESS) {
-          goto done;
-        }
-
-        const char *topology = nullptr;
-        const char *drm = nullptr;
-        if (rj_vm_topology_path(daemon->vm, &topology) != ROCJITSU_STATUS_SUCCESS ||
-            rj_vm_drm_path(daemon->vm, &drm) != ROCJITSU_STATUS_SUCCESS) {
-          goto done;
-        }
-        const size_t topology_length = topology ? std::strlen(topology) : 0;
-        const size_t drm_length = drm ? std::strlen(drm) : 0;
-        constexpr size_t max_payload = std::numeric_limits<uint32_t>::max();
-        if (topology_length > max_payload - sizeof(handshake) ||
-            drm_length > max_payload - sizeof(handshake) - topology_length) {
-          goto done;
-        }
-        handshake.topology_path_len = static_cast<uint32_t>(topology_length);
-        handshake.drm_path_len = static_cast<uint32_t>(drm_length);
-
-        RpcHeader response{};
-        response.request_id = header.request_id;
-        response.payload_bytes =
-            static_cast<uint32_t>(sizeof(handshake) + topology_length + drm_length);
-        if (!rpc_send_exact(client_fd, &response, sizeof(response)) ||
-            !rpc_send_exact(client_fd, &handshake, sizeof(handshake)) ||
-            (topology_length > 0 && !rpc_send_exact(client_fd, topology, topology_length)) ||
-            (drm_length > 0 && !rpc_send_exact(client_fd, drm, drm_length))) {
-          goto done;
-        }
-        break;
-      }
-
-      case RPC_CLOSE: {
-        if (process_id == 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
-          goto done;
-        rj_vm_device_close(daemon->vm, process_id);
-        process_id = 0;
-        RpcHeader response{};
-        response.request_id = header.request_id;
-        rpc_send_exact(client_fd, &response, sizeof(response));
-        goto done;
-      }
-
-      case RPC_MMAP: {
-        if (process_id == 0 || header.payload_bytes != sizeof(RpcMmapRequest) ||
-            input_fd.get() >= 0) {
-          goto done;
-        }
-        RpcMmapRequest request{};
-        if (!rpc_recv_exact(client_fd, &request, sizeof(request)))
-          goto done;
-
-        rj_vm_map_t map{};
-        map.addr = request.addr;
-        map.length = request.length;
-        map.prot = static_cast<uint32_t>(request.prot);
-        map.flags = static_cast<uint32_t>(request.flags);
-        map.offset = request.offset;
-        if (rj_vm_device_map_as(daemon->vm, process_id, &map) != ROCJITSU_STATUS_SUCCESS)
-          goto done;
-
-        RpcHeader response{};
-        response.request_id = header.request_id;
-        response.result = reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED ? -errno : 0;
-        response.payload_bytes = sizeof(RpcMmapResponse);
-        RpcMmapResponse map_response{.mapped_addr = map.mapped_addr};
-        uint8_t response_buffer[sizeof(response) + sizeof(map_response)];
-        std::memcpy(response_buffer, &response, sizeof(response));
-        std::memcpy(response_buffer + sizeof(response), &map_response, sizeof(map_response));
-
-        rj_handle_t backing_memory = -1;
-        if (rj_vm_get_shared_mem_as(daemon->vm, process_id, request.offset, &backing_memory) !=
-            ROCJITSU_STATUS_SUCCESS) {
-          goto done;
-        }
-        const bool sent = backing_memory >= 0
-                              ? send_with_fd_exact(client_fd, response_buffer,
-                                                   sizeof(response_buffer), backing_memory)
-                              : rpc_send_exact(client_fd, response_buffer, sizeof(response_buffer));
-        if (!sent)
-          goto done;
-        break;
-      }
-
-      case RPC_MUNMAP: {
-        if (process_id == 0 || header.payload_bytes != sizeof(RpcMunmapRequest) ||
-            input_fd.get() >= 0) {
-          goto done;
-        }
-        RpcMunmapRequest request{};
-        if (!rpc_recv_exact(client_fd, &request, sizeof(request)))
-          goto done;
-        rj_vm_unmap_t unmap{.addr = request.addr, .length = request.length};
-        if (rj_vm_device_unmap_as(daemon->vm, process_id, &unmap) != ROCJITSU_STATUS_SUCCESS)
-          goto done;
-        RpcHeader response{};
-        response.request_id = header.request_id;
-        if (!rpc_send_exact(client_fd, &response, sizeof(response)))
-          goto done;
-        break;
-      }
-
-      case RPC_IOCTL: {
-        if (process_id == 0 || header.payload_bytes > kMaxPayloadBytes ||
-            header.payload_bytes < sizeof(RpcIoctlRequest)) {
-          goto done;
-        }
-        std::vector<uint8_t> payload(header.payload_bytes);
-        if (!rpc_recv_exact(client_fd, payload.data(), payload.size()))
-          goto done;
-        auto *request = reinterpret_cast<RpcIoctlRequest *>(payload.data());
-        const size_t available_arguments = payload.size() - sizeof(RpcIoctlRequest);
-        void *arguments = payload.data() + sizeof(RpcIoctlRequest);
-        if (request->args_bytes != available_arguments ||
-            !validate_ioctl_payload(request->ioctl_cmd, arguments, request->args_bytes)) {
-          goto done;
-        }
-
-        rj_vm_cmd_t command{};
-        command.cmd = request->ioctl_cmd;
-        command.buf = arguments;
-        command.buf_size = request->args_bytes;
-        command.shared_handle = -1;
-        command.in_handle = input_fd.get();
-        if (rj_vm_execute_as(daemon->vm, process_id, &command) != ROCJITSU_STATUS_SUCCESS)
-          goto done;
-        if (command.in_handle < 0)
-          static_cast<void>(input_fd.release());
-        if (command.buf_size > available_arguments)
-          goto done;
-
-        RpcHeader response{};
-        response.opcode = RPC_IOCTL;
-        response.request_id = header.request_id;
-        response.result = command.result;
-        response.payload_bytes = static_cast<uint32_t>(command.buf_size);
-
-        if (command.shared_handle >= 0) {
-          std::vector<uint8_t> response_buffer(sizeof(response) + command.buf_size);
-          std::memcpy(response_buffer.data(), &response, sizeof(response));
-          if (command.buf_size > 0) {
-            std::memcpy(response_buffer.data() + sizeof(response), command.buf, command.buf_size);
-          }
-          const bool sent = send_with_fd_exact(client_fd, response_buffer.data(),
-                                               response_buffer.size(), command.shared_handle);
-          if (!sent)
-            goto done;
-        } else {
-          if (!rpc_send_exact(client_fd, &response, sizeof(response)) ||
-              (command.buf_size > 0 && !rpc_send_exact(client_fd, command.buf, command.buf_size)))
-            goto done;
-        }
-        break;
-      }
-
-      default:
-        goto done;
-      }
+  ~ClientSession() {
+    try {
+      close_device();
+    } catch (...) {
     }
-  } catch (...) {
   }
 
-done:
-  if (process_id != 0)
-    rj_vm_device_close(daemon->vm, process_id);
+  ClientSession(const ClientSession &) = delete;
+  ClientSession &operator=(const ClientSession &) = delete;
+
+  void run(std::stop_token stop) {
+    try {
+      while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
+        RpcHeader header{};
+        UniqueFd input_fd;
+        if (!receive_header_with_fd(client_fd_, &header, &input_fd))
+          break;
+
+        if (header.reserved != 0 ||
+            handle_request(header, input_fd) == RequestDisposition::Disconnect) {
+          break;
+        }
+      }
+    } catch (...) {
+    }
+    close_device();
+  }
+
+private:
+  RequestDisposition handle_request(const RpcHeader &header, UniqueFd &input_fd) {
+    switch (header.opcode) {
+    case RPC_HANDSHAKE:
+      return handle_handshake(header, input_fd);
+    case RPC_CLOSE:
+      return handle_close(header, input_fd);
+    case RPC_MMAP:
+      return handle_mmap(header, input_fd);
+    case RPC_MUNMAP:
+      return handle_munmap(header, input_fd);
+    case RPC_IOCTL:
+      return handle_ioctl(header, input_fd);
+    default:
+      return RequestDisposition::Disconnect;
+    }
+  }
+
+  RequestDisposition handle_handshake(const RpcHeader &header, const UniqueFd &input_fd) {
+    if (process_id_ != 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
+      return RequestDisposition::Disconnect;
+
+    if (rj_vm_device_open(daemon_->vm, client_pid_, &process_id_) != ROCJITSU_STATUS_SUCCESS) {
+      RpcHeader response{};
+      response.request_id = header.request_id;
+      response.result = -1;
+      rpc_send_exact(client_fd_, &response, sizeof(response));
+      return RequestDisposition::Disconnect;
+    }
+
+    RpcHandshakeResponse handshake{};
+    handshake.version = kRpcProtocolVersion;
+    if (rj_vm_gpu_id(daemon_->vm, &handshake.gpu_id) != ROCJITSU_STATUS_SUCCESS ||
+        rj_vm_gpu_info(daemon_->vm, &handshake.gpu_info) != ROCJITSU_STATUS_SUCCESS) {
+      return RequestDisposition::Disconnect;
+    }
+
+    const char *topology = nullptr;
+    const char *drm = nullptr;
+    if (rj_vm_topology_path(daemon_->vm, &topology) != ROCJITSU_STATUS_SUCCESS ||
+        rj_vm_drm_path(daemon_->vm, &drm) != ROCJITSU_STATUS_SUCCESS) {
+      return RequestDisposition::Disconnect;
+    }
+    const size_t topology_length = topology ? std::strlen(topology) : 0;
+    const size_t drm_length = drm ? std::strlen(drm) : 0;
+    constexpr size_t max_payload = std::numeric_limits<uint32_t>::max();
+    if (topology_length > max_payload - sizeof(handshake) ||
+        drm_length > max_payload - sizeof(handshake) - topology_length) {
+      return RequestDisposition::Disconnect;
+    }
+    handshake.topology_path_len = static_cast<uint32_t>(topology_length);
+    handshake.drm_path_len = static_cast<uint32_t>(drm_length);
+
+    RpcHeader response{};
+    response.request_id = header.request_id;
+    response.payload_bytes =
+        static_cast<uint32_t>(sizeof(handshake) + topology_length + drm_length);
+    const bool sent =
+        rpc_send_exact(client_fd_, &response, sizeof(response)) &&
+        rpc_send_exact(client_fd_, &handshake, sizeof(handshake)) &&
+        (topology_length == 0 || rpc_send_exact(client_fd_, topology, topology_length)) &&
+        (drm_length == 0 || rpc_send_exact(client_fd_, drm, drm_length));
+    return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
+  }
+
+  RequestDisposition handle_close(const RpcHeader &header, const UniqueFd &input_fd) {
+    if (process_id_ == 0 || header.payload_bytes != 0 || input_fd.get() >= 0)
+      return RequestDisposition::Disconnect;
+
+    close_device();
+    RpcHeader response{};
+    response.request_id = header.request_id;
+    rpc_send_exact(client_fd_, &response, sizeof(response));
+    return RequestDisposition::Disconnect;
+  }
+
+  RequestDisposition handle_mmap(const RpcHeader &header, const UniqueFd &input_fd) {
+    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMmapRequest) || input_fd.get() >= 0) {
+      return RequestDisposition::Disconnect;
+    }
+    RpcMmapRequest request{};
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+      return RequestDisposition::Disconnect;
+
+    rj_vm_map_t map{};
+    map.addr = request.addr;
+    map.length = request.length;
+    map.prot = static_cast<uint32_t>(request.prot);
+    map.flags = static_cast<uint32_t>(request.flags);
+    map.offset = request.offset;
+    if (rj_vm_device_map_as(daemon_->vm, process_id_, &map) != ROCJITSU_STATUS_SUCCESS)
+      return RequestDisposition::Disconnect;
+
+    RpcHeader response{};
+    response.request_id = header.request_id;
+    response.result = reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED ? -errno : 0;
+    response.payload_bytes = sizeof(RpcMmapResponse);
+    RpcMmapResponse map_response{.mapped_addr = map.mapped_addr};
+    uint8_t response_buffer[sizeof(response) + sizeof(map_response)];
+    std::memcpy(response_buffer, &response, sizeof(response));
+    std::memcpy(response_buffer + sizeof(response), &map_response, sizeof(map_response));
+
+    rj_handle_t backing_memory = -1;
+    if (rj_vm_get_shared_mem_as(daemon_->vm, process_id_, request.offset, &backing_memory) !=
+        ROCJITSU_STATUS_SUCCESS) {
+      return RequestDisposition::Disconnect;
+    }
+    const bool sent = backing_memory >= 0
+                          ? send_with_fd_exact(client_fd_, response_buffer, sizeof(response_buffer),
+                                               backing_memory)
+                          : rpc_send_exact(client_fd_, response_buffer, sizeof(response_buffer));
+    return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
+  }
+
+  RequestDisposition handle_munmap(const RpcHeader &header, const UniqueFd &input_fd) {
+    if (process_id_ == 0 || header.payload_bytes != sizeof(RpcMunmapRequest) ||
+        input_fd.get() >= 0) {
+      return RequestDisposition::Disconnect;
+    }
+    RpcMunmapRequest request{};
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+      return RequestDisposition::Disconnect;
+    rj_vm_unmap_t unmap{.addr = request.addr, .length = request.length};
+    if (rj_vm_device_unmap_as(daemon_->vm, process_id_, &unmap) != ROCJITSU_STATUS_SUCCESS)
+      return RequestDisposition::Disconnect;
+    RpcHeader response{};
+    response.request_id = header.request_id;
+    return rpc_send_exact(client_fd_, &response, sizeof(response)) ? RequestDisposition::Continue
+                                                                   : RequestDisposition::Disconnect;
+  }
+
+  RequestDisposition handle_ioctl(const RpcHeader &header, UniqueFd &input_fd) {
+    if (process_id_ == 0 || header.payload_bytes > kMaxPayloadBytes ||
+        header.payload_bytes < sizeof(RpcIoctlRequest)) {
+      return RequestDisposition::Disconnect;
+    }
+    std::vector<uint8_t> payload(header.payload_bytes);
+    if (!rpc_recv_exact(client_fd_, payload.data(), payload.size()))
+      return RequestDisposition::Disconnect;
+    auto *request = reinterpret_cast<RpcIoctlRequest *>(payload.data());
+    const size_t available_arguments = payload.size() - sizeof(RpcIoctlRequest);
+    void *arguments = payload.data() + sizeof(RpcIoctlRequest);
+    if (request->args_bytes != available_arguments ||
+        !validate_ioctl_payload(request->ioctl_cmd, arguments, request->args_bytes)) {
+      return RequestDisposition::Disconnect;
+    }
+
+    rj_vm_cmd_t command{};
+    command.cmd = request->ioctl_cmd;
+    command.buf = arguments;
+    command.buf_size = request->args_bytes;
+    command.shared_handle = -1;
+    command.in_handle = input_fd.get();
+    if (rj_vm_execute_as(daemon_->vm, process_id_, &command) != ROCJITSU_STATUS_SUCCESS)
+      return RequestDisposition::Disconnect;
+    if (command.in_handle < 0)
+      static_cast<void>(input_fd.release());
+    if (command.buf_size > available_arguments)
+      return RequestDisposition::Disconnect;
+
+    RpcHeader response{};
+    response.opcode = RPC_IOCTL;
+    response.request_id = header.request_id;
+    response.result = command.result;
+    response.payload_bytes = static_cast<uint32_t>(command.buf_size);
+
+    bool sent = false;
+    if (command.shared_handle >= 0) {
+      std::vector<uint8_t> response_buffer(sizeof(response) + command.buf_size);
+      std::memcpy(response_buffer.data(), &response, sizeof(response));
+      if (command.buf_size > 0) {
+        std::memcpy(response_buffer.data() + sizeof(response), command.buf, command.buf_size);
+      }
+      sent = send_with_fd_exact(client_fd_, response_buffer.data(), response_buffer.size(),
+                                command.shared_handle);
+    } else {
+      sent = rpc_send_exact(client_fd_, &response, sizeof(response)) &&
+             (command.buf_size == 0 || rpc_send_exact(client_fd_, command.buf, command.buf_size));
+    }
+    return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
+  }
+
+  void close_device() {
+    if (process_id_ == 0)
+      return;
+    rj_vm_device_close(daemon_->vm, std::exchange(process_id_, 0));
+  }
+
+  const int client_fd_;
+  rj_daemon_t *const daemon_;
+  const rj_client_pid_t client_pid_;
+  uint32_t process_id_ = 0;
+};
+
+void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
+  ClientSession session(client_fd, daemon);
+  session.run(stop);
 }
 
 void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
