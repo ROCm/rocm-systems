@@ -2,7 +2,9 @@ name: RCCL cluster CI
 
 # Runs the RCCL suites via rccl-suite.yml, each on the cluster it needs. A
 # per-cluster provision job warms a shared ROCm + OpenMPI cache, then that
-# cluster's suites fan out reusing it, and a cleanup job GCs the ROCm build.
+# cluster's suites fan out reusing it, and a cleanup job releases this run's ROCm
+# reference. The resolved ROCm version stays warm across runs; fetch-rocm.sh
+# evicts older, unreferenced nightly/rc versions on a version bump.
 # ROCm is a version prefix (default "7.14"); lib/fetch-rocm.sh picks the greatest
 # available build. See each job / component for details.
 
@@ -120,9 +122,9 @@ jobs:
           echo "GIN build/infra failed; see the GIN job logs." >&2
           exit 1
 
-  # --- Per-cluster cleanup: release this run's ROCm reference (always) and GC the
-  # build if unreferenced. rocm-ref.sh only touches the local cache (no network).
-  # `needs` the cluster's provision + all its suites. ---
+  # --- Per-cluster cleanup: release this run's ROCm reference (always). The tree
+  # stays warm; a later version bump prunes it in fetch-rocm.sh. rocm-ref.sh only
+  # touches the local cache (no network). `needs` provision + all its suites. ---
   cleanup-ruby:
     name: Cleanup ROCm (ruby)
     needs: [provision-ruby, device-api]
@@ -130,8 +132,6 @@ jobs:
     runs-on: ruby-linux-slurm-scale-runner
     env:
       ROCM_RELEASE: ${{ needs.provision-ruby.outputs.rocm_release }}
-      # Resolved channel drives GC: rocm-ref.sh only deletes nightly builds;
-      # RC/release trees are kept warm on the shared cache.
       ROCM_RELEASE_CHANNEL: ${{ needs.provision-ruby.outputs.rocm_channel }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       RCCL_DEVICE_API_CACHE: /apps/rccl-ci
@@ -142,12 +142,12 @@ jobs:
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
 
-      - name: Release ROCm reference and GC if unused
+      - name: Release ROCm reference
         env:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release-gc
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
 
   cleanup-tw:
     name: Cleanup ROCm (Tensorwave)
@@ -165,9 +165,9 @@ jobs:
         with:
           sparse-checkout: projects/rccl/tools/ci
 
-      - name: Release ROCm reference and GC if unused
+      - name: Release ROCm reference
         env:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release-gc
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release

@@ -6,7 +6,7 @@ name: RCCL provision
 # instead of each re-fetching/rebuilding. Reusable: rccl-ci.yml calls it once per
 # cluster with that cluster's runner label / cache_root / partition. Exposes the
 # resolved ROCm version + channel as outputs for the suites
-# (to locate the same cached tree) and for cleanup (to decide GC).
+# (to locate the same cached tree) and for cleanup (to release its reference).
 on:
   workflow_call:
     inputs:
@@ -45,7 +45,7 @@ on:
         description: 'Exact ROCm version resolved by fetch-rocm.sh.'
         value: ${{ jobs.provision-rocm.outputs.rocm_release }}
       rocm_channel:
-        description: 'Resolved channel (release|prerelease|nightly), for cleanup GC.'
+        description: 'Resolved channel (release|prerelease|nightly), recorded for reference.'
         value: ${{ jobs.provision-rocm.outputs.rocm_channel }}
 
 permissions:

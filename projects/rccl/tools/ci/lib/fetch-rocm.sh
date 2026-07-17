@@ -3,6 +3,11 @@
 # (ROCM_PATH, ROCM_RELEASE) for later stages. Bash (not
 # install_rocm_from_artifacts.py) because the head node only has Python 3.9.
 #
+# The resolved version is kept warm; after fetching it we prune other cached
+# nightly/rc versions that no run still references (GA is never auto-pruned).
+# So repeat runs on one version download once, and a nightly/rc bump fetches the
+# new tree and evicts the old.
+#
 # Resolves the "best" tarball for a requested version via a stability-first
 # cascade over three public tarball-multi-arch CDN indexes (no token needed):
 #
@@ -135,6 +140,54 @@ _patch_rocm_abs_libpaths() {
   done < <(grep -rlZ '/usr/lib64/lib[^";[:space:]]*\.so' "${cmake_dir}" 2>/dev/null)
 }
 
+# True for a GA/release tree, which we never auto-prune. Uses the recorded
+# channel; if .stamp is missing, a bare X.Y.Z version is treated as GA.
+#   $1 = tree dir   $2 = version
+_is_durable_version() {
+  local dir="$1" ver="$2" ch
+  ch="$(sed -n 's/^channel=//p' "${dir}/.stamp" 2>/dev/null || true)"
+  [[ "${ch}" == "release" ]] && return 0
+  [[ -z "${ch}" && "${ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && return 0
+  return 1
+}
+
+# Evict cached nightly/rc trees other than the one we just resolved, so a version
+# bump self-cleans. Skips GA (never pruned) and any tree still referenced by a
+# run. Each candidate is locked non-blocking; a busy lock means skip this round.
+#   $1 = keep (the current ROCM_PATH to preserve)
+_prune_stale_versions() {
+  local keep="$1" rocm_root="${CACHE_DIR}/rocm"
+  [[ -d "${rocm_root}" ]] || return 0
+  local d ver live lock_fd
+  for d in "${rocm_root}"/rocm-*; do
+    [[ -d "${d}" ]] || continue          # no matches (glob stayed literal)
+    [[ "${d}" == *.refs ]] && continue   # skip the sidecar refs dirs
+    [[ "${d}" == "${keep}" ]] && continue
+    ver="${d##*/rocm-}"
+    if _is_durable_version "${d}" "${ver}"; then
+      echo "==> Keeping GA/release ROCm ${ver} (never auto-pruned)"
+      continue
+    fi
+    exec {lock_fd}>"${CACHE_DIR}/downloads/.lock-${ver}"
+    if flock -n "${lock_fd}"; then
+      live=0
+      if [[ -d "${d}.refs" ]]; then
+        live="$(find "${d}.refs" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')"
+      fi
+      if [[ "${live}" -eq 0 ]]; then
+        echo "==> Pruning stale ROCm ${ver} at ${d}"
+        rm -rf "${d}" "${d}.refs"
+      else
+        echo "==> Keeping ROCm ${ver} (${live} live reference(s))"
+      fi
+      flock -u "${lock_fd}"
+    else
+      echo "==> Skipping prune of ROCm ${ver} (in use by another run)"
+    fi
+    exec {lock_fd}>&-
+  done
+}
+
 # --- ROCM_PATH_OVERRIDE: explicit tree, no resolve/download -----------------
 
 mkdir -p "${WORKDIR}/.ci-out"
@@ -253,6 +306,9 @@ fi
 
 # Sanitize RHEL-baked absolute lib paths in the resolved tree (see helper above).
 _patch_rocm_abs_libpaths "${ROCM_PATH}"
+
+# Keep only this version warm; evict other unreferenced trees (see helper above).
+_prune_stale_versions "${ROCM_PATH}"
 
 {
   printf 'export ROCM_RELEASE=%q\n' "${ROCM_RELEASE}"
