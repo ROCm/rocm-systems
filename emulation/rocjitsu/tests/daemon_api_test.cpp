@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/daemon/rj_daemon.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/rocjitsu.h"
 
 #include <chrono>
 #include <cstring>
