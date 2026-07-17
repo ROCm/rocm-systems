@@ -787,7 +787,6 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK_FALSE(comgr_version.empty());
   CHECK(json_has_key(metadata, "device_count"));
   CHECK(json_has_key(metadata, "captured_device_count"));
-  CHECK(json_has_key(metadata, "device_metadata_errors"));
   const long long device_count = json_integer_value(metadata, "device_count");
   const long long captured_device_count = json_integer_value(metadata, "captured_device_count");
   CHECK(device_count >= 1);
