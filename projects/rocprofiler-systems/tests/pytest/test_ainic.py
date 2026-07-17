@@ -30,6 +30,11 @@ from pathlib import Path
 from conftest import RocprofsysTest
 from rocprofsys import RocprofsysConfig
 
+# AI NIC support is only compiled in when AMD SMI >= 26.3.
+pytestmark = [
+    pytest.mark.amdsmi_min_version("26.3"),
+]
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -59,7 +64,6 @@ AINIC_PERFETTO_COUNTER_NAMES = [
 # =============================================================================
 # Fixtures
 # =============================================================================
-
 
 @pytest.fixture
 def ainic_perf_env() -> dict[str, str]:
