@@ -588,6 +588,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+#ifdef __linux__
+  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+#endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
   if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {
