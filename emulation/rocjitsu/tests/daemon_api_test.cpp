@@ -17,6 +17,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -131,6 +132,45 @@ void close_session(int fd, uint32_t request_id = 2) {
   ASSERT_TRUE(rpc_recv_exact(fd, &response, sizeof(response)));
   EXPECT_EQ(response.request_id, request_id);
   close(fd);
+}
+
+bool send_ioctl_request(int fd, uint32_t request_id, uint32_t command, const void *arguments,
+                        size_t argument_size, const void *inline_data = nullptr,
+                        size_t inline_size = 0) {
+  constexpr size_t max_arguments = UINT32_MAX - sizeof(RpcIoctlRequest);
+  if (argument_size > max_arguments || inline_size > max_arguments - argument_size)
+    return false;
+
+  const auto args_bytes = static_cast<uint32_t>(argument_size + inline_size);
+  RpcHeader header{};
+  header.opcode = RPC_IOCTL;
+  header.request_id = request_id;
+  header.payload_bytes = static_cast<uint32_t>(sizeof(RpcIoctlRequest) + args_bytes);
+  RpcIoctlRequest request{.ioctl_cmd = command, .args_bytes = args_bytes};
+  return rpc_send_exact(fd, &header, sizeof(header)) &&
+         rpc_send_exact(fd, &request, sizeof(request)) &&
+         (argument_size == 0 || rpc_send_exact(fd, arguments, argument_size)) &&
+         (inline_size == 0 || rpc_send_exact(fd, inline_data, inline_size));
+}
+
+void expect_wait_events_payload_rejected(TestDaemon &daemon,
+                                         const std::filesystem::path &socket_path,
+                                         uint32_t num_events, size_t inline_size) {
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+
+  kfd_ioctl_wait_events_args arguments{};
+  arguments.num_events = num_events;
+  arguments.timeout = 0;
+  std::vector<uint8_t> inline_events(inline_size);
+  ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_WAIT_EVENTS, &arguments, sizeof(arguments),
+                                 inline_events.data(), inline_events.size()));
+
+  RpcHeader response{};
+  EXPECT_FALSE(rpc_recv_exact(client, &response, sizeof(response)));
+  EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+  close(client);
 }
 
 TEST(DaemonApi, RejectsInvalidArguments) {
@@ -343,6 +383,59 @@ TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
     EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
   }
   EXPECT_FALSE(std::filesystem::exists(socket_path));
+}
+
+TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+
+  kfd_ioctl_get_version_args arguments{};
+  ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_GET_VERSION, &arguments, sizeof(arguments)));
+
+  RpcHeader response{};
+  ASSERT_TRUE(rpc_recv_exact(client, &response, sizeof(response)));
+  EXPECT_EQ(response.opcode, RPC_IOCTL);
+  EXPECT_EQ(response.request_id, 2u);
+  EXPECT_EQ(response.result, 0);
+  ASSERT_EQ(response.payload_bytes, sizeof(arguments));
+  ASSERT_TRUE(rpc_recv_exact(client, &arguments, sizeof(arguments)));
+  EXPECT_EQ(arguments.major_version, KFD_IOCTL_MAJOR_VERSION);
+  EXPECT_EQ(arguments.minor_version, KFD_IOCTL_MINOR_VERSION);
+  EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+  close_session(client, 3);
+}
+
+TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  expect_wait_events_payload_rejected(daemon, socket_path, 2, sizeof(kfd_event_data));
+}
+
+TEST(DaemonApi, RejectsWaitEventsInlineArrayOneByteShortWithoutStoppingServer) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  expect_wait_events_payload_rejected(daemon, socket_path, 1, sizeof(kfd_event_data) - 1);
+}
+
+TEST(DaemonApi, RejectsWaitEventsInlineArrayWithTrailingByteWithoutStoppingServer) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  expect_wait_events_payload_rejected(daemon, socket_path, 1, sizeof(kfd_event_data) + 1);
 }
 
 TEST(DaemonApi, DoesNotRemoveAReplacementSocketEntry) {
