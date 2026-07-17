@@ -16,7 +16,15 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+
+#if __has_include("hsa_ext_amd.h")
 #include "hsa_ext_amd.h"
+#elif __has_include("hsa/hsa_ext_amd.h")
+#include "hsa/hsa_ext_amd.h"
+#else
+#error "ROCr HSA extension header was not found"
+#endif
+
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
