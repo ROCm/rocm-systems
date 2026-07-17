@@ -63,6 +63,10 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
     ASSERT_TRUE(srsrc.has_value()) << tc.label;
     EXPECT_EQ(*srsrc, (RegisterRef{RegClass::SGPR, 4, 4})) << tc.label;
 
+    const auto vdata = inst->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(vdata.has_value()) << tc.label;
+    EXPECT_EQ(*vdata, (RegisterRef{RegClass::VGPR, 68, 1})) << tc.label;
+
     if (mode.width == 1) {
       const std::string disasm = inst->disassemble();
       EXPECT_NE(disasm.find("v63"), std::string::npos) << disasm;
@@ -70,6 +74,18 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
       EXPECT_NE(disasm.find("s[4:7]"), std::string::npos) << disasm;
       EXPECT_EQ(disasm.find("s[1:4]"), std::string::npos) << disasm;
     }
+  }
+
+  const bool has_acc = tc.arch == ROCJITSU_CODE_ARCH_CDNA2 || tc.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                       tc.arch == ROCJITSU_CODE_ARCH_CDNA4;
+  if (has_acc) {
+    // Word 1 bit 23 selects the AccVGPR bank for VDATA on CDNA2+.
+    const uint32_t words[] = {tc.encoding, 0x8081443fu};
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr) << tc.label;
+    const auto vdata = inst->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(vdata.has_value()) << tc.label;
+    EXPECT_EQ(*vdata, (RegisterRef{RegClass::ACC_VGPR, 68, 1})) << tc.label;
   }
 }
 

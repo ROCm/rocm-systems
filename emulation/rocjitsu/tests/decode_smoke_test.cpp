@@ -822,4 +822,76 @@ TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 136, 16}));
 }
 
+TEST(Cdna3DecodeTest, MfmaAccBitsSelectIndependentMultiplicandBanks) {
+  struct TestCase {
+    uint32_t high_word;
+    RegClass src0_class;
+    RegClass src1_class;
+  };
+  constexpr TestCase cases[] = {
+      {0x0E22A554u, RegClass::ACC_VGPR, RegClass::VGPR},
+      {0x1622A554u, RegClass::VGPR, RegClass::ACC_VGPR},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &tc : cases) {
+    const uint32_t words[] = {0xD3E08088u, tc.high_word};
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
+
+    InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({tc.src0_class, 84, 2})) << inst->disassemble();
+    EXPECT_TRUE(def_use.uses.contains({tc.src1_class, 82, 2})) << inst->disassemble();
+  }
+}
+
+TEST(Cdna3DecodeTest, MfmaAccCdPreservesInlineConstantSrc2) {
+  const uint32_t words[] = {
+      0xD3E08088u,
+      0x1A02A554u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
+  EXPECT_EQ(inst->disassemble(), "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], 0");
+}
+
+TEST(Cdna2DecodeTest, MemoryAccBitSelectsAccumulatorDestination) {
+  struct TestCase {
+    const char *mnemonic;
+    std::array<uint32_t, 2> vgpr_words;
+    std::array<uint32_t, 2> accvgpr_words;
+    uint8_t width;
+  };
+  constexpr TestCase cases[] = {
+      {"global_load_dword", {0xDC508000u, 0x057F0002u}, {0xDC508000u, 0x05FF0002u}, 1},
+      {"scratch_load_dword", {0xDC504000u, 0x05020000u}, {0xDC504000u, 0x05820000u}, 1},
+      {"image_load", {0xF0000100u, 0x00020502u}, {0xF0010100u, 0x00020502u}, 4},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &tc : cases) {
+    std::unique_ptr<Instruction> vgpr_inst(decoder->decode(tc.vgpr_words.data()));
+    ASSERT_NE(vgpr_inst, nullptr) << tc.mnemonic;
+    ASSERT_EQ(vgpr_inst->mnemonic(), tc.mnemonic);
+    const auto vgpr_dst = vgpr_inst->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(vgpr_dst.has_value()) << vgpr_inst->disassemble();
+    EXPECT_EQ(*vgpr_dst, (RegisterRef{RegClass::VGPR, 5, tc.width})) << vgpr_inst->disassemble();
+
+    std::unique_ptr<Instruction> accvgpr_inst(decoder->decode(tc.accvgpr_words.data()));
+    ASSERT_NE(accvgpr_inst, nullptr) << tc.mnemonic;
+    ASSERT_EQ(accvgpr_inst->mnemonic(), tc.mnemonic);
+    const auto accvgpr_dst = accvgpr_inst->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(accvgpr_dst.has_value()) << accvgpr_inst->disassemble();
+    EXPECT_EQ(*accvgpr_dst, (RegisterRef{RegClass::ACC_VGPR, 5, tc.width}))
+        << accvgpr_inst->disassemble();
+  }
+}
+
 } // namespace

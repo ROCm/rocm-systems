@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Codegen regressions for semantic legacy buffer operands."""
+"""Codegen regressions for semantic register operands."""
 
 from amdisa.codegen._generator import CodeGenerator
 
@@ -105,7 +105,13 @@ def test_mfma_acc_cd_selects_accvgpr_c_and_d_banks():
     )
     assert src2_expr == (
         '(reinterpret_cast<const OpEncoding*>(inst)->src2 + '
-        '(reinterpret_cast<const OpEncoding*>(inst)->acc_cd ? '
+        '((reinterpret_cast<const OpEncoding*>(inst)->acc_cd && '
+        'reinterpret_cast<const OpEncoding*>(inst)->src2 >= '
+        'OpSelSrcVgprOrAccvgprOrConst::'
+        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN && '
+        'reinterpret_cast<const OpEncoding*>(inst)->src2 <= '
+        'OpSelSrcVgprOrAccvgprOrConst::'
+        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX) ? '
         '(OpSelSrcVgprOrAccvgprOrConst::'
         'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN - '
         'OpSelSrcVgprOrAccvgprOrConst::'

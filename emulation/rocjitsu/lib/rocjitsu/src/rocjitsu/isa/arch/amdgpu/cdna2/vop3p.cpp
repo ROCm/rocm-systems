@@ -781,7 +781,11 @@ VMfmaF3232x32x1f32Vop3pMfma::VMfmaF3232x32x1f32Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(1024, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -828,7 +832,11 @@ VMfmaF3216x16x1f32Vop3pMfma::VMfmaF3216x16x1f32Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -875,7 +883,11 @@ VMfmaF324x4x1f32Vop3pMfma::VMfmaF324x4x1f32Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -922,7 +934,11 @@ VMfmaF3232x32x2f32Vop3pMfma::VMfmaF3232x32x2f32Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -969,7 +985,11 @@ VMfmaF3216x16x4f32Vop3pMfma::VMfmaF3216x16x4f32Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1016,7 +1036,11 @@ VMfmaF3232x32x4f16Vop3pMfma::VMfmaF3232x32x4f16Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(1024, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1063,7 +1087,11 @@ VMfmaF3216x16x4f16Vop3pMfma::VMfmaF3216x16x4f16Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1110,7 +1138,11 @@ VMfmaF324x4x4f16Vop3pMfma::VMfmaF324x4x4f16Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1157,7 +1189,11 @@ VMfmaF3232x32x8f16Vop3pMfma::VMfmaF3232x32x8f16Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1204,7 +1240,11 @@ VMfmaF3216x16x16f16Vop3pMfma::VMfmaF3216x16x16f16Vop3pMfma(const MachineInst *in
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1251,7 +1291,11 @@ VMfmaI3232x32x4i8Vop3pMfma::VMfmaI3232x32x4i8Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(1024, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1298,7 +1342,11 @@ VMfmaI3216x16x4i8Vop3pMfma::VMfmaI3216x16x4i8Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1345,7 +1393,11 @@ VMfmaI324x4x4i8Vop3pMfma::VMfmaI324x4x4i8Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1392,7 +1444,11 @@ VMfmaI3232x32x8i8Vop3pMfma::VMfmaI3232x32x8i8Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1439,7 +1495,11 @@ VMfmaI3216x16x16i8Vop3pMfma::VMfmaI3216x16x16i8Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1486,7 +1546,11 @@ VMfmaF3232x32x4bf161kVop3pMfma::VMfmaF3232x32x4bf161kVop3pMfma(const MachineInst
                  : 0))),
       src2(1024, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1533,7 +1597,11 @@ VMfmaF3216x16x4bf161kVop3pMfma::VMfmaF3216x16x4bf161kVop3pMfma(const MachineInst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1580,7 +1648,11 @@ VMfmaF324x4x4bf161kVop3pMfma::VMfmaF324x4x4bf161kVop3pMfma(const MachineInst *in
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1627,7 +1699,11 @@ VMfmaF3232x32x8bf161kVop3pMfma::VMfmaF3232x32x8bf161kVop3pMfma(const MachineInst
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1674,7 +1750,11 @@ VMfmaF3216x16x16bf161kVop3pMfma::VMfmaF3216x16x16bf161kVop3pMfma(const MachineIn
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1721,7 +1801,11 @@ VMfmaF3232x32x2bf16Vop3pMfma::VMfmaF3232x32x2bf16Vop3pMfma(const MachineInst *in
                  : 0))),
       src2(1024, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1768,7 +1852,11 @@ VMfmaF3216x16x2bf16Vop3pMfma::VMfmaF3216x16x2bf16Vop3pMfma(const MachineInst *in
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1815,7 +1903,11 @@ VMfmaF324x4x2bf16Vop3pMfma::VMfmaF324x4x2bf16Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1862,7 +1954,11 @@ VMfmaF3232x32x4bf16Vop3pMfma::VMfmaF3232x32x4bf16Vop3pMfma(const MachineInst *in
                  : 0))),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1909,7 +2005,11 @@ VMfmaF3216x16x8bf16Vop3pMfma::VMfmaF3216x16x8bf16Vop3pMfma(const MachineInst *in
                  : 0))),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -1956,7 +2056,11 @@ VMfmaF6416x16x4f64Vop3pMfma::VMfmaF6416x16x4f64Vop3pMfma(const MachineInst *inst
                  : 0))),
       src2(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {
@@ -2002,7 +2106,11 @@ VMfmaF644x4x4f64Vop3pMfma::VMfmaF644x4x4f64Vop3pMfma(const MachineInst *inst)
                  : 0))),
       src2(64, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
            (reinterpret_cast<const OpEncoding *>(inst)->src2 +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
+            ((reinterpret_cast<const OpEncoding *>(inst)->acc_cd &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 >=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN &&
+              reinterpret_cast<const OpEncoding *>(inst)->src2 <=
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX)
                  ? (OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN -
                     OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN)
                  : 0))) {

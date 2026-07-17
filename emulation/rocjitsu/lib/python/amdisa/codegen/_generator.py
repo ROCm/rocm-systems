@@ -5826,12 +5826,20 @@ class CodeGenerator:
                 opnd_name == 'src2'
                 and operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST'
             ):
+                vgpr_min = (
+                    'OpSelSrcVgprOrAccvgprOrConst::'
+                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN'
+                )
+                vgpr_max = (
+                    'OpSelSrcVgprOrAccvgprOrConst::'
+                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX'
+                )
                 expr = (
-                    f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc_cd ? '
+                    f'({expr} + ((reinterpret_cast<const OpEncoding*>(inst)->acc_cd '
+                    f'&& {expr} >= {vgpr_min} && {expr} <= {vgpr_max}) ? '
                     '(OpSelSrcVgprOrAccvgprOrConst::'
                     'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN - '
-                    'OpSelSrcVgprOrAccvgprOrConst::'
-                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN) : 0))'
+                    f'{vgpr_min}) : 0))'
                 )
         if packed_16bit:
             expr = f'static_cast<unsigned short>({expr})'
