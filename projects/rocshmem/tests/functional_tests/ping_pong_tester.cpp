@@ -30,10 +30,17 @@ using namespace rocshmem;
 
 /******************************************************************************
  * DEVICE TEST KERNEL
+ *
+ * op_type selects the put method:
+ *   0 — rocshmem_ctx_int_p (scalar immediate, 4B fixed)
+ *   1 — rocshmem_ctx_putmem_nbi from symmetric source (4B fixed)
+ *   2 — rocshmem_ctx_putmem_signal with SIGNAL_ADD (variable msg size)
  *****************************************************************************/
 __global__ void PingPongTest(int loop, int skip, long long int *start_time,
                              long long int *end_time, int *r_buf,
-                             ShmemContextType ctx_type) {
+                             int *s_buf, char *data_s_buf, char *data_r_buf,
+                             uint64_t *sig_addr, size_t size,
+                             unsigned op_type, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
@@ -48,14 +55,45 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
         start_time[wg_id] = wall_clock64();
       }
 
-      if (pe == 0) {
-        rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 1);
-        rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
-                                 i + 1);
+      int target = 1 - pe;
+
+      if (op_type == 2) {
+        uint64_t expected = static_cast<uint64_t>(i + 1);
+        if (pe == 0) {
+          rocshmem_ctx_putmem_signal(ctx, data_r_buf, data_s_buf, size,
+                                     sig_addr, 1, ROCSHMEM_SIGNAL_ADD, target);
+          rocshmem_ulong_wait_until(
+              reinterpret_cast<unsigned long *>(sig_addr),
+              ROCSHMEM_CMP_GE, expected);
+        } else {
+          rocshmem_ulong_wait_until(
+              reinterpret_cast<unsigned long *>(sig_addr),
+              ROCSHMEM_CMP_GE, expected);
+          rocshmem_ctx_putmem_signal(ctx, data_r_buf, data_s_buf, size,
+                                     sig_addr, 1, ROCSHMEM_SIGNAL_ADD, target);
+        }
       } else {
-        rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
-                                 i + 1);
-        rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 0);
+        if (pe == 0) {
+          if (op_type == 0) {
+            rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, target);
+          } else {
+            s_buf[hipBlockIdx_x] = i + 1;
+            rocshmem_ctx_putmem_nbi(ctx, &r_buf[hipBlockIdx_x],
+                                    &s_buf[hipBlockIdx_x], sizeof(int), target);
+          }
+          rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
+                                   i + 1);
+        } else {
+          rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
+                                   i + 1);
+          if (op_type == 0) {
+            rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, target);
+          } else {
+            s_buf[hipBlockIdx_x] = i + 1;
+            rocshmem_ctx_putmem_nbi(ctx, &r_buf[hipBlockIdx_x],
+                                    &s_buf[hipBlockIdx_x], sizeof(int), target);
+          }
+        }
       }
     }
     end_time[wg_id] = wall_clock64();
@@ -71,22 +109,39 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
   r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
+  s_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
+  data_s_buf = (char *)alloc_test_buffer(max_msg_size);
+  data_r_buf = (char *)alloc_test_buffer(max_msg_size);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
   rtt_factor = 2;
+  bw_factor = 2;
 }
 
-PingPongTester::~PingPongTester() { free_test_buffer(r_buf); }
+PingPongTester::~PingPongTester() {
+  free_test_buffer(r_buf);
+  free_test_buffer(s_buf);
+  free_test_buffer(data_s_buf);
+  free_test_buffer(data_r_buf);
+  free_test_buffer(sig_addr);
+}
 
-void PingPongTester::resetBuffers([[maybe_unused]] size_t size) {
+void PingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);
+  memset(s_buf, 0, sizeof(int) * args.num_wgs);
+  memset(data_s_buf, 0xAB, size);
+  memset(data_r_buf, 0, size);
+  uint64_t zero = 0;
+  memcpy(sig_addr, &zero, sizeof(uint64_t));
 }
 
 void PingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  [[maybe_unused]] size_t size) {
+                                  size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(PingPongTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, r_buf,
-                     _shmem_context);
+                     loop, args.skip, start_time, end_time, r_buf, s_buf,
+                     data_s_buf, data_r_buf, sig_addr, size,
+                     args.op_type, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop;

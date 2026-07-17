@@ -1,0 +1,162 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *****************************************************************************/
+
+#include "sdma_ping_pong_tester.hpp"
+
+#include <rocshmem/rocshmem.hpp>
+#include "context.hpp"
+#include "ipc_policy.hpp"
+#include "sdma/anvil_device.hpp"
+#include "assembly.hpp"
+#include "constmem.hpp"
+
+using namespace rocshmem;
+
+/******************************************************************************
+ * DEVICE TEST KERNEL
+ *
+ * Bypass the rocSHMEM API and use anvil directly on the SDMA queue.
+ *
+ * op_type selects the signaling method:
+ *   0,1 — anvil::put (no quiet), spin on data value (matches pingpong -o 1)
+ *   2   — anvil::put + quiet + GPU shader atomic (separate signal)
+ *
+ * Only thread 0 is active (single-producer handle).
+ *****************************************************************************/
+__global__ void SdmaPingPongTest(int loop, int skip,
+                                 long long int *start_time,
+                                 long long int *end_time,
+                                 char *s_buf, char *r_buf,
+                                 uint64_t *sig_addr, size_t size,
+                                 unsigned op_type,
+                                 ShmemContextType ctx_type) {
+  __shared__ rocshmem_ctx_t ctx;
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
+
+  if (threadIdx.x == 0) {
+    Context *base_ctx = reinterpret_cast<Context *>(ctx.ctx_opaque);
+    auto &sdma = base_ctx->ipcImpl_.sdmaImpl_;
+
+    int pe = constmem.my_pe;
+    int target = 1 - pe;
+
+    int target_local_pe{-1};
+    base_ctx->ipcImpl_.isIpcAvailable(pe, target, &target_local_pe);
+
+    anvil::SdmaQueueDeviceHandle *handle =
+        sdma.deviceHandles_d[target_local_pe * sdma.numChannels + 0];
+
+    char *my_base = base_ctx->ipcImpl_.ipc_bases[pe];
+    char *remote_base = base_ctx->ipcImpl_.ipc_bases[target];
+    uint64_t r_offset = r_buf - my_base;
+    uint64_t sig_offset =
+        reinterpret_cast<char *>(sig_addr) - my_base;
+
+    void *remote_r_buf = remote_base + r_offset;
+    uint64_t *remote_sig = reinterpret_cast<uint64_t *>(remote_base + sig_offset);
+
+    int *r_int = reinterpret_cast<int *>(r_buf);
+    int *s_int = reinterpret_cast<int *>(s_buf);
+
+    for (int i = 0; i < loop + skip; i++) {
+      if (i == skip) {
+        start_time[0] = wall_clock64();
+      }
+
+      if (op_type <= 1) {
+        int val = i + 1;
+        *s_int = val;
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+        if (pe == 0) {
+          anvil::put(*handle, remote_r_buf, s_buf, sizeof(int));
+          anvil::quiet(*handle);
+          while (uncached_load(r_int) != val) {}
+        } else {
+          while (uncached_load(r_int) != val) {}
+          anvil::put(*handle, remote_r_buf, s_buf, sizeof(int));
+          anvil::quiet(*handle);
+        }
+      } else {
+        uint64_t expected = static_cast<uint64_t>(i + 1);
+        if (pe == 0) {
+          anvil::put(*handle, remote_r_buf, s_buf, size);
+          anvil::quiet(*handle);
+          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
+                                 __HIP_MEMORY_SCOPE_SYSTEM);
+          anvil::waitSignal(sig_addr, expected);
+        } else {
+          anvil::waitSignal(sig_addr, expected);
+          anvil::put(*handle, remote_r_buf, s_buf, size);
+          anvil::quiet(*handle);
+          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
+                                 __HIP_MEMORY_SCOPE_SYSTEM);
+        }
+      }
+    }
+    end_time[0] = wall_clock64();
+
+    anvil::quiet(*handle);
+  }
+
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
+/******************************************************************************
+ * HOST TESTER CLASS METHODS
+ *****************************************************************************/
+SdmaPingPongTester::SdmaPingPongTester(TesterArguments args) : Tester(args) {
+  s_buf = (char *)alloc_test_buffer(max_msg_size);
+  r_buf = (char *)alloc_test_buffer(max_msg_size);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
+  rtt_factor = 2;
+  bw_factor = 2;
+}
+
+SdmaPingPongTester::~SdmaPingPongTester() {
+  free_test_buffer(s_buf);
+  free_test_buffer(r_buf);
+  free_test_buffer(sig_addr);
+}
+
+void SdmaPingPongTester::resetBuffers(size_t size) {
+  memset(s_buf, 0, size);
+  memset(r_buf, 0, size);
+  uint64_t zero = 0;
+  memcpy(sig_addr, &zero, sizeof(uint64_t));
+}
+
+void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                                      size_t size) {
+  size_t shared_bytes = 0;
+
+  hipLaunchKernelGGL(SdmaPingPongTest, gridSize, blockSize, shared_bytes,
+                     stream, loop, args.skip, start_time, end_time,
+                     s_buf, r_buf, sig_addr, size, args.op_type,
+                     _shmem_context);
+
+  num_msgs = (loop + args.skip) * gridSize.x;
+  num_timed_msgs = loop;
+}
+
+void SdmaPingPongTester::verifyResults([[maybe_unused]] size_t size) {}

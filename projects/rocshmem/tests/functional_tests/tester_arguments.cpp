@@ -193,6 +193,22 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case SdmaPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
+    case QpPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
     case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
