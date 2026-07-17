@@ -17,7 +17,5 @@ matrix-nightly:
   - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
 matrix-ci:
-  # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
   # Strix Halo
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
