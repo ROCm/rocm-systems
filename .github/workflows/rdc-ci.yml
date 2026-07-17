@@ -53,6 +53,7 @@ jobs:
       uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   rdc_build:
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     runs-on: lstt_ci_runners
     timeout-minutes: 90
     container: rocm/dev-ubuntu-22.04:7.2
@@ -212,6 +213,7 @@ jobs:
   #  Test job — non-GPU tests (installation, CLI, Python, parsers)
   # =================================================================
   rdc_test:
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
     runs-on: lstt_ci_runners
     timeout-minutes: 30
