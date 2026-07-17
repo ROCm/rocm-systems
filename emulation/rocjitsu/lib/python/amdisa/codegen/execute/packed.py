@@ -499,7 +499,6 @@ def gen_pk_mov_b32(
     dst: list[str],
     src: list[str],
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
 ) -> str:
     """Generate V_PK_MOV_B32: move two 32-bit values based on op_sel."""
     d, s0, s1 = dst[0], src[0], src[1]
@@ -508,14 +507,18 @@ def gen_pk_mov_b32(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for var, src in [('s0', s0), ('s1', s1)]:
-        _append_pk_f32_pair_read(L, var, src, use_gfx1250_helpers)
+        L.append(f'    uint64_t {var}_pair_w = {src}.read_lane64(wf, lane);')
+        L.append(f'    uint32_t {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
+        L.append(
+            f'    uint32_t {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);'
+        )
     opsel, opsel_hi = opsel_exprs
-    s0_lo = _pk_f32_word_expr('s0', 'lo', use_gfx1250_helpers)
-    s0_hi = _pk_f32_word_expr('s0', 'hi', use_gfx1250_helpers)
-    s1_lo = _pk_f32_word_expr('s1', 'lo', use_gfx1250_helpers)
-    s1_hi = _pk_f32_word_expr('s1', 'hi', use_gfx1250_helpers)
+    s0_lo = _pk_f32_word_expr('s0', 'lo')
+    s0_hi = _pk_f32_word_expr('s0', 'hi')
+    s1_lo = _pk_f32_word_expr('s1', 'lo')
+    s1_hi = _pk_f32_word_expr('s1', 'hi')
     L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel_hi} & 2) ? {s1_hi} : {s1_lo};')
+    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
     L.append(
         f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
     )

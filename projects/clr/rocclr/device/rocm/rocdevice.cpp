@@ -2704,15 +2704,16 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
-bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
-                                      amd::Memory::HandleType handle_type) {
+amd::Device::VmmExportStatus Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                void* shareableHandle,
+                                                amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;
 
   if (hsa_vmem_handle.handle == 0) {
     LogError("HSA Handle is not valid");
-    return false;
+    return amd::Device::VmmExportStatus::kError;
   }
 
   if (handle_type == amd::Memory::HandleType::kHandleFabric) { //handle type fabric
@@ -2720,7 +2721,10 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
     if ((hsa_status = Hsa::vmem_export_fabric_handle(&fabric_handle,
                         hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
       LogPrintfError("Failed hsa_vmem_export_fabric_handle with status: %d \n", hsa_status);
-      return false;
+      if (hsa_status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY)) {
+        return amd::Device::VmmExportStatus::kResourceNotReady;
+      }
+      return amd::Device::VmmExportStatus::kError;
     }
     *(reinterpret_cast<hsa_fabric_handle_t*>(shareableHandle)) = fabric_handle;
   } else {
@@ -2728,12 +2732,12 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
     if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd,
                         hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
       LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d \n", hsa_status);
-      return false;
+      return amd::Device::VmmExportStatus::kError;
     }
     *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
   }
 
-  return true;
+  return amd::Device::VmmExportStatus::kSuccess;
 }
 
 // ================================================================================================
@@ -3148,20 +3152,24 @@ void Device::svmFree(void* ptr) const {
 
 // ================================================================================================
 VirtualGPU* Device::xferQueue() const {
-  if (!xferQueue_) {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    Device* thisDevice = const_cast<Device*>(this);
     thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
-    if (!xferQueue_) {
+    if (!thisDevice->xferQueue_) {
       LogError("Couldn't create the device transfer manager!");
-      return nullptr;
+      return;
     }
-    if (xferQueue_->gpu_queue() == nullptr) {
+    if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
       void* md_rb = nullptr;
       auto* queue = thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
                                                    nullptr, nullptr, &md_rb);
-      xferQueue_->SetGpuQueue(queue, md_rb);
+      thisDevice->xferQueue_->SetGpuQueue(queue, md_rb);
     }
+  });
+  if (!xferQueue_) {
+    LogError("Couldn't create the device transfer manager!");
+    return nullptr;
   }
   xferQueue_->enableSyncBlit();
   return xferQueue_;

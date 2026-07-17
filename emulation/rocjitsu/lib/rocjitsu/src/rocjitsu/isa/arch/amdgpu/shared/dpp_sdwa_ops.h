@@ -198,6 +198,24 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   return lane;
 }
 
+/// @brief Return true if a dpp_ctrl can read across a row/wavefront edge.
+///
+/// Such controls produce an out-of-bounds source lane, so with BOUND_CTRL=0
+/// they leave some destination lanes unwritten (old value preserved) -- the
+/// shifts, wavefront shifts, and row broadcasts. Rotates, mirrors, quad_perm,
+/// row_share and row_xmask always map to valid lanes. Derived from dpp_permute
+/// over a full 64-lane wavefront so it stays consistent as controls are added;
+/// this is an analysis-time query, not on the execution hot path.
+inline bool dpp_ctrl_produces_oob(uint32_t dpp_ctrl) {
+  for (int lane = 0; lane < 64; ++lane) {
+    bool oob = false;
+    (void)dpp_permute(dpp_ctrl, lane, /*wf_size=*/64, oob);
+    if (oob)
+      return true;
+  }
+  return false;
+}
+
 /// @brief Check if a lane is disabled by DPP row/bank masks.
 ///
 /// @param lane Lane index.

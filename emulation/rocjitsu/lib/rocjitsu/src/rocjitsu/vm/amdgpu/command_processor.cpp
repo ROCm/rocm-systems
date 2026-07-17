@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/code/kernel_symbol.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -20,12 +21,14 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cstring>
 #include <elf.h>
 #include <format>
 #include <limits>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -300,28 +303,20 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
-  // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
-  // components via bit masks.
+  // On packed-TID targets (CDNA3/4 and GFX11+): v0[9:0]=X, v0[19:10]=Y,
+  // v0[29:20]=Z. TIDIG_COMP_CNT controls which components the SPI supplies;
+  // unused packed components are zero.
   uint32_t vbase = wf->vgpr_alloc().base;
-  uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
-  uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
-  uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
-  uint32_t wg_xy = wg_x * wg_y;
   for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
-    uint32_t flat_id = workitem_base + lane;
-    uint32_t id_x = flat_id % wg_x;
-    uint32_t id_y = (flat_id / wg_x) % wg_y;
-    uint32_t id_z = flat_id / wg_xy;
-    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
-      uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
-      cu->write_vgpr(vbase, lane, packed);
+    const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, cu->wf_size());
+    if (packed_tid_) {
+      cu->write_vgpr(vbase, lane, pack_workitem_id(id, pkt.enable_vgpr_workitem_id));
     } else {
-      cu->write_vgpr(vbase, lane, id_x);
+      cu->write_vgpr(vbase, lane, id.x);
       if (pkt.enable_vgpr_workitem_id >= 1)
-        cu->write_vgpr(vbase + 1, lane, id_y);
+        cu->write_vgpr(vbase + 1, lane, id.y);
       if (pkt.enable_vgpr_workitem_id >= 2)
-        cu->write_vgpr(vbase + 2, lane, id_z);
+        cu->write_vgpr(vbase + 2, lane, id.z);
     }
   }
 
@@ -698,13 +693,15 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
 uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
 
-  // Activate wavefront slots for each workgroup, distributing across CUs.
-  // Entire workgroups must land on a single CU (programming model requirement:
-  // LDS is per-CU and s_barrier synchronises within a CU). Query each CU for
-  // capacity before dispatching to guarantee all-or-nothing placement.
+  // All waves in one workgroup currently land on one physical CU so the
+  // existing barrier implementation remains local. WGP mode additionally
+  // reserves that CU's sibling and binds the waves to their shared LDS pool.
+  // Query the complete placement before dispatching for all-or-nothing setup.
   uint32_t dispatched = 0;
-  auto dispatch_to_cu = [&](uint32_t local_wg_id, uint32_t global_wg_id, ComputeUnitCore *cu) {
-    uint32_t lds_base = cu->allocate_lds(entry.group_segment_fixed_size);
+  auto dispatch_to_placement = [&](uint32_t local_wg_id, uint32_t global_wg_id,
+                                   const ShaderProcessorInput::WorkgroupPlacement &placement) {
+    ComputeUnitCore *cu = placement.cu;
+    uint32_t lds_base = placement.lds_base;
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
@@ -715,9 +712,10 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                                       entry.vgprs_per_wf);
       assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
       wf->set_lds_base(lds_base);
+      wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
-      wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
+      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
@@ -737,6 +735,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
 
     if (entry.has_workgroup_clusters()) {
+      assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
       // The SPI interface chooses one WG at a time and cannot reserve all peers
       // in a cluster atomically. Plan clusters directly across the CP-visible CU
       // list until SPI grows an all-or-nothing cluster placement API.
@@ -758,36 +757,49 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         break;
       }
       next_cu_ = planned_next_cu;
-      for (const auto &wg : plan)
-        dispatch_to_cu(wg.local_wg_id, wg.global_wg_id, wg.cu);
+      for (const auto &wg : plan) {
+        ShaderProcessorInput::WorkgroupPlacement placement{
+            wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
+        dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement);
+      }
       continue;
     }
 
-    // SPI selects the CU based on resource availability.
-    ComputeUnitCore *cu = nullptr;
+    // SPI selects the CU or sibling-CU WGP based on descriptor mode and
+    // resource availability.
+    std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
     if (!spis_.empty()) {
       for (auto *spi : spis_) {
-        cu = spi->dispatch_workgroup(entry);
-        if (cu)
+        placement = spi->allocate_workgroup(entry, global_wg_id);
+        if (placement)
           break;
       }
-    } else {
+    } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
         cus_[cu_idx]->retire_halted_wfs();
         if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
                                                entry.group_segment_fixed_size)) {
-          cu = cus_[cu_idx];
+          auto *cu = cus_[cu_idx];
+          placement = ShaderProcessorInput::WorkgroupPlacement{
+              cu, &cu->lds(), cu->allocate_lds(entry.group_segment_fixed_size)};
           next_cu_ = (cu_idx + 1) % cus_.size();
           break;
         }
       }
     }
 
-    if (!cu)
+    if (!placement) {
+      if (!any_active_wavefronts(cus_)) {
+        throw std::runtime_error(
+            std::format("workgroup cannot fit in available {} resources: waves={} LDS={} bytes",
+                        entry.wgp_mode ? "WGP" : "CU", entry.wfs_per_workgroup,
+                        entry.group_segment_fixed_size));
+      }
       break;
+    }
 
-    dispatch_to_cu(local_wg_id, global_wg_id, cu);
+    dispatch_to_placement(local_wg_id, global_wg_id, *placement);
   }
   return dispatched;
 }
@@ -800,6 +812,9 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
   util::Logger::cp(
       [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (auto *spi : spis_)
+    if (spi->release_wgp_workgroup(dispatch_id, wg_id))
+      break;
   mark_cluster_workgroup_complete(dispatch_id, wg_id);
   if (completion_)
     completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
@@ -958,6 +973,30 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.kernarg_preload = kd.kernarg_preload;
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
+  dp.wgp_mode = isa_properties(arch).supports_wgp_mode &&
+                AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE) != 0;
+
+  uint64_t lds_capacity = 0;
+  if (dp.wgp_mode) {
+    for (const auto *spi : spis_)
+      lds_capacity = std::max<uint64_t>(lds_capacity, spi->max_wgp_lds_bytes());
+  } else {
+    for (const auto *cu : cus_)
+      lds_capacity =
+          std::max<uint64_t>(lds_capacity, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
+  }
+  const uint64_t aligned_lds =
+      (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
+  if (dp.wgp_mode && lds_capacity == 0) {
+    throw std::runtime_error(
+        "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured");
+  }
+  if (aligned_lds > lds_capacity) {
+    throw std::runtime_error(std::format(
+        "kernel dispatch requests {} bytes of LDS ({} bytes after alignment) in {} mode, but "
+        "the simulator topology provides at most {} bytes",
+        dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", lds_capacity));
+  }
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
   // The queue_ptr and dispatch_ptr are GPU VAs that the kernel reads via SMEM.
@@ -974,6 +1013,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   dp.workgroup_id_offset = workgroup_id_offset_;
+  dp.grid_size_x = pkt.grid_size_x;
+  dp.grid_size_y = (num_dims >= 2) ? pkt.grid_size_y : 1;
+  dp.grid_size_z = (num_dims >= 3) ? pkt.grid_size_z : 1;
   // For WG ID decomposition, use the dispatch dimensionality (setup field).
   // A 1D dispatch flattens the entire grid into workgroup_id_x.
   dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;
@@ -1050,12 +1092,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   util::Logger::vm([&](auto &os) {
     os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
-                      "lds={} sgpr={} vgpr={} sig={:#x}",
+                      "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
                       total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
                       pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                       pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
-                      dp.completion_signal);
+                      kd.group_segment_fixed_size, dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf,
+                      dp.vgprs_per_wf, dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
     os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
@@ -1210,21 +1252,65 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       uint64_t sig = 0;
       sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-      DispatchEntry dp{};
-      dp.dispatch_id = next_dispatch_id_++;
-      dp.queue_id = queue.queue_id;
-      dp.process_id = queue.process_id;
-      dp.total_wgs = 0;
-      dp.completed_wgs = 0;
-      dp.dispatched_wgs = 0;
-      dp.completion_signal = sig;
-      dp.host_signal = false;
+      DispatchEntry dp{
+          .dispatch_id = next_dispatch_id_++,
+          .queue_id = queue.queue_id,
+          .process_id = queue.process_id,
+          .completion_signal = sig,
+          .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+      };
 
       qs.entries.push_back(std::move(dp));
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
       AmdExtKernelDispatchPacket ext{};
       std::memcpy(&ext, &pkt, sizeof(ext));
-      if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+      if (ext.amd_format == kHsaAmdPacketTypeBarrierValue) {
+        AmdBarrierValuePacket barrier{};
+        std::memcpy(&barrier, &pkt, sizeof(barrier));
+
+        bool condition_satisfied = true;
+        if (barrier.signal.handle != 0) {
+          constexpr uint32_t SIG_VAL_OFF = 8;
+          const auto signal_value = std::bit_cast<int64_t>(
+              read_gpu_u64(barrier.signal.handle + SIG_VAL_OFF, queue.process_id));
+          const auto masked_value = signal_value & barrier.mask;
+          switch (barrier.condition) {
+          case HSA_SIGNAL_CONDITION_EQ:
+            condition_satisfied = masked_value == barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_NE:
+            condition_satisfied = masked_value != barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_LT:
+            condition_satisfied = masked_value < barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_GTE:
+            condition_satisfied = masked_value >= barrier.value;
+            break;
+          default:
+            throw std::runtime_error("Unsupported AMD barrier-value condition: " +
+                                     std::to_string(barrier.condition));
+          }
+        }
+
+        if (!condition_satisfied) {
+          // The packet stalls this queue, but other queues (notably SDMA) must
+          // keep running so they can satisfy the dependency.
+          process_limit = read_idx;
+          engine()->schedule_event_now(&doorbell_event_);
+          break;
+        }
+
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = barrier.completion_signal.handle,
+            .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
+
+        qs.entries.push_back(std::move(dp));
+      } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
         if (ext.dep_signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
           auto v = static_cast<int64_t>(
@@ -1265,22 +1351,22 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
         process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
-      } else {
+      } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
         constexpr uint32_t SIG_OFF = 56;
-        uint64_t sig = 0;
-        sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
+        const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-        DispatchEntry dp{};
-        dp.dispatch_id = next_dispatch_id_++;
-        dp.queue_id = queue.queue_id;
-        dp.process_id = queue.process_id;
-        dp.total_wgs = 0;
-        dp.completed_wgs = 0;
-        dp.dispatched_wgs = 0;
-        dp.completion_signal = sig;
-        dp.host_signal = false;
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = sig,
+            .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
 
         qs.entries.push_back(std::move(dp));
+      } else {
+        throw std::runtime_error("Unsupported AMD vendor-specific AQL packet format: " +
+                                 std::to_string(ext.amd_format));
       }
     }
 
@@ -1422,6 +1508,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break;
       if (!entry.is_non_kernel())
         break;
       entry.completed_wgs = entry.total_wgs;

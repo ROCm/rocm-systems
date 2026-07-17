@@ -54,9 +54,15 @@ jobs:
     #   - https://gh.io/supported-runners-and-hardware-resources
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    runs-on: ubuntu-latest
+    runs-on: azure-linux-scale-rocm
 
-    container: rocm/dev-ubuntu-22.04:latest
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
     permissions:
       # required for all workflows
       security-events: write
@@ -83,23 +89,12 @@ jobs:
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
-      env:
-        DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update -y
-        sudo apt upgrade -y
-        sudo apt install -y software-properties-common wget rocm-llvm-dev
-        sudo apt-add-repository ppa:git-core/ppa
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        sudo tee /etc/apt/sources.list.d/rocm.list << EOF
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 jammy main
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.1/ubuntu jammy main
-        EOF
-        sudo apt update -y
-        sudo apt upgrade -y
-        sudo apt install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        apt-get update
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:git-core/ppa
+        apt-get update
+        apt-get install -y git
         git config --global --add safe.directory '*'
 
     - uses: actions/checkout@v6
@@ -147,7 +142,7 @@ jobs:
       shell: bash
       run: |
         cd projects/rocprofiler-sdk
-        python3 -m pip install -r requirements.txt
+        python3 -m pip install -U --user -r requirements.txt
         cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm ${{ env.GLOBAL_CMAKE_OPTIONS }} -DPython3_EXECUTABLE=$(which python3) .
         cmake --build /tmp/build --target all --parallel 16
         rm -rf ${EXCLUDED_PATHS}
