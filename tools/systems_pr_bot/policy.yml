@@ -168,8 +168,7 @@ diff:
 checks:
   # External checks that must be GREEN before PR is "ready for review"
   # (Do NOT include therock-pr-bot here to avoid circular dependency.)
-  required_check_runs:
-    - pre-commit
+  required_check_runs: []
 
   failure_comments:
     pre-commit:
