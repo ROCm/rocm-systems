@@ -423,12 +423,12 @@ class Bench_base(ABC):
         func = prog.get_kernel("HBM_bw")
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
-        UNROLL = 16
+        unroll = 16
         elem_size = 16  # sizeof(__uint128_t)
 
         dataset_bytes = 4 * 1024 * 1024 * 1024  # 4 GB
         workgroups = 128 * cus
-        elems_per_step = workgroups * workgroup_size * UNROLL
+        elems_per_step = workgroups * workgroup_size * unroll
         total_elems = dataset_bytes // elem_size
         num_steps = (total_elems + elems_per_step - 1) // elems_per_step
 
