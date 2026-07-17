@@ -135,8 +135,9 @@ ensure_live_tracking()
         if(hipGetDeviceCount(&devs) != hipSuccess || devs == 0) return false;
         return true;
     }();
-    // Tracking is normally enabled by rocprofiler_configure_kernel_replay_counting_service; enable
-    // it directly here (same statically-linked instance).
+    // Tracking is normally enabled when a tool configures the KERNEL_REPLAY callback-tracing
+    // service (rocprofiler_configure_callback_tracing_service). This unit test drives snap/restore
+    // directly without that service, so enable it here (same statically-linked instance).
     if(ok) mt::set_tracking_enabled(true);
     return ok;
 }

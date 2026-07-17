@@ -22,12 +22,13 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
+#include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
-#include <mutex>
-#include <shared_mutex>
 
 namespace rocprofiler
 {
@@ -41,22 +42,17 @@ namespace
 std::atomic<bool>&
 tracking_flag()
 {
-    static std::atomic<bool> _v{false};
-    return _v;
+    static auto*& _v = common::static_object<std::atomic<bool>>::construct(false);
+    return *_v;
 }
 
-std::shared_mutex&
-inventory_mutex()
-{
-    static std::shared_mutex _v;
-    return _v;
-}
-
-alloc_map_t&
+// Tracked allocations. The map and its lock are bundled in a Synchronized wrapper so every access
+// goes through rlock/wlock (no bare mutex to mismanage).
+common::Synchronized<alloc_map_t>&
 inventory()
 {
-    static alloc_map_t _v;
-    return _v;
+    static auto*& _v = common::static_object<common::Synchronized<alloc_map_t>>::construct();
+    return *_v;
 }
 
 // Saved "next" function pointers (the already-installed wrappers) we chain through. Types are taken
@@ -119,22 +115,19 @@ tracking_enabled()
 void
 record_alloc(void* ptr, size_t size)
 {
-    auto _lk         = std::unique_lock<std::shared_mutex>{inventory_mutex()};
-    inventory()[ptr] = size;
+    inventory().wlock([ptr, size](auto& inv) { inv[ptr] = size; });
 }
 
 void
 record_free(void* ptr)
 {
-    auto _lk = std::unique_lock<std::shared_mutex>{inventory_mutex()};
-    inventory().erase(ptr);
+    inventory().wlock([ptr](auto& inv) { inv.erase(ptr); });
 }
 
 alloc_map_t
 snap_inventory()
 {
-    auto _lk = std::shared_lock<std::shared_mutex>{inventory_mutex()};
-    return inventory();
+    return inventory().get();
 }
 
 void
