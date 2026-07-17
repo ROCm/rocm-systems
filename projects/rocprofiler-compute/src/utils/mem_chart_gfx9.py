@@ -1262,16 +1262,10 @@ def plot_mem_chart(
     normal_unit: str,
     metric_dict: dict[str, Any],
     *,
-    chart_title: Optional[str] = None,
+    chart_title: str,
 ) -> str:
     canvas = Canvas(width=234, height=42, xmax=234, ymax=42)
     mc = MemChart(0, 0, 233, 41)
     mc.draw(canvas, metric_dict)
 
-    if chart_title is None:
-        chart_title = f"3. Memory Chart (Normalization: {normal_unit})"
-
-    chart_output = canvas.plot()
-    if not chart_title:
-        return chart_output
-    return f"{chart_title}\n{chart_output}"
+    return f"{chart_title}\n{canvas.plot()}"

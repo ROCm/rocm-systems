@@ -4,12 +4,12 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
-from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
 from utils.tty import convert_time_columns, format_table_output, has_time_data
+from utils.utils_common import is_gfx115x
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -280,35 +280,37 @@ def test_edge_cases_and_error_handling() -> None:
 
 
 @pytest.mark.parametrize(
-    ("gpu_arch", "uses_gfx11"),
+    "gpu_arch",
     [
-        pytest.param(
-            "gfx1151",
-            True,
-            id="rdna35",
-        ),
-        pytest.param(
-            "gfx942",
-            False,
-            id="cdna",
-        ),
+        pytest.param("gfx1151", id="rdna35"),
+        pytest.param("gfx942", id="cdna"),
     ],
 )
 def test_format_table_output_dispatches_memory_chart_renderer(
     monkeypatch: pytest.MonkeyPatch,
     gpu_arch: str,
-    uses_gfx11: bool,
 ) -> None:
     """Memory Chart output uses the architecture renderer and shared heading."""
-    gfx11_renderer = Mock(return_value="rendered RDNA3.5 memory chart")
-    gfx9_renderer = Mock(return_value="rendered CDNA memory chart")
+    calls: dict[str, dict] = {}
+
+    def record(name: str, return_value: str):
+        def stub(normal_unit: str, mem_data: dict, *, chart_title: str) -> str:
+            calls[name] = {
+                "normal_unit": normal_unit,
+                "mem_data": mem_data,
+                "chart_title": chart_title,
+            }
+            return return_value
+
+        return stub
+
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        gfx11_renderer,
+        record("gfx11", "rendered RDNA3.5 memory chart"),
     )
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        gfx9_renderer,
+        record("gfx9", "rendered CDNA memory chart"),
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
@@ -325,12 +327,17 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         gpu_arch=gpu_arch,
     )
 
-    expected_renderer = gfx11_renderer if uses_gfx11 else gfx9_renderer
-    unexpected_renderer = gfx9_renderer if uses_gfx11 else gfx11_renderer
-    expected_renderer.assert_called_once_with(
-        "per_wave",
-        {"Metric A": 1},
-        chart_title="7. Memory Chart (Normalization: per_wave)",
+    expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
+    unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
+    assert calls[expected] == {
+        "normal_unit": "per_wave",
+        "mem_data": {"Metric A": 1},
+        "chart_title": "7. Memory Chart (Normalization: per_wave)",
+    }
+    assert unexpected not in calls
+    return_value = (
+        "rendered RDNA3.5 memory chart"
+        if is_gfx115x(gpu_arch)
+        else "rendered CDNA memory chart"
     )
-    unexpected_renderer.assert_not_called()
-    assert content == f"{expected_renderer.return_value}\n"
+    assert content == f"{return_value}\n"
