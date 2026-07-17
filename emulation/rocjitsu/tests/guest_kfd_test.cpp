@@ -45,12 +45,26 @@ constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
 
+// Resolve the directory holding the config-path handoff file, mirroring the
+// precedence in load_dbt_guest_config_from_runtime_config(): the launcher exports
+// $ROCJITSU_INVOCATION_DIR (its per-PID directory) and the DBT guest hook reads
+// config_path from there first. Tests that install a config the hook must observe
+// have to write to the same directory; falling back to $ROCJITSU_RUNTIME_DIR keeps
+// the standalone (no-launcher) case working.
+std::optional<std::filesystem::path> config_handoff_dir() {
+  if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
+    return std::filesystem::path(inv);
+  if (const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR"); runtime_dir && *runtime_dir)
+    return std::filesystem::path(runtime_dir);
+  return std::nullopt;
+}
+
 std::optional<std::string> read_active_config_json() {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  if (!runtime_dir || !*runtime_dir)
+  const auto dir = config_handoff_dir();
+  if (!dir)
     return std::nullopt;
 
-  std::ifstream active_config(std::filesystem::path(runtime_dir) / "config_path");
+  std::ifstream active_config(*dir / "config_path");
   std::string configured_path;
   if (!std::getline(active_config, configured_path) || configured_path.empty())
     return std::nullopt;
@@ -63,12 +77,12 @@ std::optional<std::string> read_active_config_json() {
 
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
                                uint32_t lds_size_kb, std::string_view external_host_config = {}) {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  if (!runtime_dir || !*runtime_dir)
+  const auto dir = config_handoff_dir();
+  if (!dir)
     return false;
 
   try {
-    const std::filesystem::path runtime(runtime_dir);
+    const std::filesystem::path runtime(*dir);
     std::filesystem::create_directories(runtime);
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
@@ -356,10 +370,9 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
 }
 
 TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  ASSERT_NE(runtime_dir, nullptr);
-  const std::string nonexistent =
-      (std::filesystem::path(runtime_dir) / "nonexistent_simulator_config.json").string();
+  const auto dir = config_handoff_dir();
+  ASSERT_TRUE(dir.has_value());
+  const std::string nonexistent = (*dir / "nonexistent_simulator_config.json").string();
   ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
 
   errno = 0;

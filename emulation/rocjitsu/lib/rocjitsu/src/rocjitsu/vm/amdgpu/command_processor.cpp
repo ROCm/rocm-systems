@@ -871,9 +871,9 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
 
 // INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is
 // invoked from CU::execute_quantum() (the CU's own per-partition tick event), so
-// the CU, this CP, and doorbell_event_ all share one partition. schedule_event()
-// (same-partition, non-thread-safe) is correct here; schedule_event_now() would
-// collapse ticks and break causal ordering.
+// the CU, this CP, and the CUs it dispatches to all share one partition. Dispatch
+// therefore happens inline (same-partition, non-thread-safe path); a
+// schedule_event_now() here would collapse ticks and break causal ordering.
 void CommandProcessor::on_cu_idle() {
   if (cus_.empty())
     return;
@@ -883,8 +883,40 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  auto now = engine()->context(partition_id()).current_tick();
-  schedule_event(&doorbell_event_, now + 1);
+  // Retire any non-kernel entries (barriers with total_wgs==0) that are now at
+  // the head, then drain again so a dependent kernel behind them can proceed.
+  for (auto &qs : new_queue_states_) {
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &e = qs.entries[qs.next_dispatch_idx];
+      if (e.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break;
+      if (!e.is_non_kernel())
+        break;
+      e.completed_wgs = e.total_wgs;
+      ++qs.next_dispatch_idx;
+    }
+  }
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  // Continue dispatching pending workgroups onto the just-freed CU in this same
+  // tick rather than deferring to a now+1 doorbell event. Deferring routed every
+  // dispatch continuation through the doorbell path; across the many tiny kernels
+  // of an RCCL collective the engine would idle a full tick between steps, adding
+  // latency the host socket layer then paid for. dispatch_workgroups() schedules
+  // the CU's own tick event, so no explicit CU nudge is needed here.
+  for (auto &qs : new_queue_states_) {
+    if (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        continue;
+      if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
+        uint32_t sent = dispatch_workgroups(entry);
+        if (sent > 0 && entry.fully_dispatched())
+          ++qs.next_dispatch_idx;
+      }
+    }
+  }
 }
 
 bool CommandProcessor::step() {
