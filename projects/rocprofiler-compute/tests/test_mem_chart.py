@@ -348,14 +348,17 @@ class TestPlotMemChartGfx11:
     def test_chart_title_override(self):
         """Explicit chart_title appears in output."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel",
-            metrics,
-            chart_title="3. Memory Chart (Normalization: per_kernel)",
+        chart_title = "7. Memory Chart (Normalization: per_kernel)"
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart(
+                "per_kernel",
+                metrics,
+                chart_title=chart_title,
+            )
         )
-        assert "3. Memory Chart (Normalization: per_kernel)" in common.strip_ansi(
-            result
-        )
+
+        assert output.strip().splitlines()[0] == chart_title
+        assert mem_chart_gfx11.format_mem_chart_heading("per_kernel") not in output
 
     def test_contains_complete_rdna35_architecture(self):
         """RDNA3.5 output contains every rendered memory component."""
@@ -658,7 +661,6 @@ class TestPlotMemChartGfx9:
             "Instr Buff",
             "Instr Dispatch",
             "Exec",
-            "LDS",
             "Vector L1 Cache",
             "Scalar L1D Cache",
             "Instr L1 Cache",
@@ -671,6 +673,9 @@ class TestPlotMemChartGfx9:
         for component in expected_components:
             assert component in output, f"Missing CDNA component: {component}"
 
+        assert re.search(r"\bExec\b.*\bLDS\b.*\bL2 Cache\b", output), (
+            "Missing CDNA component: LDS"
+        )
         assert re.search(r"(?<!x)GMI(?!/PCIe)", output)
 
     def test_contains_normalization_and_directional_connectors(self):

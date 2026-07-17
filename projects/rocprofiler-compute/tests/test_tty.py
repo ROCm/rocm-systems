@@ -4,6 +4,7 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -276,3 +277,60 @@ def test_edge_cases_and_error_handling() -> None:
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
+
+
+@pytest.mark.parametrize(
+    ("gpu_arch", "uses_gfx11"),
+    [
+        pytest.param(
+            "gfx1151",
+            True,
+            id="rdna35",
+        ),
+        pytest.param(
+            "gfx942",
+            False,
+            id="cdna",
+        ),
+    ],
+)
+def test_format_table_output_dispatches_memory_chart_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+    gpu_arch: str,
+    uses_gfx11: bool,
+) -> None:
+    """Memory Chart output uses the architecture renderer and shared heading."""
+    gfx11_renderer = Mock(return_value="rendered RDNA3.5 memory chart")
+    gfx9_renderer = Mock(return_value="rendered CDNA memory chart")
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx11.plot_mem_chart",
+        gfx11_renderer,
+    )
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        gfx9_renderer,
+    )
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+
+    content = format_table_output(
+        make_args(),
+        {
+            "id": 701,
+            "title": "Memory Chart",
+            "cli_style": "mem_chart",
+        },
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch=gpu_arch,
+    )
+
+    expected_renderer = gfx11_renderer if uses_gfx11 else gfx9_renderer
+    unexpected_renderer = gfx9_renderer if uses_gfx11 else gfx11_renderer
+    expected_renderer.assert_called_once_with(
+        "per_wave",
+        {"Metric A": 1},
+        chart_title="7. Memory Chart (Normalization: per_wave)",
+    )
+    unexpected_renderer.assert_not_called()
+    assert content == f"{expected_renderer.return_value}\n"
