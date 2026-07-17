@@ -1557,9 +1557,11 @@ private:
     return false;
   }
 
-  [[nodiscard]] static bool is_cdna4_buffer_vaddr_operand(const Instruction &inst,
-                                                          int operand_index, rj_code_arch_t arch) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+  [[nodiscard]] static bool is_cdna_buffer_vaddr_operand(const Instruction &inst, int operand_index,
+                                                         rj_code_arch_t arch) {
+    // The generated CDNA3/CDNA4 MUBUF decoder exposes the raw VADDR field as a
+    // two-register operand.  The actual width is selected by offen/idxen.
+    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
       return false;
 
     const std::string_view mnemonic = inst.mnemonic();
@@ -1570,7 +1572,7 @@ private:
     return false;
   }
 
-  [[nodiscard]] static std::optional<uint8_t> cdna4_buffer_vaddr_width(const Instruction &inst) {
+  [[nodiscard]] static std::optional<uint8_t> cdna_buffer_vaddr_width(const Instruction &inst) {
     if (inst.raw_encoding() == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
       return std::nullopt;
 
@@ -1602,8 +1604,8 @@ private:
       return true;
     }
 
-    if (is_cdna4_buffer_vaddr_operand(inst, operand_index, arch)) {
-      if (const auto width = cdna4_buffer_vaddr_width(inst)) {
+    if (is_cdna_buffer_vaddr_operand(inst, operand_index, arch)) {
+      if (const auto width = cdna_buffer_vaddr_width(inst)) {
         if (*width == 0)
           return true;
         if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::VGPR) {
@@ -1614,7 +1616,7 @@ private:
       }
     }
 
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
         (starts_with(mnemonic, "buffer_") || starts_with(mnemonic, "tbuffer_"))) {
       if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR && ref->width == 4) {
         if (const int encoded = op.encoding_value(); encoded >= 0) {

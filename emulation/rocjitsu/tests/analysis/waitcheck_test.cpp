@@ -690,6 +690,11 @@ void append_gfx942_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &progr
   program.push_back(0x80000008u);
 }
 
+void append_gfx942_buffer_load_dword(std::vector<uint32_t> &program, uint8_t vdst, uint8_t vaddr) {
+  program.push_back(0xE0501000u);
+  program.push_back(0x80010000u | (static_cast<uint32_t>(vdst) << 8u) | vaddr);
+}
+
 void append_gfx942_s_load_dword_s4_s0(std::vector<uint32_t> &program) {
   program.push_back(0xC0020100u);
   program.push_back(0x00000000u);
@@ -917,6 +922,38 @@ TEST(WaitcheckTest, Gfx942AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942OffenBufferAddressDoesNotUseAdjacentVgpr) {
+  // Reduced from PyTorch's CK kernel at code object 202, .text+0x43500.
+  // An offen-only MUBUF address is one VGPR wide: the final load uses v67,
+  // not v[67:68], so the earlier asynchronous definition of v68 is unrelated.
+  std::vector<uint32_t> program;
+  append_gfx942_buffer_load_dword(program, 68, 63);
+  append_gfx942_buffer_load_dword(program, 69, 64);
+  append_gfx942_buffer_load_dword(program, 70, 65);
+  append_gfx942_buffer_load_dword(program, 71, 67);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942BufferDescriptorUsesEncodedSgprQuad) {
+  // SRSRC=1 names s[4:7], not the unscaled register range s[1:4].
+  std::vector<uint32_t> program;
+  append_gfx942_s_load_dword_s4_s0(program);
+  append_gfx942_buffer_load_dword(program, 0, 8);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 4, 1}));
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt lgkmcnt(0)"), std::string::npos);
 }
 
 TEST(WaitcheckTest, Gfx942ReportsMissingVmcntBeforeGlobalLoadUse) {
