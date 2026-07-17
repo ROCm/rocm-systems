@@ -6947,13 +6947,16 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
 /**
  *  @brief Retrieves the current compute partitioning for a desired device
  *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_accelerator_partition_profile() should be used instead
+ *
  *  @ingroup tagComputePartition
  *
  *  @platform{gpu_bm_linux}
  *
  *  @details
- *  Given a processor handle @p processor_handle and a string @p compute_partition ,
- *  and uint32 @p len , this function will attempt to obtain the device's
+ *  Given a processor handle @p processor_handle and a string @p compute_partition,
+ *  and uint32 @p len, this function will attempt to obtain the device's
  *  current compute partition setting string. Upon successful retrieval,
  *  the obtained device's compute partition settings string shall be stored in
  *  the passed @p compute_partition char string variable.
@@ -6981,6 +6984,9 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 
 /**
  *  @brief Modifies a selected device's compute partition setting.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_accelerator_partition_profile() should be used instead
  *
  *  @ingroup tagComputePartition
  *
@@ -7162,8 +7168,8 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
  *  @platform{gpu_bm_linux}
  *
  *  @details
- *  Given a processor handle @p processor_handle and a string @p memory_partition ,
- *  and uint32 @p len , this function will attempt to obtain the device's
+ *  Given a processor handle @p processor_handle and a string @p memory_partition,
+ *  and uint32 @p len, this function will attempt to obtain the device's
  *  memory partition string. Upon successful retrieval, the obtained device's
  *  memory partition string shall be stored in the passed @p memory_partition
  *  char string variable.
@@ -7173,7 +7179,7 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
  *  @param[inout] memory_partition a pointer to a char string variable,
  *  which the device's memory partition will be written to.
  *
- *  @param[in] len the length of the caller provided buffer @p memory_partition ,
+ *  @param[in] len the length of the caller provided buffer @p memory_partition,
  *  suggested length is 5 or greater.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
