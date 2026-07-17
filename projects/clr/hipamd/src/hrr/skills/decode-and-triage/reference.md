@@ -172,6 +172,25 @@ skills/decode-and-triage/scripts/decode_finding.sh --archive <pid-dir> [--log re
 
 Runs `hrr-playback --info` (when available) and the parser. Does **not** run full GPU replay.
 
+## Full GPU replay (native vs docker)
+
+Native replay requires `hrr-playback` and `libamdhip64` from the **same build**:
+
+```bash
+export LD_LIBRARY_PATH=<clr-build>/hipamd/lib
+hrr-playback ./out.hrr/pid-<pid>/
+```
+
+If native replay fails with a HIP symbol/version error from `/opt/rocm/lib`, use docker
+replay (recommended on hosts where system ROCm ≠ capture/build HIP):
+
+```bash
+triage_archive.sh --archive <pid-dir> --replay docker
+```
+
+Requires passwordless `sudo -n` and a project docker playback script (e.g.
+`scripts/maf-hrr-docker-playback.sh`) that injects matching HIP/HSA libraries.
+
 ## Knobs (replay / capture)
 
 Environment variables and CLI flags: [README.md](../../README.md#configuration-reference).

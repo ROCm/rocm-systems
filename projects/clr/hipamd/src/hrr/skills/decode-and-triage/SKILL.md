@@ -63,6 +63,10 @@ SKILL=<path-to>/.cursor/skills/hrr-decode-and-triage
 # or: --replay native | --replay docker | --replay auto
 ```
 
+**Replay environment:** Prefer `--replay docker` when native replay fails with a HIP
+library mismatch (`libamdhip64` version/symbol errors against `/opt/rocm`). Native replay
+requires `hrr-playback` and `libamdhip64` from the same build on `LD_LIBRARY_PATH`.
+
 - Read-only path runs `hrr-playback --info` + parser (no GPU)
 - Full replay writes `hrr-replay-<pid>-<timestamp>.log` and a finding file under cwd
 - Prints the finding to stdout — **copy the summary into your reply**

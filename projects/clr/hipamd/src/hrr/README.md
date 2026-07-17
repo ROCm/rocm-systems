@@ -41,17 +41,28 @@ Details: [DESIGN.md § Build System](DESIGN.md#build-system).
 
 ## Inspecting and replaying captures
 
+Point at a specific `pid-<pid>/` subdirectory when the capture root has multiple processes.
+
 **Summary only (no GPU):**
 
 ```bash
 hrr-playback ./my_capture.hrr/pid-<pid>/ --info
 ```
 
-**Full replay** (reproduces the workload and runs D2H validation; GPU faults appear in stderr):
+**Full replay** (requires AMD GPU, `/dev/kfd`, and matching `hrr-playback` + HIP libraries):
 
 ```bash
 hrr-playback ./my_capture.hrr/pid-<pid>/
 ```
+
+**HIP library matching:** `hrr-playback` must load the same `libamdhip64` it was built against. If native replay fails with a symbol/version error (e.g. `hip_7.14 not found` from `/opt/rocm/lib`), either run with only the build tree on `LD_LIBRARY_PATH`:
+
+```bash
+export LD_LIBRARY_PATH=<clr-build>/hipamd/lib
+hrr-playback ./my_capture.hrr/pid-<pid>/
+```
+
+or use a containerized replay that injects the matching HIP/HSA libraries (recommended when the host `/opt/rocm` install differs from the capture/build). The decode-and-triage skill supports `triage_archive.sh --replay docker` when a project docker script is available.
 
 Useful flags when debugging a fault or hang: `--sync-after-launch`, `--sync-watchdog-ms N`, `--progress-seconds S`, `--trace-kernels`. See [Configuration reference](#configuration-reference) below.
 
