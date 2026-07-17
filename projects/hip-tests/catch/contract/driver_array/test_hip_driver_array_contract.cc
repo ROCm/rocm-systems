@@ -13,6 +13,14 @@ constexpr size_t kWidth = 8;
 constexpr size_t kHeight = 4;
 constexpr size_t kDepth = 2;
 
+// Establishes a device context before the driver-style array entry points below.
+// On the NVIDIA backend hipArrayCreate maps to the driver API, which requires a
+// bound primary context; a test that calls it before any allocation would
+// otherwise fail with an initialization / "invalid device context" error.
+// hipFree(0) is the canonical no-op that forces primary-context initialization,
+// and is a harmless success on AMD where the runtime already auto-initializes.
+void EnsureContext() { HIP_CHECK(hipFree(0)); }
+
 HIP_ARRAY_DESCRIPTOR Array2DDesc() {
   HIP_ARRAY_DESCRIPTOR desc{};
   desc.Width = kWidth;
@@ -36,6 +44,7 @@ HIP_ARRAY3D_DESCRIPTOR Array3DDesc() {
 
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
@@ -49,6 +58,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
 
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
@@ -67,6 +77,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
 
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hipArray_t array = nullptr;
   auto desc = Array2DDesc();
@@ -77,6 +88,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
 
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
@@ -92,6 +104,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
 
 HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;
@@ -105,6 +118,7 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
 
 HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags) {
   CHECK_IMAGE_SUPPORT;
+  EnsureContext();
 
   hip::contract::ContractCleanup cleanup;
   hipArray_t array = nullptr;

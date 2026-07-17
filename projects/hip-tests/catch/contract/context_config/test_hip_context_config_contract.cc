@@ -17,6 +17,13 @@ void RequireDevice() {
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
+  // Establish a device context before the driver-style hipCtx* configuration
+  // entry points run. On the NVIDIA backend these map to the driver API, which
+  // requires a bound primary context; without one they fail with "invalid device
+  // context". hipFree(0) is the canonical no-op that forces primary-context
+  // initialization, and is a harmless success on AMD where the runtime already
+  // auto-initializes.
+  HIP_CHECK(hipFree(0));
 }
 
 // Resolves the driver-style handle for ordinal zero, which every context

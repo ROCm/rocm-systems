@@ -17,6 +17,14 @@ constexpr size_t kWidth = 16;
 constexpr size_t kHeight = 8;
 constexpr unsigned int kElementBytes = sizeof(uint32_t);
 
+// Establishes a device context before the driver-style pitched-memory entry
+// points below. On the NVIDIA backend these map to the driver API, which
+// requires a bound primary context; a test that calls one before any allocation
+// would otherwise fail with an initialization / "invalid device context" error.
+// hipFree(0) is the canonical no-op that forces primary-context initialization,
+// and is a harmless success on AMD where the runtime already auto-initializes.
+void EnsureContext() { HIP_CHECK(hipFree(0)); }
+
 std::array<uint32_t, kWidth * kHeight> MakePattern(uint32_t seed) {
   std::array<uint32_t, kWidth * kHeight> pattern{};
   for (size_t i = 0; i < pattern.size(); ++i) {
@@ -59,6 +67,7 @@ hip_Memcpy2D HostToDeviceUnaligned(hipDeviceptr_t dst, const void* src, size_t w
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth) {
   hip::contract::ContractCleanup cleanup;
+  EnsureContext();
   hipDeviceptr_t device_ptr = 0;
   size_t pitch = 0;
   const size_t width_bytes = kWidth * sizeof(uint32_t);
@@ -74,6 +83,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth) 
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   hip::contract::ContractCleanup cleanup;
+  EnsureContext();
   const auto src = MakePattern(0x10u);
   std::array<uint32_t, kWidth * kHeight> dst{};
   hipDeviceptr_t device_ptr = 0;
@@ -95,6 +105,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
   hip::contract::ContractCleanup cleanup;
+  EnsureContext();
   constexpr uint32_t pattern = 0x12345678u;
   std::array<uint32_t, kWidth * kHeight> dst{};
   hipDeviceptr_t device_ptr = 0;
@@ -116,6 +127,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
 }
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_FreePitchedAllocation_Succeeds) {
+  EnsureContext();
   hipDeviceptr_t device_ptr = 0;
   size_t pitch = 0;
   const size_t width_bytes = kWidth * sizeof(uint32_t);
@@ -129,6 +141,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_FreePitchedAllocation_Succeeds) {
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
+  EnsureContext();
   std::array<uint8_t, kUnalignedWidthBytes * kUnalignedHeight> src{};
   std::array<uint8_t, kUnalignedWidthBytes * kUnalignedHeight> dst{};
   for (size_t i = 0; i < src.size(); ++i) {
@@ -149,6 +162,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundT
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejected) {
   hip::contract::ContractCleanup cleanup;
+  EnsureContext();
   std::array<uint8_t, kUnalignedWidthBytes * kUnalignedHeight> host{};
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
@@ -169,6 +183,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejecte
 }
 
 HIP_TEST_CASE(Contract_DriverPitchedMemory_RejectsInvalidArgs) {
+  EnsureContext();
   hipDeviceptr_t device_ptr = 0;
   size_t pitch = 0;
   const size_t width_bytes = kWidth * sizeof(uint32_t);
