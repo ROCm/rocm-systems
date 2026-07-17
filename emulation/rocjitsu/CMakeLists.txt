@@ -82,7 +82,7 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
-option(RJ_SANITIZE_SHARED "Link sanitizer runtime libraries dynamically" OFF)
+option(RJ_SANITIZE_SHARED "Link sanitizer runtime libraries dynamically" ON)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
