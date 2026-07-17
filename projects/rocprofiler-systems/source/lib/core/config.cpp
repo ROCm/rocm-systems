@@ -792,9 +792,11 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_AINIC,
                               "Enable tracking for AI NIC metrics", false,
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::PROCESS_SAMPLING_FREQ,
@@ -823,12 +825,14 @@ configure_settings(bool _init)
         "user_time, kernel_time. Special: all, none",
         std::string{ "all" }, "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::SAMPLING_AINICS,
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
                               "names should be separated by "
                               "commas, e.g. eno8303,enp7s0.",
                               std::string{ "none" }, "amd_smi", "rocm", "sampling",
                               "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::SAMPLING_GPUS,
@@ -2299,8 +2303,22 @@ get_cpu_freq_enabled()
 std::string
 get_sampling_ainics()
 {
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     static auto _v = get_config()->find(std::string{ env_vars::SAMPLING_AINICS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+#else
+    return std::string{};
+#endif
+}
+
+bool
+get_ainic_supported()
+{
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool&
