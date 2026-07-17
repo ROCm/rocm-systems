@@ -35,14 +35,14 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *
- * One-way blocking put using anvil::put + anvil::quiet directly on the
- * SDMA queue.  PE0 sends, PE1 is passive.  Sweeps message sizes.
+ * One-way non-blocking put using anvil directly on the SDMA queue.
+ * Pipelines multiple anvil::put calls and quiets only at batch boundaries.
  *****************************************************************************/
 __global__ void SdmaPutNbiTest(int loop, int skip,
                                long long int *start_time,
                                long long int *end_time,
                                char *source, char *dest, size_t size,
-                               ShmemContextType ctx_type) {
+                               int batch, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -61,18 +61,27 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 
     char *my_base = base_ctx->ipcImpl_.ipc_bases[pe];
     char *remote_base = base_ctx->ipcImpl_.ipc_bases[target];
-    uint64_t offset = dest - my_base;
-    void *remote_dest = remote_base + offset;
 
     int wg_id = hipBlockIdx_x;
+    int start_slot = (batch - (skip % batch)) % batch;
 
     for (int i = 0; i < loop + skip; i++) {
-      if (i == skip) {
-        start_time[wg_id] = wall_clock64();
+      int slot = (start_slot + i) % batch;
+
+      if (slot == 0) {
+        anvil::quiet(*handle);
+        if (i == skip) {
+          start_time[wg_id] = wall_clock64();
+        }
       }
+
+      uint64_t d_offset = (dest + size * slot) - my_base;
+      void *remote_dest = remote_base + d_offset;
+
       anvil::put(*handle, remote_dest, source, size);
-      anvil::quiet(*handle);
     }
+
+    anvil::quiet(*handle);
     end_time[wg_id] = wall_clock64();
   }
 
@@ -84,7 +93,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
  *****************************************************************************/
 SdmaPutNbiTester::SdmaPutNbiTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size);
-  r_buf = (char *)alloc_test_buffer(max_msg_size);
+  r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
 }
 
 SdmaPutNbiTester::~SdmaPutNbiTester() {
@@ -94,7 +103,7 @@ SdmaPutNbiTester::~SdmaPutNbiTester() {
 
 void SdmaPutNbiTester::resetBuffers(size_t size) {
   memset(s_buf, 0xAB, size);
-  memset(r_buf, 0, size);
+  memset(r_buf, 0, size * batch_size);
 }
 
 void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -103,7 +112,7 @@ void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
   hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
-                     s_buf, r_buf, size, _shmem_context);
+                     s_buf, r_buf, size, batch_size, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;

@@ -34,13 +34,12 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *
- * One-way blocking put (put_nbi_single + quiet_single) using QP internals
- * directly.  PE0 sends, PE1 is passive.  Sweeps message sizes to separate
- * initiation latency from bandwidth.
+ * One-way non-blocking put using QP internals directly.  Pipelines multiple
+ * put_nbi_single calls and quiets only at batch boundaries.
  *****************************************************************************/
 __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
                              long long int *end_time, char *source,
-                             char *dest, size_t size,
+                             char *dest, size_t size, int batch,
                              ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
@@ -56,19 +55,28 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
         reinterpret_cast<uintptr_t>(gda_ctx->base_heap[pe]);
     uintptr_t remote_base =
         reinterpret_cast<uintptr_t>(gda_ctx->base_heap[target]);
-    uintptr_t offset =
-        reinterpret_cast<uintptr_t>(dest) - local_base;
-    void *remote_addr = reinterpret_cast<void *>(remote_base + offset);
 
     int wg_id = hipBlockIdx_x;
+    int start_slot = (batch - (skip % batch)) % batch;
 
     for (int i = 0; i < loop + skip; i++) {
-      if (i == skip) {
-        start_time[wg_id] = wall_clock64();
+      int slot = (start_slot + i) % batch;
+
+      if (slot == 0) {
+        qp.quiet_single();
+        if (i == skip) {
+          start_time[wg_id] = wall_clock64();
+        }
       }
+
+      uintptr_t d_offset =
+          reinterpret_cast<uintptr_t>(dest + size * slot) - local_base;
+      void *remote_addr = reinterpret_cast<void *>(remote_base + d_offset);
+
       qp.put_nbi_single(remote_addr, source, size, true);
-      qp.quiet_single();
     }
+
+    qp.quiet_single();
     end_time[wg_id] = wall_clock64();
   }
 
@@ -80,7 +88,7 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 QpPutNbiTester::QpPutNbiTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size);
-  r_buf = (char *)alloc_test_buffer(max_msg_size);
+  r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
 }
 
 QpPutNbiTester::~QpPutNbiTester() {
@@ -90,7 +98,7 @@ QpPutNbiTester::~QpPutNbiTester() {
 
 void QpPutNbiTester::resetBuffers(size_t size) {
   memset(s_buf, 0xAB, size);
-  memset(r_buf, 0, size);
+  memset(r_buf, 0, size * batch_size);
 }
 
 void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -99,7 +107,7 @@ void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
   hipLaunchKernelGGL(QpPutNbiTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, s_buf, r_buf, size,
-                     _shmem_context);
+                     batch_size, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
