@@ -695,7 +695,14 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
     } else {
       if (!writeVAImmediate) {
         // convert cl_mem to amd::Memory*, return false if invalid.
+        // GCC's -Warray-bounds gives a false positive here: setArgument is inlined and GCC
+        // cannot see that this T_POINTER path is only taken when 'value' points to a cl_mem
+        // (not the smaller scalar object seen at some call sites). The runtime kernel arg
+        // descriptor guarantees the correct type/size for this path.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
         amd::Memory* mem = as_amd(*static_cast<const cl_mem*>(value));
+#pragma GCC diagnostic pop
 
         reinterpret_cast<amd::Memory**>(
             kernel->parameters().values() +
@@ -730,7 +737,13 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
         if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
           uint64_value = size;
         } else {
+          // GCC's -Warray-bounds gives a false positive here: setArgument is inlined and GCC
+          // cannot see that this case is only taken when desc.size_ == 8, i.e. 'value' points
+          // to an 8-byte object rather than the smaller scalar seen at some call sites.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
           uint64_value = *static_cast<const uint64_t*>(value);
+#pragma GCC diagnostic pop
         }
         break;
       default:

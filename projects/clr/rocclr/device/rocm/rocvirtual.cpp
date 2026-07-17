@@ -2331,7 +2331,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Get the next chunk
     active_chunk_ = (active_chunk_ + 1) % num_chunk_signals_;
     // Make sure the new active chunk is free
-    bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
+    [[maybe_unused]] bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
