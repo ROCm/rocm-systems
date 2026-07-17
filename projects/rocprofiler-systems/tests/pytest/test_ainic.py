@@ -66,6 +66,7 @@ AINIC_PERFETTO_COUNTER_NAMES = [
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def ainic_perf_env() -> dict[str, str]:
     """Environment variables for AI NIC performance tests."""
