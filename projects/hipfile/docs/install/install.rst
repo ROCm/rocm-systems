@@ -96,3 +96,16 @@ The `TheRock <https://github.com/ROCm/TheRock>`__ build system publishes nightly
 builds for the ROCm Core SDK and its components. See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for download links and
 support notes.
+
+.. _hipfile-install-nvmeof-nfsordma:
+
+NVMeoF & NFSoRDMA Support on Linux
+==================================
+
+NVMeoF & NFSoRDMA are supported by hipFile on Linux on an experimental basis. Version
+31.40 or newer of the ``amdgpu-dkms`` driver must be installed at a minimum.
+
+NFSoRDMA, and NVMeoF backed by a regular file on an unsupported filesystem, require
+setting ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true`` to bypass hipFile's filesystem
+check. See :doc:`/reference/hipFile-io-backends` for the fastpath backend's full
+filesystem and file-type rules.
