@@ -1864,7 +1864,9 @@ private:
     const auto mnemonic = inst.mnemonic();
     if (starts_with(mnemonic, "flat_load")) {
       events.push_back({WaitCounterKind::Load, WaitEventKind::FlatLoad});
-      events.push_back({WaitCounterKind::Ds, WaitEventKind::Ds});
+      // Keep the instruction kind distinct: generic FLAT and native DS can
+      // complete out of order even though both contribute to the DS counter.
+      events.push_back({WaitCounterKind::Ds, WaitEventKind::FlatLoad});
       if (expert)
         events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatLoad,
                           TrackedRegisterSource::VectorUses, false, true});
@@ -2200,6 +2202,7 @@ private:
                                         std::span<const ClassifiedEvent> current_events) {
     switch (event.kind) {
     case WaitEventKind::VmemNoSamplerLoad:
+    case WaitEventKind::Ds:
     case WaitEventKind::Sample:
     case WaitEventKind::Bvh:
       break;
