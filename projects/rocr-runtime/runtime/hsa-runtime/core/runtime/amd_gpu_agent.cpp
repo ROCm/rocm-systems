@@ -4317,8 +4317,11 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   pcs_data->session->stop();
 
   // Stop consumer thread first
-  pcs_data->consumer_exit.store(true, std::memory_order_release);
-  pcs_data->consumer_cv.notify_one();
+  {
+    std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
+    pcs_data->consumer_exit.store(true, std::memory_order_release);
+    pcs_data->consumer_cv.notify_one();
+  }
   if (pcs_data->consumer_thread.joinable()) {
     pcs_data->consumer_thread.join();
   }
@@ -4380,8 +4383,11 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   // 2. Consumer may have unprocessed notifications - that's OK, Flush handles it
   // 3. Stopping consumer first avoids wasteful concurrent access (both use same buffers/mutexes)
   // 4. Final flush reads all data from host buffers and delivers via callback
-  pcs_data->consumer_exit.store(true, std::memory_order_release);
-  pcs_data->consumer_cv.notify_one();
+  {
+    std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
+    pcs_data->consumer_exit.store(true, std::memory_order_release);
+    pcs_data->consumer_cv.notify_one();
+  }
   if (pcs_data->consumer_thread.joinable()) {
     pcs_data->consumer_thread.join();
   }
@@ -4825,8 +4831,12 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
 
       if (val == -1) {
         // Exit signal received - notify consumer and exit
-        pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-        pcs_data.consumer_cv.notify_one();
+        // fetch_add + notify_one must be under same lock to prevent lost-wakeup race
+        {
+          std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
+          pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
+          pcs_data.consumer_cv.notify_one();
+        }
         break;
       } else if (val != 0) {
         // Spurious wakeup - continue waiting
@@ -4851,8 +4861,15 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
       }
 
       // Notify consumer thread that new data is available
-      pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
-      pcs_data.consumer_cv.notify_one();
+      // fetch_add + notify_one must be under same lock to prevent lost-wakeup race.
+      // The consumer's wait() predicate checks pending_flush_count under this same lock, so either:
+      // 1. Consumer is waiting: we increment, then notify wakes it up
+      // 2. Consumer checks predicate: it sees our incremented count and doesn't wait
+      {
+        std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
+        pcs_data.pending_flush_count.fetch_add(1, std::memory_order_release);
+        pcs_data.consumer_cv.notify_one();
+      }
     }
 
     debug_print("%s (XCC %u)::Exiting\n", thread_name, xcc_id);
