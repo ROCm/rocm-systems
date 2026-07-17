@@ -72,15 +72,15 @@ for target in "${targets[@]}"; do
   echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
-  skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
-  artifact_dir=".pytest-artifacts/${name}"
-  cache_dir=".pytest-cache/${name}"
+  corpus_test_config_dir="${ROCJITSU_SOURCE_DIR}/tests/corpus"
+  artifact_dir="${corpus_test_config_dir}/.pytest-artifacts/${name}"
+  cache_dir="${corpus_test_config_dir}/.pytest-cache/${name}"
 
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
-    --skip-tests-config "${skip_tests_config_path}"
+    --skip-tests-config "${corpus_test_config_dir}/${skip_tests_config}"
     --artifact-directory "${artifact_dir}"
     --durations=0
     -vv
