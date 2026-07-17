@@ -16,7 +16,7 @@ a private prefix:
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target rocjitsu_comgr rocjitsu_hotswap_select
-cmake --install build --prefix "$PWD/install"
+cmake --install build --prefix "$PWD/install" --component rocjitsu-hotswap
 ```
 
 The install contains two relevant shared libraries:

@@ -33,14 +33,13 @@ constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
 constexpr uint16_t kSkippedKernelTrapId = 0x52;
 /// @brief Source-distance cutoff for reserving a long direct-branch window.
 ///
-/// @details Most scalar branches target neighboring blocks and still fit after
-/// semantic expansion. Reserving the 7-dword long-branch sequence for every
-/// branch bloats translated kernels with NOPs. Use a conservative source
-/// distance estimate below the hardware SOPP range so near-limit source
-/// branches get a long window before translation expansion can push them out of
-/// range.
-constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 32 * 1024;
-
+/// @details The largest current gfx1250 semantic replacement grows a 16-byte
+/// Scale16 WMMA to at most 272 bytes (17x, including VGPR-MSB mode changes).
+/// Seven KiB of maximally dense expansion therefore remains below the 128 KiB
+/// signed SOPP reach, while genuinely close branches keep compact slots. The
+/// production NVFP4 branch which exposed this limit spans about 15 KiB and is
+/// conservatively assigned a long window by this threshold.
+constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 7 * 1024;
 } // namespace
 
 [[nodiscard]] TextRelocationResult relocation_ok() { return {}; }

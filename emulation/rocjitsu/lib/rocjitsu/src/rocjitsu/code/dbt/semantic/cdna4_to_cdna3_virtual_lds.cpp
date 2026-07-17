@@ -678,8 +678,8 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
     return false;
   if ((translation.virtual_lds_lowering.prologue_temp_sgpr % 2) != 0)
     return false;
-  if (translation.virtual_lds_lowering.base_sgpr + 1 >= kCdnaOrdinarySgprLimit ||
-      translation.virtual_lds_lowering.prologue_temp_sgpr + 1 >= kCdnaOrdinarySgprLimit ||
+  if (translation.virtual_lds_lowering.base_sgpr + 1u >= kCdnaOrdinarySgprLimit ||
+      translation.virtual_lds_lowering.prologue_temp_sgpr + 1u >= kCdnaOrdinarySgprLimit ||
       pointer_base_sgpr > 126)
     return false;
   if (translation.lds_overflow_kernarg_pointer_offset > kCdnaSmemImmediateByteOffsetMax)

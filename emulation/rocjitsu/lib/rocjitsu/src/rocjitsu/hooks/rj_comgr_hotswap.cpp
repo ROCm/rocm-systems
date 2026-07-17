@@ -290,7 +290,11 @@ extern "C" RJ_API_EXPORT int amd_comgr_hotswap_rewrite(ComgrData input,
     rocjitsu::BinaryTranslatorOptions options;
     options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
     options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
-    options.skip_failed_kernels = false;
+    // Large framework code objects can include kernels that the current model
+    // never dispatches. Keep the object loadable and redirect only an
+    // unsupported kernel to the target-ISA trap stub; the translator reports a
+    // KernelSkipped warning with its symbol and failure reason.
+    options.skip_failed_kernels = true;
     rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
                                           ROCJITSU_CODE_ARCH_GFX1250,
                                           rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, options);

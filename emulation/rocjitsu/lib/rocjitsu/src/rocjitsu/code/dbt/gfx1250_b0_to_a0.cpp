@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/semantic_scratch.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
@@ -352,6 +353,254 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   return ExpandResult::success(std::move(words));
 }
 
+/// @brief Encode an inline non-negative integer accepted by a VALU source.
+[[nodiscard]] constexpr uint16_t gfx1250_inline_u32(uint16_t value) {
+  return static_cast<uint16_t>(128u + value);
+}
+
+/// @brief Encode one low-bank VGPR as a generic VALU source operand.
+[[nodiscard]] constexpr uint16_t gfx1250_vgpr_src(uint16_t vgpr) {
+  return static_cast<uint16_t>(256u + vgpr);
+}
+
+/// @brief Emit one block-16 to block-32 scale reduction.
+///
+/// @details A Scale16 operand is a pair of VGPRs containing eight byte scales.
+/// Adjacent byte pairs describe the two block-16 halves of one A0 block-32
+/// group. Taking the unsigned maximum of each pair produces the conservative
+/// four-byte A0 scale operand recommended for exponent scales. All emitted
+/// instructions are VOP3 forms so the temporary zero VGPR-MSB mode applies to
+/// every register role uniformly.
+void append_gfx1250_scale16_reduction(std::vector<uint32_t> &words, uint16_t src_lo,
+                                      uint16_t dst, uint16_t temp1, uint16_t temp2) {
+  const auto vgpr = gfx1250_vgpr_src;
+  const auto bfe = [&](uint16_t out, uint16_t src, uint16_t bit) {
+    append_words(words, gfx1250::build_vop3(
+                            gfx1250::kVBfeU32Vop3,
+                            {.vdst = static_cast<uint8_t>(out),
+                             .src0 = vgpr(src),
+                             .src1 = gfx1250_inline_u32(bit),
+                             .src2 = gfx1250_inline_u32(8)}));
+  };
+  const auto maximum = [&](uint16_t out, uint16_t lhs, uint16_t rhs) {
+    append_words(words, gfx1250::build_vop3(
+                            gfx1250::kVMaxU32Vop3,
+                            {.vdst = static_cast<uint8_t>(out),
+                             .src0 = vgpr(lhs),
+                             .src1 = vgpr(rhs)}));
+  };
+  const auto insert = [&](uint16_t shift) {
+    append_words(words, gfx1250::build_vop3(
+                            gfx1250::kVLshlOrB32Vop3,
+                            {.vdst = static_cast<uint8_t>(dst),
+                             .src0 = vgpr(temp1),
+                             .src1 = gfx1250_inline_u32(shift),
+                             .src2 = vgpr(dst)}));
+  };
+
+  bfe(temp1, src_lo, 0);
+  bfe(temp2, src_lo, 8);
+  maximum(dst, temp1, temp2);
+
+  bfe(temp1, src_lo, 16);
+  bfe(temp2, src_lo, 24);
+  maximum(temp1, temp1, temp2);
+  insert(8);
+
+  bfe(temp1, static_cast<uint16_t>(src_lo + 1u), 0);
+  bfe(temp2, static_cast<uint16_t>(src_lo + 1u), 8);
+  maximum(temp1, temp1, temp2);
+  insert(16);
+
+  bfe(temp1, static_cast<uint16_t>(src_lo + 1u), 16);
+  bfe(temp2, static_cast<uint16_t>(src_lo + 1u), 24);
+  maximum(temp1, temp1, temp2);
+  insert(24);
+}
+
+/// @brief Convert B0 Scale16 WMMA to A0 regular Scale WMMA.
+///
+/// @details The B0 prefix consumes two-VGPR block-16 scale operands. A0's
+/// regular Scale prefix consumes one reduced VGPR per matrix. The B0-only
+/// 32x16 FP4 form is additionally split along M into two A0 16x16 F8F6F4
+/// instructions with both matrix formats forced to FP4. The halves share B
+/// and reduced scales while D, A, and a VGPR C operand are sliced by eight
+/// dwords. Inline C is copied to both halves.
+ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint64_t,
+                                         std::span<const uint8_t>,
+                                         const LivenessAnalysis &liveness,
+                                         TranslationContext &context, const LaneLayout *,
+                                         const LaneLayout *) {
+  // The prefix opcode shares its structural lookup key with ordinary VOP3
+  // instructions. Decline those collisions so their own legalization can
+  // report an unimplemented expansion instead of a misleading Scale16 error.
+  if (!inst.mnemonic().starts_with("v_wmma_scale16_f32_"))
+    return ExpandResult::not_handled();
+  if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
+    return ExpandResult::failed(
+        "gfx1250 Scale16 WMMA rule received an unsupported VOP3PX3 instruction");
+  }
+
+  gfx1250::Vop3pMachineInst scale{};
+  gfx1250::Vop3pMachineInst matrix{};
+  std::memcpy(&scale, inst.raw_encoding(), sizeof(scale));
+  std::memcpy(&matrix, inst.raw_encoding() + 2, sizeof(matrix));
+  if (scale.op != 0x3a ||
+      (matrix.op != gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p &&
+       matrix.op != gfx1250::kVWmmaF3232x16x128F4Vop3p)) {
+    return ExpandResult::failed("gfx1250 Scale16 WMMA rule received an unsupported base opcode");
+  }
+
+  constexpr uint16_t kVgprEncoding = 256;
+  if (scale.src0 < kVgprEncoding || scale.src1 < kVgprEncoding) {
+    return ExpandResult::failed("gfx1250 Scale16 WMMA scale operands are not VGPR pairs");
+  }
+  const uint16_t scale_a = static_cast<uint16_t>(scale.src0 - kVgprEncoding);
+  const uint16_t scale_b = static_cast<uint16_t>(scale.src1 - kVgprEncoding);
+  if (scale_a >= 255 || scale_b >= 255) {
+    return ExpandResult::failed("gfx1250 Scale16 WMMA scale pair crosses the low VGPR bank");
+  }
+
+  SemanticScratchAllocator allocator(
+      inst, liveness, context,
+      SemanticScratchPolicy{.max_vgprs = 256, .max_spill_dword_offset = 0});
+  SemanticScratchRequest request;
+  request.count = 4;
+  request.allow_spill = false;
+  const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+  if (!scratch) {
+    return ExpandResult::failed(
+        "gfx1250 Scale16 WMMA could not allocate four dead low-bank scratch VGPRs",
+        {"Provide four dead VGPRs below v256 for scale reduction."});
+  }
+  const uint16_t reduced_a = scratch.lease->base;
+  const uint16_t reduced_b = static_cast<uint16_t>(reduced_a + 1u);
+  const uint16_t temp1 = static_cast<uint16_t>(reduced_a + 2u);
+  const uint16_t temp2 = static_cast<uint16_t>(reduced_a + 3u);
+
+  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
+  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
+  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
+  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
+    return ExpandResult::failed("gfx1250 Scale16 WMMA cannot prove the VGPR-MSB mode");
+  }
+  const uint8_t original_mode = static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) |
+                                                      (*src2_bank << 4) | (*dst_bank << 6));
+
+  std::vector<uint32_t> words;
+  words.reserve(64);
+  if (original_mode != 0)
+    append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0}));
+  append_gfx1250_scale16_reduction(words, scale_a, reduced_a, temp1, temp2);
+  append_gfx1250_scale16_reduction(words, scale_b, reduced_b, temp1, temp2);
+  if (original_mode != 0)
+    append_words(words,
+                 gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
+
+  const auto build_scale_prefix = [&](uint8_t a_row) {
+    // Matrix reuse bits describe the original B64 operands and must not carry
+    // into the reduced B32 instruction. Preserve only scale-row and scale-format fields.
+    return gfx1250::build_vop3p(
+        0x35,
+        {.neg_hi = static_cast<uint8_t>(scale.neg_hi & 0x3u),
+         .opsel = static_cast<uint8_t>(a_row & 0x1u),
+         .src0 = gfx1250_vgpr_src(reduced_a),
+         .src1 = gfx1250_vgpr_src(reduced_b),
+         .src2 = gfx1250_vgpr_src(0),
+         .opsel_hi = static_cast<uint8_t>(scale.opsel_hi & 0x1u),
+         .neg = static_cast<uint8_t>(scale.neg & 0x3u)});
+  };
+
+  if (matrix.op == gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p) {
+    append_words(words, build_scale_prefix(static_cast<uint8_t>(scale.opsel & 0x1u)));
+    words.insert(words.end(), inst.raw_encoding() + 2, inst.raw_encoding() + 4);
+    return ExpandResult::success(std::move(words));
+  }
+
+  if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding) {
+    return ExpandResult::failed("gfx1250 32x16 Scale16 matrix inputs are not VGPR ranges");
+  }
+  const bool src2_is_vgpr = matrix.src2 >= kVgprEncoding;
+  const uint16_t src0_low = static_cast<uint16_t>(matrix.src0 - kVgprEncoding);
+  const uint16_t src1_low = static_cast<uint16_t>(matrix.src1 - kVgprEncoding);
+  const uint16_t src2_low =
+      src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
+  constexpr uint16_t kHalfDwords = 8;
+  const bool dst_crosses = static_cast<uint32_t>(matrix.vdst) + kHalfDwords > 0xffu;
+  const bool src0_crosses = static_cast<uint32_t>(src0_low) + kHalfDwords > 0xffu;
+  const bool src2_crosses =
+      src2_is_vgpr && static_cast<uint32_t>(src2_low) + kHalfDwords > 0xffu;
+  if ((dst_crosses && *dst_bank == 3) || (src0_crosses && *src0_bank == 3) ||
+      (src2_crosses && *src2_bank == 3)) {
+    return ExpandResult::failed("gfx1250 32x16 Scale16 split exceeds the VGPR address space");
+  }
+
+  for (uint16_t half = 0; half < 2; ++half) {
+    std::optional<uint8_t> half_mode;
+    if (half == 1 && (dst_crosses || src0_crosses || src2_crosses)) {
+      half_mode = static_cast<uint8_t>((*src0_bank + (src0_crosses ? 1u : 0u)) |
+                                       (*src1_bank << 2) |
+                                       ((*src2_bank + (src2_crosses ? 1u : 0u)) << 4) |
+                                       ((*dst_bank + (dst_crosses ? 1u : 0u)) << 6));
+      append_words(words,
+                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = *half_mode}));
+    }
+
+    append_words(words, build_scale_prefix(static_cast<uint8_t>(half)));
+    const uint16_t delta = static_cast<uint16_t>(half * kHalfDwords);
+    const uint16_t half_src2 =
+        src2_is_vgpr
+            ? static_cast<uint16_t>(kVgprEncoding + ((src2_low + delta) & 0xffu))
+            : static_cast<uint16_t>(matrix.src2);
+    auto wmma = gfx1250::build_vop3p(
+        gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+        {.vdst = static_cast<uint8_t>(matrix.vdst + delta),
+         .neg_hi = static_cast<uint8_t>(matrix.neg_hi),
+         .opsel = 4,
+         .clamp = static_cast<uint8_t>(matrix.clamp),
+         .src0 = static_cast<uint16_t>(kVgprEncoding + ((src0_low + delta) & 0xffu)),
+         .src1 = static_cast<uint16_t>(kVgprEncoding + src1_low),
+         .src2 = half_src2,
+         .opsel_hi = 0,
+         .neg = static_cast<uint8_t>(matrix.neg)});
+    // MATRIX_FMT_FP4 for B is {pad_14,opsel_hi}=4.
+    wmma[0] |= uint32_t{1} << 14;
+    append_words(words, wmma);
+
+    if (half_mode)
+      append_words(words,
+                   gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = original_mode}));
+  }
+  return ExpandResult::success(std::move(words));
+}
+
+/// @brief Conservatively separate B0 integer WMMA from its A0 successor.
+///
+/// @details A0 requires eight safe co-execution slots after integer IU8/IU4
+/// WMMA, whereas B0 requires four. This temporary local lowering does not yet
+/// inspect the following VALU or control-flow successors, so it appends eight
+/// V_NOPs unconditionally and is intentionally safe rather than optimal.
+ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, uint64_t,
+                                             std::span<const uint8_t>, const LivenessAnalysis &,
+                                             TranslationContext &, const LaneLayout *,
+                                             const LaneLayout *) {
+  if (inst.mnemonic() != "v_wmma_i32_16x16x64_iu8")
+    return ExpandResult::not_handled();
+  if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
+    return ExpandResult::failed("gfx1250 IU8 WMMA rule received an unsupported VOP3P instruction");
+
+  std::vector<uint32_t> words(inst.raw_encoding(),
+                              inst.raw_encoding() + inst.size() / sizeof(uint32_t));
+  // TODO: Reduce this to four V_NOPs once we establish that B0 compiler output
+  // always supplies its required four safe co-execution slots.
+  // TODO: Replace fixed padding with a whole-kernel lookahead that counts
+  // existing V_NOPs/independent VALU and inserts exactly the A0-required eight slots.
+  for (int slot = 0; slot < 8; ++slot)
+    append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
+  return ExpandResult::success(std::move(words));
+}
+
 /// @brief Split a B0-only K=128 FP8/BF8 WMMA into two A0 K=64 WMMAs.
 ///
 /// @details WMMA computes D=A*B+C. The first instruction consumes the low
@@ -525,11 +774,15 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 23> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 25> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_s_clause, nullptr, nullptr},
     {gfx1250::encoding::kVop3p, 0x35, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale_src2, nullptr, nullptr},
+    {gfx1250::encoding::kVop3p, 0x3a, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_wmma_scale16, nullptr, nullptr},
+    {gfx1250::encoding::kVop3p, gfx1250::kVWmmaI3216x16x64Iu8Vop3p, RuleAction::Expand, 0, 0,
+     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,

@@ -1194,20 +1194,46 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const Instruction &low_inst = *ctx.insts[block.first_index];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 2];
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    // The compiler also emits a scalar immediate move to configure the
+    // prefetch.  It is safe to skip only when its destination is outside the
+    // getpc pair being proven.
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+  };
+
+  size_t high_index = block.first_index + 1;
+  while (high_index <= block.last_index && is_gfx1250_padding(high_index))
+    ++high_index;
+  if (high_index > block.last_index)
+    return std::nullopt;
+  const Instruction &high_inst = *ctx.insts[high_index];
+
+  size_t setpc_index = high_index + 1;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
+    return std::nullopt;
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index].word, *add_u32_opcode,
                                 pair_lo, pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 1].word,
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word,
                                      *addc_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 2].word,
+  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word,
                                    ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return block.first_index + 2;
+  return setpc_index;
 }
 
 [[nodiscard]] std::optional<std::pair<size_t, uint64_t>>
@@ -1224,32 +1250,51 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   // through this subtract half. Relocation rewrites that first range once; the
   // add-half fixup shares the range only so translation knows its setpc was
   // statically accounted for.
-  if (block.first_index + 3 > block.last_index)
-    return std::nullopt;
-
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
   if (!sub_u32_opcode || !subb_u32_opcode)
     return std::nullopt;
 
-  const Instruction &abs_inst = *ctx.insts[block.first_index];
-  const Instruction &low_inst = *ctx.insts[block.first_index + 1];
-  const Instruction &high_inst = *ctx.insts[block.first_index + 2];
-  const Instruction &setpc_inst = *ctx.insts[block.first_index + 3];
-  if (!sop1_same_sreg(abs_inst, ctx.facts[block.first_index].word, "s_abs_i32", tmp_sreg))
+  const auto is_gfx1250_padding = [&](size_t index) {
+    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+      return false;
+    const Instruction &inst = *ctx.insts[index];
+    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+      return true;
+    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+      return false;
+    const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
+    return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u);
+  };
+
+  size_t abs_index = block.first_index;
+  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
+    ++abs_index;
+  if (abs_index + 3 > block.last_index)
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index + 1].word, *sub_u32_opcode,
+  const Instruction &abs_inst = *ctx.insts[abs_index];
+  const Instruction &low_inst = *ctx.insts[abs_index + 1];
+  const Instruction &high_inst = *ctx.insts[abs_index + 2];
+  size_t setpc_index = abs_index + 3;
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+    ++setpc_index;
+  if (setpc_index > block.last_index)
+    return std::nullopt;
+  const Instruction &setpc_inst = *ctx.insts[setpc_index];
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
+    return std::nullopt;
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode,
                                 pair_lo, pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[block.first_index + 2].word,
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word,
                                      *subb_u32_opcode, static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;
-  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[block.first_index + 3].word,
+  auto setpc_sreg = scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word,
                                    ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return std::pair{block.first_index + 3,
+  return std::pair{setpc_index,
                    high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
 }
 

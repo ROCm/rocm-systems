@@ -343,14 +343,21 @@ install(
 
 # Libraries: lib/
 install(
-    TARGETS rocjitsu_shared rocjitsu_hooks rocjitsu_comgr
+    TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(
+    TARGETS rocjitsu_comgr
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT rocjitsu-hotswap
 )
 
 if(TARGET rocjitsu_hotswap_select)
     install(
         TARGETS rocjitsu_hotswap_select
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT rocjitsu-hotswap
     )
 endif()
 
