@@ -22,6 +22,7 @@
 ///   0xBFB00000 = s_endpgm (op = 48) — RDNA3/3.5/4
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
@@ -778,5 +779,47 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expect_lds ? "_with_lds" : "_without_lds";
       return name;
     });
+
+TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
+  const uint32_t words[] = {
+      0xDA704746u,
+      0x3E0000F3u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
+  EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243");
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
+  EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
+}
+
+TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
+  const uint32_t words[] = {
+      0xD3E08088u,
+      0x1E22A554u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
+  EXPECT_EQ(inst->disassemble(),
+            "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], acc[136:151]");
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 136, 16}));
+  EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 136, 16}));
+  EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 84, 2}));
+  EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 82, 2}));
+  EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 136, 16}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 136, 16}));
+}
 
 } // namespace

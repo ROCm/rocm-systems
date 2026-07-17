@@ -5761,15 +5761,24 @@ class CodeGenerator:
 
     @staticmethod
     def _operand_encoding_value_expr(
-        opnd_name: str, enc_name: str, packed_16bit: bool
+        opnd_name: str,
+        enc_name: str,
+        packed_16bit: bool,
+        operand_type: str | None = None,
+        has_acc_field: bool = False,
+        has_acc_cd_field: bool = False,
     ) -> str:
         """C++ expression for the decoded value passed to an Operand constructor.
 
         For most operands this is just the value. SMEM SBASE and legacy buffer
         SRSRC fields are encoded in register groups, so this helper scales them
-        to the real SGPR index. This keeps the operand's register-ref
-        (disassembly, def/use, liveness) consistent with execution, which
-        scales the raw fields independently in its address calculations.
+        to the real SGPR index. CDNA memory encodings also carry their AccVGPR
+        bank selection in a separate ``acc`` bit, so fold that bit into the
+        selector passed to OPR_VGPR_OR_ACCVGPR. MFMA's two ``acc`` bits select
+        the AccVGPR bank for its A/B inputs, and ``acc_cd`` selects it for the
+        C/D operands. This keeps the operand's register-ref (disassembly,
+        def/use, liveness) consistent with execution, which applies these
+        transformations independently.
         """
         expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
         enc_name = enc_name.upper()
@@ -5777,6 +5786,53 @@ class CodeGenerator:
             expr = f'({expr} * 2)'
         elif enc_name in ('ENC_MUBUF', 'ENC_MTBUF') and opnd_name == 'srsrc':
             expr = f'({expr} * 4)'
+        acc_bank_encodings = {
+            'ENC_DS',
+            'ENC_MUBUF',
+            'ENC_MTBUF',
+            'ENC_FLAT',
+            'ENC_FLAT_GLBL',
+            'ENC_FLAT_SCRATCH',
+            'ENC_MIMG',
+        }
+        if (
+            enc_name in acc_bank_encodings
+            and has_acc_field
+            and operand_type == 'OPR_VGPR_OR_ACCVGPR'
+        ):
+            expr = (
+                f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc ? '
+                'OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))'
+            )
+        elif enc_name in {'ENC_VOP3P', 'ENC_VOP3P_MFMA'} and has_acc_cd_field:
+            if (
+                opnd_name in {'src0', 'src1'}
+                and operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR'
+                and has_acc_field
+            ):
+                acc_mask = '0x1u' if opnd_name == 'src0' else '0x2u'
+                expr = (
+                    f'({expr} + ((reinterpret_cast<const OpEncoding*>(inst)->acc & '
+                    f'{acc_mask}) ? (OpSelSrcVgprOrAccvgpr::'
+                    'OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN - '
+                    'OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN) : 0))'
+                )
+            elif opnd_name == 'vdst' and operand_type == 'OPR_VGPR_OR_ACCVGPR':
+                expr = (
+                    f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc_cd ? '
+                    'OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))'
+                )
+            elif (
+                opnd_name == 'src2'
+                and operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST'
+            ):
+                expr = (
+                    f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc_cd ? '
+                    '(OpSelSrcVgprOrAccvgprOrConst::'
+                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN - '
+                    'OpSelSrcVgprOrAccvgprOrConst::'
+                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN) : 0))'
+                )
         if packed_16bit:
             expr = f'static_cast<unsigned short>({expr})'
         return expr
@@ -5938,7 +5994,12 @@ class CodeGenerator:
                                 else ''
                             )
                             operand_value = self._operand_encoding_value_expr(
-                                opnd.name, enc.enc_name, bool(packed_16bit_source_arg)
+                                opnd.name,
+                                enc.enc_name,
+                                bool(packed_16bit_source_arg),
+                                operand_type=opr_type,
+                                has_acc_field='acc' in inst_field_names,
+                                has_acc_cd_field='acc_cd' in inst_field_names,
                             )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
