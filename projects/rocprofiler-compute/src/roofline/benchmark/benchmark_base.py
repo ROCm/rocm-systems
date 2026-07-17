@@ -419,21 +419,33 @@ class Bench_base(ABC):
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-        prog = self.Program(self.hbm_bw_src, ["HBM_bw<double>"])
-        func = prog.get_kernel("HBM_bw<double>")
+        prog = self.Program(self.hbm_bw_src)
+        func = prog.get_kernel("HBM_bw")
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
-        workgroups_per_cu = 20 * 1024
-        workgroups = cus * workgroups_per_cu
-        dataset_entries = workgroups * workgroup_size
+        UNROLL = 16
+        elem_size = 16  # sizeof(__uint128_t)
 
-        d_src = hip.hipMalloc(dataset_entries * sizeof(c_double))
-        d_dst = hip.hipMalloc(dataset_entries * sizeof(c_double))
+        dataset_bytes = 4 * 1024 * 1024 * 1024  # 4 GB
+        workgroups = 128 * cus
+        elems_per_step = workgroups * workgroup_size * UNROLL
+        total_elems = dataset_bytes // elem_size
+        num_steps = (total_elems + elems_per_step - 1) // elems_per_step
 
-        total_bytes = dataset_entries * sizeof(c_double) * 2
+        total_elems = num_steps * elems_per_step
+        alloc_bytes = total_elems * elem_size
+
+        d_src = hip.hipMalloc(alloc_bytes)
+
+        total_bytes = total_elems * elem_size
 
         self.launch_kernel(
-            func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [d_dst, d_src]
+            func,
+            [workgroups, 1, 1],
+            [workgroup_size, 1, 1],
+            0,
+            None,
+            [d_src, c_int64(num_steps)],
         )
         hip.hipDeviceSynchronize()
 
@@ -445,7 +457,7 @@ class Bench_base(ABC):
             [workgroup_size, 1, 1],
             0,
             None,
-            [d_dst, d_src],
+            [d_src, c_int64(num_steps)],
         )
 
         stats = self.calc_stats(samples)
