@@ -77,7 +77,6 @@ rocprofiler_add_integration_validate_test(
     ARGS --rocpd-input ${CMAKE_CURRENT_BINARY_DIR}/out_multi/multi_results.db
     COPY spm_input.json conftest.py
     CONFIG pytest.ini
-    COPY conftest.py
     LABELS "integration-tests"
     FIXTURES_REQUIRED "rocprofv3-test-spm-multigpu-rocpd-execute"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"

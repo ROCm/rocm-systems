@@ -19,9 +19,6 @@ def _find_table_or_view(conn, base_name):
 def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     assert not counter_csv.empty
 
-    TOLERANCE = 0.2
-    within_tolerance = lambda x, y: abs(x - y) < TOLERANCE * max(x, y)
-
     kernel_column = "kernel_name" if "kernel_name" in counter_csv else "Kernel_Name"
     counter_column = "counter_name" if "counter_name" in counter_csv else "Counter_Name"
     value_column = "Counter_Value"
@@ -66,24 +63,15 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
 
     assert spm_values
 
-    is_cycle = lambda x: x[:2] == "CP" or x == "SQ_CYCLES"
-    is_deterministic = lambda x: x[:3] == "SQ_" and x != "SQ_CYCLES"
-
     for counter_name, csv_value in csv_values.items():
         assert counter_name in spm_values, (
             f"{counter_name} in CSV but not in JSON. "
             f"JSON counters: {sorted(spm_values.keys())}"
         )
         spm_value = spm_values[counter_name]
-        if is_deterministic(counter_name):
-            assert (
-                csv_value == spm_value
-            ), f"{counter_name}: csv={csv_value} != json={spm_value}"
-        elif not is_cycle(counter_name):
-            assert within_tolerance(csv_value, spm_value), (
-                f"{counter_name}: csv={csv_value}, json={spm_value}, "
-                f"not within {TOLERANCE*100}% tolerance"
-            )
+        assert (
+            csv_value == spm_value
+        ), f"{counter_name}: csv={csv_value} != json={spm_value}"
 
 
 def test_validate_spm_rocpd(spm_json_data, rocpd_data):

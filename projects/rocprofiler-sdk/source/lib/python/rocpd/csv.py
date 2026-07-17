@@ -419,7 +419,6 @@ def write_spm_counters_csv(importData, config) -> None:
         "accum_vgpr_count",
         "sgpr_count",
         "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
-        "pmc_id AS Counter_Id",
         "value AS Counter_Value",
         "timestamp AS Timestamp",
     ]

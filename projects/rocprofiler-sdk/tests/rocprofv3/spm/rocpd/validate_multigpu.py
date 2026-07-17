@@ -20,7 +20,10 @@ def test_validate_spm_multigpu_rocpd_stream_id(rocpd_data):
     assert spm_view is not None
 
     rows = rocpd_data.execute(
-        f"SELECT DISTINCT stream_id FROM {spm_view} WHERE stream_id > 0"
+        f"SELECT DISTINCT K.stream_id FROM {spm_view} S"
+        f" INNER JOIN rocpd_kernel_dispatch K ON K.event_id = S.event_id"
+        f" AND K.guid = S.guid"
+        f" WHERE K.stream_id > 0"
     ).fetchall()
 
     assert len(rows) > 0, "No SPM kernel dispatches with non-zero stream_id in rocpd"
