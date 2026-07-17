@@ -114,6 +114,7 @@ jobs:
         env:
           RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
         run: "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+
       - name: Build OpenMPI on a compute node
         env:
           RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
