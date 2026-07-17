@@ -4039,6 +4039,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // the packet type so checkGpuTime → addTimestamps only fires for
       // kernel dispatches (not synthetic barriers).
       ps->flags_.done_ = false;
+      // Record the queue this patched dispatch signal runs on (resolved from the
+      // owning segment's stream at launch) so profiling attributes it to the
+      // right stream rather than the graph launch stream.
+      ps->queue_index_ = patch.queue_index;
       uint16_t hdr;
       memcpy(&hdr, patch.packet, sizeof(hdr));
       uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);

@@ -84,7 +84,7 @@ __device__ void Context::to_all(T *dest, const T *source, int nreduce,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
+__device__ int Context::reduce_wg(rocshmem_team_t team, T *dest, const T *source,
                                int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
@@ -94,7 +94,7 @@ __device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
     ctxStats.incStat(NUM_REDUCE);
   }
 
-  DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));
+  DISPATCH_RET(reduce_wg<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
 template <typename T, ROCSHMEM_OP Op>
@@ -109,6 +109,20 @@ __device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   }
 
   DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_wave(rocshmem_team_t team, T *dest,
+                                    const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE);
+  }
+
+  DISPATCH_RET(reduce_wave<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
 template <typename T>

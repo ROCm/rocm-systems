@@ -48,15 +48,21 @@ struct ncclGin {
   ncclResult_t (*getProperties)(int dev, ncclNetProperties_t* props);
   ncclResult_t (*listen)(void* ctx, int dev, void* handle, void** listenComm);
   ncclResult_t (*connect)(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm);
-  ncclResult_t (*createContext)(void* collComm, ncclGinConfig_t* config, void** ginCtx, ncclNetDeviceHandle_t** devHandle);
-  ncclResult_t (*regMrSym)(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle, void** ginHandle);
-  ncclResult_t (*regMrSymDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle, void** ginHandle);
+  ncclResult_t (*createContext)(void* collComm, ncclGinConfig_t* config, void** ginCtx,
+                                ncclNetDeviceHandle_t** devHandle);
+  ncclResult_t (*regMrSym)(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle,
+                           void** ginHandle);
+  ncclResult_t (*regMrSymDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                 uint64_t mrFlags, void** mhandle, void** ginHandle);
   ncclResult_t (*deregMrSym)(void* collComm, void* mhandle);
   ncclResult_t (*destroyContext)(void* ginCtx);
   ncclResult_t (*closeColl)(void* collComm);
   ncclResult_t (*closeListen)(void* listenComm);
-  ncclResult_t (*iput)(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request);
-  ncclResult_t (*iputSignal)(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff, void* signalMhandle, uint64_t signalValue, uint32_t signalOp, void** request);
+  ncclResult_t (*iput)(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
+                       void* dstMhandle, uint32_t rank, void** request);
+  ncclResult_t (*iputSignal)(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
+                             void* dstMhandle, uint32_t rank, uint64_t signalOff, void* signalMhandle,
+                             uint64_t signalValue, uint32_t signalOp, void** request);
   ncclResult_t (*test)(void* collComm, void* request, int* done);
   ncclResult_t (*ginProgress)(void* ginCtx);
   ncclResult_t (*queryLastError)(void* ginCtx, bool* hasError);
@@ -104,12 +110,13 @@ ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType);
 ncclResult_t getGlobalRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm);
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
-ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs, struct ncclDevComm* devComm);
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm);
 ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm);
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS],
-                             int winFlags, bool multiSegment, int memType);
+                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
+                             int memType);
 ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS]);
 ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError);
 ncclResult_t ncclGinGetDevCount(int ginPluginIndex, int* nPhysDev, int* nVirtDev);

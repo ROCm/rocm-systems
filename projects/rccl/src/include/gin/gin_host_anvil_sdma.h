@@ -14,9 +14,8 @@
 extern ncclGin_t ncclGinAnvilSdmaPlugin;
 
 struct ncclComm;
-ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr,
-                                                   size_t arenaByteOffset, int nContexts,
-                                                   int nSignalsPerContext);
+ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr, size_t arenaByteOffset,
+                                                   int nContexts, int nSignalsPerContext);
 
 void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm);
 
