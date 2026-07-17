@@ -104,9 +104,15 @@ enum amd_loaded_segment_info_t {
 };
 
 namespace rocr {
+namespace hotswap {
+class ReaderRetargetCache;
+}
+
 namespace amd {
 namespace hsa {
 namespace loader {
+
+using CodeObjectMemoryOwner = std::shared_ptr<const void>;
 
 /// @class CodeObjectReaderImpl.
 /// @brief Code Object Reader Wrapper.
@@ -147,11 +153,15 @@ struct CodeObjectReaderImpl final {
 
   std::string GetUri() const { return uri; };
 
+  std::shared_ptr<hotswap::ReaderRetargetCache> GetOrCreateRetargetCache();
+
  private:
   const void *code_object_memory{nullptr};
   size_t code_object_size{0};
   std::string uri{};
   bool is_mmap{false};
+  std::mutex retarget_cache_mutex{};
+  std::shared_ptr<hotswap::ReaderRetargetCache> retarget_cache{};
 #if defined(_WIN32) || defined(_WIN64)
   // Bookkeeping for MapViewOfFile-backed mappings (file-backed code objects on
   // Windows). map_base is the unadjusted pointer returned by MapViewOfFile and
@@ -368,6 +378,12 @@ public:
     const char *options,
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object = nullptr) = 0;
+
+  virtual hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                      size_t code_object_size,
+                                      CodeObjectMemoryOwner code_object_owner, const char* options,
+                                      const std::string& uri,
+                                      hsa_loaded_code_object_t* loaded_code_object = nullptr) = 0;
 
   virtual hsa_status_t Freeze(const char *options) = 0;
 

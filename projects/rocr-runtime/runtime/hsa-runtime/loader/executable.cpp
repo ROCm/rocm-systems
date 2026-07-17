@@ -1256,14 +1256,18 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   return LoadCodeObject(agent, code_object, 0, options, uri, loaded_code_object);
 }
 
-hsa_status_t ExecutableImpl::LoadCodeObject(
-  hsa_agent_t agent,
-  hsa_code_object_t code_object,
-  size_t code_object_size,
-  const char *options,
-  const std::string &uri,
-  hsa_loaded_code_object_t *loaded_code_object)
-{
+hsa_status_t ExecutableImpl::LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                            size_t code_object_size, const char* options,
+                                            const std::string& uri,
+                                            hsa_loaded_code_object_t* loaded_code_object) {
+  return LoadCodeObject(agent, code_object, code_object_size, {}, options, uri, loaded_code_object);
+}
+
+hsa_status_t ExecutableImpl::LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                            size_t code_object_size,
+                                            CodeObjectMemoryOwner code_object_owner,
+                                            const char* options, const std::string& uri,
+                                            hsa_loaded_code_object_t* loaded_code_object) {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
   if (HSA_EXECUTABLE_STATE_FROZEN == state_) {
     logger_ << "LoaderError: executable is already frozen\n";
@@ -1405,7 +1409,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   hsa_status_t status;
 
-  objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
+  objects.push_back(std::make_shared<LoadedCodeObjectImpl>(
+      this, agent, code->ElfData(), code->ElfSize(), std::move(code_object_owner)));
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
   status = LoadSegments(agent, code.get(), majorVersion);

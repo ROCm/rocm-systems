@@ -45,9 +45,11 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "core/inc/amd_hsa_loader.hpp"
 #include "inc/hsa.h"
@@ -59,10 +61,81 @@ struct AgentGfxRevision;
 
 using OwnedElfBuffer = std::unique_ptr<void, decltype(&std::free)>;
 
+class RetargetedElf final {
+ public:
+  RetargetedElf(OwnedElfBuffer bytes, size_t size) : bytes_(std::move(bytes)), size_(size) {}
+
+  const void* data() const { return bytes_.get(); }
+  size_t size() const { return size_; }
+
+ private:
+  OwnedElfBuffer bytes_;
+  size_t size_ = 0;
+};
+
+using RetargetedElfRef = std::shared_ptr<const RetargetedElf>;
+
+enum class RetargetError {
+  kNone,
+  kInvalidArgument,
+  kComgrUnavailable,
+  kComgrFailure,
+  kOutOfResources,
+};
+
+enum class RetargetResultSource {
+  kComputed,
+  kReadyCache,
+  kCoalesced,
+};
+
+struct RetargetOperationResult {
+  RetargetedElfRef elf;
+  RetargetError error = RetargetError::kNone;
+  RetargetResultSource source = RetargetResultSource::kComputed;
+
+  bool succeeded() const { return elf != nullptr; }
+};
+
+struct RetargetCacheKey {
+  std::string source_isa;
+  std::string target_isa;
+  bool entry_trampolines = false;
+  bool strict_mode = false;
+
+  bool operator==(const RetargetCacheKey& other) const {
+    return source_isa == other.source_isa && target_isa == other.target_isa &&
+        entry_trampolines == other.entry_trampolines && strict_mode == other.strict_mode;
+  }
+};
+
+class ReaderRetargetCache final {
+ public:
+  ReaderRetargetCache();
+  ~ReaderRetargetCache();
+
+  ReaderRetargetCache(const ReaderRetargetCache&) = delete;
+  ReaderRetargetCache& operator=(const ReaderRetargetCache&) = delete;
+
+  RetargetOperationResult GetOrCompute(const RetargetCacheKey& key,
+                                       const std::function<RetargetOperationResult()>& producer);
+
+#ifdef ROCR_HOTSWAP_TESTING
+  size_t ReadyEntryCountForTesting() const;
+  size_t WaiterCountForTesting(const RetargetCacheKey& key) const;
+#endif
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
 struct CodeObjectView {
   const void* data = nullptr;
   size_t size = 0;
   std::string uri;
+  amd::hsa::loader::CodeObjectReaderImpl* reader = nullptr;
+  std::shared_ptr<ReaderRetargetCache> retarget_cache;
 };
 
 // Entry-trampoline rewriting is opt-in while validation is ongoing.
@@ -90,6 +163,8 @@ enum class RetargetCodeObjectStatus {
 struct RetargetCodeObjectResult {
   RetargetCodeObjectStatus status = RetargetCodeObjectStatus::kSkipped;
   bool rewrite_required = false;
+  RetargetedElfRef elf;
+  RetargetError error = RetargetError::kNone;
 };
 
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(
@@ -98,9 +173,9 @@ using LoadOriginalCodeObjectFn = hsa_status_t (*)(
     hsa_loaded_code_object_t* loaded_code_object);
 
 using LoadCodeObjectWithSizeFn = hsa_status_t (*)(
-    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
-    size_t code_object_size, const char* options, const std::string& uri,
-    hsa_loaded_code_object_t* loaded_code_object);
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object, size_t code_object_size,
+    amd::hsa::loader::CodeObjectMemoryOwner code_object_owner, const char* options,
+    const std::string& uri, hsa_loaded_code_object_t* loaded_code_object);
 
 struct LoadAgentCodeObjectCallbacks {
   void* context = nullptr;
@@ -110,19 +185,16 @@ struct LoadAgentCodeObjectCallbacks {
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
-bool RetargetCodeObject(const void* elf_data, size_t elf_size,
-                        const char* source_isa, const char* target_isa,
-                        OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size,
-                        bool request_entry_trampolines = false,
-                        bool request_strict_mode = false);
+RetargetOperationResult RetargetCodeObject(const void* elf_data, size_t elf_size,
+                                           const char* source_isa, const char* target_isa,
+                                           bool request_entry_trampolines = false,
+                                           bool request_strict_mode = false);
 
-RetargetCodeObjectResult TryRetargetCodeObject(
-    const CodeObjectView& code_object, hsa_agent_t agent,
-    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
+                                               hsa_agent_t agent);
 
-RetargetCodeObjectResult TryRetargetCodeObject(
-    amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
+                                               hsa_agent_t agent);
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,
@@ -130,19 +202,13 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_loaded_code_object_t* loaded_code_object,
     const LoadAgentCodeObjectCallbacks& callbacks);
 
-void RetainRewrittenElfBuffer(hsa_executable_t executable,
-                              OwnedElfBuffer elf_buffer);
-void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
-
 #ifdef ROCR_HOTSWAP_TESTING
-std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
-    const AgentGfxRevision& gfx, const std::string& source_isa,
-    const std::string& target_isa, const RewriteOptions& options);
-size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
+std::optional<RewriteDecision> DecideHotswapRewriteForTesting(const AgentGfxRevision& gfx,
+                                                              const std::string& source_isa,
+                                                              const std::string& target_isa,
+                                                              const RewriteOptions& options);
 bool HotswapRewriteWithOptionsAvailableForTesting();
 void ForceRetargetCodeObjectFailureForTesting(bool force);
-size_t RetargetCacheSizeForTesting();
-void ClearRetargetCacheForTesting();
 #endif
 
 }  // namespace hotswap

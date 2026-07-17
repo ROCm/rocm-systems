@@ -360,32 +360,36 @@ public:
 };
 
 class LoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
-friend class AmdHsaCodeLoader;
-private:
+  friend class AmdHsaCodeLoader;
+
+ private:
   LoadedCodeObjectImpl(const LoadedCodeObjectImpl&);
   LoadedCodeObjectImpl& operator=(const LoadedCodeObjectImpl&);
 
-  const void *elf_data;
+  const void* elf_data;
   const size_t elf_size;
+  CodeObjectMemoryOwner elf_owner;
   std::vector<Segment*> loaded_segments;
 
-public:
-  LoadedCodeObjectImpl(ExecutableImpl *owner_, hsa_agent_t agent_, const void *elf_data_, size_t elf_size_)
-    : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {
-      memset(&r_debug_info, 0, sizeof(r_debug_info));
-    }
+ public:
+  LoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
+                       size_t elf_size_, CodeObjectMemoryOwner elf_owner_ = {})
+      : ExecutableObject(owner_, agent_),
+        elf_data(elf_data_),
+        elf_size(elf_size_),
+        elf_owner(std::move(elf_owner_)) {
+    memset(&r_debug_info, 0, sizeof(r_debug_info));
+  }
 
   const void* ElfData() const { return elf_data; }
   size_t ElfSize() const { return elf_size; }
   std::vector<Segment*>& LoadedSegments() { return loaded_segments; }
 
-  bool GetInfo(amd_loaded_code_object_info_t attribute, void *value) override;
+  bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;
 
-  hsa_status_t IterateLoadedSegments(
-    hsa_status_t (*callback)(
-      amd_loaded_segment_t loaded_segment,
-      void *data),
-    void *data) override;
+  hsa_status_t IterateLoadedSegments(hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment,
+                                                              void* data),
+                                     void* data) override;
 
   void Print(std::ostream& out) override;
 
@@ -534,6 +538,11 @@ public:
     const char *options,
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object) override;
+
+  hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                              size_t code_object_size, CodeObjectMemoryOwner code_object_owner,
+                              const char* options, const std::string& uri,
+                              hsa_loaded_code_object_t* loaded_code_object) override;
 
   hsa_status_t Freeze(const char *options) override;
 

@@ -48,6 +48,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <sys/types.h>
 
 #include "core/inc/runtime.h"
@@ -2136,13 +2137,14 @@ hsa_status_t LoadOriginalCodeObject(
                               loaded_code_object);
 }
 
-hsa_status_t LoadSizedCodeObject(
-    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
-    size_t code_object_size, const char* options, const std::string& uri,
-    hsa_loaded_code_object_t* loaded_code_object) {
+hsa_status_t LoadSizedCodeObject(void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+                                 size_t code_object_size,
+                                 amd::hsa::loader::CodeObjectMemoryOwner code_object_owner,
+                                 const char* options, const std::string& uri,
+                                 hsa_loaded_code_object_t* loaded_code_object) {
   auto* exec = static_cast<Executable*>(context);
-  return exec->LoadCodeObject(agent, code_object, code_object_size, options,
-                              uri, loaded_code_object);
+  return exec->LoadCodeObject(agent, code_object, code_object_size, std::move(code_object_owner),
+                              options, uri, loaded_code_object);
 }
 
 } // namespace anonymous
@@ -2276,7 +2278,6 @@ hsa_status_t hsa_executable_destroy(
   }
 
   GetLoader()->DestroyExecutable(exec);
-  hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -2366,6 +2367,7 @@ hsa_status_t hsa_executable_load_agent_code_object(
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
+  code_object.reader = reader;
 
   hotswap::LoadAgentCodeObjectCallbacks callbacks;
   callbacks.context = exec;
