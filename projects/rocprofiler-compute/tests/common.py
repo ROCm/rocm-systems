@@ -243,7 +243,7 @@ def _tee(pipe, sink, out) -> None:
     """Echo each line from pipe to sink while accumulating it in out."""
     with pipe:
         for line in pipe:
-            print(line, end="", file=sink)
+            print(line, end="", file=sink, flush=True)
             out.append(line)
 
 
@@ -278,15 +278,20 @@ def run_subprocess(
         bufsize=1,
     )
     out_buf, err_buf = [], []
-    readers = [
-        Thread(target=_tee, args=(proc.stdout, sys.stdout, out_buf)),
-        Thread(target=_tee, args=(proc.stderr, sys.stderr, err_buf)),
-    ]
-    for r in readers:
-        r.start()
-    for r in readers:
-        r.join()
-    proc.wait()
+    # Tee to the real fds, not sys.stdout/stderr, which pytest's capsys swaps
+    # for in-memory buffers that never reach the terminal.
+    with os.fdopen(os.dup(1), "w", closefd=True) as real_out, os.fdopen(
+        os.dup(2), "w", closefd=True
+    ) as real_err:
+        readers = [
+            Thread(target=_tee, args=(proc.stdout, real_out, out_buf)),
+            Thread(target=_tee, args=(proc.stderr, real_err, err_buf)),
+        ]
+        for r in readers:
+            r.start()
+        for r in readers:
+            r.join()
+        proc.wait()
     return subprocess.CompletedProcess(
         command, proc.returncode, "".join(out_buf), "".join(err_buf)
     )
