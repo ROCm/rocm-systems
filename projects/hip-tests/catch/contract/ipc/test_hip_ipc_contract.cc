@@ -157,6 +157,13 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
 HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   RequireDevice();
   SkipIfIpcMemHandleUnsupported();
+
+  // The null-argument rejection contract is only exercised on AMD. On NVIDIA
+  // hipIpcGetMemHandle maps to cudaIpcGetMemHandle, which does not validate the
+  // handle/pointer arguments and dereferences them - a null argument faults
+  // instead of returning a defined error - so the contract cannot be evaluated
+  // safely there.
+#ifdef __HIP_PLATFORM_AMD__
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
@@ -175,6 +182,10 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   hipIpcMemHandle_t handle{};
   HIP_CHECK_ERRORS(hipIpcGetMemHandle(&handle, nullptr), hipErrorInvalidValue,
                    hipErrorInvalidHandle);
+#else
+  HIP_SKIP_TEST("hipIpcGetMemHandle does not validate its arguments on the NVIDIA backend; the "
+                "null-argument rejection contract cannot be exercised safely.");
+#endif  // __HIP_PLATFORM_AMD__
 }
 
 HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
