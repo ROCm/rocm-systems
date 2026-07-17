@@ -366,6 +366,12 @@ public:
   uint64_t cycle_count() const { return cycle_counter_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
+  /// @details This is the VM-level scalar register accessor. It notifies the
+  /// plugin group of an SGPR read when the physical register is currently owned
+  /// by a wavefront. Instruction operand implementations use this to implement
+  /// scalar operand semantics. VGPR reads from instruction emulators should not
+  /// use the analogous CU physical VGPR accessors directly; use Operand or
+  /// RegisterAccess APIs instead.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   // TODO(newling) consider cmake flag to build without plugins, this call
@@ -378,23 +384,48 @@ public:
   }
 
   /// @brief Write a scalar register in the physical SGPR file.
+  /// @details VM-level scalar register write used for scalar operand
+  /// destinations and dispatch/runtime state setup. This does not imply a VGPR
+  /// read and does not participate in VGPR read observation.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
 
-  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
-                        uint32_t lane_end, uint8_t byte_mask = 0xF) const {
-    if (wf)
-      plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane_begin, lane_end, byte_mask);
+  /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
+  /// @details Low-level notification primitive used by RegisterAccess and the
+  /// concrete CU implementation. Instruction emulators should acquire observed
+  /// VGPR values through RegisterAccess rather than manually pairing raw
+  /// storage access with this hook.
+  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                        uint8_t byte_mask = 0xF) const {
+    if (wf && lane_mask != 0)
+      plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  /// @brief Notify plugins that lanes of a physical VGPR were read.
+  /// @details Resolves the owning wavefront from the physical register index.
+  /// Intended for RegisterAccess and CU internals, not as a direct instruction
+  /// emulator API.
+  virtual void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                                       uint8_t byte_mask = 0xF) const = 0;
+
   /// @brief Read a vector register lane from the physical VGPR file.
+  /// @details VM/storage-level scalar lane accessor. The concrete
+  /// implementation reports the read to plugins. Instruction-visible VGPR
+  /// reads should still go through Operand or RegisterAccess so the read
+  /// intent, lane mask, byte mask, and region lifetime remain explicit and
+  /// enforceable.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @returns Lane value.
   virtual uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Write a vector register lane in the physical VGPR file.
+  /// @details VM/storage-level scalar lane write. Instruction emulators should
+  /// prefer Operand or RegisterAccess write APIs for instruction-visible VGPR
+  /// writes. Use this directly only in VM/runtime code paths that deliberately
+  /// operate on physical register storage, such as dispatch setup or memory
+  /// completion.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @param val Value to write.
@@ -405,35 +436,46 @@ public:
   /// @returns Pointer to the contiguous SGPR data.
   const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
 
-  /// @brief Return a pointer to a wavefront's VGPR data in the physical file.
+  /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
+  /// @details This bypasses plugin read hooks and should not be used directly
+  /// by instruction emulators. It is reserved for RegisterAccess, VM storage
+  /// code, serialization/checkpointing, diagnostics, and tightly controlled
+  /// internals that have a separate observation contract.
   /// @param base Base register index in the VGPR file.
   /// @returns Const pointer to the raw VGPR data.
-  virtual const uint8_t *vgpr_data(uint32_t base) const = 0;
+  virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
 
-  /// @brief Return a mutable pointer to a wavefront's VGPR data.
+  /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
+  /// @details This bypasses the instruction-facing RegisterAccess boundary.
+  /// It is intended for VM storage operations such as memory completion,
+  /// checkpoint restore, RegisterAccess view implementation, and other
+  /// tightly controlled internals. Instruction emulators should use Operand or
+  /// RegisterAccess write APIs instead.
   /// @param base Base register index in the VGPR file.
   /// @returns Mutable pointer to the raw VGPR data.
-  virtual uint8_t *vgpr_data(uint32_t base) = 0;
+  virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
 
-  /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
+  /// @brief Raw typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
-  /// (@c vgpr_data), which erases the wavefront-size template parameter. The
+  /// (@c raw_vgpr_data), which erases the wavefront-size template parameter. The
   /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
   /// the typed register with the design's single localized @c reinterpret_cast.
+  /// Like @c raw_vgpr_data, this bypasses plugin hooks and is for
+  /// RegisterAccess/VM internals rather than instruction emulator call sites.
   /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
   /// (no padding / vtable) so the byte view and the typed view coincide.
-  template <size_t N> simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) {
+  template <size_t N> simdojo::VectorReg<N, uint32_t> &raw_vgpr_reg(uint32_t base) {
     static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
-    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
-  template <size_t N> const simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) const {
+  template <size_t N> const simdojo::VectorReg<N, uint32_t> &raw_vgpr_reg(uint32_t base) const {
     static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
-    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
 
   /// @brief Return the SGPR register file (for serialization).
@@ -547,6 +589,32 @@ protected:
   bool functional_yield_requested_ = false;
 };
 
+inline GpuMemory *InstructionComputeUnitView::memory() const { return raw_cu().memory(); }
+inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
+inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
+inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
+inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
+inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
+inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
+inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
+  return raw_cu().config().sgprs_per_wf;
+}
+inline std::string InstructionComputeUnitView::full_path() const { return raw_cu().full_path(); }
+inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
+inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
+  return raw_cu().engine();
+}
+inline void InstructionComputeUnitView::request_functional_yield() {
+  raw_cu().request_functional_yield();
+}
+inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
+  return raw_cu().read_sgpr(reg_idx);
+}
+inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t value) {
+  raw_cu().write_sgpr(reg_idx, value);
+}
+
 /// @brief Execution-mode-aware compute unit shell.
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
@@ -632,10 +700,14 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx]) {
-      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
-    }
+    notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
+  }
+
+  void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                               uint8_t byte_mask = 0xF) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx])
+      this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
@@ -648,12 +720,12 @@ public:
   }
 
   /// @returns Const pointer to the raw VGPR data.
-  const uint8_t *vgpr_data(uint32_t base) const override {
+  const uint8_t *raw_vgpr_data(uint32_t base) const override {
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
   }
 
   /// @returns Mutable pointer to the raw VGPR data.
-  uint8_t *vgpr_data(uint32_t base) override {
+  uint8_t *raw_vgpr_data(uint32_t base) override {
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }
 

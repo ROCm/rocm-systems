@@ -907,7 +907,7 @@ class CodeGenerator:
                     {
                       float result = std::fma(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
+                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -992,7 +992,7 @@ class CodeGenerator:
                     ('VopdCndmaskB32',),
                     '''
                     {
-                      uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
+                      uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::RegisterAccess(wf).read_scalar64(*slot.src2);
                       return ((condition >> lane) & 1u) ? src1 : src0;
                     }
                     ''',
@@ -1227,8 +1227,8 @@ class CodeGenerator:
                   continue;
                 uint32_t x_result = execute_slot(x_, wf, lane);
                 uint32_t y_result = execute_slot(y_, wf, lane);
-                x_.dst->write_lane(wf, lane, x_result);
-                y_.dst->write_lane(wf, lane, y_result);
+                amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
+                amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
               }
             ''')
         if has_vopd3:
@@ -1255,12 +1255,12 @@ class CodeGenerator:
 
             uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf,
                                           uint32_t lane) {
-              uint64_t src0 = apply_neg64(slot.src0->read_lane64(wf, lane), slot.neg, 0);
-              uint64_t src1 = apply_neg64(slot.src1->read_lane64(wf, lane), slot.neg, 1);
+              uint64_t src0 = apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src0, lane), slot.neg, 0);
+              uint64_t src1 = apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src1, lane), slot.neg, 1);
 
               switch (slot.op) {
               case kVopdFmaF64: {
-                uint64_t src2 = apply_neg64(slot.src2->read_lane64(wf, lane), slot.neg, 2);
+                uint64_t src2 = apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src2, lane), slot.neg, 2);
                 double result = std::fma(std::bit_cast<double>(src0),
                                          std::bit_cast<double>(src1),
                                          std::bit_cast<double>(src2));
@@ -1374,13 +1374,13 @@ class CodeGenerator:
                 uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
                 uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
                 if (x64)
-                  x_.dst->write_lane64(wf, lane, x_result64);
+                  amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
                 else
-                  x_.dst->write_lane(wf, lane, x_result32);
+                  amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result32);
                 if (y64)
-                  y_.dst->write_lane64(wf, lane, y_result64);
+                  amdgpu::RegisterAccess(wf).write_lane64(*y_.dst, lane, y_result64);
                 else
-                  y_.dst->write_lane(wf, lane, y_result32);
+                  amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result32);
               }
             ''')
         vopd_execute_slot_cases = join_cases(
@@ -1560,9 +1560,9 @@ class CodeGenerator:
 
             uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
                                         uint32_t lane) {
-              uint32_t src0 = slot.src0->read_lane(wf, lane);
-              uint32_t src1 = slot.src1->read_lane(wf, lane);
-              uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane)
+              uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
+              uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
+              uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
                                                      : slot.src2_imm;
               if (uses_src_neg_modifier(slot.op)) {
                 src0 = apply_neg(src0, slot.neg, 0);
@@ -2429,12 +2429,12 @@ class CodeGenerator:
               if (auto literal = operand.literal64_value())
                 return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
 
-              const uint32_t lo = operand.read_lane(wf, lane);
+              const uint32_t lo = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
               const auto reg = operand.to_register_ref();
               if (!reg || reg->cls != RegClass::VGPR)
                 return {lo, lo};
 
-              const uint64_t raw = operand.read_lane64(wf, lane);
+              const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
               return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
             }
             ''')
@@ -2565,7 +2565,7 @@ class CodeGenerator:
                 '\n'
                 'float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
                 '                              uint32_t src_selector, bool src_is_f16, bool high_half) {\n'
-                '  uint32_t raw = src.read_lane(wf, lane);\n'
+                '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
                 '  if (!src_is_f16)\n'
                 '    return std::bit_cast<float>(raw);\n'
                 '  return util::f16_to_f32(read_fma_mix_f16_bits(raw, src_selector, high_half));\n'
@@ -2573,7 +2573,7 @@ class CodeGenerator:
                 '\n'
                 'float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
                 '                                   uint32_t src_selector, bool src_is_bf16, bool high_half) {\n'
-                '  uint32_t raw = src.read_lane(wf, lane);\n'
+                '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
                 '  if (!src_is_bf16)\n'
                 '    return std::bit_cast<float>(raw);\n'
                 '  return util::bf16_to_f32(read_fma_mix_bf16_bits(raw, src_selector, high_half));\n'
@@ -2797,7 +2797,7 @@ class CodeGenerator:
                 const_acc = amdgpu::ACC_FROM_VGPR;
                 s2 = vb + *src2_off;
               } else {
-                const_acc = src2.read_scalar(wf);
+                const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
               }
 
               const uint32_t matrix_a_fmt = inst_.opsel;
@@ -2811,10 +2811,10 @@ class CodeGenerator:
               const bool scale16 = scale_inst_.op == 0x3a;
 
               auto scale0 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? scale_src0.read_lane64(wf, lane) : scale_src0.read_lane(wf, lane);
+                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src0, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src0, lane);
               };
               auto scale1 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? scale_src1.read_lane64(wf, lane) : scale_src1.read_lane(wf, lane);
+                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src1, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src1, lane);
               };
 
               bool dispatched = false;
@@ -3161,9 +3161,9 @@ class CodeGenerator:
                         )
                         lctx.true16_src_raw = (
                             '((inst_.src0 >= 256 && inst_.src0 <= 511) '
-                            '? wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                            '? amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + '
                             '((inst_.src0 - 256) & 0x7fu), lane) '
-                            ': src0.read_lane(wf, lane))'
+                            ': amdgpu::RegisterAccess(wf).read_lane(src0, lane))'
                         )
                 elif (
                     uses_true16_e32
@@ -3174,16 +3174,18 @@ class CodeGenerator:
                     lctx.true16_dst_select = 'inst_.vdst & 0x80u'
                     lctx.true16_dst_reg = 'inst_.vdst & 0x7fu'
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
-                    lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
+                    lctx.vcc_read = (
+                        f'amdgpu::RegisterAccess(wf).read_scalar64({src_ops[2]})'
+                    )
                     if inst.name == 'V_CNDMASK_B32':
                         return (
                             '  uint64_t exec = wf.exec();\n'
                             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
                             '    if (!(exec & (1ULL << lane)))\n'
                             '      continue;\n'
-                            f'    const uint32_t src0_value = apply_vop3_b32_src_mod({src_ops[0]}.read_lane(wf, lane), inst_.abs, inst_.neg, 0);\n'
-                            f'    const uint32_t src1_value = apply_vop3_b32_src_mod({src_ops[1]}.read_lane(wf, lane), inst_.abs, inst_.neg, 1);\n'
-                            f'    {dst_ops[0]}.write_lane(wf, lane, (({src_ops[2]}.read_scalar64(wf) >> lane) & 1) ? src1_value : src0_value);\n'
+                            f'    const uint32_t src0_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
+                            f'    const uint32_t src1_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
+                            f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, ((amdgpu::RegisterAccess(wf).read_scalar64({src_ops[2]}) >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
                 if (
@@ -3204,7 +3206,7 @@ class CodeGenerator:
                         '      src = std::fabs(src);\n'
                         '    if (inst_.neg & (1u << 0))\n'
                         '      src = -src;\n'
-                        f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(src));\n'
+                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(src));\n'
                         '  }\n'
                     )
                 true16_special_vop3_ops = {
@@ -3260,7 +3262,9 @@ class CodeGenerator:
                     )
                 if cls == 'vector_add_co':
                     if is_vop3 and len(src_ops) >= 3:
-                        lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
+                        lctx.vcc_read = (
+                            f'amdgpu::RegisterAccess(wf).read_scalar64({src_ops[2]})'
+                        )
                     lctx.vcc_dst = dst_ops[1] if len(dst_ops) > 1 else '__vcc__'
                 body = lower_sema_block(sema_block, lctx)
                 if (
@@ -3308,19 +3312,19 @@ class CodeGenerator:
         if cls == 'gpr_idx':
             if op == 'on':
                 return (
-                    '  uint32_t idx = ssrc0.read_scalar(wf) & 0xFF;\n'
-                    '  uint32_t mode = ssrc1.read_scalar(wf) & 0xF;\n'
+                    '  uint32_t idx = amdgpu::RegisterAccess(wf).read_scalar(ssrc0) & 0xFF;\n'
+                    '  uint32_t mode = amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 0xF;\n'
                     '  wf.set_m0((wf.m0() & 0xFFFFF000u) | (mode << 8) | idx);\n'
                     '  wf.set_mode_raw(wf.mode_raw() | Wavefront::GPR_IDX_EN_BIT);'
                 )
             if op == 'off':
                 return '  wf.set_mode_raw(wf.mode_raw() & ~Wavefront::GPR_IDX_EN_BIT);'
             if op == 'idx':
-                return '  wf.set_m0((wf.m0() & 0xFFFFFF00u) | (ssrc0.read_scalar(wf) & 0xFF));'
+                return '  wf.set_m0((wf.m0() & 0xFFFFFF00u) | (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) & 0xFF));'
             if op == 'mode':
                 return (
                     f'  wf.set_m0((wf.m0() & 0xFFFFF0FFu) '
-                    f'| (({src_ops[0]}.read_scalar(wf) & 0xF) << 8));'
+                    f'| ((amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]}) & 0xF) << 8));'
                 )
 
         if cls == 'set_vgpr_msb':
@@ -3440,18 +3444,20 @@ class CodeGenerator:
 
         if cls == 'scalar_movk':
             L.append(
-                f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));'
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));'
             )
             return '\n'.join(L)
 
         if cls == 'scalar_cmovk':
             L.append(
-                f'  if (wf.read_scc()) {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));'
+                f'  if (wf.read_scc()) amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));'
             )
             return '\n'.join(L)
 
         if cls == 'scalar_addk':
-            L.append(f'  uint32_t s0 = {dst_ops[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({dst_ops[0]});'
+            )
             L.append(
                 f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
             )
@@ -3459,24 +3465,34 @@ class CodeGenerator:
                 '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);'
             )
             L.append('  uint32_t result = static_cast<uint32_t>(wide);')
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, result);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, result);'
+            )
             L.append('  wf.write_scc(wide > 0xFFFFFFFFu);')
             return '\n'.join(L)
 
         if cls == 'scalar_mulk':
-            L.append(f'  uint32_t s0 = {dst_ops[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({dst_ops[0]});'
+            )
             L.append(
                 f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
             )
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, s0 * imm);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, s0 * imm);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_wrexec':
             if dtype == 'b32':
-                L.append(f'  uint64_t src = {src_ops[0]}.read_scalar(wf);')
+                L.append(
+                    f'  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+                )
                 mask_expr = ' & 0xffffffffULL'
             else:
-                L.append(f'  uint64_t src = {src_ops[0]}.read_scalar64(wf);')
+                L.append(
+                    f'  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
+                )
                 mask_expr = ''
             if op in ('andn1', 'and_not1'):
                 # EXEC = SRC & ~EXEC
@@ -3493,34 +3509,46 @@ class CodeGenerator:
             # At execute() time, wf.pc points to the S_GETPC itself; step() will
             # add size_ afterwards. Write wf.pc + size_ so the net result after
             # post-execute advance is correct (caller sees PC of next instruction).
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc + size_);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, wf.pc + size_);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
-            L.append(f'  wf.pc = {src_ops[0]}.read_scalar64(wf) - size_;')
+            L.append(
+                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
             L.append(f'  uint64_t next_pc = wf.pc + size_;')
-            L.append(f'  wf.pc = {src_ops[0]}.read_scalar64(wf) - size_;')
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, next_pc);')
+            L.append(
+                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+            )
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_bitreplicate':
-            L.append(f'  uint32_t val = {src_ops[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
             L.append('  uint64_t result = 0;')
             L.append('  for (uint32_t i = 0; i < 32; ++i) {')
             L.append('    uint64_t bit = (static_cast<uint64_t>(val) >> i) & 1ULL;')
             L.append('    result |= bit << (2 * i);')
             L.append('    result |= bit << (2 * i + 1);')
             L.append('  }')
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, result);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, result);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_addpc':
             L.append(
-                f'  int64_t offset = static_cast<int64_t>({src_ops[0]}.read_scalar64(wf));'
+                f'  int64_t offset = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}));'
             )
             L.append(
                 '  wf.pc = static_cast<uint64_t>(static_cast<int64_t>(wf.pc) + offset);'
@@ -3530,7 +3558,9 @@ class CodeGenerator:
         if cls == 'scalar_shader_cycles':
             L.append('  auto *engine = wf.cu().engine();')
             L.append('  uint64_t cycles = engine ? engine->global_time() : 0;')
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, cycles);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, cycles);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_sendmsg_rtn':
@@ -3558,15 +3588,17 @@ class CodeGenerator:
             L.append('    break;')
             L.append('  }')
             L.append(f'  if ({dst_ops[0]}.size_bits() == 64)')
-            L.append(f'    {dst_ops[0]}.write_scalar64(wf, value);')
+            L.append(
+                f'    amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, value);'
+            )
             L.append('  else')
             L.append(
-                f'    {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(value));'
+                f'    amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, static_cast<uint32_t>(value));'
             )
             return '\n'.join(L)
 
         if cls == 'scalar_barrier_state':
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, 0);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, 0);')
             return '\n'.join(L)
 
         if cls == 'scalar_movrel':
@@ -3586,11 +3618,11 @@ class CodeGenerator:
                 )
                 L.append('  if (width_words == 2) {')
                 L.append(
-                    f'    {dst_ops[0]}.write_scalar64(wf, indexed_src.read_scalar64(wf));'
+                    f'    amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));'
                 )
                 L.append('  } else {')
                 L.append(
-                    f'    {dst_ops[0]}.write_scalar(wf, indexed_src.read_scalar(wf));'
+                    f'    amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
                 )
                 L.append('  }')
                 return '\n'.join(L)
@@ -3610,11 +3642,11 @@ class CodeGenerator:
                 )
                 L.append('  if (width_words == 2) {')
                 L.append(
-                    f'    indexed_dst.write_scalar64(wf, {src_ops[0]}.read_scalar64(wf));'
+                    f'    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}));'
                 )
                 L.append('  } else {')
                 L.append(
-                    f'    indexed_dst.write_scalar(wf, {src_ops[0]}.read_scalar(wf));'
+                    f'    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]}));'
                 )
                 L.append('  }')
                 return '\n'.join(L)
@@ -3635,12 +3667,16 @@ class CodeGenerator:
                 L.append(
                     '  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));'
                 )
-                L.append('  indexed_dst.write_scalar(wf, indexed_src.read_scalar(wf));')
+                L.append(
+                    '  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
+                )
                 return '\n'.join(L)
 
         if cls == 'scalar_call':
             # S_CALL_B64: dst = PC of next instruction (return address), then branch.
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc + size_);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, wf.pc + size_);'
+            )
             L.append(
                 f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
             )
@@ -3688,7 +3724,9 @@ class CodeGenerator:
             L.append(
                 '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
             )
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, (reg_val >> offset) & mask);')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, (reg_val >> offset) & mask);'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_setreg':
@@ -3702,7 +3740,9 @@ class CodeGenerator:
             L.append(
                 '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
             )
-            L.append(f'  uint32_t src = {src_ops[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
             if profile.use_hwreg_helpers:
                 L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
                 L.append(
@@ -3776,24 +3816,34 @@ class CodeGenerator:
             L.append('  uint32_t val = 0;')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (exec & (1ULL << lane)) {')
-            L.append(f'      val = {src_ops[0]}.read_lane(wf, lane);')
+            L.append(
+                f'      val = amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane);'
+            )
             L.append('      break;')
             L.append('    }')
             L.append('  }')
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, val);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, val);')
             return '\n'.join(L)
 
         if cls == 'vector_readlane':
-            L.append(f'  uint32_t lane = {src_ops[1]}.read_scalar(wf);')
             L.append(
-                f'  {dst_ops[0]}.write_scalar(wf, {src_ops[0]}.read_lane(wf, lane));'
+                f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
+            )
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
             )
             return '\n'.join(L)
 
         if cls == 'vector_writelane':
-            L.append(f'  uint32_t val = {src_ops[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t lane = {src_ops[1]}.read_scalar(wf);')
-            L.append(f'  {dst_ops[0]}.write_lane(wf, lane, val);')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
+            )
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, val);'
+            )
             return '\n'.join(L)
 
         # vector_swap now handled by SemaAST.
@@ -3809,27 +3859,27 @@ class CodeGenerator:
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'f16':
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src_ops[0]}.read_lane(wf, lane)));'
+                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
                 )
                 L.append(
                     f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
                 )
                 L.append(
-                    f'    float s2 = util::f16_to_f32(static_cast<uint16_t>({s2_expr}.read_lane(wf, lane)));'
+                    f'    float s2 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane)));'
                 )
                 L.append(
-                    f'    {dst_ops[0]}.write_lane(wf, lane, util::f32_to_f16(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, k, s2)));'
                 )
             else:
                 L.append(
-                    f'    float s0 = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));'
+                    f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
                 )
                 L.append(f'    float k = std::bit_cast<float>({k_expr});')
                 L.append(
-                    f'    float s2 = std::bit_cast<float>({s2_expr}.read_lane(wf, lane));'
+                    f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                 )
                 L.append(
-                    f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -3844,27 +3894,27 @@ class CodeGenerator:
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'f16':
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src_ops[0]}.read_lane(wf, lane)));'
+                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src_ops[1]}.read_lane(wf, lane)));'
+                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane)));'
                 )
                 L.append(
                     f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
                 )
                 L.append(
-                    f'    {dst_ops[0]}.write_lane(wf, lane, util::f32_to_f16(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, s1, k)));'
                 )
             else:
                 L.append(
-                    f'    float s0 = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));'
+                    f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
                 )
                 L.append(
-                    f'    float s1 = std::bit_cast<float>({src_ops[1]}.read_lane(wf, lane));'
+                    f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane));'
                 )
                 L.append(f'    float k = std::bit_cast<float>({k_expr});')
                 L.append(
-                    f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -4014,8 +4064,8 @@ class CodeGenerator:
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
                 '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
-                '  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));\n'
-                '  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+                '  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));\n'
+                '  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -4058,6 +4108,24 @@ class CodeGenerator:
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  uint32_t lane_group_width = wf.wf_size();')
             L.append(
+                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
+            )
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
+            L.append(
+                f'  auto data_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+            )
+            if is_bpermute:
+                L.append(
+                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+                )
+            else:
+                L.append(
+                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, exec);'
+                )
+            L.append(
+                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
+            )
+            L.append(
                 f'  if (wf.wf_size() == 64 && (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||'
                 f' cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))'
             )
@@ -4065,7 +4133,7 @@ class CodeGenerator:
             L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
+            L.append(f'    src_data[i] = data_region.lane(0, i);')
             if is_bpermute:
                 # DS_BPERMUTE_B32 (ISA spec pseudocode, page 476):
                 #   tmp[i] = 0 for all lanes
@@ -4076,7 +4144,7 @@ class CodeGenerator:
                 #     if EXEC[i]: VGPR[i][VDST] = tmp[i]
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
-                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -4091,7 +4159,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
                 L.append(f'  }}')
             else:
                 # DS_PERMUTE_B32 (ISA spec pseudocode, page 475):
@@ -4105,7 +4173,7 @@ class CodeGenerator:
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (!(exec & (1ULL << i))) continue;')
-                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -4116,7 +4184,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
                 L.append(f'  }}')
             return '\n'.join(L)
 
@@ -4129,9 +4197,19 @@ class CodeGenerator:
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
+            L.append(
+                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
+            )
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
+            L.append(
+                f'  auto src_region = regs.read_vgpr_region(vb + inst_.{src_field}, 1, full_lane_mask);'
+            )
+            L.append(
+                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
+            )
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.{src_field}, i);')
+            L.append(f'    src_data[i] = src_region.lane(0, i);')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
@@ -4153,7 +4231,7 @@ class CodeGenerator:
             )
             L.append(f'    }}')
             L.append(f'    if (src_lane < wf.wf_size())')
-            L.append(f'      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);')
+            L.append(f'      dst_region.set_lane(0, lane, src_data[src_lane]);')
             L.append(f'  }}')
             return '\n'.join(L)
 
@@ -4225,7 +4303,9 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
-        L.append('    d->store_data[i] = cu.read_sgpr(sdata_base + i);')
+        L.append(
+            '    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);'
+        )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
         else:
@@ -4593,19 +4673,25 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz == 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base + {i}, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
+                )
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -4648,7 +4734,9 @@ class CodeGenerator:
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append('    uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);')
+        L.append(
+            '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+        )
         L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -4682,7 +4770,7 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
+            '    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
         )
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
@@ -4696,7 +4784,7 @@ class CodeGenerator:
         L.append('    d->wf_size = wf.wf_size();')
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    d->cu_path = wf.cu().full_path();')
-        L.append('    uint64_t base = saddr.read_scalar64(wf);')
+        L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         L.append(
             '    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
         )
@@ -4746,7 +4834,9 @@ class CodeGenerator:
         L.append('  d->store_data.resize(wf.wf_size() * 4);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append('    uint32_t val0 = cu.read_vgpr(data_base, lane);')
+        L.append(
+            '    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+        )
         L.append('    std::memcpy(&d->store_data[lane * 4], &val0, 4);')
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -4817,7 +4907,9 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base + {i}, lane);')
+            L.append(
+                f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
             )
@@ -4860,7 +4952,9 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base + {i}, lane);')
+            L.append(
+                f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
             )
@@ -4912,7 +5006,9 @@ class CodeGenerator:
                 data_source = f'data1_base + {i - half}'
             else:
                 data_source = f'data_base + {i}'
-            L.append(f'    uint32_t val{i} = cu.read_vgpr({data_source}, lane);')
+            L.append(
+                f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr({data_source}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
             )
@@ -4953,12 +5049,16 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(dwords_per_operand):
-            L.append(f'    uint32_t mask{i} = cu.read_vgpr(mask_base + {i}, lane);')
+            L.append(
+                f'    uint32_t mask{i} = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &mask{i}, 4);'
             )
         for i in range(dwords_per_operand):
-            L.append(f'    uint32_t src{i} = cu.read_vgpr(src_base + {i}, lane);')
+            L.append(
+                f'    uint32_t src{i} = amdgpu::RegisterAccess(cu).read_vgpr(src_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {esz + i * 4}], &src{i}, 4);'
             )
@@ -5026,8 +5126,12 @@ class CodeGenerator:
             L.append('  d->store_data.resize(wf.wf_size() * 8);')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
-            L.append('    uint32_t lo = cu.read_vgpr(data_base, lane);')
-            L.append('    uint32_t hi = cu.read_vgpr(data_base + 1, lane);')
+            L.append(
+                '    uint32_t lo = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+            )
+            L.append(
+                '    uint32_t hi = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);'
+            )
             L.append('    std::memcpy(&d->store_data[lane * 8], &lo, 4);')
             L.append('    std::memcpy(&d->store_data[lane * 8 + 4], &hi, 4);')
             L.append('  }')
@@ -5135,19 +5239,25 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz >= 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base + {i}, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
+                )
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, {esz});'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -5250,7 +5360,9 @@ class CodeGenerator:
         L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(f'    uint32_t val0 = cu.read_vgpr(data_base, lane);')
+        L.append(
+            f'    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+        )
         L.append(
             f'    std::memcpy(&d->store_data[lane * {sem.elem_size}], &val0, {sem.elem_size});'
         )
@@ -5321,10 +5433,10 @@ class CodeGenerator:
             if esz == 8:
                 vgpr_base = i * 2
                 L.append(
-                    f'    uint32_t lo{i} = cu.read_vgpr(data_base + {vgpr_base}, lane);'
+                    f'    uint32_t lo{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {vgpr_base}, lane);'
                 )
                 L.append(
-                    f'    uint32_t hi{i} = cu.read_vgpr(data_base + {vgpr_base + 1}, lane);'
+                    f'    uint32_t hi{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {vgpr_base + 1}, lane);'
                 )
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &lo{i}, 4);'
@@ -5333,19 +5445,25 @@ class CodeGenerator:
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off + 4}], &hi{i}, 4);'
                 )
             elif esz == 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base + {i}, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
+                )
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 4);'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                L.append(
+                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
+                )
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -5398,7 +5516,9 @@ class CodeGenerator:
         )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append('    uint32_t base = cu.read_vgpr(addr_base, lane);')
+        L.append(
+            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+        )
         L.append(
             f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
         )
@@ -5451,7 +5571,9 @@ class CodeGenerator:
         L.append(f"  uint32_t data1_base = {self._vgpr_base_expr('data1')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append('    uint32_t base = cu.read_vgpr(addr_base, lane);')
+        L.append(
+            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+        )
         L.append(
             f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
         )
@@ -5460,13 +5582,17 @@ class CodeGenerator:
         )
         # Pack data0 into store_data
         for i in range(dwords_per_access):
-            L.append(f'    uint32_t v0_{i} = cu.read_vgpr(data0_base + {i}, lane);')
+            L.append(
+                f'    uint32_t v0_{i} = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {esz} + {i * 4}], &v0_{i}, 4);'
             )
         # Pack data1 into ds2_store_data
         for i in range(dwords_per_access):
-            L.append(f'    uint32_t v1_{i} = cu.read_vgpr(data1_base + {i}, lane);')
+            L.append(
+                f'    uint32_t v1_{i} = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + {i}, lane);'
+            )
             L.append(
                 f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], &v1_{i}, 4);'
             )
@@ -6500,7 +6626,7 @@ class CodeGenerator:
                                         '    uint64_t ex = wf.exec();\n'
                                         '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
                                         '      if (ex & (1ULL << ln))\n'
-                                        f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                        f'        sdwa_old_dst_[ln] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                         '  }\n'
                                     )
                                 else:
@@ -6511,7 +6637,7 @@ class CodeGenerator:
                                         '    uint64_t ex = wf.exec();\n'
                                         '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
                                         '      if (ex & (1ULL << ln))\n'
-                                        f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                        f'        sdwa_old_dst_[ln] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                         '  }\n'
                                     )
                             if _dpp_struct and _supports_dpp_encoding:
@@ -6537,7 +6663,7 @@ class CodeGenerator:
                                     '      uint32_t result[64];\n'
                                     '      for (uint32_t i = 0; i < ws; ++i)\n'
                                     '        result[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                    '            cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
+                                    '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
                                     '      if (sdwa_src0_abs_ || sdwa_src0_neg_) {\n'
                                     '        for (uint32_t i = 0; i < ws; ++i) {\n'
                                     '          float sv = std::bit_cast<float>(result[i]);\n'
@@ -6555,7 +6681,7 @@ class CodeGenerator:
                                     '      uint32_t result1[64];\n'
                                     '      for (uint32_t i = 0; i < ws; ++i)\n'
                                     '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                    '            cu.read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
+                                    '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
                                     '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
                                     '        for (uint32_t i = 0; i < ws; ++i) {\n'
                                     '          float sv = std::bit_cast<float>(result1[i]);\n'
@@ -6589,9 +6715,9 @@ class CodeGenerator:
                                 '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                 '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                 '      if (!(ex & (1ULL << ln))) continue;\n'
-                                f'      uint32_t dv = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                 '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
-                                f'      wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln, dv);\n'
+                                f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, dv);\n'
                                 '    }\n'
                                 '  }\n'
                             )
@@ -6602,10 +6728,10 @@ class CodeGenerator:
                                     '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                     '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                     '      if (!(ex & (1ULL << ln))) continue;\n'
-                                    f'      uint32_t dv = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                    f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                     '      float fv = std::bit_cast<float>(dv);\n'
                                     '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                    f'      wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
+                                    f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
                                     '    }\n'
                                     '  }\n'
                                 )
@@ -6634,8 +6760,8 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
                                         '    uint64_t cmp_result = wf.vcc();\n'
                                         '    uint32_t sb = wf.sgpr_alloc().base;\n'
-                                        '    wf.cu().write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));\n'
-                                        '    wf.cu().write_sgpr(sb + sdwa_sdst_ + 1, static_cast<uint32_t>(cmp_result >> 32));\n'
+                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));\n'
+                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1, static_cast<uint32_t>(cmp_result >> 32));\n'
                                         '    wf.set_vcc(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
@@ -6649,7 +6775,7 @@ class CodeGenerator:
                                         '      uint32_t vb = wf.vgpr_alloc().base;\n'
                                         '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                         '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
+                                        f'          amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln,\n'
                                         '              sdwa_old_dst_[ln]);\n'
                                         '      }\n'
                                         '    }\n'
@@ -6969,6 +7095,9 @@ class CodeGenerator:
                             False,
                         )
                     )
+                uses_register_access = any(
+                    'RegisterAccess' in str(impl) for impl in class_func_impls
+                )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -6980,6 +7109,8 @@ class CodeGenerator:
                             ('limits', True),
                         ]
                     )
+                if uses_register_access:
+                    cpp_includes.append(('rocjitsu/vm/amdgpu/register_access.h', False))
                 has_tensor_dma = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -7532,6 +7663,16 @@ class CodeGenerator:
                 prefixed_body = _re.sub(
                     helper_arg_pattern, f'inst.{opnd.name}', prefixed_body
                 )
+                register_access_arg_pattern = (
+                    rf'((?:amdgpu::)?RegisterAccess\(wf\)\.'
+                    rf'(?:read|write)_(?:scalar64|scalar|lane64|lane|chunk)\()'
+                    rf'{_re.escape(opnd.name)}(?=\s*[,)])'
+                )
+                prefixed_body = _re.sub(
+                    register_access_arg_pattern,
+                    rf'\1inst.{opnd.name}',
+                    prefixed_body,
+                )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)inst_\.', 'inst.inst_.', prefixed_body
             )
@@ -7632,6 +7773,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/wavefront.h"',
             '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
+            '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             *simd_extra_includes(),
@@ -8290,11 +8432,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
         )
         literal64_decl = '  std::optional<uint64_t> literal64_value() const override;\n'
-        simd_decl = ''
+        simd_public_decl = ''
+        simd_private_decl = ''
         packed_16bit_field = ''
         if uses_packed_16bit_sources:
-            simd_decl = (
-                '  bool simd_capable() const override;\n'
+            simd_public_decl = '  bool simd_capable() const override;\n'
+            simd_private_decl = (
                 '  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,\n'
                 '                       uint32_t *out) const override;\n'
                 '  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,\n'
@@ -8313,7 +8456,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
-                f'{simd_decl}'
+                f'{simd_public_decl}'
+                'private:\n'
+                f'{simd_private_decl}'
                 '  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
                 '  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
                 '  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
@@ -8588,7 +8733,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         read_lane_lines = [
             'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {',
-            '  if (delegate()) return delegate()->read_lane(wf, lane);',
+            '  if (delegate()) return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);',
             '  int ev = encoding_value_;',
         ]
         if uses_packed_16bit_sources:
@@ -8597,7 +8742,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '  if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {',
                     '    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);',
                     '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;',
-                    '    uint32_t raw = wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                    '    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);',
                     '    return (raw >> packed->shift) & 0xffffu;',
                     '  }',
                 ]
@@ -8606,7 +8751,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [
                 f'  if (auto off = {_resolved_vgpr_read_call}) {{',
                 '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;',
-                '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                '    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);',
                 '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
@@ -8620,14 +8765,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         _read_lane64_body = (
             'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
-            '  if (delegate()) return delegate()->read_lane64(wf, lane);\n'
+            '  if (delegate()) return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);\n'
             '  int ev = encoding_value_;\n'
             f'  if (auto off = {_resolved_vgpr_read_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;\n'
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
-            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
-            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
+            '    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);\n'
             '  }\n'
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
@@ -8653,7 +8796,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                                               uint32_t *out) const {
                   if (delegate()) {
-                    delegate()->read_lane_chunk(wf, lane_base, count, out);
+                    amdgpu::RegisterAccess(wf).read_chunk(*delegate(), lane_base, count, out);
                     return;
                   }
                   if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
@@ -8661,13 +8804,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       out[i] = read_lane(wf, lane_base + i);
                     return;
                   }
-                AmdgpuIsaOperand<Isa>::read_lane_chunk(wf, lane_base, count, out);
+                detail::amdgpu_isa_read_lane_chunk_base(static_cast<const AmdgpuIsaOperand<Isa> &>(*this), wf, lane_base, count, out);
                 }
 
                 void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                                                const uint32_t *vals, uint64_t mask) const {
                   if (delegate()) {
-                    delegate()->write_lane_chunk(wf, lane_base, count, vals, mask);
+                    amdgpu::RegisterAccess(wf).write_chunk(*delegate(), lane_base, count, vals, mask);
                     return;
                   }
                   if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
@@ -8676,7 +8819,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         write_lane(wf, lane_base + i, vals[i]);
                     return;
                   }
-                  AmdgpuIsaOperand<Isa>::write_lane_chunk(wf, lane_base, count, vals, mask);
+                  detail::amdgpu_isa_write_lane_chunk_base(static_cast<const AmdgpuIsaOperand<Isa> &>(*this), wf, lane_base, count, vals, mask);
                 }
 
                 ''')
@@ -8688,10 +8831,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
                     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
                     uint32_t idx = wf.vgpr_alloc().base + voff;
-                    uint32_t old = wf.cu().read_vgpr(idx, lane);
+                    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
                     uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
                     uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-                    wf.cu().write_vgpr(idx, lane, merged);
+                    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
                     return;
                   }
                 ''')
@@ -8705,13 +8848,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 103)\n'
             '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
             '  if (ev <= 105)\n'
-            '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '  if (ev == 106)\n'
             '    return static_cast<uint32_t>(wf.vcc());\n'
             '  if (ev == 107)\n'
             '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
             '  if (ev >= 108 && ev <= 123)\n'
-            '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             + (
                 '  if (ev == 124)\n'
                 '    return 0u; // NULL\n'
@@ -8820,15 +8963,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 102)\n'
             '    return wf.scratch_base();\n'
             '  if (ev <= 105) {\n'
-            '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
+            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
             '  if (ev == 106)\n'
             '    return wf.vcc();\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
+            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
+            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
             + (
@@ -8888,7 +9031,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev <= 105) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 106) {\n'
@@ -8900,7 +9043,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 123) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
             '  }\n'
             + (
@@ -8933,8 +9076,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev <= 105) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 106) {\n'
@@ -8942,8 +9085,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 122) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
+            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 124)\n'
@@ -8984,7 +9127,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '\n'
             + simd_methods
             + 'uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {\n'
-            '  if (delegate()) return delegate()->read_scalar(wf);\n'
+            '  if (delegate()) return amdgpu::RegisterAccess(wf).read_scalar(*delegate());\n'
             '  if (has_literal64_)\n'
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
@@ -9000,7 +9143,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + packed_16bit_write_lane_prefix
             + f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
-            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
+            '    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
@@ -9010,8 +9153,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
             '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
-            '    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));\n'
-            '    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));\n'
+            '    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("write_lane64 called on non-VGPR operand type");\n'
@@ -9053,6 +9195,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 (f'rocjitsu/isa/arch/amdgpu/{arch}/operand.h', False),
                 ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                 ('rocjitsu/vm/amdgpu/compute_unit.h', False),
+                ('rocjitsu/vm/amdgpu/register_access.h', False),
                 ('rocjitsu/vm/amdgpu/wavefront.h', False),
                 ('format', True),
                 ('optional', True),
