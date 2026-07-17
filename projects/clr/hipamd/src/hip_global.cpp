@@ -134,7 +134,7 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
 }
 
 // ================================================================================================
-Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
+Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size,
          FatBinaryInfo** modules)
     : name_(name),
       dVarKind_(dVarKind),

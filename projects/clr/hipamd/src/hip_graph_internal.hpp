@@ -51,7 +51,7 @@ class UserObject : public amd::ReferenceCountedObject {
   // should be cleared from Graph's list of user object.
   std::unordered_set<Graph*> owning_graphs_;
 
-  UserObject(UserCallbackDestructor callback, void* data, unsigned int flags)
+  UserObject(UserCallbackDestructor callback, void* data)
       : ReferenceCountedObject(), callback_(callback), data_(data) {
     amd::ScopedLock lock(UserObjectLock_);
     ObjectSet_.insert(this);

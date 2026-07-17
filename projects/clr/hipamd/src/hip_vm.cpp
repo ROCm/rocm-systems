@@ -188,7 +188,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
       (prop->location.type == hipMemLocationTypeDevice) ? prop->location.id : dev->deviceId();
   phys_mem_obj->getUserData().locationType = prop->location.type;
   phys_mem_obj->getUserData().numaNode = numaNode;
-  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
+  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, *prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   HIP_RETURN(hipSuccess);
@@ -329,7 +329,7 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   prop.requestedHandleTypes = shHandleType;
 
   phys_mem_obj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
-  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, 0, prop);
+  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   if (!amd::MemObjMap::FindMemObj(phys_mem_obj->getSvmPtr())) {

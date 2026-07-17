@@ -231,7 +231,7 @@ hipError_t DynCO::populateDynGlobalVars() {
 
   for (auto& elem : var_names) {
     vars_.insert(
-        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, 0, 0, nullptr)));
+        std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, nullptr)));
   }
 
   for (auto& elem : var_names) {
