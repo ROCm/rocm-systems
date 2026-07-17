@@ -1894,7 +1894,7 @@ void Image::destroy() {
   delete copyImageBuffer_;
 
   if (hsaImageObject_.handle != 0 && ownsHsaImageObject_) {
-    hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
+    [[maybe_unused]] hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
     assert(status == HSA_STATUS_SUCCESS);
   }
   // Don't destroy memory if it's a view. Parent will destroy the original allocation.
