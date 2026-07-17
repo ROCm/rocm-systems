@@ -201,6 +201,28 @@ class SystemCapabilities:
             return []
 
     @cached_property
+    def ainic_compiled(self) -> bool:
+        """Check whether the binaries were built with AI NIC support.
+
+        Runs ``rocprof-sys-avail --settings`` and checks for the presence of
+        ``ROCPROFSYS_USE_AINIC``, which is only registered when
+        ``ROCPROFSYS_BUILD_AINIC=ON`` (i.e. AMD SMI >= 26.3 was found at
+        configure time). This is a hardware-independent, build-artifact check.
+        """
+        try:
+            result = subprocess.run(
+                [str(self.rocprofsys_avail), "--settings"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode != 0:
+                return False
+            return "ROCPROFSYS_USE_AINIC" in result.stdout
+        except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
+            return False
+
+    @cached_property
     def papi_nic_events(self) -> Optional[str]:
         """Get the list of all events that we want PAPI to record.
 

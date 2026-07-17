@@ -254,6 +254,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "ainic_compiled",
     ]
 
     # Informational markers, only used for test labeling
@@ -515,6 +516,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             )
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic_compiled" in item.keywords:
+            _msg = ainic_compiled_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -767,6 +772,21 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     """
     if not rocprof_config.capabilities.ai_nic_devices:
         return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    return None
+
+
+def ainic_compiled_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check if the binaries were built with AI NIC support (ROCPROFSYS_BUILD_AINIC=ON).
+
+    Checks ``rocprof-sys-avail --settings`` for ``ROCPROFSYS_USE_AINIC``, which is
+    only registered when AI NIC support was compiled in. Hardware-independent.
+    """
+    if not rocprof_config.capabilities.ainic_compiled:
+        return (
+            "AI NIC support not compiled in "
+            "(ROCPROFSYS_USE_AINIC absent from rocprof-sys-avail --settings; "
+            "requires ROCPROFSYS_BUILD_AINIC=ON, i.e. AMD SMI >= 26.3)"
+        )
     return None
 
 

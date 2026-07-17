@@ -389,7 +389,6 @@ HELP_CASES = [
             r"--sample-cputime",
             r"--sample-realtime",
             r"--sample-overflow",
-            r"--sampling-ainics",
             r"--sampling-cputime-delay",
             r"--sampling-cputime-freq",
             r"--sampling-cputime-signal",
@@ -464,6 +463,23 @@ class TestCliHelp(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.ainic_compiled
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_sampling_ainics_help(self, target):
+        """Verify --sampling-ainics appears in sampling help when AI NIC is compiled in.
+
+        Skipped when ROCPROFSYS_BUILD_AINIC=OFF (i.e. AMD SMI < 26.3 at configure
+        time), because ROCPROFSYS_SAMPLING_AINICS is only registered then, so the
+        flag is absent from the help output.
+        """
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--help=sampling"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"--sampling-ainics"])
 
     @pytest.mark.parametrize("target", TARGETS)
     def test_explain_invalid(self, target):
