@@ -66,14 +66,25 @@ HIP_TEST_CASE(Contract_MemBatchCopy_TwoOps_RoundTripBytes) {
 
   // A batch of two independent device-to-device copies must deliver each source
   // to its matching destination after the stream is synchronized, behaving like
-  // two ordinary device-to-device copies issued together. With no per-copy
-  // attributes the default access ordering applies.
+  // two ordinary device-to-device copies issued together. A single default
+  // attributes entry (stream access ordering, device location hints) is applied
+  // to both copies via a shared attribute index. Supplying one attribute rather
+  // than none is the portable form: the AMD runtime accepts a null attributes
+  // array and applies defaults, but the NVIDIA path (cudaMemcpyBatchAsync)
+  // requires at least one attributes entry and rejects numAttrs == 0.
+  hipMemcpyAttributes attribute{};
+  attribute.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attribute.srcLocHint = DeviceLocation();
+  attribute.dstLocHint = DeviceLocation();
+
   void* dsts[2] = {dev_dst_a, dev_dst_b};
   void* srcs[2] = {dev_src_a, dev_src_b};
   size_t sizes[2] = {kBytes, kBytes};
+  hipMemcpyAttributes attrs[1] = {attribute};
+  size_t attr_indices[1] = {0};
   size_t fail_index = 0;
   const hipError_t status =
-      hipMemcpyBatchAsync(dsts, srcs, sizes, 2, nullptr, nullptr, 0, &fail_index, stream);
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 2, attrs, attr_indices, 1, &fail_index, stream);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memcpy is not supported by this device/runtime path.");
   }
@@ -145,14 +156,23 @@ HIP_TEST_CASE(Contract_MemBatchCopy_NullDestination_IsRejected) {
   // A batch containing a null destination must not silently succeed. The exact
   // error code is backend-specific, so only a non-success status is required.
   // The sticky error left by the rejected call is cleared afterward so it does
-  // not leak into later tests.
+  // not leak into later tests. A valid default attributes entry is supplied so
+  // the rejection is attributable to the null destination rather than a missing
+  // attributes array (which the NVIDIA path rejects on its own).
+  hipMemcpyAttributes attribute{};
+  attribute.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attribute.srcLocHint = DeviceLocation();
+  attribute.dstLocHint = DeviceLocation();
+
   HIP_CHECK(hipGetLastError());
   void* dsts[1] = {nullptr};
   void* srcs[1] = {dev_src};
   size_t sizes[1] = {kBytes};
+  hipMemcpyAttributes attrs[1] = {attribute};
+  size_t attr_indices[1] = {0};
   size_t fail_index = 0;
   const hipError_t status =
-      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, nullptr, nullptr, 0, &fail_index, stream);
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, attrs, attr_indices, 1, &fail_index, stream);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memcpy is not supported by this device/runtime path.");
   }
