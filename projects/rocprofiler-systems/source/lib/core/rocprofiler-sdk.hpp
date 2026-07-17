@@ -9,7 +9,6 @@
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "logger/debug.hpp"
-#include "timemory/settings/settings.hpp"
 
 #include <spdlog/fmt/ranges.h>
 
@@ -108,17 +107,19 @@ public:
     static std::unordered_set<typename Wrapper::buffer_tracing_kind>
     get_buffered_domains();
 
-    static std::vector<std::int32_t> get_operations(Wrapper::callback_tracing_kind kindv);
+    static std::vector<std::int32_t> get_operations(
+        typename Wrapper::callback_tracing_kind kindv);
 
-    static std::vector<std::int32_t> get_operations(Wrapper::buffer_tracing_kind kindv);
+    static std::vector<std::int32_t> get_operations(
+        typename Wrapper::buffer_tracing_kind kindv);
 
     static std::vector<std::string> get_rocm_events();
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        Wrapper::callback_tracing_kind kindv);
+        typename Wrapper::callback_tracing_kind kindv);
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        Wrapper::buffer_tracing_kind kindv);
+        typename Wrapper::buffer_tracing_kind kindv);
 
     // Pure filtering logic — public so it can be unit-tested directly.
     static std::vector<std::int32_t> get_operations_impl(
@@ -134,10 +135,10 @@ public:
     // Test-only: directly inject operation options for a tracing kind without
     // running config_settings(). Enables unit-testing get_operations() and
     // get_backtrace_operations() without the settings infrastructure.
-    static void set_operation_options(Wrapper::callback_tracing_kind kind,
+    static void set_operation_options(typename Wrapper::callback_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
-    static void set_operation_options(Wrapper::buffer_tracing_kind kind,
+    static void set_operation_options(typename Wrapper::buffer_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
 
@@ -163,12 +164,12 @@ public:
     static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Wrapper::callback_tracing_kind tracing_kind,
-        const std::string&             operations_setting = {});
+        typename Wrapper::callback_tracing_kind tracing_kind,
+        const std::string&                      operations_setting = {});
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Wrapper::buffer_tracing_kind tracing_kind,
-        const std::string&           operations_setting = {});
+        typename Wrapper::buffer_tracing_kind tracing_kind,
+        const std::string&                    operations_setting = {});
 
     template <typename Tp>
     static auto insert_config_setting(
@@ -223,10 +224,9 @@ sdk_core<Wrapper, Externals>::get_setting_name(std::string _v)
 
 template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper, Externals>::set_operation_options(Wrapper::callback_tracing_kind kind,
-                                                    std::string include,
-                                                    std::string exclude,
-                                                    std::string backtrace)
+sdk_core<Wrapper, Externals>::set_operation_options(
+    typename Wrapper::callback_tracing_kind kind, std::string include,
+    std::string exclude, std::string backtrace)
 {
     callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
                                               std::move(backtrace) };
@@ -234,10 +234,9 @@ sdk_core<Wrapper, Externals>::set_operation_options(Wrapper::callback_tracing_ki
 
 template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper, Externals>::set_operation_options(Wrapper::buffer_tracing_kind kind,
-                                                    std::string                  include,
-                                                    std::string                  exclude,
-                                                    std::string backtrace)
+sdk_core<Wrapper, Externals>::set_operation_options(
+    typename Wrapper::buffer_tracing_kind kind, std::string include, std::string exclude,
+    std::string backtrace)
 {
     buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
                                               std::move(backtrace) };
@@ -346,7 +345,8 @@ sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_operations_impl(
-    Wrapper::callback_tracing_kind tracing_kind, const std::string& operations_setting)
+    typename Wrapper::callback_tracing_kind tracing_kind,
+    const std::string&                      operations_setting)
 {
     return operation_ids_for_tracing_kind(
         tracing_kind, operations_setting, s_callback_names,
@@ -356,7 +356,8 @@ sdk_core<Wrapper, Externals>::get_operations_impl(
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_operations_impl(
-    Wrapper::buffer_tracing_kind tracing_kind, const std::string& operations_setting)
+    typename Wrapper::buffer_tracing_kind tracing_kind,
+    const std::string&                    operations_setting)
 {
     return operation_ids_for_tracing_kind(
         tracing_kind, operations_setting, s_buffer_names,
@@ -866,7 +867,8 @@ sdk_core<Wrapper, Externals>::get_rocm_events()
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(Wrapper::callback_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(
+    typename Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -893,7 +895,7 @@ sdk_core<Wrapper, Externals>::get_operations(Wrapper::callback_tracing_kind kind
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(Wrapper::buffer_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
@@ -919,7 +921,7 @@ sdk_core<Wrapper, Externals>::get_operations(Wrapper::buffer_tracing_kind kindv)
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_backtrace_operations(
-    Wrapper::callback_tracing_kind kindv)
+    typename Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -940,7 +942,8 @@ sdk_core<Wrapper, Externals>::get_backtrace_operations(
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_backtrace_operations(Wrapper::buffer_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_backtrace_operations(
+    typename Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
