@@ -1420,11 +1420,11 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
                                           amdsmi_board_info_t* board_info) {
   AMDSMI_CHECK_INIT();
 
+  AMDSMI_WSL_INTERCEPT(get_gpu_board_info(processor_handle, board_info));
+
   if (board_info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-
-  AMDSMI_WSL_INTERCEPT(get_gpu_board_info(processor_handle, board_info));
 
   amdsmi_status_t status;
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -1569,11 +1569,11 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
                                        amdsmi_temperature_metric_t metric, int64_t* temperature) {
   AMDSMI_CHECK_INIT();
 
+  AMDSMI_WSL_INTERCEPT(get_temp_metric(processor_handle, sensor_type, metric, temperature));
+
   if (temperature == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-
-  AMDSMI_WSL_INTERCEPT(get_temp_metric(processor_handle, sensor_type, metric, temperature));
 
   // Get the PLX temperature from the gpu_metrics
   if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
@@ -2292,11 +2292,11 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
                                          amdsmi_asic_info_t* info) {
   AMDSMI_CHECK_INIT();
 
+  AMDSMI_WSL_INTERCEPT(get_gpu_asic_info(processor_handle, info));
+
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-
-  AMDSMI_WSL_INTERCEPT(get_gpu_asic_info(processor_handle, info));
 
   struct drm_amdgpu_info_device dev_info = {};
   uint16_t vendor_id = 0;
@@ -5331,11 +5331,11 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
                                       amdsmi_power_info_t* info) {
   AMDSMI_CHECK_INIT();
 
+  AMDSMI_WSL_INTERCEPT(get_power_info(processor_handle, info));
+
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-
-  AMDSMI_WSL_INTERCEPT(get_power_info(processor_handle, info));
 
   amdsmi_status_t status;
 

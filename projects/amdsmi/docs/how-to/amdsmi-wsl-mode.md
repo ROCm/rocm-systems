@@ -29,13 +29,14 @@ brought up incrementally.
 ## How it works
 
 AMD SMI keeps a single code path per API. The WSL-versus-native decision is made
-**once**, at library init, not scattered through every function:
+**once per process**, on the first API call, not scattered through every
+function:
 
 ```text
 amdsmi_get_gpu_* (one dispatcher, backend-agnostic)
         │
         ├─ native  → DRM ioctls / sysfs        (default)
-        └─ WSL     → WddmBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
+        └─ WSL     → AMDSmiWslBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
 ```
 
 Queries that WDDM cannot serve (for example CPU/HSMP metrics, NIC, xGMI fabric,
@@ -70,22 +71,30 @@ the WSL source is not compiled and the intercept hooks expand to nothing.
 Even in a WSL-enabled build, the backend stays inert until it is activated. This
 lets a single binary ship the capability while defaulting to native behavior.
 
-Activation rules, evaluated once at first use:
+While the backend returns mock data (the D3DKMT implementation is still being
+brought up), activation is **explicit only** so a real WSL2 host is never
+silently served synthetic data:
 
 | `AMDSMI_WSL_MODE` | Behavior |
 |-------------------|----------|
-| `1` | Force the WSL backend on (explicit opt-in, useful for testing). |
-| `0` | Force it off. |
-| unset | Auto: on if `/sys/module/dxgkrnl` exists (real WSL2), otherwise off. |
+| `1` | Enable the WSL backend. |
+| any other value, or unset | Native behavior. |
+
+```{note}
+Only the exact value `1` enables the backend; any other non-empty value (for
+example `true` or `yes`) is treated as off. Automatic activation from the
+presence of `/sys/module/dxgkrnl` is deferred until the production D3DKMT backend
+replaces the mock.
+```
 
 Example:
 
 ```bash
-# Force the WSL backend for a single command
+# Enable the WSL backend for a single command
 AMDSMI_WSL_MODE=1 amd-smi static
 
-# Force native behavior even under WSL
-AMDSMI_WSL_MODE=0 amd-smi metric
+# Native behavior (default)
+amd-smi metric
 ```
 
 ## Impact on existing scripts
@@ -100,9 +109,9 @@ The WSL backend is designed to be a drop-in. For users with existing automation:
   than wrong. Scripts should already tolerate `N/A` for unsupported hardware;
   the same handling covers WSL.
 - **Native installs are unaffected.** If you never build with
-  `-DENABLE_WSL_BACKEND=ON` or never set `AMDSMI_WSL_MODE`, nothing changes.
-- **Opt-in is explicit.** On non-WSL systems the backend never activates, so a
-  script moved between native and WSL hosts adapts automatically without edits.
+  `-DENABLE_WSL_BACKEND=ON` or never set `AMDSMI_WSL_MODE=1`, nothing changes.
+- **Opt-in is explicit.** The backend activates only when you set
+  `AMDSMI_WSL_MODE=1`, so nothing changes for a script until you ask for it.
 
 ## Verifying
 

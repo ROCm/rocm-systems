@@ -313,6 +313,10 @@ install(
 # error. Build them, but keep them out of the installed dev headers.
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+# The WSL backend header is build-only: it includes the generated
+# config/amd_smi_config.h and declares an internal class that is not part of the
+# public dev surface, so keep it out of the installed headers.
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_backend")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
