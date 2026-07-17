@@ -67,6 +67,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 30
     LABELS "attachment" "att"
     DISABLED ${IS_DISABLED}
+    DISABLED_CODECOV
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once-att
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-att-output/out_results.json
