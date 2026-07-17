@@ -32,15 +32,17 @@ public:
   // -- Memory events --
 
   /// Register a global load into VGPRs (tracked by vmcnt).
-  void globalLoad(int wave, int vgprBase, int numRegs, uint64_t exec = 0) {
+  void globalLoad(int wave, int vgprBase, int numRegs, uint64_t exec = 0, uint8_t byteMask = 0xF) {
     if (!exec) {
       exec = defaultExec_;
     }
     std::vector<uint32_t> regs(numRegs);
     for (int i = 0; i < numRegs; ++i) {
       regs[i] = vgprBase + i;
+      waves_[wave]->checkVgprWrite(vgprBase + i, exec, byteMask, MemoryEventType::GLOBAL_TO_VGPR);
     }
-    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(regs), exec);
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(regs), exec,
+                                byteMask);
   }
 
   /// Register a Direct-to-LDS global load (tracked by vmcnt).
@@ -100,6 +102,7 @@ public:
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
+    waves_[wave]->checkVgprWrite(vgprDst, laneMask, byteMask, MemoryEventType::LDS_TO_VGPR);
     waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask,
                                    waveSize_, ldsAddrs, bytes, byteMask);
   }

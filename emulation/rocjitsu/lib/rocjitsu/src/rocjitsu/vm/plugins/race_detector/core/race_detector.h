@@ -49,10 +49,12 @@ public:
   /// registry, enabling prefix trimming.
   void retireEvent(EventId);
 
-  /// Check for RAW hazards: no outstanding LDS writes overlap the range.
+  /// Check for cross-wave RAW hazards: no outstanding LDS writes from another
+  /// wave overlap the range.
   void validateRead(int addr, WaveId, int lane, int nBytes) const;
 
-  /// Check for WAR hazards: no outstanding LDS reads overlap the range.
+  /// Check for cross-wave WAR hazards: no outstanding LDS reads from another
+  /// wave overlap the range.
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes) const;

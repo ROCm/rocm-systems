@@ -127,11 +127,15 @@ races. Some examples:
 ## What this plugin detects
 
 - **VGPR races**: a vector register is read before a pending global or LDS load
-  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient).
+  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient), or
+  asynchronous loads from different completion domains overwrite the same
+  VGPR before the older load completes.
 - **SGPR races**: a scalar register is read before a pending scalar load has
   completed (`s_waitcnt lgkmcnt` insufficient).
 - **LDS races**: an LDS byte is read or written by one wave while another wave
   has an outstanding write to the same byte, without an intervening `s_barrier`.
+  Same-wave native DS accesses are ordered; direct-to-LDS VMEM writes also need
+  the appropriate `vmcnt` before a same-wave DS access.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.

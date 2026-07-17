@@ -36,6 +36,8 @@ std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detec
     return {detector.events().pc(eid), detector.events().waveId(eid).value, -1};
   };
   if (v.space == RaceViolation::Space::VGPR) {
+    if (v.conflictEvent.value >= 0)
+      return make(v.conflictEvent);
     auto &wrs = detector.getWaveRaceState(v.wave);
     for (auto eid : wrs.getVgprMemoryEvents(v.index))
       if (isToVgpr(detector.events().type(eid)))
@@ -284,8 +286,11 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     if (d.is_load) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       registers.resize(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
+      uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+      for (uint32_t i = 0; i < d.num_elems; ++i) {
         registers[i] = logicalBase + i;
+        rs->checkVgprWrite(static_cast<int>(logicalBase + i), wf.exec(), byte_mask, type);
+      }
     }
     uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
     rs->registerLdsEvent(wf.pc, type, std::move(registers), wf.exec(), wf.wf_size(),
@@ -314,9 +319,12 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       std::vector<uint32_t> registers(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
-        registers[i] = logicalBase + i;
       uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+      for (uint32_t i = 0; i < d.num_elems; ++i) {
+        registers[i] = logicalBase + i;
+        rs->checkVgprWrite(static_cast<int>(logicalBase + i), wf.exec(), byte_mask,
+                           MemoryEventType::GLOBAL_TO_VGPR);
+      }
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), wf.exec(),
                         byte_mask);
     } else if (!d.is_load) {
