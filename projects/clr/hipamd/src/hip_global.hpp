@@ -58,7 +58,7 @@ class Var {
   // Types of variable
   enum DeviceVarKind { DVK_Variable = 0, DVK_Surface, DVK_Texture, DVK_Managed };
 
-  Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
+  Var(const std::string& name, DeviceVarKind dVarKind, size_t size,
       FatBinaryInfo** modules = nullptr);
 
   Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t size, unsigned align,

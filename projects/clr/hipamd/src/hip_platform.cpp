@@ -203,7 +203,7 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
                       int global) {         // Unknown, always 0
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
-                                   size, 0, 0, fat_binary_modules);
+                                   size, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Global Var, error:%d", err);
 }
@@ -217,7 +217,7 @@ void __hipRegisterSurface(
     int type, int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
-                                   sizeof(surfaceReference), 0, 0, fat_binary_modules);
+                                   sizeof(surfaceReference), fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Glbal Var, err:%d", err);
 }
@@ -275,7 +275,7 @@ void __hipRegisterTexture(
     int type, int norm, int ext) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
-                                   sizeof(textureReference), 0, 0, fat_binary_modules);
+                                   sizeof(textureReference), fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
   guarantee((err == hipSuccess), "Cannot register Static Global Var, status: %d", err);
 }

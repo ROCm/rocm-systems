@@ -3972,7 +3972,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
     addSystemScope();
 
-    bool result;
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);

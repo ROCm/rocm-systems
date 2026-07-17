@@ -3072,7 +3072,7 @@ hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::UserObject* object = new hip::UserObject(destroy, ptr, flags);
+  hip::UserObject* object = new hip::UserObject(destroy, ptr);
   //! Creating object adds one reference.
   if (initialRefcount > 1) {
     object->increaseRefCount(static_cast<const unsigned int>(initialRefcount - 1));
