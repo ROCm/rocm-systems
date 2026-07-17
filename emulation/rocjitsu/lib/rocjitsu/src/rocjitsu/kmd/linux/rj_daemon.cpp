@@ -466,7 +466,7 @@ bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
   if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode))
     return false;
 
-  UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
   if (probe.get() < 0)
     return false;
   if (::connect(probe.get(), reinterpret_cast<const sockaddr *>(&address), address_length) == 0)

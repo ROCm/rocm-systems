@@ -226,6 +226,41 @@ TEST(DaemonApi, RecoversAbandonedSocket) {
   EXPECT_FALSE(std::filesystem::exists(socket_path));
 }
 
+TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  const std::string path = socket_path.string();
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+  const auto length = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() + 1);
+
+  const int listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  ASSERT_GE(listener, 0);
+  ASSERT_EQ(bind(listener, reinterpret_cast<const sockaddr *>(&address), length), 0);
+  ASSERT_EQ(listen(listener, 1), 0);
+  const int first = connect_to(socket_path);
+  const int second = connect_to(socket_path);
+  ASSERT_GE(first, 0);
+  ASSERT_GE(second, 0);
+
+  struct stat before {};
+  ASSERT_EQ(lstat(socket_path.c_str(), &before), 0);
+  const auto start = std::chrono::steady_clock::now();
+  TestDaemon daemon(socket_path);
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
+  EXPECT_EQ(daemon.start_status(), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(daemon.get(), nullptr);
+  struct stat after {};
+  ASSERT_EQ(lstat(socket_path.c_str(), &after), 0);
+  EXPECT_EQ(after.st_dev, before.st_dev);
+  EXPECT_EQ(after.st_ino, before.st_ino);
+
+  close(first);
+  close(second);
+  close(listener);
+}
+
 TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "nested" / "daemon.sock";
