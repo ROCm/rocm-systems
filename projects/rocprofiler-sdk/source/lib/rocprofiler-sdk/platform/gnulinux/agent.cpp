@@ -178,8 +178,7 @@ parse_cpu_info()
                     }
                 }
 
-                if(itr.find("processor") == 0)
-                    info_v.processor = get_stol(value);
+                if(itr.find("processor") == 0) info_v.processor = get_stol(value);
 #if defined(__x86_64__) || defined(_M_X64)
                 else if(itr.find("vendor_id") == 0)
                     info_v.vendor_id = value;
@@ -209,7 +208,7 @@ parse_cpu_info()
                         sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
                 }
 #else
-#error "Unsupported architecture: /proc/cpuinfo parsing not implemented"
+#    error "Unsupported architecture: /proc/cpuinfo parsing not implemented"
 #endif
             }
             else
