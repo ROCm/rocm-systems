@@ -612,8 +612,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  rocjitsu::cli::LaunchEnvironment launch_environment =
-      rocjitsu::cli::make_launch_environment(lib_path);
+  rocjitsu::cli::LaunchEnvironment launch_environment;
+  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
   if (dbt_guest_mode) {
     if (std::optional<std::string> rocr_visible_devices =
             expanded_rocr_visible_devices(dbt_guest_config))

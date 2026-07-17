@@ -157,12 +157,6 @@ void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &
     environment.prepend_path("LD_PRELOAD", tsan_runtime);
 }
 
-LaunchEnvironment make_launch_environment(const std::string &interposer_path) {
-  LaunchEnvironment environment;
-  prepend_launch_preloads(environment, interposer_path);
-  return environment;
-}
-
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
   return execvpe(file, argv, environment.envp());
 }
