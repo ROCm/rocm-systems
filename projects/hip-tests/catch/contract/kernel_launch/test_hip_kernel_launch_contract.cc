@@ -110,6 +110,11 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
   const hipError_t status =
       hipLaunchCooperativeKernel(null_function, dim3(1), dim3(1), nullptr, 0, nullptr);
   REQUIRE(status != hipSuccess);
+  // The rejected launch leaves a sticky thread-local error (observed as
+  // hipErrorInvalidDeviceFunction on the NVIDIA backend). Clear it so it does not
+  // leak into the next test's hipGetLastError() check; the AMD runtime does not
+  // surface it the same way, but clearing is correct on both backends.
+  (void)hipGetLastError();
 }
 
 HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer) {

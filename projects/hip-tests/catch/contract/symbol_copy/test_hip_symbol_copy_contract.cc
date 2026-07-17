@@ -171,6 +171,10 @@ HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {
   const hipError_t from_status =
       hipMemcpyFromSymbol(&value, null_symbol, sizeof(value), 0, hipMemcpyDeviceToHost);
   REQUIRE(from_status != hipSuccess);
+  // The rejected copies leave a sticky thread-local error (observed as
+  // hipErrorInvalidSymbol on the NVIDIA backend). Clear it so it does not leak
+  // into the next test's hipGetLastError() check.
+  (void)hipGetLastError();
 }
 
 HIP_TEST_CASE(Contract_SymbolCopy_OutOfBoundsSizePlusOffset_IsRejected) {
@@ -186,4 +190,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_OutOfBoundsSizePlusOffset_IsRejected) {
       hipMemcpyToSymbol(HIP_SYMBOL(g_contract_symbol_copy_array), &value, sizeof(value),
                         symbol_bytes, hipMemcpyHostToDevice);
   REQUIRE(status != hipSuccess);
+  // Clear the sticky error left by the rejected copy so it does not leak into a
+  // later test's hipGetLastError() check.
+  (void)hipGetLastError();
 }
