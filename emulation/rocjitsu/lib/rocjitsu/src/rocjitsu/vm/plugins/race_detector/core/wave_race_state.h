@@ -75,6 +75,13 @@ public:
   /// Check all lanes of a VGPR for races (used by bulk register reads).
   void checkVgprReadAllLanes(int reg) const;
 
+  /// Check an asynchronous load destination for WAW races against pending
+  /// loads from a different completion domain. Loads in the same domain are
+  /// ordered, but (for example) a VMEM load and an LDS load can complete out
+  /// of order. Calls the RaceHandler on violation.
+  void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
+                      MemoryEventType currentType) const;
+
   /// Check a scalar register read for races. Calls the RaceHandler on
   /// violation (outstanding s_load targeting this SGPR).
   void checkSgprRead(int reg) const;

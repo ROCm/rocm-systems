@@ -77,8 +77,13 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes) con
   }
 
   for (EventId eventId : ldsWriteEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
-      continue;
+    if (wave == events_.waveId(eventId)) {
+      // Native DS instructions issued by one wave are ordered. Direct-to-LDS
+      // buffer loads complete through VMEM instead, so a same-wave DS read
+      // still needs vmcnt to make an ACTIVE DTL write visible.
+      if (events_.type(eventId) == MemoryEventType::VGPR_TO_LDS ||
+          events_.status(eventId) == EventStatus::WAVE_COMPLETE)
+        continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
       raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId});
@@ -102,7 +107,9 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
   }
 
   for (EventId eventId : ldsReadEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+    // LDS instructions issued by one wave are ordered. Only another wave can
+    // overwrite data while this read is outstanding without synchronization.
+    if (wave == events_.waveId(eventId)) {
       continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {

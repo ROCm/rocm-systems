@@ -10,7 +10,7 @@
 //   Vgpr_*          — VGPR races from global loads (vmcnt)
 //   Sgpr_*          — SGPR races from scalar loads (lgkmcnt)
 //   LdsCrossWave_*  — cross-wave LDS races (missing barrier)
-//   LdsSameWave_*   — same-wave LDS races (missing waitcnt)
+//   LdsSameWave_*   — ordered same-wave LDS accesses
 //   SameWave_*      — same-wave VGPR races via LDS loads
 //   DeepStack_*     — multiple outstanding loads with partial waitcnt
 //   D16_*           — byte-level VGPR tracking (half-register loads)
@@ -178,25 +178,26 @@ TEST(RaceDetector, LdsSameWave_ReadReadOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, LdsSameWave_WriteReadRace) {
-  // Write then read same address, same wave, no waitcnt → RACE.
+TEST(RaceDetector, LdsSameWave_WriteReadOrdered) {
+  // LDS operations from one wave are ordered, so the later read observes the
+  // earlier write without requiring a workgroup barrier.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  // no waitcnt
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_TRUE(b.hasLdsRace(0));
+  EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, LdsSameWave_InsufficientLgkm) {
-  // Two LDS writes, waitcnt lgkmcnt(1) drains oldest only.
+TEST(RaceDetector, LdsSameWave_PartialWaitDoesNotChangeOrdering) {
+  // A partial wait changes register-result availability, but same-wave LDS
+  // memory operations remain ordered.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);     // oldest
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);    // newest
   b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);              // drain oldest
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4); // safe
   EXPECT_FALSE(b.hasLdsRace(0));
-  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4); // RACE
-  EXPECT_TRUE(b.hasLdsRace(64));
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4); // also safe
+  EXPECT_FALSE(b.hasLdsRace(64));
 }
 
 // ---- Same-wave VGPR via LDS load ----
@@ -219,7 +220,9 @@ TEST(RaceDetector, SameWave_WriteWaitcntOk) {
 }
 
 TEST(RaceDetector, SameWave_DoubleWriteRace) {
-  // Two LDS loads into same VGPR, waitcnt(1) drains oldest → newest RACE.
+  // Two LDS loads into the same VGPR are ordered within the LDS unit. The
+  // newest result remains pending after a partial wait and races only when it
+  // is read.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4,
             /*vgprDst=*/2); // oldest
@@ -228,6 +231,63 @@ TEST(RaceDetector, SameWave_DoubleWriteRace) {
   b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1); // drain oldest
   b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0); // still racing
   EXPECT_TRUE(b.hasVgprRace(2));
+}
+
+TEST(RaceDetector, VgprWaw_GlobalThenLdsLoadRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/3, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2,
+            /*byteMask=*/0xF, /*exec=*/1ULL << 3);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_TRUE(b.hasVgprRace(2));
+  EXPECT_TRUE(b.violations()[0].isWrite);
+  EXPECT_EQ(b.violations()[0].lane, 3);
+  EXPECT_EQ(b.violations()[0].conflictEvent.value, 0);
+}
+
+TEST(RaceDetector, VgprWaw_LdsThenGlobalLoadRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/4, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2,
+            /*byteMask=*/0xF, /*exec=*/1ULL << 4);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/1ULL << 4);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_TRUE(b.hasVgprRace(2));
+  EXPECT_TRUE(b.violations()[0].isWrite);
+  EXPECT_EQ(b.violations()[0].lane, 4);
+  EXPECT_EQ(b.violations()[0].conflictEvent.value, 0);
+}
+
+TEST(RaceDetector, VgprWaw_SameCompletionDomainIsOrdered) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/3);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/3);
+
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, VgprWaw_WaitClearsCrossDomainRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, VgprWaw_RequiresLaneAndByteOverlap) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/1ULL << 0,
+               /*byteMask=*/0x3);
+  b.ldsRead(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2,
+            /*byteMask=*/0x3, /*exec=*/1ULL << 1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/2,
+            /*byteMask=*/0xC, /*exec=*/1ULL << 0);
+
+  EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, SameWave_BarrierNoWaitcnt) {
@@ -376,14 +436,30 @@ TEST(RaceDetector, Dtl_CrossWaveSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, Dtl_SameWaveNeedsVmcnt) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/64);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
+}
+
+TEST(RaceDetector, Dtl_SameWaveVmcntMakesReadSafe) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/64);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
 // ---- Exec mask ----
 
-TEST(RaceDetector, Exec_PartialWriteFullRead) {
-  // Only lane 0 writes LDS, then full-exec read → RACE (write still ACTIVE).
+TEST(RaceDetector, Exec_PartialWriteSameWaveReadOrdered) {
+  // Only lane 0 writes LDS, then the same wave reads. The partial EXEC mask
+  // does not change same-wave LDS ordering.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_TRUE(b.hasLdsRace(0));
+  EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, Exec_PartialWriteWaitcntOk) {
@@ -395,12 +471,13 @@ TEST(RaceDetector, Exec_PartialWriteWaitcntOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, Exec_DisjointLanesOverlap) {
-  // Lane 0 writes LDS[0], lane 1 reads LDS[0] without barrier → RACE.
+TEST(RaceDetector, Exec_DisjointLanesSameWaveOrdered) {
+  // Lane 0 writes LDS[0], then lane 1 in the same wave reads LDS[0]. LDS
+  // program order applies across lanes in a wave.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.checkLdsRead(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4); // RACE
-  EXPECT_TRUE(b.hasLdsRace(0));
+  b.checkLdsRead(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, Exec_DisjointLanesDisjoint) {
@@ -782,7 +859,7 @@ TEST(RaceDetector, DualOffset_Race) {
   // Uses RaceDetector/WaveRaceState directly since the builder doesn't
   // expose registerDualOffsetLdsEvent.
   std::vector<RaceViolation> violations;
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4,
+  RaceDetector detector(/*nWaves=*/2, /*vgprCount=*/4,
                         /*sgprCount=*/4, Dim3d(0),
                         [&](RaceViolation v) { violations.push_back(v); });
   auto &rs = detector.getWaveRaceState(0);
@@ -792,13 +869,14 @@ TEST(RaceDetector, DualOffset_Race) {
       /*pc=*/0, MemoryEventType::VGPR_TO_LDS, /*registers=*/{},
       /*execMask=*/1, /*waveSize=*/64, ldsAddrs,
       /*offset0=*/0, /*offset1=*/2);
-  // Lane 0 wrote: [100, 108) and [116, 124)
-  detector.validateRead(/*addr=*/100, WaveId{0}, /*lane=*/0, /*nBytes=*/4);
+  // Wave 0 lane 0 wrote [100, 108) and [116, 124). Wave 1 reads without a
+  // barrier, so both overlapping ranges race.
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 1u); // first interval
-  detector.validateRead(/*addr=*/116, WaveId{0}, /*lane=*/0, /*nBytes=*/4);
+  detector.validateRead(/*addr=*/116, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 2u); // second interval
   // Outside both intervals: no race
-  detector.validateRead(/*addr=*/108, WaveId{0}, /*lane=*/0, /*nBytes=*/4);
+  detector.validateRead(/*addr=*/108, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 2u); // still 2
 }
 

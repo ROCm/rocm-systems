@@ -209,6 +209,24 @@ void WaveRaceState::checkVgprReadAllLanes(int reg) const {
   }
 }
 
+void WaveRaceState::checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
+                                   MemoryEventType currentType) const {
+  for (EventId eid : vgprMemoryEvents[reg]) {
+    const MemoryEventType pendingType = detector->events().type(eid);
+    if (!isToVgpr(pendingType) || pendingType == currentType ||
+        (detector->events().byteMask(eid) & byteMask) == 0)
+      continue;
+
+    const uint64_t overlappingLanes = detector->events().execMask(eid) & execMask;
+    if (overlappingLanes == 0)
+      continue;
+
+    const int lane = static_cast<int>(std::countr_zero(overlappingLanes));
+    detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, true,
+                                detector->getWorkgroupId(), eid});
+  }
+}
+
 bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
   for (EventId eid : vgprMemoryEvents[reg]) {
     if (isFromVgpr(detector->events().type(eid)) && detector->events().isActiveForLane(eid, lane)) {
