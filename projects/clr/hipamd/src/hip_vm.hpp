@@ -24,11 +24,12 @@ int VmmOwnerDeviceIndex(const hipMemAllocationProp& prop);
 
 class GenericAllocation : public amd::RuntimeObject {
   amd::Memory& phys_mem_ref_;        //<! Physical memory object
+  size_t size_;                      //<! Allocated size
   hipMemAllocationProp properties_;  //<! Allocation Properties
 
  public:
   GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop)
-      : phys_mem_ref_(phys_mem_ref), properties_(prop) {}
+      : phys_mem_ref_(phys_mem_ref), size_(size), properties_(prop) {}
   ~GenericAllocation() {
     if (size_ == 0) {
       if (amd::MemObjMap::FindMemObj(phys_mem_ref_.getSvmPtr()) == &phys_mem_ref_) {
