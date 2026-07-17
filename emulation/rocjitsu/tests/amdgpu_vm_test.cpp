@@ -876,7 +876,7 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
 }
 
 TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
-  constexpr std::array<uint8_t, 2> unsupported_formats{0, 200};
+  constexpr std::array<uint8_t, 2> unsupported_formats{0, amdgpu::kHsaAmdPacketTypeReserved200};
 
   for (const auto amd_format : unsupported_formats) {
     SCOPED_TRACE(static_cast<unsigned>(amd_format));

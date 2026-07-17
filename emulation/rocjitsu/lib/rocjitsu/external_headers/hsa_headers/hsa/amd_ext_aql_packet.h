@@ -1,26 +1,22 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_AMD_EXT_AQL_PACKET_H_
-#define ROCJITSU_VM_AMDGPU_AMD_EXT_AQL_PACKET_H_
+/// @file amd_ext_aql_packet.h
+/// @brief Minimal AMD vendor-specific AQL packet ABI mirror.
+///
+/// @details The source of truth for the public packet layouts and format values is
+/// `projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h`. Keep this mirror limited to the
+/// packet ABI consumed by RocJITsu and update the layout assertions whenever that header changes.
 
-#ifndef HSA_LARGE_MODEL
-#define HSA_LARGE_MODEL 1
-#endif
+#pragma once
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/hsa.h"
-RJ_DIAGNOSTIC_POP
 
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
 namespace rocjitsu::amdgpu {
-
-// AMD vendor-specific packet format 0 is unassigned; 200 is reserved and unreleased.
 
 /// ROCR-internal PM4 indirect-buffer packet format.
 constexpr uint8_t kAmdAqlFormatPm4Ib = 1;
@@ -31,19 +27,22 @@ constexpr uint8_t kHsaAmdPacketTypeBarrierValue = 2;
 /// AMD vendor-specific packet format selector for extended kernel dispatch.
 constexpr uint8_t kHsaAmdPacketTypeExtKernelDispatch = 3;
 
+/// Reserved, unreleased AMD vendor-specific packet format.
+constexpr uint8_t kHsaAmdPacketTypeReserved200 = 200;
+
 /// @brief AMD vendor-specific barrier-value packet layout.
 ///
-/// @details Processing stops until `(signal_value & mask) cond value` is true.
-/// This mirrors hsa_amd_barrier_value_packet_t without depending on the ROCr
-/// extension-header version installed on the host.
+/// @details Processing stops until `(signal_value & mask) cond value` is true. This mirrors
+/// `hsa_amd_barrier_value_packet_t` without depending on an ROCr extension header installed on the
+/// host.
 struct AmdBarrierValuePacket {
   uint16_t header;
   uint8_t amd_format;
   uint8_t reserved_header;
   uint32_t reserved0;
   hsa_signal_t signal;
-  int64_t value;
-  int64_t mask;
+  hsa_signal_value_t value;
+  hsa_signal_value_t mask;
   uint32_t condition;
   uint32_t reserved1;
   uint64_t reserved2;
@@ -61,8 +60,8 @@ static_assert(offsetof(AmdBarrierValuePacket, completion_signal) == 56);
 
 /// @brief AMD vendor-specific extended kernel dispatch packet layout.
 ///
-/// @details This mirrors the 64-byte wire packet consumed from an AQL ring for
-/// clustered dispatch. Keep the field order and size stable; tests and runtime
+/// @details This mirrors `hsa_amd_ext_kernel_dispatch_packet_t`, the 64-byte wire packet consumed
+/// from an AQL ring for clustered dispatch. Keep the field order and size stable; tests and runtime
 /// queue code copy this type directly into packet slots.
 struct AmdExtKernelDispatchPacket {
   uint16_t header;
@@ -99,5 +98,3 @@ static_assert(offsetof(AmdExtKernelDispatchPacket, dep_signal) == 48);
 static_assert(offsetof(AmdExtKernelDispatchPacket, completion_signal) == 56);
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_VM_AMDGPU_AMD_EXT_AQL_PACKET_H_
