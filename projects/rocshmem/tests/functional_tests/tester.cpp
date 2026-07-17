@@ -83,10 +83,14 @@
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
+#if defined(USE_GDA)
 #include "qp_ping_pong_tester.hpp"
 #include "qp_put_nbi_tester.hpp"
+#endif
+#if defined(USE_SDMA)
 #include "sdma_ping_pong_tester.hpp"
 #include "sdma_put_nbi_tester.hpp"
+#endif
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -942,6 +946,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
       break;
+#if defined(USE_GDA)
     case QpPingPongTestType:
       test_name = "QP-Direct PingPong";
       testers.push_back(new QpPingPongTester(args));
@@ -950,6 +955,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+#endif
+#if defined(USE_SDMA)
     case SdmaPingPongTestType:
       test_name = "SDMA-Direct PingPong";
       testers.push_back(new SdmaPingPongTester(args));
@@ -958,6 +965,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "SDMA-Direct Put NBI";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
+#endif
     default:
       test_name = "Empty";
       break;

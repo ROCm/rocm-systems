@@ -78,10 +78,10 @@ target_sources(
     host_rma_tester.cpp
     tile_broadcast_tester.cpp
     tile_allgather_tester.cpp
-    qp_ping_pong_tester.cpp
-    qp_put_nbi_tester.cpp
-    sdma_ping_pong_tester.cpp
-    sdma_put_nbi_tester.cpp
+    $<$<BOOL:${USE_GDA}>:qp_ping_pong_tester.cpp>
+    $<$<BOOL:${USE_GDA}>:qp_put_nbi_tester.cpp>
+    $<$<BOOL:${USE_SDMA}>:sdma_ping_pong_tester.cpp>
+    $<$<BOOL:${USE_SDMA}>:sdma_put_nbi_tester.cpp>
 )
 
 ###############################################################################
