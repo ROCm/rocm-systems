@@ -41,6 +41,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -169,14 +170,21 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
-        // Counter collection completion is migrated off the callback registry (see
-        // WriteInterceptor); invoke it explicitly here.
+        // Services migrated off the callback registry (see WriteInterceptor) are invoked
+        // explicitly here, ordered by client id (hsa/queue_hooks/client_ids.hpp).
         counters::signal_completion_hook(queue_info_session.queue,
                                          packet.kernel_packet,
                                          _session,
                                          packet,
                                          packet.instrumentation_packets,
                                          dispatch_time);
+
+        thread_trace::signal_completion_hook(queue_info_session.queue,
+                                             packet.kernel_packet,
+                                             _session,
+                                             packet,
+                                             packet.instrumentation_packets,
+                                             dispatch_time);
 
         if(packet.is_serialized)
         {
@@ -315,11 +323,12 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // Counter collection no longer registers a queue-controller callback, so it does not count
-    // toward get_notifiers(); detect it explicitly so a counters-only run still enters the
-    // interceptor.
+    // The migrated services no longer register queue-controller callbacks, so they do not count
+    // toward get_notifiers(); detect each explicitly so a run using only those services still
+    // enters the interceptor.
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !counters::is_any_active() &&
+         !thread_trace::is_any_active() &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
@@ -630,8 +639,11 @@ WriteInterceptor(const void* packets,
                 }
             });
 
-            // Counter collection is migrated off the per-queue callback registry: call its hook
-            // explicitly (the other services still flow through signal_callback above).
+            // Services migrated off the per-queue callback registry: call their hooks
+            // explicitly, ordered by client id. This order fixes the sequence in which each
+            // service appends to instrumentation_packets, which the registry previously left to
+            // registration order. Services still on the registry flow through signal_callback
+            // above.
             counters::write_hook(queue,
                                  kernel_packet,
                                  kernel_id,
@@ -641,6 +653,16 @@ WriteInterceptor(const void* packets,
                                  corr_id,
                                  _packet_data.instrumentation_packets,
                                  _packet_data.is_serialized);
+
+            thread_trace::write_hook(queue,
+                                     kernel_packet,
+                                     kernel_id,
+                                     dispatch_id,
+                                     &_packet_data.user_data,
+                                     _packet_data.tracing_data.external_correlation_ids,
+                                     corr_id,
+                                     _packet_data.instrumentation_packets,
+                                     _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -776,8 +798,8 @@ WriteInterceptor(const void* packets,
         }
     });
 
-    // Counter collection requires per-packet mode; it no longer participates in the registry.
-    if(counters::is_any_active()) should_batch_packets = false;
+    // The migrated services require per-packet mode; they no longer participate in the registry.
+    if(counters::is_any_active() || thread_trace::is_any_active()) should_batch_packets = false;
 
     if(should_batch_packets)
     {
