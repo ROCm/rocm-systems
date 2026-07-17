@@ -103,8 +103,8 @@ env:
   DEFAULT_SALLOC_RESERVATION: rccl_dev
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
-  # Exclude known-broken GPU nodes: g24/g25
-  DEFAULT_SALLOC_EXCLUDE: 'mia1-p01-g[24-25]'
+  # No nodes excluded by default; override via the salloc_exclude input if needed.
+  DEFAULT_SALLOC_EXCLUDE: ''
   # PR subset for the label-gated path: Group A component gtests + selected B
   # suites (IB baseline, CAST full alltoall, autodetect on/off, ROCM-IB no
   # offload, CTS force-override, and the full-range guard). Skips B3-B7 and C1.
