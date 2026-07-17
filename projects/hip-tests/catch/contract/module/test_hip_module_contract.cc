@@ -36,6 +36,14 @@ constexpr char const kModuleSource[] =
 // familiar `if (!Compile...())` shape; the false branch is unreachable because
 // any real failure aborts first.
 bool CompileModuleSource(std::vector<char>& code) {
+  // Ensure a device context exists before the module is loaded below. On the
+  // NVIDIA backend hipModuleLoadData maps to the driver-API cuModuleLoadData,
+  // which requires a bound primary context; a test that loads a module before
+  // any allocation would otherwise fail with "invalid device context". hipFree(0)
+  // is the canonical no-op that forces primary-context initialization, and is a
+  // harmless success on AMD where the runtime already auto-initializes.
+  HIP_CHECK(hipFree(0));
+
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_contract.cu", 0, nullptr,
                                    nullptr));
