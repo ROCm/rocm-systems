@@ -123,6 +123,8 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
 HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Priority) {
   constexpr int N = 1024;
 
+  HIP_CHECK(hipSetDevice(0))
+
   int *A_d, *B_d, *C_d;
   HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
   HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
