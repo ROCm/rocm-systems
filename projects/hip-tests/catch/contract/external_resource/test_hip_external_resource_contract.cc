@@ -78,6 +78,13 @@ HIP_TEST_CASE(Contract_ExternalResource_DestroySemaphore_NullHandle_IsRejected) 
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
+  // The null-handle rejection contract is only exercised on AMD. On NVIDIA
+  // hipSignalExternalSemaphoresAsync maps to cudaSignalExternalSemaphoresAsync,
+  // which does not validate the semaphore handle and dereferences it - a null
+  // handle faults (SIGSEGV) instead of returning a defined error - so the
+  // rejection contract cannot be evaluated safely there. (The matching wait API
+  // does validate its handle, so WaitSemaphore_NullHandle stays cross-backend.)
+#ifdef __HIP_PLATFORM_AMD__
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -88,6 +95,10 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
   hipExternalSemaphore_t semaphores[1] = {nullptr};
   hipExternalSemaphoreSignalParams params[1] = {};
   RequireRejected(hipSignalExternalSemaphoresAsync(semaphores, params, 1, stream));
+#else
+  HIP_SKIP_TEST("hipSignalExternalSemaphoresAsync does not validate the semaphore handle on the "
+                "NVIDIA backend; the null-handle rejection contract cannot be exercised safely.");
+#endif  // __HIP_PLATFORM_AMD__
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
