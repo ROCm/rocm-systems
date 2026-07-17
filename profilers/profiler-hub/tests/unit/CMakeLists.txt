@@ -11,6 +11,7 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     symbol_seal_test.cpp
     writer_test.cpp
+    reader_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
