@@ -87,6 +87,25 @@ struct mock_worker_factory_t
     }
 };
 
+struct mock_scoped_guard_t
+{};
+
+struct gmock_thread_state_policy_t
+{
+    MOCK_METHOD(mock_scoped_guard_t, scoped, (rocprofsys::state::thread::State));
+};
+
+std::unique_ptr<::testing::StrictMock<gmock_thread_state_policy_t>>
+    g_mock_thread_state_policy;
+
+struct mock_thread_state_policy_t
+{
+    static mock_scoped_guard_t scoped(rocprofsys::state::thread::State state_to_set)
+    {
+        return g_mock_thread_state_policy->scoped(state_to_set);
+    }
+};
+
 }  // namespace
 
 class buffer_storage_test : public ::testing::Test
@@ -102,6 +121,7 @@ protected:
     {
         std::remove(test_file_path.c_str());
         g_mock_worker.reset();
+        g_mock_thread_state_policy.reset();
     }
 
     std::string             test_file_path;
@@ -199,6 +219,30 @@ TEST_F(buffer_storage_test, store_event_samples)
     EXPECT_NO_THROW(storage.store(sample));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_NO_THROW(storage.shutdown());
+}
+
+TEST_F(buffer_storage_test, store_sets_thread_state_to_internal)
+{
+    g_mock_thread_state_policy =
+        std::make_unique<::testing::StrictMock<gmock_thread_state_policy_t>>();
+
+    rocprofsys::trace_cache::buffer_storage<mock_worker_factory_t, test_type_identifier_t,
+                                            mock_thread_state_policy_t>
+        storage(test_file_path);
+    SetUpStartStopOnCall();
+
+    EXPECT_CALL(*g_mock_worker, start).Times(1);
+    EXPECT_CALL(*g_mock_worker, stop).Times(1);
+    EXPECT_CALL(*g_mock_thread_state_policy,
+                scoped(::testing::Eq(rocprofsys::state::thread::Internal)))
+        .Times(1)
+        .WillOnce(::testing::Return(mock_scoped_guard_t{}));
+
+    storage.start();
+    test_sample_1 sample{ 10, "test string" };
+    EXPECT_NO_THROW(storage.store(sample));
+
     EXPECT_NO_THROW(storage.shutdown());
 }
 
