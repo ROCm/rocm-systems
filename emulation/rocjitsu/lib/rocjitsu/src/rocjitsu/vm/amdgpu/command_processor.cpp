@@ -44,6 +44,11 @@ namespace {
 constexpr uint32_t kMaxClusterWorkgroups = kClusterMulticastMaskBits;
 static_assert(kMaxClusterWorkgroups <= kClusterMulticastMaskBits);
 
+constexpr uint32_t kPacketUnsupportedExceptionCode = 20;
+constexpr uint32_t kVendorPacketUnsupportedExceptionCode = 23;
+constexpr uint64_t kLegacyPacketUnsupportedMask = 32;
+constexpr uint64_t kLegacyVendorPacketUnsupportedMask = 256;
+
 struct PlannedWorkgroup {
   uint32_t local_wg_id = 0;
   uint32_t global_wg_id = 0;
@@ -481,6 +486,79 @@ void CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size
   auto *p = static_cast<const uint8_t *>(src);
   for (size_t i = 0; i < size; ++i)
     memory_->write8(va + i, p[i], vmid);
+}
+
+void CommandProcessor::signal_kfd_event(uint32_t process_id, uint64_t signal_value_va,
+                                        uint32_t event_id, uint64_t value) {
+  if (!memory_ || signal_value_va == 0)
+    return;
+
+  // amd_signal_t::value is at offset 8. The mailbox pointer and event ID follow
+  // it at relative offsets 8 and 16, respectively. Publish the payload before
+  // waking the event so ROCr's async handler observes the new value.
+  auto store_release = [&](uint64_t va, uint64_t payload) {
+    if (auto *page = memory_->resolve_host_ptr(va, process_id);
+        page && (va & (alignof(uint64_t) - 1)) == 0 && (va & 0xFFF) + sizeof(uint64_t) <= 0x1000) {
+      auto *ptr = reinterpret_cast<uint64_t *>(page + (va & 0xFFF));
+      std::atomic_ref<uint64_t>(*ptr).store(payload, std::memory_order_release);
+    } else {
+      // Daemon mode may only be able to reach client memory through
+      // process_vm_writev, which GpuMemory::write64 handles for us.
+      memory_->write64(va, payload, process_id);
+    }
+  };
+  store_release(signal_value_va, value);
+
+  if (event_id == 0)
+    event_id = read_gpu_u32(signal_value_va + 16, process_id);
+
+  const uint64_t mailbox_va = read_gpu_u64(signal_value_va + 8, process_id);
+  if (mailbox_va != 0)
+    store_release(mailbox_va, event_id);
+
+  if (interrupt_cb_ && event_id != 0)
+    interrupt_cb_(process_id, event_id);
+}
+
+void CommandProcessor::report_queue_error(HwQueue &queue, uint32_t exception_code,
+                                          uint64_t legacy_error_mask) {
+  if (queue.faulted)
+    return;
+  queue.faulted = true;
+
+  // Newer KFD interfaces expose the per-queue exception signal through the
+  // CWSR header. Exception codes use the hardware bit numbering consumed by
+  // ROCr's AqlQueue::ExceptionHandler.
+  if (queue.error_reason_va != 0) {
+    if (exception_code == 0 || exception_code > 64) {
+      util::Logger::warn("Unable to report invalid queue exception code: ", exception_code);
+      return;
+    }
+    const uint64_t exception_mask = uint64_t{1} << (exception_code - 1);
+    const uint64_t signal_value = queue.uses_legacy_error_mask ? legacy_error_mask : exception_mask;
+    if (queue.remote_error_metadata && remote_queue_error_cb_ &&
+        remote_queue_error_cb_(queue.process_id, queue.error_reason_va, queue.error_mailbox_va,
+                               queue.error_event_id, signal_value))
+      return;
+    signal_kfd_event(queue.process_id, queue.error_reason_va, queue.error_event_id, signal_value);
+    return;
+  }
+
+  // Older runtimes multiplex queue errors onto queue_inactive_signal. Preserve
+  // that path for configurations without a CWSR exception signal.
+  if (queue.queue_desc_va != 0) {
+    constexpr uint64_t kQueueInactiveSignalOffset = offsetof(amd_queue_t, queue_inactive_signal);
+    const uint64_t signal_base =
+        read_gpu_u64(queue.queue_desc_va + kQueueInactiveSignalOffset, queue.process_id);
+    if (signal_base != 0) {
+      constexpr uint64_t kSignalValueOffset = 8;
+      signal_kfd_event(queue.process_id, signal_base + kSignalValueOffset, 0, legacy_error_mask);
+      return;
+    }
+  }
+
+  util::Logger::warn("Unable to report queue error: pid=", queue.process_id,
+                     " qid=", queue.queue_id, " exception=", exception_code);
 }
 
 /// @brief Scan all HW queues for doorbell changes; return true if any changed.
@@ -1124,6 +1202,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
   if (!memory_)
     return;
+  if (queue.faulted)
+    return;
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
     return;
 
@@ -1365,9 +1445,21 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
 
         qs.entries.push_back(std::move(dp));
       } else {
-        throw std::runtime_error("Unsupported AMD vendor-specific AQL packet format: " +
-                                 std::to_string(ext.amd_format));
+        // EC_QUEUE_PACKET_VENDOR_UNSUPPORTED. Leave the packet unconsumed and
+        // let ROCr translate the exception into
+        // HSA_STATUS_ERROR_INVALID_PACKET_FORMAT for the queue callback.
+        report_queue_error(queue, kVendorPacketUnsupportedExceptionCode,
+                           kLegacyVendorPacketUnsupportedMask);
+        process_limit = read_idx;
+        break;
       }
+    } else {
+      // EC_QUEUE_PACKET_UNSUPPORTED. This covers agent-dispatch and reserved
+      // packet types that rocJITsu cannot execute; consuming them as no-ops
+      // would falsely report forward progress.
+      report_queue_error(queue, kPacketUnsupportedExceptionCode, kLegacyPacketUnsupportedMask);
+      process_limit = read_idx;
+      break;
     }
 
     ++read_idx;

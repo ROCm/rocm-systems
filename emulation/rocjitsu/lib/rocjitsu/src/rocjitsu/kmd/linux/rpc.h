@@ -49,7 +49,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 3;
+inline constexpr uint32_t kRpcProtocolVersion = 4;
 
 /// @brief Fixed-size GPU metadata sent during daemon handshake.
 using RpcGpuInfo = ::rj_vm_gpu_info_t;
@@ -70,6 +70,29 @@ struct RpcIoctlRequest {
   uint32_t ioctl_cmd;  ///< AMDKFD_IOC_* ioctl number.
   uint32_t args_bytes; ///< Size in bytes of the ioctl args (and any inlined arrays) that follow.
 };
+
+/// @brief Client-side queue-error metadata inlined after CREATE_QUEUE args.
+/// @details The CWSR header and legacy queue signal are private ROCr memory, so
+/// the client resolves them while serializing the ioctl. The daemon retains
+/// only the addresses and event metadata needed when a packet later faults.
+struct RpcQueueErrorState {
+  uint64_t signal_value_address;  ///< amd_signal_t::value address.
+  uint64_t event_mailbox_address; ///< Optional amd_signal_t event mailbox.
+  uint32_t event_id;              ///< KFD signal event to wake.
+  uint32_t flags;                 ///< RpcQueueErrorFlags bitmask.
+};
+
+enum RpcQueueErrorFlags : uint32_t {
+  RPC_QUEUE_ERROR_USES_LEGACY_MASK = 1u << 0,
+};
+
+/// @brief Signal stores appended after the echoed ioctl arguments in a response.
+/// @details The start offset is RpcIoctlRequest::args_bytes, so no count header
+/// is needed; all remaining response bytes are an array of these records. Stores
+/// remain pending until the process issues another ioctl and receives its response.
+/// Any variable-length ioctl output must reserve the same inline space in its
+/// request; otherwise response-only bytes would be interpreted as signal writes.
+using RpcSignalWrite = ::rj_vm_signal_write_t;
 
 /// @brief mmap request payload (when opcode == RPC_MMAP).
 struct RpcMmapRequest {
@@ -95,6 +118,8 @@ static_assert(sizeof(RpcHeader) == 16);
 static_assert(sizeof(RpcGpuInfo) == 312);
 static_assert(sizeof(RpcHandshakeResponse) == 328);
 static_assert(sizeof(RpcIoctlRequest) == 8);
+static_assert(sizeof(RpcQueueErrorState) == 24);
+static_assert(sizeof(RpcSignalWrite) == 16);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
 static_assert(sizeof(RpcMunmapRequest) == 16);

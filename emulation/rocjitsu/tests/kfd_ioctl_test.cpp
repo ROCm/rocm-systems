@@ -13,6 +13,12 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "simdojo/sim/simulation.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
+
 #include <gtest/gtest.h>
 
 #include <cerrno>
@@ -600,6 +606,117 @@ TEST_F(KfdIoctlTest, DbgTrapEnableUndersizedRuntimeInfoTruncates) {
   EXPECT_EQ(en.enable.rinfo_size, sizeof(kfd_runtime_info)); // full size reported
   for (size_t i = kSmall; i < buf.size(); ++i)
     EXPECT_EQ(buf[i], kSentinel) << "runtime-info copy overran the undersized buffer at byte " << i;
+}
+
+TEST(RemoteDriverQueueErrorTest, MarshalsCwsrStateAndAppliesReturnedSignalWrites) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  alignas(8) std::array<uint8_t, 40> cwsr_header{};
+  alignas(8) std::array<uint64_t, 4> signal{};
+  alignas(8) uint64_t mailbox = 0;
+  constexpr uint32_t kEventId = 37;
+  constexpr uint64_t kExceptionMask = uint64_t{1} << (23 - 1);
+  const uint64_t signal_value_address = reinterpret_cast<uint64_t>(&signal[1]);
+  const uint64_t mailbox_address = reinterpret_cast<uint64_t>(&mailbox);
+  std::memcpy(cwsr_header.data() + 24, &signal_value_address, sizeof(signal_value_address));
+  std::memcpy(cwsr_header.data() + 32, &kEventId, sizeof(kEventId));
+  signal[2] = mailbox_address;
+
+  std::atomic<bool> metadata_ok{false};
+  std::jthread server([&, server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    if (!rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)))
+      return;
+    std::vector<uint8_t> request(hdr.payload_bytes);
+    if (!rocjitsu::rpc_recv_exact(server_fd, request.data(), request.size()))
+      return;
+
+    auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(request.data());
+    const size_t arg_size = sizeof(kfd_ioctl_create_queue_args);
+    rocjitsu::RpcQueueErrorState state{};
+    if (ireq->ioctl_cmd == AMDKFD_IOC_CREATE_QUEUE &&
+        ireq->args_bytes == arg_size + sizeof(state)) {
+      std::memcpy(&state, request.data() + sizeof(*ireq) + arg_size, sizeof(state));
+      metadata_ok.store(state.signal_value_address == signal_value_address &&
+                            state.event_mailbox_address == mailbox_address &&
+                            state.event_id == kEventId && state.flags == 0,
+                        std::memory_order_release);
+    }
+
+    const std::array<rocjitsu::RpcSignalWrite, 2> writes{{
+        {signal_value_address, kExceptionMask},
+        {mailbox_address, kEventId},
+    }};
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.payload_bytes = ireq->args_bytes + static_cast<uint32_t>(sizeof(writes));
+    rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response));
+    rocjitsu::rpc_send_exact(server_fd, request.data() + sizeof(*ireq), ireq->args_bytes);
+    rocjitsu::rpc_send_exact(server_fd, writes.data(), sizeof(writes));
+    ::close(server_fd);
+  });
+
+  amd_queue_t queue{};
+  kfd_ioctl_create_queue_args args{};
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&queue.write_dispatch_id);
+  args.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr_header.data());
+  const uint64_t original_cwsr_address = args.ctx_save_restore_address;
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_EQ(driver.ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+  EXPECT_TRUE(metadata_ok.load(std::memory_order_acquire));
+  EXPECT_EQ(args.ctx_save_restore_address, original_cwsr_address);
+  EXPECT_EQ(signal[1], kExceptionMask);
+  EXPECT_EQ(mailbox, kEventId);
+}
+
+TEST(RemoteDriverQueueErrorTest, LeavesNonAqlComputeQueueMetadataEmpty) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  alignas(8) std::array<uint64_t, 4> signal{};
+  amd_queue_t fake_aql_layout{};
+  fake_aql_layout.queue_inactive_signal.handle = reinterpret_cast<uint64_t>(signal.data());
+  std::atomic<bool> metadata_empty{false};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    if (!rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)))
+      return;
+    std::vector<uint8_t> request(hdr.payload_bytes);
+    if (!rocjitsu::rpc_recv_exact(server_fd, request.data(), request.size()))
+      return;
+
+    auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(request.data());
+    rocjitsu::RpcQueueErrorState state{};
+    const size_t arg_size = sizeof(kfd_ioctl_create_queue_args);
+    if (ireq->ioctl_cmd == AMDKFD_IOC_CREATE_QUEUE &&
+        ireq->args_bytes == arg_size + sizeof(state)) {
+      std::memcpy(&state, request.data() + sizeof(*ireq) + arg_size, sizeof(state));
+      metadata_empty.store(state.signal_value_address == 0 && state.event_mailbox_address == 0 &&
+                               state.event_id == 0 && state.flags == 0,
+                           std::memory_order_release);
+    }
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.payload_bytes = ireq->args_bytes;
+    rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response));
+    rocjitsu::rpc_send_exact(server_fd, request.data() + sizeof(*ireq), ireq->args_bytes);
+    ::close(server_fd);
+  });
+
+  kfd_ioctl_create_queue_args args{};
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&fake_aql_layout.write_dispatch_id);
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_EQ(driver.ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+  EXPECT_TRUE(metadata_empty.load(std::memory_order_acquire));
 }
 
 // Exercises the RemoteDriver client stub against an in-process server that runs

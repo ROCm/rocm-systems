@@ -7,7 +7,15 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/log.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
+
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -35,6 +43,7 @@ namespace {
 
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
+  case AMDKFD_IOC_CREATE_QUEUE:
   case AMDKFD_IOC_WAIT_EVENTS:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
@@ -48,6 +57,50 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   default:
     return false;
   }
+}
+
+template <typename T> T read_client_value(uint64_t address) {
+  T value{};
+  std::memcpy(&value, reinterpret_cast<const void *>(address), sizeof(value));
+  return value;
+}
+
+RpcQueueErrorState queue_error_state(const kfd_ioctl_create_queue_args &args) {
+  RpcQueueErrorState state{};
+  if (args.queue_type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
+    return state;
+
+  // HsaUserContextSaveAreaHeader fields used by ROCr's queue exception path.
+  constexpr uint64_t kErrorReasonOffset = 24;
+  constexpr uint64_t kErrorEventIdOffset = 32;
+  if (args.ctx_save_restore_address != 0) {
+    state.signal_value_address =
+        read_client_value<uint64_t>(args.ctx_save_restore_address + kErrorReasonOffset);
+    state.event_id =
+        read_client_value<uint32_t>(args.ctx_save_restore_address + kErrorEventIdOffset);
+  }
+
+  // Older runtimes use amd_queue_t::queue_inactive_signal instead.
+  if (state.signal_value_address == 0 && args.write_pointer_address != 0) {
+    const uint64_t queue_address =
+        args.write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    const uint64_t signal_address =
+        read_client_value<uint64_t>(queue_address + offsetof(amd_queue_t, queue_inactive_signal));
+    if (signal_address != 0) {
+      constexpr uint64_t kSignalValueOffset = 8;
+      state.signal_value_address = signal_address + kSignalValueOffset;
+      state.flags |= RPC_QUEUE_ERROR_USES_LEGACY_MASK;
+    }
+  }
+
+  if (state.signal_value_address != 0) {
+    // amd_signal_t fields relative to value: event_mailbox at +8, event_id at
+    // +16. A nonzero CWSR event ID takes precedence over the signal fallback.
+    state.event_mailbox_address = read_client_value<uint64_t>(state.signal_value_address + 8);
+    if (state.event_id == 0)
+      state.event_id = read_client_value<uint32_t>(state.signal_value_address + 16);
+  }
+  return state;
 }
 
 /// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
@@ -378,8 +431,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint32_t saved_dbg_rinfo_size = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
   size_t saved_dbg_snapshot_cap = 0;
+  uint64_t saved_ctx_save_restore_address = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
+    case AMDKFD_IOC_CREATE_QUEUE:
+      saved_ctx_save_restore_address =
+          static_cast<kfd_ioctl_create_queue_args *>(arg)->ctx_save_restore_address;
+      break;
     case AMDKFD_IOC_WAIT_EVENTS:
       saved_events_ptr = static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr;
       break;
@@ -422,6 +480,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (has_embedded_pointers(request)) {
     auto *args_base = buf.data() + prefix;
     switch (request) {
+    case AMDKFD_IOC_CREATE_QUEUE: {
+      const auto state = queue_error_state(*static_cast<kfd_ioctl_create_queue_args *>(arg));
+      const size_t inline_offset = buf.size();
+      buf.resize(inline_offset + sizeof(state));
+      std::memcpy(buf.data() + inline_offset, &state, sizeof(state));
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS: {
       auto *wait_args = reinterpret_cast<kfd_ioctl_wait_events_args *>(args_base);
       size_t inline_size = wait_args->num_events * sizeof(kfd_event_data);
@@ -479,6 +544,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   auto *ireq = reinterpret_cast<RpcIoctlRequest *>(buf.data() + sizeof(RpcHeader));
   ireq->ioctl_cmd = static_cast<uint32_t>(request);
   ireq->args_bytes = static_cast<uint32_t>(buf.size() - prefix);
+  const size_t wire_args_size = ireq->args_bytes;
 
   // For DBG_TRAP ENABLE, hand the debugger's notifier pipe write-end to the
   // daemon as an SCM_RIGHTS fd. The daemon substitutes it into the ioctl's
@@ -527,6 +593,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // daemon's response (daemon rewrites them to point at its own buffer).
     if (has_embedded_pointers(request)) {
       switch (request) {
+      case AMDKFD_IOC_CREATE_QUEUE:
+        static_cast<kfd_ioctl_create_queue_args *>(arg)->ctx_save_restore_address =
+            saved_ctx_save_restore_address;
+        break;
       case AMDKFD_IOC_WAIT_EVENTS:
         static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr = saved_events_ptr;
         break;
@@ -556,6 +626,28 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       default:
         break;
       }
+    }
+
+    // Queue exception signal values and mailboxes are private client memory.
+    // The daemon appends release-ordered stores after the echoed ioctl bytes so
+    // they are visible before this call reports the corresponding event ready.
+    if (payload.size() < wire_args_size)
+      return -EPROTO;
+    const size_t writes_bytes = payload.size() - wire_args_size;
+    if (writes_bytes % sizeof(RpcSignalWrite) != 0)
+      return -EPROTO;
+    for (size_t offset = 0; offset < writes_bytes; offset += sizeof(RpcSignalWrite)) {
+      RpcSignalWrite write{};
+      std::memcpy(&write, payload.data() + wire_args_size + offset, sizeof(write));
+      if (write.address == 0)
+        continue;
+      if ((write.address & (alignof(uint64_t) - 1)) != 0) {
+        util::Logger::warn("Ignoring misaligned RPC signal write address: 0x", std::hex,
+                           write.address);
+        continue;
+      }
+      auto *target = reinterpret_cast<uint64_t *>(write.address);
+      std::atomic_ref<uint64_t>(*target).store(write.value, std::memory_order_release);
     }
 
     if (has_embedded_pointers(request) && resp->payload_bytes > arg_size) {

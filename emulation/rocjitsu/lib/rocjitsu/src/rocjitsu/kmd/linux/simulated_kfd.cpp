@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -253,6 +254,28 @@ void SimulatedKfd::init_command_processors_locked() {
                            " found=false");
         }
       });
+      if (daemon_mode_) {
+        cp->set_remote_queue_error_callback([this](uint32_t process_id, uint64_t signal_value_va,
+                                                   uint64_t mailbox_va, uint32_t event_id,
+                                                   uint64_t value) {
+          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+          auto event = event_dispatch_.find(process_id);
+          if (event == event_dispatch_.end()) {
+            util::Logger::warn("Dropping remote queue error for closed process: pid=", process_id,
+                               " event_id=", event_id);
+            return true;
+          }
+
+          auto &writes = pending_signal_writes_[process_id];
+          writes.push_back({signal_value_va, value});
+          if (mailbox_va != 0)
+            writes.push_back({mailbox_va, event_id});
+
+          if (event_id != 0)
+            event->second->signal_interrupt(event_id);
+          return true;
+        });
+      }
       cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
         std::lock_guard<std::mutex> plk(process_mutex_);
         for (auto &[fd, proc] : processes_) {
@@ -472,6 +495,7 @@ int SimulatedKfd::close(uint32_t process_id) {
   {
     std::lock_guard<std::mutex> ilk(interrupt_mutex_);
     event_dispatch_.erase(process_id);
+    pending_signal_writes_.erase(process_id);
   }
 
   for (auto &g : gpus_) {
@@ -1418,12 +1442,35 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     hw.doorbell_base = gs.doorbell_page;
     hw.last_doorbell = ~uint64_t(0);
     hw.host_accessible = true;
-    hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
-                  args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
-                  args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    hw.is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
+                 args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+                 args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
+    const bool is_aql = args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!hw.is_sdma)
+    if (is_aql)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    if (is_aql && daemon_mode_ && args->ctx_save_restore_address != 0) {
+      const auto *state =
+          reinterpret_cast<const RpcQueueErrorState *>(args->ctx_save_restore_address);
+      hw.error_reason_va = state->signal_value_address;
+      hw.error_mailbox_va = state->event_mailbox_address;
+      hw.error_event_id = state->event_id;
+      hw.remote_error_metadata = true;
+      hw.uses_legacy_error_mask = (state->flags & RPC_QUEUE_ERROR_USES_LEGACY_MASK) != 0;
+    } else if (is_aql && args->ctx_save_restore_address != 0) {
+      // HsaUserContextSaveAreaHeader stores the exception signal value pointer
+      // and its shared KFD event ID at ABI offsets 24 and 32. CP firmware writes
+      // the exception bitmask through these fields for ROCr's async queue-error
+      // handler.
+      constexpr uint64_t kErrorReasonOffset = 24;
+      constexpr uint64_t kErrorEventIdOffset = 32;
+      if (auto *memory = gpu->soc->memory()) {
+        hw.error_reason_va =
+            memory->read64(args->ctx_save_restore_address + kErrorReasonOffset, proc.process_id());
+        hw.error_event_id =
+            memory->read32(args->ctx_save_restore_address + kErrorEventIdOffset, proc.process_id());
+      }
+    }
     if (hw.is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
       auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
@@ -1448,6 +1495,28 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // Register with the CP OUTSIDE alloc_mutex_ (see note above).
   target_cp->register_queue(std::move(hw));
   return 0;
+}
+
+std::vector<SimulatedKfd::SignalWrite> SimulatedKfd::take_signal_writes(uint32_t process_id,
+                                                                        size_t capacity) {
+  std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+  auto it = pending_signal_writes_.find(process_id);
+  if (it == pending_signal_writes_.end() || capacity == 0)
+    return {};
+
+  auto &pending = it->second;
+  const size_t count = std::min(capacity, pending.size());
+  std::vector<SignalWrite> result(pending.begin(), pending.begin() + count);
+  pending.erase(pending.begin(), pending.begin() + count);
+  if (pending.empty())
+    pending_signal_writes_.erase(it);
+  return result;
+}
+
+size_t SimulatedKfd::signal_write_count(uint32_t process_id) const {
+  std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+  auto it = pending_signal_writes_.find(process_id);
+  return it == pending_signal_writes_.end() ? 0 : it->second.size();
 }
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {

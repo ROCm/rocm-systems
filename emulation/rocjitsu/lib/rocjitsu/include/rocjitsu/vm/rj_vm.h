@@ -35,6 +35,16 @@ typedef int rj_handle_t;
 /// platform width of a process ID.
 typedef int32_t rj_client_pid_t;
 
+/// @brief One daemon-to-client store into client-owned signal memory.
+/// @details Queue exception signals live in ROCr's private address space and
+/// cannot be written by a sibling daemon under normal ptrace restrictions.
+/// The daemon returns these stores with an ioctl response for the client stub
+/// to publish before it reports the corresponding KFD event.
+typedef struct rj_vm_signal_write_t {
+  uint64_t address; ///< Client virtual address of the 64-bit signal field.
+  uint64_t value;   ///< Value to publish with release ordering.
+} rj_vm_signal_write_t;
+
 /// @brief VM creation mode.
 typedef enum rj_vm_mode_t {
   /// @brief Standalone simulation. Engine runs with configured tick limit.
@@ -236,6 +246,18 @@ RJ_API_EXPORT rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd);
 /// @param[in] process_id The target process ID.
 /// @param[in,out] cmd Command descriptor.
 RJ_API_EXPORT rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd);
+
+/// @brief Drain pending daemon-to-client signal stores for a process.
+/// @param[in] vm VM handle.
+/// @param[in] process_id The target process ID.
+/// @param[out] writes Caller-owned output array.
+/// @param[in] capacity Number of entries available in @p writes. Pass zero
+///   with @p writes set to NULL to query the pending count without draining it.
+/// @param[out] count Number of entries written. Any excess remains pending for
+///   the next call.
+RJ_API_EXPORT rj_status_t rj_vm_take_signal_writes_as(rj_vm_t *vm, uint32_t process_id,
+                                                      rj_vm_signal_write_t *writes, size_t capacity,
+                                                      size_t *count);
 
 /// @brief Open the VM's simulated device and create (or reuse) a KFD process.
 /// @param[in] vm VM handle.

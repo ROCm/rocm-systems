@@ -21,6 +21,7 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -875,22 +876,145 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
   }
 }
 
-TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
-  constexpr std::array<uint8_t, 2> unsupported_formats{0, 200};
+TEST_P(IsaTest, VendorSpecificReportsUnsupportedFormatsWithoutConsumption) {
+  constexpr std::array<uint8_t, 3> unsupported_formats{0, 200, 255};
 
   for (const auto amd_format : unsupported_formats) {
     SCOPED_TRACE(static_cast<unsigned>(amd_format));
     VmFixture f(arch(), 1, 8);
 
+    constexpr uint64_t kErrorReason = 0x7000;
+    constexpr uint64_t kCompletionSignal = 0x7100;
+    constexpr uint64_t kSignalValueOffset = 8;
+    constexpr uint32_t kErrorEventId = 17;
+    constexpr uint64_t kVendorUnsupported = uint64_t{1} << (23 - 1);
+    f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+
+    uint32_t interrupted_process = 0;
+    uint32_t interrupted_event = 0;
+    uint32_t interrupt_count = 0;
+    f.cp()->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+      interrupted_process = process_id;
+      interrupted_event = event_id;
+      ++interrupt_count;
+    });
+
     amdgpu::AmdExtKernelDispatchPacket packet{};
     packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
     packet.amd_format = amd_format;
+    packet.completion_signal.handle = kCompletionSignal;
 
-    test::AqlQueue queue(f.mem(), f.cp());
+    test::AqlQueue queue(
+        f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+        test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+        test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*process_id=*/9, kErrorReason, kErrorEventId);
     queue.submit(packet);
 
-    EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+    EXPECT_NO_THROW((void)f.engine->step());
     EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+    EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 1u);
+    EXPECT_EQ(f.mem()->read64(kErrorReason), kVendorUnsupported);
+    EXPECT_EQ(interrupted_process, 9u);
+    EXPECT_EQ(interrupted_event, kErrorEventId);
+    EXPECT_EQ(interrupt_count, 1u);
+
+    f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
+    EXPECT_NO_THROW((void)f.engine->step());
+    EXPECT_EQ(interrupt_count, 1u);
+  }
+}
+
+TEST_P(IsaTest, UnsupportedStandardPacketReportsQueueErrorWithoutConsumption) {
+  VmFixture f(arch(), 1, 8);
+
+  constexpr uint64_t kErrorReason = 0x7000;
+  constexpr uint64_t kCompletionSignal = 0x7100;
+  constexpr uint64_t kSignalValueOffset = 8;
+  constexpr uint32_t kErrorEventId = 23;
+  constexpr uint64_t kPacketUnsupported = uint64_t{1} << (20 - 1);
+  f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+  uint32_t interrupted_event = 0;
+  uint32_t interrupt_count = 0;
+  f.cp()->set_interrupt_callback([&](uint32_t, uint32_t event_id) {
+    interrupted_event = event_id;
+    ++interrupt_count;
+  });
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
+  packet.completion_signal.handle = kCompletionSignal;
+
+  test::AqlQueue queue(
+      f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+      test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+      test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*process_id=*/11, kErrorReason, kErrorEventId);
+  queue.submit(packet);
+
+  EXPECT_NO_THROW((void)f.engine->step());
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 1u);
+  EXPECT_EQ(f.mem()->read64(kErrorReason), kPacketUnsupported);
+  EXPECT_EQ(interrupted_event, kErrorEventId);
+  EXPECT_EQ(interrupt_count, 1u);
+
+  f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
+  EXPECT_NO_THROW((void)f.engine->step());
+  EXPECT_EQ(interrupt_count, 1u);
+}
+
+TEST_P(IsaTest, UnsupportedPacketsUseLegacyQueueInactiveSignalMasks) {
+  constexpr uint64_t kQueueDesc = 0x7000;
+  constexpr uint64_t kSignal = 0x7200;
+  constexpr uint64_t kMailbox = 0x7400;
+  constexpr uint64_t kSignalValueOffset = 8;
+  constexpr uint32_t kErrorEventId = 29;
+  struct LegacyPacketCase {
+    uint16_t packet_type;
+    uint8_t amd_format;
+    uint64_t expected_mask;
+  };
+  constexpr std::array cases{
+      LegacyPacketCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, 255, 256},
+      LegacyPacketCase{HSA_PACKET_TYPE_AGENT_DISPATCH, 0, 32},
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.packet_type);
+    VmFixture f(arch(), 1, 8);
+
+    f.mem()->write64(kQueueDesc + offsetof(amd_queue_t, queue_inactive_signal), kSignal);
+    f.mem()->write64(kSignal + kSignalValueOffset, 1);
+    f.mem()->write64(kSignal + kSignalValueOffset + 8, kMailbox);
+    f.mem()->write32(kSignal + kSignalValueOffset + 16, kErrorEventId);
+
+    uint32_t interrupted_event = 0;
+    uint32_t interrupt_count = 0;
+    f.cp()->set_interrupt_callback([&](uint32_t, uint32_t event_id) {
+      interrupted_event = event_id;
+      ++interrupt_count;
+    });
+
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = test_case.packet_type;
+    packet.setup = test_case.amd_format;
+
+    test::AqlQueue queue(
+        f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+        test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+        test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*process_id=*/13, /*error_reason_va=*/0,
+        /*error_event_id=*/0, kQueueDesc);
+    queue.submit(packet);
+
+    EXPECT_NO_THROW((void)f.engine->step());
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+    EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), test_case.expected_mask);
+    EXPECT_EQ(f.mem()->read64(kMailbox), kErrorEventId);
+    EXPECT_EQ(interrupted_event, kErrorEventId);
+    EXPECT_EQ(interrupt_count, 1u);
+
+    f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
+    EXPECT_NO_THROW((void)f.engine->step());
+    EXPECT_EQ(interrupt_count, 1u);
   }
 }
 

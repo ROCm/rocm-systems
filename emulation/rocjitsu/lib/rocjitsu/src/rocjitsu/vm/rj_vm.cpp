@@ -102,6 +102,11 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     return;
   auto *extra = static_cast<uint8_t *>(arg) + arg_size;
   switch (cmd) {
+  case AMDKFD_IOC_CREATE_QUEUE: {
+    auto *args = static_cast<kfd_ioctl_create_queue_args *>(arg);
+    args->ctx_save_restore_address = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
     args->events_ptr = reinterpret_cast<uint64_t>(extra);
@@ -303,6 +308,24 @@ rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd)
   if (!vm || !cmd || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   return execute_impl(vm->vm->driver(), process_id, cmd);
+}
+
+rj_status_t rj_vm_take_signal_writes_as(rj_vm_t *vm, uint32_t process_id,
+                                        rj_vm_signal_write_t *writes, size_t capacity,
+                                        size_t *count) {
+  if (!vm || !count || (capacity != 0 && !writes) || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (capacity == 0) {
+    *count = vm->vm->driver()->signal_write_count(process_id);
+    return ROCJITSU_STATUS_SUCCESS;
+  }
+  auto pending = vm->vm->driver()->take_signal_writes(process_id, capacity);
+  for (size_t i = 0; i < pending.size(); ++i) {
+    writes[i].address = pending[i].address;
+    writes[i].value = pending[i].value;
+  }
+  *count = pending.size();
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t *process_id) {

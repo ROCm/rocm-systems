@@ -1074,6 +1074,39 @@ if(HSA_RUNTIME64)
                 "--gtest_filter=HsaTest.${_hsa_test}"
         )
     endforeach()
+
+    add_executable(hsa_invalid_packet_test hsa_invalid_packet_test.cpp)
+    target_include_directories(
+        hsa_invalid_packet_test
+        PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+    )
+    target_link_libraries(hsa_invalid_packet_test PRIVATE ${HSA_RUNTIME64})
+    target_link_options(
+        hsa_invalid_packet_test
+        PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+    )
+    add_dependencies(hsa_invalid_packet_test rocjitsu_bin rocjitsu_shared)
+    rj_configure_target(hsa_invalid_packet_test TEST)
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(hsa_invalid_packet_test)
+    endif()
+    rj_add_test(
+        NAME HsaInvalidPacketTest.LocalModeReportsQueueError
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:hsa_invalid_packet_test>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/hsa_invalid_packet_test"
+    )
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
     # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
@@ -1799,6 +1832,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+                RJ_HSA_INVALID_PACKET_BIN="$<TARGET_FILE:hsa_invalid_packet_test>"
                 RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
                 RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
@@ -1807,6 +1841,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
+                RJ_INSTALLED_HSA_INVALID_PACKET_BIN="hsa_invalid_packet_test"
                 RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
@@ -1815,6 +1850,7 @@ if(RJ_ENABLE_HIP_TESTS)
             rocjitsu_bin
             hip_vector_add_test_target
             hip_memcpy_test_target
+            hsa_invalid_packet_test
             interposer_dup_test
         )
         if(RJ_INSTALL_TESTS)
@@ -1825,6 +1861,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
+            DaemonTest.UnsupportedPacketReportsQueueError
             DaemonTest.TwoIndependentClients
             DaemonTest.InterposerDupReopenAfterPrimaryOverwriteRemote
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote

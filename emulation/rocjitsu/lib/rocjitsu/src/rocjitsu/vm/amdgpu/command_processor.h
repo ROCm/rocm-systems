@@ -70,6 +70,12 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   uint64_t queue_desc_va = 0;
+  uint64_t error_reason_va = 0;
+  uint64_t error_mailbox_va = 0;
+  uint32_t error_event_id = 0;
+  bool remote_error_metadata = false;
+  bool uses_legacy_error_mask = false;
+  bool faulted = false;
 };
 
 enum class SdmaPacketDialect {
@@ -114,6 +120,16 @@ public:
 
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
+
+  /// @brief Publish a queue error that targets client-private signal memory.
+  /// @returns true when the callback queued the signal stores and interrupt,
+  /// allowing the CP to skip direct memory access from daemon mode.
+  using RemoteQueueErrorCallback =
+      std::function<bool(uint32_t process_id, uint64_t signal_value_va, uint64_t mailbox_va,
+                         uint32_t event_id, uint64_t value)>;
+  void set_remote_queue_error_callback(RemoteQueueErrorCallback cb) {
+    remote_queue_error_cb_ = std::move(cb);
+  }
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
   void set_scratch_backing_resolver(ScratchBackingResolver cb) {
@@ -184,6 +200,13 @@ private:
 
   /// @brief Fetch AQL packets from a single HW queue.
   void fetch_from_queue(HwQueue &queue, HwQueueState &qs);
+
+  /// @brief Stop a malformed queue and report its hardware exception to ROCr.
+  void report_queue_error(HwQueue &queue, uint32_t exception_code, uint64_t legacy_error_mask);
+
+  /// @brief Publish a signal value and wake the associated KFD event.
+  void signal_kfd_event(uint32_t process_id, uint64_t signal_value_va, uint32_t event_id,
+                        uint64_t value);
 
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
   void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
@@ -320,6 +343,7 @@ private:
   bool scan_doorbells();
 
   InterruptCallback interrupt_cb_;
+  RemoteQueueErrorCallback remote_queue_error_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   std::unique_ptr<CompletionTracker> completion_;

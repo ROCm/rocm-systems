@@ -213,23 +213,42 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       if (cmd.in_handle >= 0)
         ::close(cmd.in_handle);
 
+      // Queue exception payloads target ROCr-private signal memory. Drain the
+      // daemon's pending stores into this response; RemoteDriver publishes them
+      // before returning the ioctl that reports the event ready.
+      size_t signal_write_count = 0;
+      rj_vm_take_signal_writes_as(vm, process_id, nullptr, 0, &signal_write_count);
+      std::vector<rj_vm_signal_write_t> signal_writes(signal_write_count);
+      if (!signal_writes.empty()) {
+        rj_vm_take_signal_writes_as(vm, process_id, signal_writes.data(), signal_writes.size(),
+                                    &signal_write_count);
+        signal_writes.resize(signal_write_count);
+      }
+
       RpcHeader resp{};
       resp.opcode = RPC_IOCTL;
       resp.request_id = hdr.request_id;
       resp.result = cmd.result;
-      resp.payload_bytes = static_cast<uint32_t>(cmd.buf_size);
+      resp.payload_bytes =
+          static_cast<uint32_t>(cmd.buf_size + signal_writes.size() * sizeof(rj_vm_signal_write_t));
 
       if (cmd.shared_handle >= 0) {
-        std::vector<uint8_t> response_buffer(sizeof(resp) + cmd.buf_size);
+        std::vector<uint8_t> response_buffer(sizeof(resp) + resp.payload_bytes);
         std::memcpy(response_buffer.data(), &resp, sizeof(resp));
         if (cmd.buf_size > 0)
           std::memcpy(response_buffer.data() + sizeof(resp), cmd.buf, cmd.buf_size);
+        if (!signal_writes.empty())
+          std::memcpy(response_buffer.data() + sizeof(resp) + cmd.buf_size, signal_writes.data(),
+                      signal_writes.size() * sizeof(rj_vm_signal_write_t));
         rpc_send_msg(client_fd, response_buffer.data(), response_buffer.size(), &cmd.shared_handle,
                      1);
       } else {
         rpc_send_exact(client_fd, &resp, sizeof(resp));
         if (cmd.buf_size > 0)
           rpc_send_exact(client_fd, cmd.buf, cmd.buf_size);
+        if (!signal_writes.empty())
+          rpc_send_exact(client_fd, signal_writes.data(),
+                         signal_writes.size() * sizeof(rj_vm_signal_write_t));
       }
       break;
     }

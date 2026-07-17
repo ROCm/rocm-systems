@@ -55,6 +55,7 @@ struct TestPaths {
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
+  std::string hsa_invalid_packet_bin = RJ_HSA_INVALID_PACKET_BIN;
   std::string interposer_dup_bin = RJ_INTERPOSER_DUP_BIN;
 };
 
@@ -86,6 +87,7 @@ bool installed_paths_exist(const TestPaths &paths) {
          std::filesystem::exists(paths.preload_lib) &&
          std::filesystem::exists(paths.hip_vector_add_bin) &&
          std::filesystem::exists(paths.hip_memcpy_bin) &&
+         std::filesystem::exists(paths.hsa_invalid_packet_bin) &&
          std::filesystem::exists(paths.interposer_dup_bin);
 }
 
@@ -98,6 +100,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HSA_INVALID_PACKET_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_INTERPOSER_DUP_BIN).string(),
   };
 }
@@ -128,6 +131,8 @@ const char *hip_vector_add_bin() { return test_paths().hip_vector_add_bin.c_str(
 const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
+
+const char *hsa_invalid_packet_bin() { return test_paths().hsa_invalid_packet_bin.c_str(); }
 
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
@@ -295,6 +300,11 @@ TEST_F(DaemonTest, HipMemcpyRoundTripInt) {
 
 TEST_F(DaemonTest, HipMemcpyDeviceToDevice) {
   auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.DeviceToDevice");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, UnsupportedPacketReportsQueueError) {
+  auto r = run_hip_test(hsa_invalid_packet_bin(), nullptr);
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 

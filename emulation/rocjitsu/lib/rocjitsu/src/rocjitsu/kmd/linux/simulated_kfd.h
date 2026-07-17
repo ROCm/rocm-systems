@@ -106,6 +106,14 @@ public:
   int munmap(uint32_t process_id, void *addr, size_t length);
   int close(uint32_t process_id);
   [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
+
+  struct SignalWrite {
+    uint64_t address = 0;
+    uint64_t value = 0;
+  };
+  /// @brief Drain up to @p capacity stores destined for client-owned signals.
+  std::vector<SignalWrite> take_signal_writes(uint32_t process_id, size_t capacity);
+  [[nodiscard]] size_t signal_write_count(uint32_t process_id) const;
   /// @}
 
   /// @brief Local-mode get_mmap_memfd (uses local process).
@@ -282,6 +290,7 @@ private:
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
   mutable std::mutex interrupt_mutex_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
+  std::unordered_map<uint32_t, std::vector<SignalWrite>> pending_signal_writes_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().
   uint32_t local_process_id_ = 0;
