@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <fstream>
 #include <link.h>
 #include <linux/limits.h>
@@ -94,8 +95,7 @@ inline std::string
 dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
-realpath(const std::string& _relpath,
-         std::string*       _resolved = nullptr) ROCPROFSYS_INTERNAL_API;
+realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline bool
 is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
@@ -282,29 +282,11 @@ readlink(const std::string& _path)
 }
 
 std::string
-realpath(const std::string& _relpath, std::string* _resolved)
+realpath(const std::string& path)
 {
-    constexpr size_t MaxLen = PATH_MAX;
-    auto             _len   = std::min<size_t>(_relpath.length(), MaxLen);
-
-    char        _buffer[MaxLen] = { '\0' };
-    const char* _result         = _buffer;
-
-    if(::realpath(_relpath.c_str(), _buffer) == nullptr)
-    {
-        _result = _relpath.data();
-    }
-
-    if(_resolved)
-    {
-        _resolved->clear();
-        _len = strnlen(_result, MaxLen);
-        _resolved->resize(_len);
-        for(size_t i = 0; i < _len; ++i)
-            (*_resolved)[i] = _result[i];
-    }
-
-    return (_resolved) ? *_resolved : std::string{ _result };
+    std::error_code error;
+    auto            canon = std::filesystem::canonical(path, error);
+    return (error) ? path : canon.string();
 }
 
 bool
