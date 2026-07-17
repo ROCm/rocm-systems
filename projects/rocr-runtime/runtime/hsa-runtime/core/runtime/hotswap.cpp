@@ -45,15 +45,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -68,131 +65,6 @@
 
 namespace rocr {
 namespace hotswap {
-namespace {
-
-struct RetargetCacheKeyHash {
-  size_t operator()(const RetargetCacheKey& key) const {
-    size_t hash = std::hash<std::string>{}(key.source_isa);
-    hash ^= std::hash<std::string>{}(key.target_isa) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-    hash ^= std::hash<bool>{}(key.entry_trampolines) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-    hash ^= std::hash<bool>{}(key.strict_mode) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-    return hash;
-  }
-};
-
-struct RetargetFlight {
-  bool completed = false;
-  size_t waiter_count = 0;
-  RetargetOperationResult result;
-  std::condition_variable completed_cv;
-};
-
-RetargetOperationResult RunRetargetProducer(
-    const std::function<RetargetOperationResult()>& producer) {
-  try {
-    RetargetOperationResult result = producer();
-    if (result.succeeded()) {
-      result.error = RetargetError::kNone;
-    } else if (result.error == RetargetError::kNone) {
-      result.error = RetargetError::kComgrFailure;
-    }
-    return result;
-  } catch (const std::bad_alloc&) {
-    return {{}, RetargetError::kOutOfResources};
-  } catch (...) {
-    return {{}, RetargetError::kComgrFailure};
-  }
-}
-
-}  // namespace
-
-struct ReaderRetargetCache::Impl {
-  mutable std::mutex mutex;
-  std::unordered_map<RetargetCacheKey, std::weak_ptr<const RetargetedElf>, RetargetCacheKeyHash>
-      ready;
-  std::unordered_map<RetargetCacheKey, std::shared_ptr<RetargetFlight>, RetargetCacheKeyHash>
-      in_flight;
-};
-
-ReaderRetargetCache::ReaderRetargetCache() : impl_(new Impl()) {}
-ReaderRetargetCache::~ReaderRetargetCache() = default;
-
-RetargetOperationResult ReaderRetargetCache::GetOrCompute(
-    const RetargetCacheKey& key, const std::function<RetargetOperationResult()>& producer) {
-  std::shared_ptr<RetargetFlight> flight;
-
-  try {
-    std::unique_lock<std::mutex> lock(impl_->mutex);
-    auto ready = impl_->ready.find(key);
-    if (ready != impl_->ready.end()) {
-      RetargetedElfRef elf = ready->second.lock();
-      if (elf) {
-        return {std::move(elf), RetargetError::kNone, RetargetResultSource::kReadyCache};
-      }
-      impl_->ready.erase(ready);
-    }
-
-    auto in_flight = impl_->in_flight.find(key);
-    if (in_flight != impl_->in_flight.end()) {
-      flight = in_flight->second;
-      ++flight->waiter_count;
-      flight->completed_cv.wait(lock, [&] { return flight->completed; });
-      --flight->waiter_count;
-      RetargetOperationResult result = flight->result;
-      result.source = RetargetResultSource::kCoalesced;
-      return result;
-    }
-
-    flight = std::make_shared<RetargetFlight>();
-    impl_->in_flight.emplace(key, flight);
-  } catch (const std::bad_alloc&) {
-    // The cache is an optimization. Resource pressure may disable coalescing,
-    // but it must not prevent an otherwise valid rewrite.
-    return RunRetargetProducer(producer);
-  }
-
-  RetargetOperationResult result = RunRetargetProducer(producer);
-  {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    flight->result = result;
-    flight->completed = true;
-    impl_->in_flight.erase(key);
-    if (result.succeeded()) {
-      try {
-        for (auto entry = impl_->ready.begin(); entry != impl_->ready.end();) {
-          if (entry->second.expired()) {
-            entry = impl_->ready.erase(entry);
-          } else {
-            ++entry;
-          }
-        }
-        impl_->ready.emplace(key, result.elf);
-      } catch (const std::bad_alloc&) {
-        // Active callers and loaded executables still own the result.
-      }
-    }
-  }
-  flight->completed_cv.notify_all();
-  return result;
-}
-
-#ifdef ROCR_HOTSWAP_TESTING
-size_t ReaderRetargetCache::ReadyEntryCountForTesting() const {
-  std::lock_guard<std::mutex> lock(impl_->mutex);
-  size_t count = 0;
-  for (const auto& entry : impl_->ready) {
-    if (!entry.second.expired()) ++count;
-  }
-  return count;
-}
-
-size_t ReaderRetargetCache::WaiterCountForTesting(const RetargetCacheKey& key) const {
-  std::lock_guard<std::mutex> lock(impl_->mutex);
-  const auto flight = impl_->in_flight.find(key);
-  return flight == impl_->in_flight.end() ? 0 : flight->second->waiter_count;
-}
-#endif
-
 namespace {
 
 #ifdef ROCR_HOTSWAP_TESTING

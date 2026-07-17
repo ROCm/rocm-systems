@@ -44,6 +44,7 @@
 #define HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -121,8 +122,24 @@ class ReaderRetargetCache final {
                                        const std::function<RetargetOperationResult()>& producer);
 
 #ifdef ROCR_HOTSWAP_TESTING
+  struct Metrics {
+    uint64_t producer_calls = 0;
+    uint64_t producer_failures = 0;
+    uint64_t ready_hits = 0;
+    uint64_t coalesced_results = 0;
+    uint64_t wait_nanoseconds = 0;
+    uint64_t lock_hold_nanoseconds = 0;
+    uint64_t produced_output_bytes = 0;
+    uint64_t live_output_bytes = 0;
+    uint64_t peak_live_output_bytes = 0;
+    size_t ready_entries = 0;
+    size_t in_flight_entries = 0;
+  };
+
   size_t ReadyEntryCountForTesting() const;
   size_t WaiterCountForTesting(const RetargetCacheKey& key) const;
+  Metrics MetricsForTesting() const;
+  void ResetMetricsForTesting();
 #endif
 
  private:

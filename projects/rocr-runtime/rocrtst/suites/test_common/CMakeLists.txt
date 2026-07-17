@@ -868,6 +868,7 @@ set_tests_properties(hotswap_gfx_query PROPERTIES
 
 add_executable(hotswap_rewrite
   ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_cache.cpp
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
   "${HOTSWAP_GFX1250_HSACO_HDR}")
@@ -892,6 +893,26 @@ set_tests_properties(hotswap_rewrite PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"
   TIMEOUT 120)
 
+add_executable(hotswap_cache
+  ${HOTSWAP_TEST_ROOT}/hotswap_cache_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_cache.cpp)
+target_include_directories(hotswap_cache PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_compile_definitions(hotswap_cache PRIVATE ROCR_HOTSWAP_TESTING)
+target_link_libraries(hotswap_cache ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME hotswap_cache COMMAND hotswap_cache)
+set_tests_properties(hotswap_cache PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 120)
+
+add_executable(hotswap_cache_benchmark
+  ${HOTSWAP_TEST_ROOT}/hotswap_cache_benchmark.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_cache.cpp)
+target_include_directories(hotswap_cache_benchmark PRIVATE ${HSA_RUNTIME_ROOT})
+target_compile_definitions(hotswap_cache_benchmark PRIVATE ROCR_HOTSWAP_TESTING)
+target_link_libraries(hotswap_cache_benchmark pthread)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -911,7 +932,7 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS hotswap_gfx_query hotswap_rewrite
+install(TARGETS hotswap_gfx_query hotswap_rewrite hotswap_cache
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -968,6 +989,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
         "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
         "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+        "add_test(hotswap_cache \"../hotswap_cache\")\n"
+        "set_tests_properties(hotswap_cache PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
     )
 
     install(
