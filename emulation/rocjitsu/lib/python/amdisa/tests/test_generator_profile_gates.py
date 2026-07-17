@@ -2078,15 +2078,17 @@ def test_bf16_mad_mix_half_updates_read_destination_operand():
     assert codegen._dst_is_also_source(SimpleNamespace(name='V_FMA_MIXHI_BF16'))
 
 
-def test_addk_registers_its_read_write_destination_as_a_source():
+def test_addk_and_mulk_register_their_read_write_destination_as_a_source():
     codegen = object.__new__(CodeGenerator)
     codegen.semantics = SimpleNamespace(
         instructions={
-            'S_ADDK_I32': SimpleNamespace(operation=None, semantic_class='scalar_addk')
+            'S_ADDK_I32': SimpleNamespace(operation=None, semantic_class='scalar_addk'),
+            'S_MULK_I32': SimpleNamespace(operation=None, semantic_class='scalar_mulk'),
         }
     )
 
     assert codegen._dst_is_also_source(SimpleNamespace(name='S_ADDK_I32'))
+    assert codegen._dst_is_also_source(SimpleNamespace(name='S_MULK_I32'))
 
 
 def test_gfx1250_ds_atomic_routes_data_through_vgpr_resolver():

@@ -4,6 +4,7 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -42,6 +43,11 @@ using namespace rocjitsu;
 
 using EncodingWords = std::array<uint32_t, 2>;
 using EncodingLookup = std::optional<EncodingWords> (*)(std::string_view);
+
+enum class WrexecDialect {
+  Andn,
+  AndNot,
+};
 
 template <typename Entry, size_t N>
 std::optional<EncodingWords> find_test_encoding(const Entry (&encodings)[N],
@@ -98,19 +104,21 @@ public:
   rj_code_arch_t arch;
   std::string_view name;
   EncodingLookup find_encoding;
+  WrexecDialect wrexec_dialect;
+  bool has_wrexec_b32;
 };
 
 const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
-    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna1_encoding},
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna2_encoding},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna3_encoding},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna4_encoding},
-    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_encoding},
-    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_encoding},
-    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding},
-    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding},
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding},
+    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
+    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
+    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
+    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
+    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
+    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
+    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -232,10 +240,62 @@ public:
 
 class WrexecPair {
 public:
+  WrexecDialect dialect;
   std::string_view first;
   std::string_view second;
   bool is_b64;
 };
+
+constexpr std::array<WrexecPair, 4> kWrexecPairs{{
+    {WrexecDialect::Andn, "s_andn1_wrexec_b32", "s_andn2_wrexec_b32", false},
+    {WrexecDialect::Andn, "s_andn1_wrexec_b64", "s_andn2_wrexec_b64", true},
+    {WrexecDialect::AndNot, "s_and_not0_wrexec_b32", "s_and_not1_wrexec_b32", false},
+    {WrexecDialect::AndNot, "s_and_not0_wrexec_b64", "s_and_not1_wrexec_b64", true},
+}};
+
+bool profile_expects_wrexec_pair(const ScalarSccProfile &profile, const WrexecPair &pair) {
+  return profile.wrexec_dialect == pair.dialect && (pair.is_b64 || profile.has_wrexec_b32);
+}
+
+bool expect_wrexec_availability(const ScalarSccProfile &profile, const WrexecPair &pair) {
+  const bool expected = profile_expects_wrexec_pair(profile, pair);
+  const bool first_available = profile.find_encoding(pair.first).has_value();
+  const bool second_available = profile.find_encoding(pair.second).has_value();
+  EXPECT_EQ(first_available, expected) << profile.name << " " << pair.first;
+  EXPECT_EQ(second_available, expected) << profile.name << " " << pair.second;
+  return first_available && second_available;
+}
+
+void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pair) {
+  auto decoder = Decoder::create(profile.arch);
+  ASSERT_NE(decoder, nullptr) << profile.name;
+
+  constexpr uint32_t kSourceSgpr = 0;
+  constexpr uint32_t kDestSgpr = 4;
+  const uint8_t width = pair.is_b64 ? 2 : 1;
+  for (const auto mnemonic : {pair.first, pair.second}) {
+    const auto words = encode_sop1(profile, mnemonic, kDestSgpr, kSourceSgpr);
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
+    ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
+
+    const RegisterRef source{RegClass::SGPR, kSourceSgpr, width};
+    const RegisterRef destination{RegClass::SGPR, kDestSgpr, width};
+    ASSERT_EQ(inst->num_src_operands(), 1) << profile.name << " " << mnemonic;
+    ASSERT_EQ(inst->num_dst_operands(), 1) << profile.name << " " << mnemonic;
+    EXPECT_EQ(inst->src_operand(0)->to_register_ref(), source) << profile.name << " " << mnemonic;
+    EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), destination)
+        << profile.name << " " << mnemonic;
+
+    const InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
+    EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
+    EXPECT_FALSE(def_use.defs.contains(source)) << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.uses.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.defs.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
+  }
+}
 
 void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pair) {
   ScalarSccFixture fixture(profile, "wrexec_scc");
@@ -257,33 +317,42 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
       {pair.second, ~uint64_t{0}, 0xF0F0F0F0F0F0F0F0ULL, 0u},
   }};
 
-  constexpr uint32_t kHighSentinel = 0xA5A55A5Au;
+  constexpr uint32_t kSourceSgpr = 0;
+  constexpr uint32_t kDestSgpr = 4;
+  constexpr uint32_t kSourceHighSentinel = 0xA5A55A5Au;
+  constexpr uint32_t kDestHighSentinel = 0x5A5AA5A5u;
+  constexpr uint32_t kExecHighSentinel = 0xC3C33C3Cu;
   const uint32_t sb = fixture.sgpr_base();
   for (const auto &test_case : cases) {
-    const auto words = encode_sop1(profile, test_case.mnemonic, /*sdst=*/0, /*ssrc0=*/0);
+    const auto words = encode_sop1(profile, test_case.mnemonic, kDestSgpr, kSourceSgpr);
     auto inst = fixture.decode(words, test_case.mnemonic);
     ASSERT_NE(inst, nullptr) << profile.name;
 
-    fixture.cu->write_sgpr(sb, static_cast<uint32_t>(test_case.src));
-    fixture.cu->write_sgpr(sb + 1, pair.is_b64 ? static_cast<uint32_t>(test_case.src >> 32)
-                                               : kHighSentinel);
+    fixture.cu->write_sgpr(sb + kSourceSgpr, static_cast<uint32_t>(test_case.src));
+    fixture.cu->write_sgpr(sb + kSourceSgpr + 1, pair.is_b64
+                                                     ? static_cast<uint32_t>(test_case.src >> 32)
+                                                     : kSourceHighSentinel);
+    fixture.cu->write_sgpr(sb + kDestSgpr, 0xBAD0D57u);
+    fixture.cu->write_sgpr(sb + kDestSgpr + 1, kDestHighSentinel);
     const uint64_t raw_exec = pair.is_b64 ? test_case.old_exec
-                                          : (static_cast<uint64_t>(kHighSentinel) << 32) |
+                                          : (static_cast<uint64_t>(kExecHighSentinel) << 32) |
                                                 (test_case.old_exec & 0xFFFFFFFFULL);
     fixture.wf->set_exec_raw(raw_exec);
     const bool expected_scc = test_case.expected != 0;
     fixture.wf->write_scc(!expected_scc);
     fixture.cu->execute_instruction(inst.get(), *fixture.wf);
 
-    uint64_t actual = fixture.cu->read_sgpr(sb);
+    uint64_t actual = fixture.cu->read_sgpr(sb + kDestSgpr);
     if (pair.is_b64) {
-      actual |= static_cast<uint64_t>(fixture.cu->read_sgpr(sb + 1)) << 32;
+      actual |= static_cast<uint64_t>(fixture.cu->read_sgpr(sb + kDestSgpr + 1)) << 32;
       EXPECT_EQ(fixture.wf->exec_raw(), test_case.expected)
           << profile.name << " " << test_case.mnemonic;
     } else {
-      EXPECT_EQ(fixture.cu->read_sgpr(sb + 1), kHighSentinel)
+      EXPECT_EQ(fixture.cu->read_sgpr(sb + kSourceSgpr + 1), kSourceHighSentinel)
           << profile.name << " " << test_case.mnemonic;
-      EXPECT_EQ(static_cast<uint32_t>(fixture.wf->exec_raw() >> 32), kHighSentinel)
+      EXPECT_EQ(fixture.cu->read_sgpr(sb + kDestSgpr + 1), kDestHighSentinel)
+          << profile.name << " " << test_case.mnemonic;
+      EXPECT_EQ(static_cast<uint32_t>(fixture.wf->exec_raw() >> 32), kExecHighSentinel)
           << profile.name << " " << test_case.mnemonic;
     }
     EXPECT_EQ(actual, test_case.expected) << profile.name << " " << test_case.mnemonic;
@@ -295,22 +364,24 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
 }
 
 TEST(ScalarSccTest, WrexecWritesDestinationExecAndScc) {
-  constexpr std::array<WrexecPair, 4> candidates{{
-      {"s_andn1_wrexec_b32", "s_andn2_wrexec_b32", false},
-      {"s_andn1_wrexec_b64", "s_andn2_wrexec_b64", true},
-      {"s_and_not0_wrexec_b32", "s_and_not1_wrexec_b32", false},
-      {"s_and_not0_wrexec_b64", "s_and_not1_wrexec_b64", true},
-  }};
-
   for (const auto &profile : kScalarSccProfiles) {
-    size_t covered = 0;
-    for (const auto &candidate : candidates) {
-      if (profile.find_encoding(candidate.first) && profile.find_encoding(candidate.second)) {
+    for (const auto &candidate : kWrexecPairs) {
+      const bool expected = profile_expects_wrexec_pair(profile, candidate);
+      const bool available = expect_wrexec_availability(profile, candidate);
+      if (expected && available)
         run_wrexec_scc_cases(profile, candidate);
-        ++covered;
-      }
     }
-    EXPECT_GT(covered, 0u) << profile.name;
+  }
+}
+
+TEST(ScalarSccTest, WrexecRegisterDefUseMatchesArchitectureMatrix) {
+  for (const auto &profile : kScalarSccProfiles) {
+    for (const auto &candidate : kWrexecPairs) {
+      const bool expected = profile_expects_wrexec_pair(profile, candidate);
+      const bool available = expect_wrexec_availability(profile, candidate);
+      if (expected && available)
+        expect_wrexec_def_use(profile, candidate);
+    }
   }
 }
 
@@ -553,22 +624,71 @@ TEST(ScalarSccTest, AddkUsesSignedOverflowAndFeedsSccConsumer) {
     run_addk_scc_cases(profile);
 }
 
-TEST(ScalarSccTest, AddkRegistersDestinationRead) {
+void run_mulk_cases(const ScalarSccProfile &profile) {
+  ScalarSccFixture fixture(profile, "mulk");
+  ASSERT_TRUE(fixture.ready()) << profile.name;
+
+  class Case {
+  public:
+    uint32_t initial;
+    uint16_t immediate;
+    uint32_t expected;
+  };
+  constexpr std::array<Case, 4> cases{{
+      {7u, 3u, 21u},
+      {7u, 0xFFFDu, 0xFFFFFFEBu},
+      {0x12345678u, 0u, 0u},
+      {0x80000001u, 2u, 2u},
+  }};
+
+  const uint32_t sb = fixture.sgpr_base();
+  for (const auto &test_case : cases) {
+    const auto words = encode_sopk(profile, "s_mulk_i32", /*sdst=*/4, test_case.immediate);
+    auto inst = fixture.decode(words, "s_mulk_i32");
+    ASSERT_NE(inst, nullptr) << profile.name;
+
+    fixture.cu->write_sgpr(sb + 4, test_case.initial);
+    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
+  }
+}
+
+TEST(ScalarSccTest, MulkUsesOldDestinationAndSignedImmediate) {
+  for (const auto &profile : kScalarSccProfiles)
+    run_mulk_cases(profile);
+}
+
+TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
   for (const auto &profile : kScalarSccProfiles) {
     auto decoder = Decoder::create(profile.arch);
     ASSERT_NE(decoder, nullptr) << profile.name;
-    const auto mnemonic = addk_mnemonic(profile);
-    const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
-    ASSERT_NE(inst, nullptr) << profile.name;
-    ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
+    const std::array mnemonics{addk_mnemonic(profile), std::string_view{"s_mulk_i32"}};
+    for (const auto mnemonic : mnemonics) {
+      const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
+      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
+      ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
-    bool reads_destination = false;
-    for (int index = 0; index < inst->num_src_operands(); ++index) {
-      const auto reg = inst->src_operand(index)->to_register_ref();
-      reads_destination |= reg == RegisterRef{RegClass::SGPR, 4, 1};
+      ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
+      ASSERT_EQ(inst->num_dst_operands(), 1) << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->src_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
+          << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->src_operand(0), inst->dst_operand(0)) << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->src_operand(0)->name(), "s4") << profile.name << " " << mnemonic;
+      EXPECT_FALSE(inst->src_operand(1)->to_register_ref()) << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->src_operand(1)->encoding_value(), 1) << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->src_operand(1)->name(), "1") << profile.name << " " << mnemonic;
+      EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
+          << profile.name << " " << mnemonic;
+
+      const InstDefUse def_use(*inst);
+      EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 4, 1}))
+          << profile.name << " " << mnemonic;
+      EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))
+          << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.uses.size(), 1u) << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.defs.size(), 1u) << profile.name << " " << mnemonic;
     }
-    EXPECT_TRUE(reads_destination) << profile.name;
   }
 }
 

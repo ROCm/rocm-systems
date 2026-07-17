@@ -2306,31 +2306,75 @@ class TestDeriveSpecialScalar:
             assert 'wf.set_exec_raw(' in cpp
         assert 'write_scc' in cpp
 
-    def test_wrexec_operand_orientation(self):
-        exec_not_src = lower_sema_block(
-            derive_sema_block(
-                _FakeSem(
-                    'S_AND_NOT0_WREXEC_B64',
-                    'scalar_wrexec',
-                    'and_not0',
-                    'b64',
-                    'nonzero',
-                )
-            )
-        )
-        src_not_exec = lower_sema_block(
-            derive_sema_block(
-                _FakeSem(
-                    'S_AND_NOT1_WREXEC_B64',
-                    'scalar_wrexec',
-                    'and_not1',
-                    'b64',
-                    'nonzero',
-                )
-            )
-        )
-        assert '(old_exec & (~src))' in exec_not_src
-        assert '(src & (~old_exec))' in src_not_exec
+    @pytest.mark.parametrize(
+        'name, operation, data_type, expected_result',
+        [
+            (
+                'S_ANDN1_WREXEC_B32',
+                'andn1',
+                'b32',
+                '((old_exec & (~src)) & 0xffffffffULL)',
+            ),
+            (
+                'S_ANDN2_WREXEC_B32',
+                'andn2',
+                'b32',
+                '((src & (~old_exec)) & 0xffffffffULL)',
+            ),
+            ('S_ANDN1_WREXEC_B64', 'andn1', 'b64', '(old_exec & (~src))'),
+            ('S_ANDN2_WREXEC_B64', 'andn2', 'b64', '(src & (~old_exec))'),
+            (
+                'S_AND_NOT0_WREXEC_B32',
+                'and_not0',
+                'b32',
+                '((old_exec & (~src)) & 0xffffffffULL)',
+            ),
+            (
+                'S_AND_NOT1_WREXEC_B32',
+                'and_not1',
+                'b32',
+                '((src & (~old_exec)) & 0xffffffffULL)',
+            ),
+            (
+                'S_AND_NOT0_WREXEC_B64',
+                'and_not0',
+                'b64',
+                '(old_exec & (~src))',
+            ),
+            (
+                'S_AND_NOT1_WREXEC_B64',
+                'and_not1',
+                'b64',
+                '(src & (~old_exec))',
+            ),
+        ],
+    )
+    def test_wrexec_operand_orientation(
+        self, name, operation, data_type, expected_result
+    ):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_wrexec'
+        assert sem.operation == operation
+        assert sem.data_type == data_type
+
+        cpp = lower_sema_block(derive_sema_block(sem))
+
+        assert f'uint64_t result = {expected_result};' in cpp
+        assert 'wf.write_scc((result != 0ULL));' in cpp
+
+        if data_type == 'b32':
+            assert (
+                'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
+                'static_cast<uint32_t>(result));'
+            ) in cpp
+            assert 'wf.set_exec(result);' in cpp
+        else:
+            assert (
+                'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
+                'static_cast<uint64_t>(result));'
+            ) in cpp
+            assert 'wf.set_exec_raw(result);' in cpp
 
     def test_wrexec_rejects_unsupported_operation(self):
         sem = _FakeSem(

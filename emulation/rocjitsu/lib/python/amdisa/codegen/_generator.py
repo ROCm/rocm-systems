@@ -2255,6 +2255,7 @@ class CodeGenerator:
             'vector_dot',
             'vector_swap',
             'scalar_addk',
+            'scalar_mulk',
             'mad_mixlo_f16',
             'mad_mixhi_f16',
             'mad_mixlo_bf16',
