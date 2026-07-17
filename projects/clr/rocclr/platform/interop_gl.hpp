@@ -233,8 +233,6 @@ class GLFunctions {
 
   EGLDisplay eglDisplay_;
   EGLContext eglOriginalContext_;
-  [[maybe_unused]] EGLContext eglInternalContext_;
-  [[maybe_unused]] EGLContext eglTempContext_;
   bool isEGL_;
   PFN_eglGetCurrentContext eglGetCurrentContext_;
 

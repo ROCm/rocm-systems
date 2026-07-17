@@ -1537,10 +1537,6 @@ template <typename Tp> struct dispatch_table_info;
     static constexpr auto import_func = &ROCPROFILER_REGISTER_IMPORT_FUNC(NAME);                   \
   };
 
-[[maybe_unused]] constexpr auto ComputeTableSize(size_t num_funcs) {
-  return (num_funcs * sizeof(void*)) + sizeof(uint64_t);
-}
-
 HIP_DEFINE_DISPATCH_TABLE_INFO(HipDispatchTable, hip)
 HIP_DEFINE_DISPATCH_TABLE_INFO(HipCompilerDispatchTable, hip_compiler)
 HIP_DEFINE_DISPATCH_TABLE_INFO(HipToolsDispatchTable, hip_tools)

@@ -329,7 +329,6 @@ class Command : public Event {
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
-  [[maybe_unused]] address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
