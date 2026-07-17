@@ -26,7 +26,7 @@ namespace {
 
 // Is a raw fp8 bit pattern NaN / Inf for the given interpretation?
 bool is_e4m3_special(unsigned i) { return (i & 0x7fu) == 0x7fu; }  // 0x7f, 0xff are NaN
-bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7cu; }  // 0x7c..0x7e NaN, 0x7f Inf
+bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7bu; }  // sat E5M2: 0x7b inf, 0x7c overflow, 0x7d-7f NaN
 
 // All representable (finite, non-NaN) fp8 values for an interpretation.
 template <bool is_e4m3> std::vector<float> all_representable_fp8() {
