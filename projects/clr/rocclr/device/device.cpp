@@ -43,6 +43,8 @@ extern void PalDeviceUnload();
 #include <cstdio>
 #include <sstream>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <set>
 #include <algorithm>
 #include <numeric>
