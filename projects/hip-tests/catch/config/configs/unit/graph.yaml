@@ -1289,7 +1289,7 @@ graph:
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
-    tags: [query]
+    tags: [query, image]
   Unit_hipGraphDebugDotPrint_Argument_Check:
     <<: *level_2
     tags: [query]
