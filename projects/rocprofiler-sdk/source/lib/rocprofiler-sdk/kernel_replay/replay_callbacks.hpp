@@ -67,6 +67,12 @@ struct pass_context_state_t
     tracing::external_correlation_id_map_t external_correlation_ids{};
 };
 
+// Set once when a tool configures a KERNEL_REPLAY callback-tracing service. Acts as a cheap
+// process-global fast-path gate so has_active_replay_contexts() (and thus WriteInterceptor) does
+// not walk the active-context list on every dispatch when replay is never used.
+void
+set_replay_service_configured(bool enabled);
+
 bool
 has_active_replay_contexts();
 

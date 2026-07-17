@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/kernel_replay.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
@@ -173,6 +174,7 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
     {
         rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
+        rocprofiler::kernel_replay::set_replay_service_configured(true);
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
