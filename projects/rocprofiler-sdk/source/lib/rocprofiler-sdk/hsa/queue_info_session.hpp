@@ -61,6 +61,17 @@ struct packet_data_t
     rocprofiler_user_data_t user_data               = {.value = 0};
     pooled_signal_t*        pooled_signal           = nullptr;
     bool                    is_serialized           = false;
+
+    // KFD dispatch-log correlation. Valid only when kfd_correlation_key_valid is
+    // true. Captured at enqueue time (in the interceptor) so get_dispatch_time()
+    // uses a stable snapshot key rather than re-deriving it at completion, which
+    // could race with queue destroy/recreate. All default to the invalid state so
+    // any dispatch that skips capture automatically falls back to HSA timestamps.
+    bool     kfd_correlation_key_valid = false;
+    uint64_t hsa_queue_pkt_index       = 0;  // full 64-bit slot index
+    uint32_t kfd_doorbell_off          = 0;  // snapshot at enqueue
+    uint32_t kfd_dispatch_idx_low32    = 0;  // hsa_queue_pkt_index & 0xFFFFFFFF
+    uint32_t kfd_generation            = 0;  // snapshot at enqueue
 };
 
 // Internal session information that is used by write interceptor

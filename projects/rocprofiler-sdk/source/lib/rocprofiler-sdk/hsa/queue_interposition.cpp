@@ -44,6 +44,9 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -470,7 +473,8 @@ write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
                   hsa_amd_queue_intercept_packet_writer writer,
-                  async_signal_task_vector_t*           deferred_async_tasks)
+                  async_signal_task_vector_t*           deferred_async_tasks,
+                  uint64_t                              base_pkt_index)
 {
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
@@ -568,6 +572,7 @@ write_interceptor(Queue*                                queue,
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_async_tasks](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
+                                    uint64_t                  _base_pkt_index,
                                     const packet_writer_fn_t& _writer) {
         static constexpr auto null_signal = hsa_signal_t{.handle = 0};
 
@@ -679,6 +684,16 @@ write_interceptor(Queue*                                queue,
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
+
+            // KFD dispatch-log: capture this kernel packet's HSA queue write index.
+            // Inline path is strict 1:1 forwarding (no injected packets), so the
+            // write index of packet i is simply base + i. Low 32 bits match the
+            // firmware record's dispatch_id. (Full correlation key + table insert
+            // are wired in the next step; kfd_correlation_key_valid stays false
+            // until then, so behavior is unchanged.)
+            _packet_data.hsa_queue_pkt_index = _base_pkt_index + i;
+            _packet_data.kfd_dispatch_idx_low32 =
+                static_cast<uint32_t>(_packet_data.hsa_queue_pkt_index & 0xFFFFFFFFULL);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             auto& completion_signal =
                 is_ext_kernel_dispatch
@@ -734,6 +749,50 @@ write_interceptor(Queue*                                queue,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
                                       .reserved_padding     = {0}}};
+
+            // KFD dispatch-log correlation (inline path). Only attempted when
+            // the KFD path is available for this GPU. hsa_queue_pkt_index /
+            // kfd_dispatch_idx_low32 were captured above; here we resolve the
+            // queue's doorbell + generation and, if certain, publish the full
+            // key so get_dispatch_time() can pair firmware records to this
+            // dispatch. If anything is unavailable/uncertain,
+            // kfd_correlation_key_valid stays false -> HSA fallback.
+            {
+                const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
+                if(kfd::kfd_dispatch_log_available() &&
+                   kfd::gpu_supports_dispatch_log(static_cast<uint32_t>(_gpu_id)))
+                {
+                    // Ensure the dispatch-log session exists for this GPU. The
+                    // inline path does not go through QueueController::create_queue,
+                    // so this is where the session is triggered for it. Idempotent.
+                    kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id));
+
+                    auto& _dmap = kfd::doorbell_map();
+                    auto  _db   = _dmap.get_by_queue(queue->get_id());
+                    if(_db && _dmap.is_generation_certain(_db->doorbell_off))
+                    {
+                        _packet_data.kfd_doorbell_off          = _db->doorbell_off;
+                        _packet_data.kfd_generation            = _db->generation;
+                        _packet_data.kfd_correlation_key_valid = true;
+
+                        kfd::correlation_table().insert(
+                            kfd::correlation_key{_packet_data.kfd_doorbell_off,
+                                                 _packet_data.kfd_dispatch_idx_low32,
+                                                 _packet_data.kfd_generation},
+                            kfd::correlation_entry{
+                                dispatch_id, kernel_id, queue->get_id(), _info_session.enqueue_ts});
+                    }
+                    else
+                    {
+                        // Doorbell not yet bound for this queue: record a hint so
+                        // the reader can bind it from the first firmware record.
+                        // This dispatch falls back to HSA (kfd_correlation_key_valid
+                        // stays false). See design notes (empirical bind).
+                        _dmap.note_pending_dispatch(queue->get_id(),
+                                                    _packet_data.kfd_dispatch_idx_low32);
+                    }
+                }
+            }
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -822,9 +881,10 @@ write_interceptor(Queue*                                queue,
     ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
         "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-    process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
-        writer(_packets.data(), _packets.size());
-    });
+    process_packet_batch(
+        packets_arr, pkt_count, base_pkt_index, [&writer](packet_vector_t&& _packets) {
+            writer(_packets.data(), _packets.size());
+        });
 }
 }  // namespace
 
@@ -933,7 +993,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                           source_snapshot,
                           pkt_count,
                           ring_buffer_writer,
-                          &deferred_async_tasks);
+                          &deferred_async_tasks,
+                          start_submit_pos);
     }
     else
     {

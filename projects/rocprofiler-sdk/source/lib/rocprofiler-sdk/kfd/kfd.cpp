@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/defines.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/utils.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -1668,6 +1669,10 @@ init()
 
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});
         init_done = true;
+
+        // KFD dispatch-log timestamp source (best-effort; silent HSA fallback).
+        // Does not affect retcode: KFD event tracing must init regardless.
+        init_kfd_profiler();
     }
 
     return retcode;
@@ -1676,6 +1681,7 @@ init()
 void
 finalize()
 {
+    shutdown_kfd_profiler();
     config::reset();
 }
 

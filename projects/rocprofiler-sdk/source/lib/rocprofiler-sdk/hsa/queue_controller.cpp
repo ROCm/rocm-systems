@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 
@@ -98,6 +100,10 @@ create_queue(hsa_agent_t        agent,
             });
             controller->add_queue(*queue, std::move(new_queue));
             ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+
+            // Now that a queue exists (agent cache populated, device acquired),
+            // ensure the KFD dispatch-log session is up for this GPU.
+            kfd::ensure_reader_session(static_cast<uint32_t>(agent_info.get_rocp_agent()->gpu_id));
             return HSA_STATUS_SUCCESS;
         }
     }
@@ -400,6 +406,10 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
     // return if queue does not exist
     if(!queue) return;
+
+    // KFD dispatch-log: retire this queue's doorbell binding (bumps generation
+    // so a reused doorbell cannot misattribute records to this dead queue).
+    kfd::doorbell_map().on_queue_destroyed(queue->get_id());
 
     queue_interposition::destroy_queue_state(id);
     queue->sync();

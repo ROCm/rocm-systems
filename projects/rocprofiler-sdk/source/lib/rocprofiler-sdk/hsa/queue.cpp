@@ -37,6 +37,9 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -269,8 +272,8 @@ bit_extract(Integral x, int first, int last)
 void
 WriteInterceptor(const void* packets,
                  uint64_t    pkt_count,
-                 uint64_t,
-                 void*                                 data,
+                 uint64_t    user_pkt_index,  // HSA write_dispatch_id at start of this write
+                 void*       data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
     if(registration::get_fini_status() > 0)
@@ -409,6 +412,7 @@ WriteInterceptor(const void* packets,
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
+                                    uint64_t                  _base_pkt_index,
                                     const packet_writer_fn_t& _writer) {
         auto transformed_packets = packet_vector_t{};
 
@@ -657,6 +661,50 @@ WriteInterceptor(const void* packets,
             }
 #endif
 
+            // KFD dispatch-log correlation (legacy path). The kernel packet's
+            // true HSA queue slot is user_pkt_index + the number of packets
+            // already injected ahead of it in this batch (serializer / barriers /
+            // before_krn_pkt / PC-sampling marker), which is exactly the current
+            // transformed_packets.size(). Capture that, resolve the doorbell, and
+            // publish the key (same logic as the inline path). Anything
+            // unavailable/uncertain leaves kfd_correlation_key_valid false -> HSA.
+            _packet_data.hsa_queue_pkt_index =
+                _base_pkt_index + static_cast<uint64_t>(transformed_packets.size());
+            _packet_data.kfd_dispatch_idx_low32 =
+                static_cast<uint32_t>(_packet_data.hsa_queue_pkt_index & 0xFFFFFFFFULL);
+            {
+                const auto _gpu_id = queue.get_agent().get_rocp_agent()->gpu_id;
+                if(kfd::kfd_dispatch_log_available() &&
+                   kfd::gpu_supports_dispatch_log(static_cast<uint32_t>(_gpu_id)))
+                {
+                    kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id));
+
+                    auto& _dmap = kfd::doorbell_map();
+                    auto  _db   = _dmap.get_by_queue(queue.get_id());
+                    if(_db && _dmap.is_generation_certain(_db->doorbell_off))
+                    {
+                        _packet_data.kfd_doorbell_off          = _db->doorbell_off;
+                        _packet_data.kfd_generation            = _db->generation;
+                        _packet_data.kfd_correlation_key_valid = true;
+
+                        kfd::correlation_table().insert(
+                            kfd::correlation_key{_packet_data.kfd_doorbell_off,
+                                                 _packet_data.kfd_dispatch_idx_low32,
+                                                 _packet_data.kfd_generation},
+                            kfd::correlation_entry{
+                                dispatch_id, kernel_id, queue.get_id(), _info_session.enqueue_ts});
+                    }
+                    else
+                    {
+                        // Doorbell not yet bound: record a hint so the reader can
+                        // bind it from the first firmware record. This dispatch
+                        // falls back to HSA. See design notes (empirical bind).
+                        _dmap.note_pending_dispatch(queue.get_id(),
+                                                    _packet_data.kfd_dispatch_idx_low32);
+                    }
+                }
+            }
+
             // emplace the kernel packet
             transformed_packets.emplace_back(kernel_packet);
 
@@ -756,9 +804,10 @@ WriteInterceptor(const void* packets,
         ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
             "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-        process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
-            writer(_packets.data(), _packets.size());
-        });
+        process_packet_batch(
+            packets_arr, pkt_count, user_pkt_index, [&writer](packet_vector_t&& _packets) {
+                writer(_packets.data(), _packets.size());
+            });
     }
     else
     {
@@ -772,12 +821,15 @@ WriteInterceptor(const void* packets,
 
         for(size_t i = 0; i < pkt_count; ++i)
         {
-            process_packet_batch(
-                &packets_arr[i], 1, [&transformed_packets](packet_vector_t&& _packets) {
-                    transformed_packets.insert(transformed_packets.end(),
-                                               std::make_move_iterator(_packets.begin()),
-                                               std::make_move_iterator(_packets.end()));
-                });
+            process_packet_batch(&packets_arr[i],
+                                 1,
+                                 user_pkt_index + i,
+                                 [&transformed_packets](packet_vector_t&& _packets) {
+                                     transformed_packets.insert(
+                                         transformed_packets.end(),
+                                         std::make_move_iterator(_packets.begin()),
+                                         std::make_move_iterator(_packets.end()));
+                                 });
         }
         writer(transformed_packets.data(), transformed_packets.size());
     }
