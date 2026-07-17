@@ -25,6 +25,7 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <set>
 #include <map>
 #include <string>
@@ -156,13 +157,11 @@ private:
     //       after CU mask support is added to agent_info
     bool asymmetric_cu_patch;
 
-    // WGP harvesting (GFX11+): per-(SE, SA) cu_bitmap mask (2 CU bits/WGP). The
-    // bIsWGPcounter11 loop tests it to skip harvested WGPs (both bits clear),
-    // zero-filling their slot rather than reading (a harvested read aliases onto
-    // an active WGP). Keeping the mask (not a compacted index list) keeps slot
-    // == physical WGP index: no remap, count stays == GetNumWGPs(), dimension
-    // indices / HW_IDs unchanged. Synthesized fully-active when no bitmap is
-    // present (V0/V1 agents).
+    // Per-(SE, SA) CU-activity mask (2 CU bits per WGP) from the DRM cu_bitmap.
+    // bIsWGPcounter11 reads active WGPs and zero-fills harvested ones (reading a
+    // harvested WGP aliases onto an active one). Indexed by physical WGP slot, so
+    // no remap is needed and the emitted sample count stays == GetNumWGPs().
+    // Synthesized fully-active when no bitmap is present (V0/V1 agents).
     std::vector<std::vector<uint32_t>> sa_cu_mask_;
 
     void DebugTrace(uint32_t value)
@@ -293,15 +292,16 @@ private:
                    : instance_index;
     }
 
-    // Populate sa_cu_mask_[se][sa] and, on GFX11, grow wgp_per_sa_ to the
-    // physical WGPs per SA (highest active WGP index + 1) so the fixed-bound
-    // read loop covers a middle-harvested WGP above the active-CU-derived count.
+    // Populate sa_cu_mask_[se][sa] from the agent cu_bitmap; on GFX11 also grow
+    // wgp_per_sa_ to the physical WGP span (highest active WGP + 1) so the read
+    // loop's fixed [0, wgp_per_sa_) bound reaches a middle-harvested WGP (e.g.
+    // gfx1151 active {0,1,2,4} -> span 5). GFX12 keeps its cu_num-derived count.
     //
-    // Logical -> raw cu_bitmap translation: chips with > NUM_SE logical SEs fold
-    // upper banks into upper SA columns (kernel mqd_symmetrically_map_cu_mask in
-    // kfd_mqd_manager.c); without it Navi31's SE 4-5 miss the bitmap. The bounds
-    // check is required because cu_bitmap.bits is a fixed [NUM_SE][NUM_SA_PER_SE]
-    // array - out-of-window reads are UB, not a guaranteed zero.
+    // Each logical (se, sa) maps to a raw bitmap slot: when logical SEs exceed
+    // the bitmap's SE dimension, upper SEs fold into higher SA columns (mirrors
+    // kernel mqd_symmetrically_map_cu_mask; else Navi31 SE 4-5 would miss the
+    // bitmap). Out-of-window or empty entries fall back to fully active
+    // (cu_bitmap.bits is fixed-size; out-of-window reads would be UB).
     void build_sa_cu_mask(const AgentInfo* agent_info)
     {
         // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
@@ -311,17 +311,14 @@ private:
         constexpr uint32_t kMaxWgpPerSa  = 16;
         constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
         constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
-        // Matches the kernel's cu_bitmap_sh_mul (== SAs per SE: always 2 on GFX11).
-        const uint32_t cu_bitmap_sh_mul = sarrays_per_se_;
-        // Highest active WGP index across all SAs; (+1) is the physical WGPs
-        // per SA used to grow wgp_per_sa_ for GFX11 below.
+        // Highest active WGP index across all SAs (physical span = index + 1).
         uint32_t max_wgp_index = 0;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
             {
                 const uint32_t raw_se = se % bitmap_se_lim;
-                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * cu_bitmap_sh_mul;
+                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * sarrays_per_se_;
 
                 uint32_t cu_bm = (raw_se < bitmap_se_lim && raw_sa < bitmap_sa_lim)
                                      ? agent_info->cu_bitmap.bits[raw_se][raw_sa]
@@ -342,11 +339,8 @@ private:
             }
         }
 
-        // Grow wgp_per_sa_ to the physical span so [0, wgp_per_sa_) covers a
-        // middle-harvested WGP (gfx1151: active {0,1,2,4} -> 4 -> 5). GFX11
-        // only; GFX12's dense read path keeps the cu_num-derived count.
         if constexpr(Primitives::GFXIP_LEVEL == 11)
-            if(max_wgp_index + 1 > wgp_per_sa_) wgp_per_sa_ = max_wgp_index + 1;
+            wgp_per_sa_ = std::max(wgp_per_sa_, max_wgp_index + 1);
     }
 
 public:
