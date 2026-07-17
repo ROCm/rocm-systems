@@ -208,8 +208,9 @@ if [[ "${build_rc}" -ne 0 ]]; then
   exit "${build_rc}"
 fi
 
-# --- test phase -> test-%j.{out,err}. Test failures are non-gating: don't fail
-# the job; drop a `tests-failed` sentinel for the workflow's separate red check. ---
+# --- test phase -> test-%j.{out,err}. Don't fail the sbatch on test failures
+# (that would look like a build/infra failure); drop a `tests-failed` sentinel
+# instead, which the workflow turns into a red (non-gating for gin) result. ---
 test_rc=0
 {
 echo "==> [6/6] run GIN tests"

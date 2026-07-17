@@ -88,8 +88,9 @@ jobs:
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
-  # GIN suite: build/link/infra failures gate here (red); test failures surface via
-  # the non-gating gin-tests check below.
+  # GIN suite (WIP). Failures show red with logs on this job. non_gating keeps
+  # test failures from blocking; build/infra failures gate via gin-build-gate
+  # below. AICOMRCCL-1478: enable full gating once GIN lands in develop.
   gin:
     name: GIN
     needs: provision-tw
@@ -102,34 +103,21 @@ jobs:
       # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
       reservation: rccl_ci
       timeout_minutes: 300
+      non_gating: true
       rocm_release: ${{ needs.provision-tw.outputs.rocm_release }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
-  # Non-gating check for GIN test failures: red when benches fail, but not a
-  # required check so it doesn't block the PR. Make it a required check to gate.
-  # Jira AICOMRCCL-1478: Enable GIN test gating.
-  gin-tests:
-    name: GIN tests (non-gating)
+  # Gates GIN on build/infra failures only; test failures stay non-gating (red
+  # with logs on the GIN job above). AICOMRCCL-1478.
+  gin-build-gate:
+    name: GIN build gate
     needs: gin
-    if: ${{ needs.gin.outputs.tests_failed == 'true' }}
+    if: ${{ needs.gin.outputs.build_failed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Report GIN test failure
-        env:
-          SUMMARY: ${{ needs.gin.outputs.tests_failed_summary }}
-        run: |
-          echo "GIN benches failed (non-gating). Failed/skipped tests:" >&2
-          printf '%s\n' "${SUMMARY:-<no summary captured; see the GIN job Summary tab>}" >&2
-          echo "" >&2
-          echo "Full per-test output: the GIN job's Summary tab and its 'test' log group." >&2
-          {
-            echo "### GIN tests failed (non-gating)"
-            echo ""
-            echo '```'
-            printf '%s\n' "${SUMMARY:-<no summary captured; see the GIN job Summary tab>}"
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
+      - run: |
+          echo "GIN build/infra failed; see the GIN job logs." >&2
           exit 1
 
   # --- Per-cluster cleanup: release this run's ROCm reference (always) and GC the
@@ -153,6 +141,7 @@ jobs:
         with:
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
+
       - name: Release ROCm reference and GC if unused
         env:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -175,6 +164,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: projects/rccl/tools/ci
+
       - name: Release ROCm reference and GC if unused
         env:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}

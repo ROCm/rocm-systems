@@ -72,6 +72,7 @@ jobs:
         with:
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
+
       - name: Fetch ROCm
         id: fetch
         env:
@@ -106,6 +107,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: projects/rccl/tools/ci
+
       # fetch-rocm.sh re-resolves the version/family/channel (to locate the cache
       # tree) even on a cache hit; the public CDNs need no token.
       - name: Resolve ROCm from cache

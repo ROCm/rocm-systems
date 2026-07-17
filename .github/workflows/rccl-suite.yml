@@ -64,12 +64,11 @@ on:
         required: false
         default: 240
     outputs:
-      tests_failed:
-        description: 'true if the build succeeded but the suite tests failed (non-gating signal).'
-        value: ${{ jobs.suite.outputs.tests_failed }}
-      tests_failed_summary:
-        description: 'The failed/skipped-test list when tests_failed is true (for downstream reporting).'
-        value: ${{ jobs.suite.outputs.tests_failed_summary }}
+      build_failed:
+        # true for a build/infra failure, false for a test-only failure. Lets the
+        # caller gate builds while keeping tests non-gating. AICOMRCCL-1478.
+        description: 'true if a build/infra step failed (not a test-only failure).'
+        value: ${{ jobs.suite.outputs.build_failed }}
   workflow_dispatch:
     inputs:
       suite:
@@ -136,8 +135,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     continue-on-error: ${{ inputs.non_gating }}
     outputs:
-      tests_failed: ${{ steps.test_result.outputs.tests_failed }}
-      tests_failed_summary: ${{ steps.test_result.outputs.tests_failed_summary }}
+      build_failed: ${{ steps.classify.outputs.build_failed }}
     defaults:
       run:
         shell: bash
@@ -172,6 +170,7 @@ jobs:
             projects/rocshmem
 
       - name: Provision ROCm (${{ inputs.rocm_release || 'latest' }}) on the head node
+        id: provision
         run: |
           set -euo pipefail
           export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
@@ -186,6 +185,7 @@ jobs:
           "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
 
       - name: Submit ${{ inputs.suite }} build+test to SLURM
+        id: submit
         run: |
           set -euo pipefail
           export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
@@ -222,35 +222,39 @@ jobs:
           # Verbose per-rank NCCL debug logs (RCCL_CI_DEBUG=1); noisy, kept last.
           dump "nccl-debug" "${logs_dir}"/nccl-debug/nccl-debug.*.log
 
-      # Surface test-only failures (sbatch sentinel) as a job output; build
-      # failures fail the submit step above and gate instead.
-      - name: Determine test result
-        id: test_result
+      # Test-only failure (sbatch drops a `tests-failed` sentinel, exits 0): turn
+      # this job red here, where the logs are. AICOMRCCL-1478.
+      - name: Fail on test failures
         if: always()
         run: |
           sentinel="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/tests-failed"
-          if [[ -f "${sentinel}" ]]; then
-            echo "tests_failed=true" >> "${GITHUB_OUTPUT}"
-            # Multiline job output so the non-gating check can echo the failed list.
-            {
-              echo "tests_failed_summary<<SUMMARY_EOF"
-              cat "${sentinel}"
-              echo "SUMMARY_EOF"
-            } >> "${GITHUB_OUTPUT}"
-            # Render the failed tests on this job's Summary tab (the findable place),
-            # not just buried in a collapsed log group.
-            {
-              echo "### ${SUITE}: tests failed (non-gating)"
-              echo ""
-              echo '```'
-              cat "${sentinel}"
-              echo '```'
-              echo ""
-              echo "_Full per-test output: the \`test\` log group of this job. Per-rank NCCL logs: the \`nccl-debug\` group._"
-            } >> "${GITHUB_STEP_SUMMARY}"
-            echo "::warning::${SUITE} tests failed (non-gating). See this job's Summary tab for the failed-test list."
+          if [[ ! -f "${sentinel}" ]]; then
+            echo "${SUITE}: no test failures."
+            exit 0
+          fi
+          # Surface the failed/skipped list on the job Summary tab, not just the log.
+          {
+            echo "### ${SUITE}: tests failed"
+            echo ""
+            echo '```'
+            cat "${sentinel}"
+            echo '```'
+            echo ""
+            echo "_Full per-test output: the \`test\` log group of this job. Per-rank NCCL logs: the \`nccl-debug\` group._"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::error::${SUITE} tests failed. See this job's Summary tab for the failed-test list."
+          exit 1
+
+      # Tell the caller whether this was a build/infra failure (gating) or a
+      # test-only failure (non-gating for gin). AICOMRCCL-1478.
+      - name: Classify failure
+        id: classify
+        if: always()
+        run: |
+          if [[ "${{ steps.provision.outcome }}" == "failure" || "${{ steps.submit.outcome }}" == "failure" ]]; then
+            echo "build_failed=true" >> "${GITHUB_OUTPUT}"
           else
-            echo "tests_failed=false" >> "${GITHUB_OUTPUT}"
+            echo "build_failed=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Clean up per-job workdir
