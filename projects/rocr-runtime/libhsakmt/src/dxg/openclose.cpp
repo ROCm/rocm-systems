@@ -41,6 +41,7 @@
 #include <cstring>
 #include <cassert>
 #include <mutex>
+#include <new>
 #include <algorithm>
 #include "util/os.h"
 #include "util/utils.h"
@@ -506,6 +507,19 @@ static void prepare_fork_handler(void) { dxg_runtime->hsakmt_mutex.lock(); }
 static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
+
+  /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
+   * no other thread would be mid-operation during the fork snapshot. In the
+   * child only this one thread survives, and its TID differs from whichever
+   * thread performed the lock in the parent, so the mutex's internal
+   * owner/lock state inherited via fork() is stale and can never be
+   * legitimately released by calling unlock() here. Reset it in place so
+   * the child starts with a fresh, unlocked mutex - otherwise the next
+   * hsaKmtOpenKFD() call in the child deadlocks forever waiting on a lock
+   * nobody in this process can release.
+   */
+  dxg_runtime->hsakmt_mutex.~recursive_mutex();
+  new (&dxg_runtime->hsakmt_mutex) std::recursive_mutex();
 }
 
 /* Call this from the child process after fork. This will clear all
