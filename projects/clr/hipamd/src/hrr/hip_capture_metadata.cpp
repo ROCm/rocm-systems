@@ -136,33 +136,52 @@ std::string collect_runtime_json() {
   return os.str();
 }
 
-std::string collect_devices_json() {
-  std::ostringstream os;
-  os << "[";
+struct DeviceMetadata {
+  std::string devices_json;
+  std::string errors_json;
+  int captured_count = 0;
+};
 
-  const int count = static_cast<int>(hip::g_devices.size());
+DeviceMetadata collect_device_metadata() {
+  std::ostringstream devices;
+  std::ostringstream errors;
+  devices << "[";
+  errors << "[";
 
-  for (int device = 0; device < count; ++device) {
-    if (device > 0) os << ",";
-    os << "\n"
-       << "    {\n"
-       << "      \"ordinal\": " << device << ",\n";
+  const int device_count = static_cast<int>(hip::g_devices.size());
+  bool first_device = true;
+  bool first_error = true;
+  int captured_count = 0;
 
+  for (int device = 0; device < device_count; ++device) {
     hipDeviceProp_t prop{};
     const hipError_t prop_err = hip::ihipGetDeviceProperties(&prop, device);
-    if (prop_err == hipSuccess) {
-      append_prop_fields(os, prop);
-    } else {
-      os << "      \"properties_error\": " << quote(hip_error_name(prop_err)) << "\n";
+    if (prop_err != hipSuccess) {
+      if (!first_error) errors << ",";
+      first_error = false;
+      errors << "\n"
+             << "    { \"ordinal\": " << device
+             << ", \"api\": \"ihipGetDeviceProperties\""
+             << ", \"error\": " << quote(hip_error_name(prop_err)) << " }";
+      continue;
     }
 
-    os << "\n"
-       << "    }";
+    if (!first_device) devices << ",";
+    first_device = false;
+    ++captured_count;
+    devices << "\n"
+            << "    {\n"
+            << "      \"ordinal\": " << device << ",\n";
+    append_prop_fields(devices, prop);
+    devices << "\n"
+            << "    }";
   }
 
-  os << "\n"
-     << "  ]";
-  return os.str();
+  devices << "\n"
+          << "  ]";
+  errors << "\n"
+         << "  ]";
+  return {devices.str(), errors.str(), captured_count};
 }
 
 }  // namespace
@@ -175,9 +194,11 @@ std::string Metadata::collect_json() const {
 
   int count = 0;
   count = static_cast<int>(hip::g_devices.size());
+  DeviceMetadata device_metadata = collect_device_metadata();
   os << "  \"device_count\": " << count << ",\n";
-
-  os << "  \"devices\": " << collect_devices_json() << "\n"
+  os << "  \"captured_device_count\": " << device_metadata.captured_count << ",\n";
+  os << "  \"device_metadata_errors\": " << device_metadata.errors_json << ",\n";
+  os << "  \"devices\": " << device_metadata.devices_json << "\n"
      << "}";
   return os.str();
 }

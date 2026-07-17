@@ -10,7 +10,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 namespace hrr_cap {
 namespace writer {
@@ -21,11 +20,6 @@ bool open(const char* output_dir);
 
 // Returns true if open() has been called successfully.
 bool is_open();
-
-// Store process-level capture metadata as a JSON object fragment. The writer
-// embeds this in pid-<pid>/manifest.json and promotes the owner process metadata
-// into the root manifest.json. Best-effort: invalid/empty metadata is ignored.
-void set_capture_metadata_json(std::string metadata_json);
 
 // Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
 // and write manifest.json with "complete": true. Safe to call multiple times

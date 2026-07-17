@@ -24,6 +24,7 @@
 
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
+#include "hip_capture_metadata.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -168,7 +169,6 @@ static std::string  g_output_dir;
 static char         g_manifest_path[kPathMax] = {0};
 static uint64_t     g_pid = 0;
 static uint64_t     g_parent_pid = 0;
-static std::string  g_metadata_json;
 
 // App-managed write buffer for events.bin (protected by g_file_mu).
 static uint8_t  g_buf[kBufCap];
@@ -495,8 +495,9 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
-  if (is_json_object_fragment(g_metadata_json)) {
-    fprintf(mf, ",\n  \"metadata\": %s\n", g_metadata_json.c_str());
+  const std::string metadata_json = hrr_cap::metadata::collect_json();
+  if (is_json_object_fragment(metadata_json)) {
+    fprintf(mf, ",\n  \"metadata\": %s\n", metadata_json.c_str());
   } else {
     fprintf(mf, "\n");
   }
@@ -1007,12 +1008,6 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 bool     is_open()      { std::lock_guard<std::mutex> lk(g_file_mu); return g_events_fd >= 0; }
 uint64_t event_count()  { return g_event_count.load(); }
 uint64_t blob_count()   { return g_blob_count.load(); }
-
-void set_capture_metadata_json(std::string metadata_json) {
-  if (!is_json_object_fragment(metadata_json)) return;
-  std::lock_guard<std::mutex> lk(g_file_mu);
-  g_metadata_json = std::move(metadata_json);
-}
 
 }  // namespace writer
 }  // namespace hrr_cap
