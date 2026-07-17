@@ -10,8 +10,9 @@
 #
 # The Slurm submit/poll/report scripts these steps call
 # (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py)
-# are version-controlled in ROCm/cvs:
-#   https://github.com/ROCm/cvs/tree/main/ci/rccl_perf_gate
+# are version-controlled in ROCm/cvs, on a branch with further related
+# changes landing before it merges to main:
+#   https://github.com/ROCm/cvs/tree/aimvt-196-rccl-regression-robustness/ci/rccl_perf_gate
 #
 # Flow per PR:
 #   1. Check out PR head with full history (merge-base resolution needs it).
@@ -113,14 +114,28 @@ jobs:
             # its own copy instead.
             RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
+            # Set the output before sbatch runs (not after) so the cleanup-on-
+            # failure step below can still find this path if sbatch fails.
+            echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
             sbatch --wait \
               --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
               --reservation="${SLURM_RESERVATION}" \
               "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch"
-            echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
           else
             echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Clean up per-run config copy on build failure
+        # Covers the case the detect job's own cleanup step can't: if sbatch
+        # fails after the per-run config copy was made, `detect` never runs
+        # (needs: build), so nothing else removes this file from NFS.
+        if: failure()
+        env:
+          _CONFIG: ${{ steps.resolve.outputs.config_json }}
+        run: |
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
 
   detect:
     needs: build
