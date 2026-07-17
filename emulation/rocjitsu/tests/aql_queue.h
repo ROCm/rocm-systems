@@ -77,6 +77,12 @@ public:
     submit(raw);
   }
 
+  void submit(const amdgpu::AmdBarrierValuePacket &pkt) {
+    hsa_kernel_dispatch_packet_t raw{};
+    std::memcpy(&raw, &pkt, sizeof(pkt));
+    submit(raw);
+  }
+
   /// Build and submit a kernel dispatch packet.
   void dispatch(uint64_t kernel_object, uint32_t grid_size_x, uint16_t workgroup_size_x = 64,
                 uint64_t kernarg_addr = 0) {

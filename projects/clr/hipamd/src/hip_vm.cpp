@@ -222,8 +222,14 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
 
   amd::Memory::HandleType htype = static_cast<amd::Memory::HandleType>(handleType);
 
-  if (!ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
-          ga->asAmdMemory(), flags, shareableHandle, htype)) {
+  amd::Device::VmmExportStatus export_status =
+      ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
+          ga->asAmdMemory(), flags, shareableHandle, htype);
+  if (export_status == amd::Device::VmmExportStatus::kResourceNotReady) {
+    LogPrintfError("Exporting Handle failed with flags: %d", flags);
+    HIP_RETURN(hipErrorNotReady);
+  }
+  if (export_status != amd::Device::VmmExportStatus::kSuccess) {
     LogPrintfError("Exporting Handle failed with flags: %d", flags);
     HIP_RETURN(hipErrorInvalidValue);
   }

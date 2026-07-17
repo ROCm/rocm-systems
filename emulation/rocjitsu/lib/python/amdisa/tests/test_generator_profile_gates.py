@@ -38,7 +38,11 @@ from amdisa.isa_profile import (
     Rdna4Profile,
 )
 from amdisa.parser import Parser
-from amdisa.semantics import InstructionSemantics, derive_all_semantics
+from amdisa.semantics import (
+    InstructionSemantics,
+    derive_all_semantics,
+    derive_semantics,
+)
 
 
 def _repo_root() -> Path:
@@ -124,6 +128,31 @@ def test_simm64_literals_require_operand_type():
 
     codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SIMM32', 'OPR_SIMM64'])
     assert codegen._supports_simm64_literal_operands()
+
+
+def test_generated_literal_fixups_separate_declared_and_dynamic_true16(
+    amdgpu_generated_root: Path,
+):
+    cdna3_vop2 = (amdgpu_generated_root / 'cdna3' / 'vop2.cpp').read_text()
+    madak_start = cdna3_vop2.index('VMadakF16Vop2::VMadakF16Vop2')
+    madak_end = cdna3_vop2.index('void VMadakF16Vop2::execute_impl', madak_start)
+    madak_ctor = cdna3_vop2[madak_start:madak_end]
+    assert 'Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu' in madak_ctor
+
+    rdna4_vop3 = (amdgpu_generated_root / 'rdna4' / 'vop3.cpp').read_text()
+    and_start = rdna4_vop3.index('VAndB16Vop3::VAndB16Vop3')
+    and_end = rdna4_vop3.index('void VAndB16Vop3::implicit_uses', and_start)
+    and_ctor = rdna4_vop3[and_start:and_end]
+    assert (
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32)'
+        in and_ctor
+    )
+    assert '((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u' in and_ctor
+    assert '((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u' in and_ctor
+
+    rdna4_operand = (amdgpu_generated_root / 'rdna4' / 'operand.cpp').read_text()
+    assert 'if (has_literal16_display_)' in rdna4_operand
+    assert 'static_cast<uint32_t>(encoding_value_)' in rdna4_operand
 
 
 def test_vop_dpp8_support_is_detected_from_machine_inst_structs():
@@ -388,6 +417,24 @@ def test_readlane_family_uses_source_vgpr_operand_type():
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_VGPR'
 
 
+def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        operand_types=[
+            'OPR_SRC_NOLIT',
+            'OPR_SRC_SIMPLE',
+            'OPR_SRC_VGPR_OR_ACCVGPR',
+        ]
+    )
+    sem = derive_semantics('V_PK_MOV_B32', 'ENC_VOP3P')
+    assert sem is not None
+    src0 = Operand('src0', 64, 'OPR_SRC_NOLIT', True, False, False, True, 1)
+    src1 = Operand('src1', 64, 'OPR_SRC_SIMPLE', True, False, False, True, 2)
+
+    assert codegen._constructor_operand_type(sem, src0) == 'OPR_SRC_NOLIT'
+    assert codegen._constructor_operand_type(sem, src1) == 'OPR_SRC_SIMPLE'
+
+
 def test_readlane_family_decodes_lane_selector_as_scalar_value():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -406,7 +453,7 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP3')
 
-    assert 'uint32_t lane = src1.read_scalar(wf);' in body
+    assert 'uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);' in body
     assert 'src1.encoding_value_' not in body
 
 
@@ -436,8 +483,11 @@ def test_div_scale_writes_explicit_sdst_mask():
     )
 
     assert 'if (wf.wf_size() <= 32)' in body
-    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
-    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
 
 
@@ -445,8 +495,11 @@ def test_vector_cmp_writes_explicit_sdst_mask():
     body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 't', 'u32', is_vop3=True)
 
     assert 'if (wf.wf_size() <= 32)' in body
-    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
-    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
 
 
@@ -461,8 +514,11 @@ def test_vop3_cmp_writes_explicit_mask_width_for_wave_size():
     body = gen_vector_cmp(['vdst'], ['src0', 'src1'], 'eq', 'f32', is_vop3=True)
 
     assert 'if (wf.wf_size() <= 32)' in body
-    assert 'vdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
-    assert 'vdst.write_scalar64(wf, vcc)' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(vdst, static_cast<uint32_t>(vcc))'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(vdst, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
 
 
@@ -470,8 +526,11 @@ def test_vop3_add_co_writes_explicit_sdst_mask_width_for_wave_size():
     body = gen_vector_add_co(['vdst', 'sdst'], ['src0', 'src1'], 'add', 'u32')
 
     assert 'if (wf.wf_size() <= 32)' in body
-    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
-    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
 
 
@@ -482,8 +541,11 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     assert 'uint64_t product = s0 * s1;' in body
     assert 'if (result < product)' in body
     assert 'carry |= 1ULL << lane;' in body
-    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(carry));' in body
-    assert 'sdst.write_scalar64(wf, carry);' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(carry));'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, carry);' in body
     assert 'wf.set_vcc(carry)' not in body
 
 
@@ -493,8 +555,11 @@ def test_vector_cmp_class_writes_explicit_sdst_mask():
     )
 
     assert 'if (wf.wf_size() <= 32)' in body
-    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
-    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert (
+        'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
+        in body
+    )
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
 
 
@@ -604,8 +669,12 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
         body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert 'auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i8' in body
-        assert 'auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i8' in body
+        assert (
+            'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
+            in body
+        )
+        assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
+        assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
         assert (
             'amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), 16, 16, 16, 8, dst,' in body
         )
@@ -613,8 +682,12 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
 
     body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i8' in body
-    assert 'auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i8' in body
+    assert (
+        'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
+        in body
+    )
+    assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
+    assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
     assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst,' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
 
@@ -658,7 +731,7 @@ def test_gfx1250_wmma_i32_iu4_emits_executor():
     inst = Instruction('V_WMMA_I32_16X16X16_IU4', 'ENC_VOP3P', 0, [])
     body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
 
-    assert 'auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i4' in body
+    assert '(inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)' in body
     assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base,' in body
 
 
@@ -839,10 +912,22 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
     vds_body = body_for('ENC_VDS')
     ds_body = body_for('ENC_DS')
 
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.addr, i);' in vds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.data0, i);' not in vds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.addr, i);' in ds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.data0, i);' not in ds_body
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+        in vds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+        not in vds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+        in ds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+        not in ds_body
+    )
     assert '2u * (lane & 0x3u)' in vds_body
     assert '2u * (lane & 0x3u)' in ds_body
 
@@ -942,7 +1027,10 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
     assert 'read_vop3_true16_src(inst.src2' not in mad_u32
-    assert 'uint32_t s2 = inst.src2.read_lane(wf, lane);' in mad_u32
+    assert (
+        'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);'
+        in mad_u32
+    )
 
     mad_i32 = _shared_execute_body(
         execute_shared, 'v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3'
@@ -952,7 +1040,8 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
     assert 'read_vop3_true16_src(inst.src2' not in mad_i32
     assert (
-        'int32_t s2 = static_cast<int32_t>(inst.src2.read_lane(wf, lane));' in mad_i32
+        'int32_t s2 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));'
+        in mad_i32
     )
 
     div_fixup = _shared_execute_body(
@@ -1012,21 +1101,24 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
     assert 'read_vop3_true16_src' not in unary
     assert 'write_vop3_true16_dst' not in unary
-    assert 'inst.vdst.write_lane' in unary
+    assert 'amdgpu::RegisterAccess(wf).write_lane(' in unary
+    assert 'inst.vdst, lane' in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
-    assert 'inst.vdst.write_lane' in binary
+    assert 'amdgpu::RegisterAccess(wf).write_lane(' in binary
+    assert 'inst.vdst, lane' in binary
 
     ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
     assert 'read_vop3_true16_src' not in ternary
     assert 'write_vop3_true16_dst' not in ternary
-    assert 'inst.vdst.write_lane' in ternary
+    assert 'amdgpu::RegisterAccess(wf).write_lane(' in ternary
+    assert 'inst.vdst, lane' in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
@@ -1395,8 +1487,8 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     body = vop3[start:end]
 
     assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-    assert 'uint32_t raw0 = src0.read_lane(wf, lane);' in body
-    assert 'uint32_t raw1 = src1.read_lane(wf, lane);' in body
+    assert 'uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);' in body
+    assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'util::f16_to_f32' in body
     assert 'util::f32_to_f16' in body
@@ -1418,7 +1510,8 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     assert 'if (inst_.abs & (1u << 0))' in body
     assert 'src = std::fabs(src);' in body
     assert 'if (inst_.neg & (1u << 0))' in body
-    assert 'vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(src));' in body
+    assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane,' in body
+    assert 'std::bit_cast<uint32_t>(src)' in body
 
 
 def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
@@ -1431,7 +1524,9 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
     body = execute_shared[start:end]
 
     assert 'ROCJITSU_TRY_SIMD_DOTC_F16(false);' in body
-    assert 'uint32_t acc = inst.vdst.read_lane(wf, lane);' in body
+    assert (
+        'uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);' in body
+    )
     assert 'float facc = std::bit_cast<float>(acc);' in body
     assert 'facc += a0 * b0 + a1 * b1;' in body
     assert 'throw util::UnimplementedInst' not in body
@@ -1617,6 +1712,10 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert '(word0 >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
+    assert 'bool literal_uses_f64_high_bits' in cpp
+    assert '(static_cast<uint64_t>(literal) << 32), true' in cpp
+    assert 'is_float64_op(opx_), literal_, srcx0' in cpp
+    assert 'is_float64_op(opy_), literal_, srcy0' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
     src_neg_start = cpp.index('bool Vopd::uses_src_neg_modifier')
@@ -1667,6 +1766,10 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
     assert '(word0 >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
+    assert 'literal_uses_f64_high_bits' in cpp
+    assert 'is_float64_op' not in cpp
+    assert 'false, literal_, srcx0' in cpp
+    assert 'false, literal_, srcy0' in cpp
     assert 'kVopdAddF64' not in cpp
     assert 'execute_slot64' not in cpp
     assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in cpp

@@ -602,13 +602,13 @@ void GraphExecSegmented::BuildSyncPlan() {
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal});
+           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
           {last_pkt, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal});
+           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
     }
 
     if (segment.segment_ids_edges.empty()) {
@@ -1152,7 +1152,6 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
     if (graphExec != this && graphExec->captureDeviceId_ == -1) {
       graphExec->captureDeviceId_ = captureDeviceId_;
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
     }
 
     for (const auto& [level, segment_ids] : graphExec->segments_per_level_) {
@@ -1547,7 +1546,6 @@ hipError_t GraphExecClassic::Init() {
 
     if (max_streams_dev_.size() == 1) {
       captureDeviceId_ = max_streams_dev_.begin()->first;
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
     } else if (max_streams_dev_.size() > 1) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
               "[hipGraph] Multi-device graph is not supported for classic scheduling path");
@@ -1728,7 +1726,6 @@ hipError_t GraphExecSegmented::Init() {
     }
   }
 
-  static_cast<ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
   return status;
 }
 
@@ -2021,13 +2018,8 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
     if (segment.child_graph_ptr != nullptr) {
       auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
       if (childGraphExec != nullptr) {
-        // Propagate instantiation device ID so BuildSyncPlan can
-        // access the device for barrier packet creation.
-        // Retain balances the release in ~Graph destructor.
         if (childGraphExec->captureDeviceId_ == -1) {
           childGraphExec->captureDeviceId_ = captureDeviceId_;
-          static_cast<amd::ReferenceCountedObject*>(
-              g_devices[captureDeviceId_])->retain();
         }
 
         // Child graphs share the same kernel arg manager as parent
@@ -2402,12 +2394,6 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
-  // Apply pre-computed patches -- writes HW events directly into flatPacketData
-  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
-  if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
-  }
-
   // Resolve a segment's assigned hip::Stream* from its pre-computed stream_id.
   // streams is the collision-handled streams_ vector built by UpdateStreams.
   auto resolveSegmentStream = [&](const Segment& seg) -> hip::Stream* {
@@ -2416,6 +2402,21 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
     return launch_stream;
   };
+
+  // Apply pre-computed patches -- writes HW events directly into flatPacketData
+  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
+  // Resolve each completion-signal patch's segment_id (set at BuildSyncPlan time) to
+  // the actual stream's queue index now that streams are available.
+  if (!sync_plan_.patch_list.empty()) {
+    for (auto& patch : sync_plan_.patch_list) {
+      if (patch.dep_slot == amd::Device::HwEventPatch::kCompletionSignal &&
+          patch.segment_id >= 0 &&
+          patch.segment_id < static_cast<int>(segments_.size())) {
+        patch.queue_index = resolveSegmentStream(segments_[patch.segment_id])->vdev()->index();
+      }
+    }
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
+  }
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.

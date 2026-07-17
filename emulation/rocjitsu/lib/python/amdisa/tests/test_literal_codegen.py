@@ -23,7 +23,9 @@ def _enc(name: str) -> InstEncoding:
     )
 
 
-def _literal_operand(size: int, operand_type: str) -> Operand:
+def _literal_operand(
+    size: int, operand_type: str, data_format_name: str = ''
+) -> Operand:
     return Operand(
         'literal',
         size,
@@ -33,6 +35,7 @@ def _literal_operand(size: int, operand_type: str) -> Operand:
         is_implicit=False,
         is_binary_ucode_required=True,
         order=2,
+        data_format_name=data_format_name,
     )
 
 
@@ -44,6 +47,7 @@ def _operand(
     is_input: bool = True,
     is_output: bool = False,
     order: int = 0,
+    data_format_name: str = '',
 ) -> Operand:
     return Operand(
         name,
@@ -54,6 +58,7 @@ def _operand(
         is_implicit=False,
         is_binary_ucode_required=False,
         order=order,
+        data_format_name=data_format_name,
     )
 
 
@@ -99,6 +104,102 @@ def test_simm32_literal_operand_is_initialized_from_extension_word():
     ) == stmt
 
 
+def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC_VGPR',
+            size=64,
+            data_format_name='FMT_NUM_F64',
+        ),
+        'Vop2InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == stmt
+
+
+def test_f64_simm32_literal_operand_falls_back_to_semantics():
+    sem = InstructionSemantics(
+        'V_FMAC_F64',
+        'vector_binop',
+        operation='fmac',
+        data_type='f64',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC_VGPR', size=64),
+        'Vop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == stmt
+
+
+def test_mixed_width_literal_operands_classify_per_operand_signature():
+    src0_stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC_NOLIT',
+            size=64,
+            data_format_name='FMT_NUM_F64',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+    src1_stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src1',
+            'OPR_SRC_SIMPLE',
+            size=32,
+            data_format_name='FMT_NUM_B32',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(64, OperandType::OPR_SIMM32, '
+        '(static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32) '
+        '<< 32), true);'
+    ) == src0_stmt
+    assert (
+        'src1 = Operand(32, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));'
+    ) == src1_stmt
+
+
+def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
+    sem = InstructionSemantics(
+        'S_MUL_U64',
+        'scalar_binop',
+        operation='mul',
+        data_type='u64',
+        sets_scc='none',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64, data_format_name='FMT_NUM_U64'),
+        'Sop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
 def test_simm16_literal_operand_uses_low_half_of_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(16, 'OPR_SIMM16'), 'Vop2InstLiteralMachineInst'
@@ -109,6 +210,59 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
         'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
         '& 0xFFFFu)));'
     ) == stmt
+
+
+def test_declared_16bit_simm32_literal_uses_low_half_of_extension_word():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(16, 'OPR_SIMM32'), 'Vop2InstLiteralMachineInst'
+    )
+
+    assert (
+        'literal = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_non_opsel_16bit_retyped_simm32_literal_uses_low_half():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC', size=16),
+        'Vop2InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 '
+        '& 0xFFFFu)));'
+    ) == stmt
+
+
+def test_dynamic_true16_simm32_literal_keeps_raw_and_selected_display_values():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src0', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=0,
+    )
+
+    assert (
+        'src0 = Operand(16, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 '
+        '>> (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) & 0xFFFFu), true);'
+    ) == stmt
+
+
+def test_dynamic_true16_display_uses_each_sources_opsel_bit():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SRC', size=16),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+        dynamic_true16_opsel_bit=2,
+    )
+
+    assert '((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u' in stmt
 
 
 def test_existing_literal_operand_does_not_need_simm32_fallback_member():
@@ -193,10 +347,12 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(ssrc0.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(src2.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(ssrc1.read_scalar(wf))' in body
-    assert body.index('src2.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
+    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(src2)') < body.index(
+        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
+    )
 
 
 def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
@@ -230,11 +386,11 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'ssrc0.read_scalar64(wf)' in body
-    assert 'ssrc1.read_scalar64(wf)' in body
-    assert 'sdst.write_scalar64(wf, result);' in body
-    assert 'ssrc0.read_scalar(wf)' not in body
-    assert 'ssrc1.read_scalar(wf)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
 
 
 def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():
