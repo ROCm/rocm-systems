@@ -670,6 +670,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaScratchBytes = 0;
   comm->ddaScratchIsVmm = false;
   comm->ddaPeerPtrsDev = nullptr;
+  comm->ddaPeerPtrsHost = nullptr;
   comm->ddaIpcBarrierState = nullptr;
   comm->ddaFabricBarrierState = nullptr;
   comm->ddaFabricMemHandler = nullptr;
