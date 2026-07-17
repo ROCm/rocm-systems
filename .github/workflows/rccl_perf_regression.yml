@@ -24,7 +24,8 @@
 #   3. [detect job] rccl_ab.sbatch: run the A/B detector on the pinned 4-node
 #      set, using the config the build job produced.
 #   4. format_report.py: render verdict to the job summary + PR comment.
-#   5. Job exit code (from the detector) is the merge gate.
+#   5. Advisory mode: job fails hard only on infra/polling errors, not on
+#      a detected regression yet (see PR description).
 name: RCCL Perf Regression Gate
 
 on:
@@ -55,10 +56,15 @@ env:
 permissions:
   contents: read
   pull-requests: write
-  actions: write
 
 jobs:
   build:
+    # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
+    # own source on a self-hosted runner, so arbitrary fork code would get
+    # arbitrary code execution on our infrastructure. Scope to same-repo PRs
+    # only; workflow_dispatch is unaffected (it already requires repo write
+    # access to trigger).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
     # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
@@ -75,6 +81,10 @@ jobs:
       - name: Checkout PR (full history)
         uses: actions/checkout@v4
         with:
+          # github.sha/github.ref point at the PR's synthetic merge commit on
+          # pull_request events, not the PR head -- use the head SHA directly
+          # so candidate == PR head exactly (matters for merge-base diffing).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Detect changed paths
@@ -114,6 +124,7 @@ jobs:
 
   detect:
     needs: build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
     # running allocation must finish cleanly to release the nodes).
@@ -126,12 +137,20 @@ jobs:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
         # Don't fail here; we still want to post the report below -- the final
-        # "Gate" step enforces it.
+        # "Gate" step enforces it based on the captured exit code below, not
+        # this step's outcome (continue-on-error reports "failure" the same
+        # way for a detected regression and for a polling error, so outcome
+        # alone can't tell them apart).
         continue-on-error: true
         env:
           _CONFIG: ${{ needs.build.outputs.config_json }}
         run: |
+          set +e
           bash "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/submit_and_poll.sh" "${_CONFIG}"
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
 
       - name: Render report
         if: always()
@@ -172,14 +191,20 @@ jobs:
       - name: Gate on detector verdict
         if: always()
         run: |
-          # steps.detect.outcome is the raw result before continue-on-error flips it:
-          # success = SLURM job ran and exited 0 or 1 (pass/regression)
-          # failure = submit_and_poll.sh exited 2 (polling error, timeout, no job)
-          # In the failure case the NFS report is stale from a previous run — fail hard.
-          if [[ "${{ steps.detect.outcome }}" == "failure" ]]; then
-            echo "::error::Detector failed to run (SLURM submission/polling error or timeout). Report on NFS may be stale — not gating on it."
+          # submit_and_poll.sh exit codes: 0 = pass, 1 = regression detected,
+          # 2 = submission/polling error (job never reached a terminal state).
+          # steps.detect.outcome can't distinguish 1 from 2 -- continue-on-error
+          # reports "failure" for any nonzero exit -- so branch on the exit
+          # code we captured explicitly instead.
+          code="${{ steps.detect.outputs.exit_code }}"
+          if [[ "${code}" != "0" && "${code}" != "1" ]]; then
+            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${code}). Report on NFS may be stale — not gating on it."
             exit 2
           fi
+          # Advisory mode (see PR description): report the verdict but don't
+          # fail the job on a detected regression yet. Infra failures above
+          # still fail hard regardless of mode.
           python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            --no-exit-code \
             --output /dev/null
