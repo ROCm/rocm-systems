@@ -9,6 +9,7 @@
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "logger/debug.hpp"
+#include "timemory/settings/settings.hpp"
 
 #include <spdlog/fmt/ranges.h>
 
@@ -41,10 +42,11 @@ struct version_info
 // Replaced by a mock in tests.
 struct default_sdk_externals
 {
-    static auto* get_settings() { return ::rocprofsys::settings::instance(); }
-    static bool  get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
-    static bool  get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
-    static bool  get_use_unified_memory_profiling()
+    using Settings = tim::settings;
+    static Settings* get_settings() { return ::rocprofsys::settings::instance(); }
+    static bool      get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
+    static bool      get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
+    static bool      get_use_unified_memory_profiling()
     {
         return ::rocprofsys::config::get_use_unified_memory_profiling();
     }
@@ -72,13 +74,18 @@ struct default_sdk_externals
     {
         return ::rocprofsys::get_gpu_perf_counters();
     }
+
+    static std::optional<std::string> get_setting_value(std::string_view s)
+    {
+        return ::rocprofsys::get_setting_value<std::string>(std::string{ s });
+    }
 };
 
 template <typename Wrapper, typename Externals = default_sdk_externals>
 class sdk_core
 {
 public:
-    static void config_settings(const std::shared_ptr<settings>&);
+    static void config_settings(const std::shared_ptr<typename Externals::Settings>&);
 
     static version_info& get_version();
 
@@ -166,8 +173,8 @@ public:
     template <typename Tp>
     static auto insert_config_setting(
 
-        const std::shared_ptr<settings>& config, std::string_view env_name,
-        std::string_view description, Tp initial_value,
+        const std::shared_ptr<typename Externals::Settings>& config,
+        std::string_view env_name, std::string_view description, Tp initial_value,
         std::initializer_list<std::string_view> extra_categories);
 
 private:
@@ -289,7 +296,7 @@ sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
         return all_operation_ids;
     }
 
-    auto operations_filter = get_setting_value<std::string>(operations_setting);
+    auto operations_filter = Externals::get_setting_value(operations_setting);
     if(!operations_filter)
     {
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
@@ -385,8 +392,8 @@ template <typename Wrapper, typename Externals>
 template <typename Tp>
 auto
 sdk_core<Wrapper, Externals>::insert_config_setting(
-    const std::shared_ptr<settings>& config, std::string_view env_name,
-    std::string_view description, Tp initial_value,
+    const std::shared_ptr<typename Externals::Settings>& config,
+    std::string_view env_name, std::string_view description, Tp initial_value,
     std::initializer_list<std::string_view> extra_categories)
 {
     auto env_str    = std::string{ env_name };
@@ -394,7 +401,7 @@ sdk_core<Wrapper, Externals>::insert_config_setting(
     for(auto cat : extra_categories)
         categories.emplace(cat);
 
-    auto [it, inserted] = config->insert<Tp, Tp>(
+    auto [it, inserted] = config->template insert<Tp, Tp>(
         env_str, get_setting_name(env_str), std::string{ description },
         Tp{ std::move(initial_value) }, std::move(categories));
 
@@ -431,7 +438,8 @@ sdk_core<Wrapper, Externals>::get_version()
 
 template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper, Externals>::config_settings(const std::shared_ptr<settings>& _config)
+sdk_core<Wrapper, Externals>::config_settings(
+    const std::shared_ptr<typename Externals::Settings>& _config)
 {
     const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
     const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
