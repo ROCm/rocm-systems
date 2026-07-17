@@ -21,9 +21,10 @@ import re
 import shlex
 import subprocess
 import sys
-import time
 from dataclasses import dataclass, field, fields
 from typing import List, Optional
+
+import slurm
 
 DEFAULT_ROCM_IMAGE = (
     "registry-sc-harbor.amd.com/framework/therock-release:"
@@ -155,10 +156,11 @@ class RunConfig:
         return m.group(0) if m else ""
 
     def reexec_vars(self) -> dict:
-        """Resolved values re-exported across a salloc/sbatch boundary so the
-        second process (compute node) uses identical settings and does not re-allocate."""
+        """Resolved values propagated across the salloc/sbatch boundary so the
+        second process (compute node) uses identical settings. ALLOC_MODE is owned
+        by the slurm layer, which forces it to "inherit" for the child."""
         return dict(
-            WORKLOAD=self.workload, ALLOC_MODE="inherit", RUN_ID=self.run_id,
+            WORKLOAD=self.workload, RUN_ID=self.run_id,
             ROCM_IMAGE=self.rocm_image, DOCKERFILE=self.dockerfile, GPU_ARCH=self.gpu_arch,
             NIC_TYPE=self.nic_type, NODES=str(self.nodes), PARTITION=self.partition,
             ACCOUNT=self.account, GPUS_PER_NODE=str(self.gpus_per_node),
@@ -168,11 +170,21 @@ class RunConfig:
             EXTRA_VOLUMES=self.extra_volumes,
         )
 
-    def child_env(self) -> dict:
-        """Env for the salloc re-exec (full environment + resolved overrides)."""
-        env = dict(os.environ)
-        env.update(self.reexec_vars())
-        return env
+    def slurm_spec(self) -> "slurm.SlurmSpec":
+        """Map the resolved SLURM fields onto the reusable slurm layer's spec.
+
+        GRES follows the layer's None/""/value convention: unset -> default
+        gpu:<N>, empty -> omit --gres, else verbatim."""
+        gres = os.environ["GRES"] if "GRES" in os.environ else None
+        return slurm.SlurmSpec(
+            nodes=self.nodes, partition=self.partition, account=self.account,
+            reservation=self.reservation, gpus_per_node=self.gpus_per_node,
+            time_limit=self.time_limit, alloc_mode=self.alloc_mode,
+            gres=gres, salloc_extra=_env("SALLOC_EXTRA", ""),
+            job_name=f"rccl-{self.workload}-{self.gpu_arch}",
+            run_id=self.run_id,
+            run_dir=os.path.dirname(self.hostfile) or "~/.mnctl",
+        )
 
 
 class Orchestrator:
@@ -204,111 +216,22 @@ class Orchestrator:
         if not (self.cfg.mnctl_dir and os.path.isdir(os.path.join(self.cfg.mnctl_dir, "mnctl"))):
             sys.exit(f"ERROR: mnctl not found at {self.cfg.mnctl_dir!r}; set MNCTL_DIR.")
 
-    def _alloc_flags(self) -> List[str]:
-        """SLURM flags shared by salloc and sbatch."""
-        c = self.cfg
-        flags = ["-N", str(c.nodes), "-p", c.partition]
-        if c.account:                       # some clusters (e.g. ruby) use no -A
-            flags += ["-A", c.account]
-        # GPU request differs per cluster. Default asks for `gpu:<N>` via --gres, but
-        # some clusters don't define a `gpu` gres (ruby: "Invalid gres specification")
-        # or hand out whole nodes. Override with GRES (a gres string, or "" to omit)
-        # and/or SALLOC_EXTRA (e.g. "--exclusive" or "--gpus-per-node=8").
-        gres = _env("GRES", f"gpu:{c.gpus_per_node}")
-        if gres:
-            flags.append(f"--gres={gres}")
-        flags += [f"--ntasks-per-node={c.gpus_per_node}", "-t", c.time_limit]
-        if c.reservation:
-            flags.append(f"--reservation={c.reservation}")
-        extra = _env("SALLOC_EXTRA", "")
-        if extra:
-            flags += shlex.split(extra)
-        return flags
-
     def maybe_allocate(self) -> None:
-        """Acquire a SLURM allocation per ALLOC_MODE (selectable per run):
-          auto (default)   -> salloc a fresh allocation unless one is already visible
-          salloc           -> always salloc a fresh allocation ("new" is an alias)
-          sbatch           -> submit a batch job (sbatch --wait) and stream its output
-          existing/inherit -> reuse the current allocation (no new alloc)
-        """
-        c = self.cfg
-        need = c.alloc_mode in ("salloc", "sbatch") or (
-            c.alloc_mode == "auto" and not os.environ.get("SLURM_JOB_NODELIST")
-            and not self._running_job()
-        )
-        if not need:
-            return
-        if c.alloc_mode == "sbatch":
-            self._submit_sbatch()            # blocks until done, then exits
-        else:
-            self._salloc_reexec()            # replaces this process
-
-    def _salloc_reexec(self) -> None:
-        c = self.cfg
-        log(f"Allocating {c.nodes} node(s) via salloc on partition={c.partition} "
-            f"account={c.account or '(none)'} ...")
-        inner = f"exec python3 {shlex.quote(self.entrypoint)}"
-        salloc = ["salloc", *self._alloc_flags(), "bash", "-c", inner]
-        os.execvpe("salloc", salloc, c.child_env())  # replaces this process
-
-    def _submit_sbatch(self) -> None:
-        c = self.cfg
-        rundir = os.path.dirname(c.hostfile) or os.path.expanduser("~/.mnctl")
-        os.makedirs(rundir, exist_ok=True)
-        script_path = os.path.join(rundir, f"{c.run_id}.sbatch.sh")
-        logfile = os.path.join(rundir, f"{c.run_id}.sbatch.out")
-        # Re-export resolved values and force ALLOC_MODE=inherit so the batch job
-        # (which inherits the submit env via --export=ALL) does not submit again.
-        exports = "\n".join(f"export {k}={shlex.quote(v)}"
-                            for k, v in c.reexec_vars().items())
-        with open(script_path, "w") as f:
-            f.write("#!/bin/bash\n"
-                    f"{exports}\n"
-                    f"exec python3 {shlex.quote(self.entrypoint)}\n")
-        os.chmod(script_path, 0o755)
-        sbatch = ["sbatch", "--wait", f"--output={logfile}",
-                  f"--job-name=rccl-{c.workload}-{c.gpu_arch}",
-                  *self._alloc_flags(), script_path]
-        log(f"Submitting sbatch job ({c.nodes} node(s), partition={c.partition}, "
-            f"account={c.account or '(none)'}); output -> {logfile}")
-        log("$ " + " ".join(shlex.quote(a) for a in sbatch))
-        open(logfile, "w").close()           # ensure it exists so tail can follow
-        tail = subprocess.Popen(["tail", "-n", "+1", "-F", logfile])
-        try:
-            rc = subprocess.run(sbatch).returncode
-        finally:
-            time.sleep(1)                    # let tail flush the final lines
-            tail.terminate()
-        sys.exit(rc)
-
-    def _running_job(self) -> str:
-        out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "-o", "%i"],
-                            capture_output=True, text=True)
-        return out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+        """Acquire a SLURM allocation via the reusable slurm layer (selectable per
+        run through ALLOC_MODE). May replace this process (salloc) or submit and
+        wait (sbatch); a no-op for existing/inherit."""
+        slurm.allocate(self.cfg.slurm_spec(), self.entrypoint, self.cfg.reexec_vars())
 
     def resolve_nodelist(self) -> None:
         c = self.cfg
-        nodelist = os.environ.get("SLURM_JOB_NODELIST", "")
-        if not nodelist:
-            out = subprocess.run(["squeue", "-u", os.environ["USER"], "-t", "R", "-h", "-o", "%i %N"],
-                                capture_output=True, text=True).stdout.strip().splitlines()
-            if not out:
-                sys.exit("ERROR: no running SLURM allocation found")
-            jobid, nodelist = sorted(out, reverse=True)[0].split(maxsplit=1)
-            log(f"Attaching to existing job {jobid}")
-        names = subprocess.run(["scontrol", "show", "hostnames", nodelist],
-                              capture_output=True, text=True, check=True).stdout.split()
-        c.hosts, c.head = names, names[0]
+        c.hosts, c.head = slurm.resolve_nodelist()
         log(f"Nodes: {' '.join(c.hosts)}  (head={c.head})")
 
     def write_hostfile(self) -> None:
         c = self.cfg
-        for d in (c.shared_dir, c.builds_dir, os.path.dirname(c.hostfile)):
+        for d in (c.shared_dir, c.builds_dir):
             os.makedirs(d, exist_ok=True)
-        with open(c.hostfile, "w") as f:
-            for h in c.hosts:
-                f.write(f"{h} slots={c.gpus_per_node}\n")
+        slurm.write_hostfile(c.hostfile, c.hosts, c.gpus_per_node)
         log(f"Run ID: {c.run_id}")
         log(f"Hostfile: {c.hostfile}")
         print(open(c.hostfile).read(), end="")
