@@ -6,7 +6,7 @@
  * JSON file instead of (or in addition to) process-level env vars.
  *
  * Usage:
- *   export NCCL_ENV_PLUGIN=/path/to/libnccl-env-json.so
+ *   export NCCL_ENV_PLUGIN=/path/to/librccl-env-json.so
  *   export NCCL_ENV_JSON_FILE=/path/to/config.json
  *
  * The JSON file is a flat object mapping NCCL/RCCL variable names to
@@ -69,7 +69,10 @@ static int loadJsonFile(const char *path) {
   if (!buf) { fclose(f); return -1; }
 
   size_t n = fread(buf, 1, MAX_FILE_SIZE - 1, f);
+  int readErr = ferror(f);
+  int truncated = !feof(f);
   fclose(f);
+  if (readErr || truncated) { free(buf); return -1; }
   buf[n] = '\0';
 
   numEntries = 0;
@@ -81,26 +84,28 @@ static int loadJsonFile(const char *path) {
   while (numEntries < MAX_ENTRIES) {
     skipWhitespace(&p);
     if (*p == '}') break;
-    if (*p == ',') { p++; continue; }
+    if (*p == ',' && numEntries > 0) { p++; continue; }
 
-    char key[MAX_KEY_LEN], val[MAX_VAL_LEN];
-    if (parseString(&p, key, MAX_KEY_LEN) != 0) break;
+    if (parseString(&p, entries[numEntries].key, MAX_KEY_LEN) != 0) {
+      free(buf);
+      return -1;
+    }
 
     skipWhitespace(&p);
-    if (*p != ':') break;
+    if (*p != ':') { free(buf); return -1; }
     p++;
 
-    if (parseString(&p, val, MAX_VAL_LEN) != 0) break;
+    if (parseString(&p, entries[numEntries].value, MAX_VAL_LEN) != 0) {
+      free(buf);
+      return -1;
+    }
 
-    strncpy(entries[numEntries].key, key, MAX_KEY_LEN - 1);
-    entries[numEntries].key[MAX_KEY_LEN - 1] = '\0';
-    strncpy(entries[numEntries].value, val, MAX_VAL_LEN - 1);
-    entries[numEntries].value[MAX_VAL_LEN - 1] = '\0';
     numEntries++;
   }
 
+  int ok = (*p == '}') ? 0 : -1;
   free(buf);
-  return 0;
+  return ok;
 }
 
 static ncclResult_t ncclEnvJsonInit(uint8_t ncclMajor, uint8_t ncclMinor,
