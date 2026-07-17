@@ -8,7 +8,7 @@ Hardware features
 
 This page gives an overview of the different hardware architectures and the
 features they implement. Hardware features do not imply performance, that
-depends on the specifications found in the :doc:`rocm:reference/gpu-arch-specs`
+depends on the specifications found in the :doc:`rocm:reference/gpu-specs`
 page.
 
   .. list-table::
