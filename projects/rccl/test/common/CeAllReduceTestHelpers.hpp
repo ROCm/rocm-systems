@@ -11,8 +11,8 @@
  
  #include <hip/hip_runtime.h>
  
- #include "ce_coll.h"
  #include "comm.h"
+ #include "ce_coll.h"
  #include "nccl.h"
  
  namespace RcclUnitTesting

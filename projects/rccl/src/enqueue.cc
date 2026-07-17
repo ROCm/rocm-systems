@@ -3569,6 +3569,7 @@ static ncclResult_t rmaTaskAppend(
 }
 
 RCCL_PARAM(ForceCe,"FORCE_CE",1);
+RCCL_PARAM_DECLARE(CeAllReduce);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
@@ -3649,7 +3650,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
-        if (!ceArGraphAllowed) {
+        if (!ceArGraphAllowed || (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
         } else {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
