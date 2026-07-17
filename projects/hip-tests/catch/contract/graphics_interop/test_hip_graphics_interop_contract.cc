@@ -27,14 +27,25 @@ void RequireRejected(hipError_t status) {
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphicsInterop_MapResources_NullResources_IsRejected) {
-  // Mapping with a null resource array (and zero count) is invalid input and
-  // must be rejected rather than silently succeeding.
-  RequireRejected(hipGraphicsMapResources(0, nullptr, nullptr));
+  // A positive count with a null resource array is invalid input and must be
+  // rejected. count must be > 0 so the null-array check is actually reached: the
+  // runtime rejects count <= 0 first, so a zero count would never exercise the
+  // null-array path.
+  RequireRejected(hipGraphicsMapResources(1, nullptr, nullptr));
+
+  // A non-null array whose single element is null must likewise be rejected.
+  hipGraphicsResource_t resources[1] = {nullptr};
+  RequireRejected(hipGraphicsMapResources(1, resources, nullptr));
 }
 
 HIP_TEST_CASE(Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected) {
-  // Unmapping with a null resource array is invalid input and must be rejected.
-  RequireRejected(hipGraphicsUnmapResources(0, nullptr, nullptr));
+  // A positive count with a null resource array must be rejected (count > 0 so
+  // the null-array check is reached rather than short-circuited by count <= 0).
+  RequireRejected(hipGraphicsUnmapResources(1, nullptr, nullptr));
+
+  // A non-null array whose single element is null must likewise be rejected.
+  hipGraphicsResource_t resources[1] = {nullptr};
+  RequireRejected(hipGraphicsUnmapResources(1, resources, nullptr));
 }
 
 HIP_TEST_CASE(Contract_GraphicsInterop_UnregisterResource_NullHandle_IsRejected) {

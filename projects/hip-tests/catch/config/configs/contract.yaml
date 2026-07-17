@@ -1353,9 +1353,6 @@ contract:
   Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundTrip:
     <<: *level_0
     tags: [texture_reference_symbol]
-  Contract_TextureReferenceSymbol_BorderColor_SucceedsWithoutRoundTrip:
-    <<: *level_0
-    tags: [texture_reference_symbol]
   Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInvalidValue:
     <<: *level_0
     tags: [texture_reference_symbol]

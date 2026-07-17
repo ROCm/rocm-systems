@@ -6,11 +6,25 @@
 
 #include <cstddef>
 
+#if !defined(_WIN32)
+#include <unistd.h>  // ::close for exported POSIX/dma-buf file descriptors
+#endif
+
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
 namespace {
+// Closes an exported POSIX/dma-buf file descriptor. Registered on the cleanup
+// guard so the fd is released even if a later assertion throws and unwinds.
+void CloseFd(int fd) {
+  if (fd >= 0) {
+#if !defined(_WIN32)
+    (void)::close(fd);
+#endif
+  }
+}
+
 int CurrentDevice() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
@@ -85,7 +99,13 @@ struct MappedAllocation {
   bool mapped = false;
 };
 
-bool CreateMappedAllocation(MappedAllocation* out) {
+// Creates a mapped VMM allocation, registering each resource's teardown on the
+// cleanup guard immediately as it is acquired. This is exception-safe: if any
+// step throws through HIP_CHECK (e.g. hipMemAddressReserve or a non-NotSupported
+// hipMemMap failure), the guard still unwinds the resources acquired so far.
+// Returns false (with everything acquired so far already registered for cleanup)
+// when a step reports hipErrorNotSupported so callers can skip.
+bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAllocation* out) {
   out->size = AllocationGranularity();
 
   const auto prop = DeviceAllocationProp();
@@ -94,33 +114,23 @@ bool CreateMappedAllocation(MappedAllocation* out) {
     return false;
   }
   HIP_CHECK(status);
+  cleanup.Add([out] { (void)hipMemRelease(out->handle); });
 
   HIP_CHECK(hipMemAddressReserve(&out->address, out->size, 0, nullptr, 0));
+  cleanup.Add([out] {
+    if (out->address != nullptr) (void)hipMemAddressFree(out->address, out->size);
+  });
 
   status = hipMemMap(out->address, out->size, 0, out->handle, 0);
   if (status == hipErrorNotSupported) {
-    HIP_CHECK(hipMemAddressFree(out->address, out->size));
-    HIP_CHECK(hipMemRelease(out->handle));
-    out->address = nullptr;
     return false;
   }
   HIP_CHECK(status);
   out->mapped = true;
+  cleanup.Add([out] {
+    if (out->mapped) (void)hipMemUnmap(out->address, out->size);
+  });
   return true;
-}
-
-// Registers the reverse teardown (unmap -> address free -> release) for a mapped
-// allocation on the cleanup guard, so it runs even if a later assertion throws.
-// Registered release-first so the guard unwinds it last.
-void RegisterMappedAllocationCleanup(hip::contract::ContractCleanup& cleanup,
-                                     MappedAllocation& alloc) {
-  cleanup.Add([&] { (void)hipMemRelease(alloc.handle); });
-  cleanup.Add([&] {
-    if (alloc.address != nullptr) (void)hipMemAddressFree(alloc.address, alloc.size);
-  });
-  cleanup.Add([&] {
-    if (alloc.mapped) (void)hipMemUnmap(alloc.address, alloc.size);
-  });
 }
 }  // namespace
 
@@ -129,10 +139,9 @@ HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
   hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
-  if (!CreateMappedAllocation(&alloc)) {
+  if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
-  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // Retaining the allocation handle for a mapped address must return a usable
   // handle that can be released independently of the original.
@@ -146,10 +155,9 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
-  if (!CreateMappedAllocation(&alloc)) {
+  if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
-  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // The properties queried from the handle must reflect what the allocation was
   // created with: pinned type on the current device location.
@@ -165,10 +173,9 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   hip::contract::ContractCleanup cleanup;
 
   MappedAllocation alloc;
-  if (!CreateMappedAllocation(&alloc)) {
+  if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
-  RegisterMappedAllocationCleanup(cleanup, alloc);
 
   // Exporting a dma-buf file descriptor for the mapped range is an OS/driver
   // capability. When supported it must yield a non-negative fd; when not, the
@@ -181,6 +188,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   if (status != hipSuccess) {
     HIP_SKIP_TEST("dma-buf handle export is not supported by this device/runtime path.");
   }
+  cleanup.Add([&] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 }
 
@@ -215,6 +223,7 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
     HIP_SKIP_TEST("VMM shareable-handle export is not supported by this device/runtime path.");
   }
   HIP_CHECK(export_status);
+  cleanup.Add([&] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 
   // The exported descriptor must import back into a usable generic allocation

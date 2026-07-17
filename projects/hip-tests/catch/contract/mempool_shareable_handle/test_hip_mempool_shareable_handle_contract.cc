@@ -6,6 +6,10 @@
 
 #include <cstddef>
 
+#if !defined(_WIN32)
+#include <unistd.h>  // ::close for the exported POSIX file descriptor
+#endif
+
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
@@ -15,6 +19,16 @@ namespace {
 // The shareable-handle contract does not depend on the allocation size, so a
 // small request keeps the test cheap and portable.
 constexpr size_t kAllocSize = 64;
+
+// Closes an exported POSIX file descriptor. Registered on the cleanup guard so
+// the fd is released even if a later assertion throws and unwinds.
+void CloseFd(int fd) {
+  if (fd >= 0) {
+#if !defined(_WIN32)
+    (void)::close(fd);
+#endif
+  }
+}
 
 int CurrentDevice() {
   int device = 0;
@@ -79,6 +93,7 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
   if (!ExportToFdOrSkip(pool, &fd)) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
+  cleanup.Add([&] { CloseFd(fd); });
 
   // A successful POSIX-fd export must yield a valid, non-negative descriptor.
   REQUIRE(fd >= 0);
@@ -102,6 +117,7 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
   if (!ExportToFdOrSkip(pool, &fd)) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
+  cleanup.Add([&] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 
   hipMemPool_t imported = nullptr;

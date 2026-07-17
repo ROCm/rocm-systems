@@ -246,38 +246,16 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundT
 }
 
 // ---------------------------------------------------------------------------
-// Deprecated-stub contracts: the border-color and mipmap-parameter getters do
-// not read back their set value on the AMD backend by design. The contract is
-// the documented stub behavior, not a CUDA-style round-trip.
+// Deprecated-stub contracts: the mipmap-parameter getters do not read back their
+// set value on the AMD backend by design. The contract is the documented stub
+// behavior, not a CUDA-style round-trip.
+//
+// hipTexRefSetBorderColor/hipTexRefGetBorderColor are intentionally NOT tested:
+// the AMD runtime implements both with an unconditional assert(false) after the
+// image-support check (clr/hipamd/src/hip_texture.cpp), so calling them aborts
+// the whole test binary in assert-enabled builds. There is no defined contract
+// to assert until the runtime stores border-color state on the reference.
 // ---------------------------------------------------------------------------
-
-// hipTexRefSetBorderColor and hipTexRefGetBorderColor both succeed, but the value
-// does not round-trip on this backend: the reference has no border-color storage
-// (the getter is a documented stub), so the set value is not read back. The
-// contract asserts that both calls succeed and that the set value is NOT returned.
-HIP_TEST_CASE(Contract_TextureReferenceSymbol_BorderColor_SucceedsWithoutRoundTrip) {
-  CHECK_IMAGE_SUPPORT;
-
-  constexpr float kSetValue = 0.25f;
-  float border[4] = {kSetValue, 0.5f, 0.75f, 1.0f};
-  const hipError_t set_status = hipTexRefSetBorderColor(&g_tex_ref_symbol_1d, border);
-  if (IsUnsupported(set_status)) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("hipTexRefSetBorderColor is not supported by this runtime path.");
-  }
-  HIP_CHECK(set_status);
-
-  float returned[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
-  const hipError_t get_status = hipTexRefGetBorderColor(returned, &g_tex_ref_symbol_1d);
-  if (IsUnsupported(get_status)) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("hipTexRefGetBorderColor is not supported by this runtime path.");
-  }
-  HIP_CHECK(get_status);
-  // Both calls succeed, but the getter does not round-trip the set value on this
-  // backend (the border-color state is not stored on the reference).
-  REQUIRE(returned[0] != kSetValue);
-}
 
 // The mipmap-parameter getters are stubbed to report hipErrorInvalidValue on this
 // backend regardless of any set value. The contract is this documented rejection.
