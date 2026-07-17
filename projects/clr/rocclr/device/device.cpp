@@ -251,7 +251,10 @@ uint32_t cachedIsaMetaUint(const Isa& isa, const char* key, uint32_t defaultValu
 }  // namespace
 
 uint32_t Isa::localMemSizePerCU() const {
-  return cachedIsaMetaUint(*this, "LocalMemorySize", 64 * Ki);
+  const uint32_t fallback = (versionMajor_ == 9 && versionMinor_ == 5)    ? 160 * Ki
+                            : (versionMajor_ == 12 && versionMinor_ == 5) ? 320 * Ki
+                                                                           : 64 * Ki;
+  return cachedIsaMetaUint(*this, "LocalMemorySize", fallback);
 }
 
 uint32_t Isa::localMemBanks() const {
