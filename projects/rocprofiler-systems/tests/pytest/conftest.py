@@ -515,10 +515,6 @@ def pytest_collection_modifyitems(config, items) -> None:
             )
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "hipfile" in item.keywords:
-            _msg = hipfile_unavailable_reason(rocprof_config)
-            if _msg is not None:
-                item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
