@@ -24,18 +24,6 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hip.h>
-#include <rocprofiler-sdk/hsa.h>
-#include <rocprofiler-sdk/marker.h>
-#include <rocprofiler-sdk/ompt.h>
-#include <rocprofiler-sdk/rccl.h>
-#include <rocprofiler-sdk/rocdecode.h>
-#include <rocprofiler-sdk/rocjpeg.h>
-
-#include <hsa/hsa.h>
-#include <hsa/hsa_amd_tool.h>
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ven_amd_loader.h>
 
 #include <stdint.h>
 
