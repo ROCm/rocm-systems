@@ -8,6 +8,7 @@
 #include <hip/hip_ext_ocp.h>
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 /*
