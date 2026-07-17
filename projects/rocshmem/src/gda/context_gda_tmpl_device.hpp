@@ -1068,7 +1068,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Get data */
     size_t nelems = dest_nelems[dest_pe] * sizeof(T);
-    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
+    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)));
     dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
 
     qps[dest_pe].get_nbi_single(dst, src, nelems, true);

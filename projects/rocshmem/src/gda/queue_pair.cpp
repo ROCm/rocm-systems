@@ -331,10 +331,10 @@ __device__ void QueuePair::put_nbi_single(void *raddr, uint32_t rkey,
 }
 
 __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t length, bool ring_db) {
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  auto [raddr, src_rkey] = get_raddr_info(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   uint32_t dst_lkey = get_lkey(dst);
-  post_wqe_rma_single(length, dst, dst_lkey, src, rkey,
+  post_wqe_rma_single(length, dst, dst_lkey, raddr, src_rkey,
                        gda_op_rdma_read, ring_db);
 }
 
