@@ -5,8 +5,17 @@
 /// @brief Tests for SimulatedKfd creation, open/close, and topology generation.
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/guest_kfd.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/virtual_machine.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "linux/uapi/kfd_ioctl.h"
+RJ_DIAGNOSTIC_POP
 
 #include "embedded_schema.h"
 #include "simdojo/sim/simulation.h"
@@ -24,6 +33,8 @@ RJ_DIAGNOSTIC_POP
 #include <filesystem>
 #include <thread>
 #include <vector>
+
+#include <unistd.h>
 
 namespace {
 
@@ -81,6 +92,105 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+  ASSERT_NE(vm, nullptr);
+  ASSERT_NE(vm->vm, nullptr);
+  auto *execution_driver = vm->vm->driver();
+  ASSERT_NE(execution_driver, nullptr);
+  ASSERT_EQ(execution_driver->local_open_ref_count(), 1u)
+      << "RJ_VM_MODE_LOCAL must provide the bootstrap open adopted by GuestKfd";
+
+  rocjitsu::config::DbtGuestConfig config;
+  config.enabled = true;
+  config.guest_isa = "gfx950";
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.guest_device = vm->loaded.device;
+  config.guest_device.gpu_id += 1;
+  config.guest_device.drm_render_minor += 1;
+
+  rocjitsu::GuestKfd guest(std::move(config), execution_driver);
+  for (int cycle = 0; cycle < 2; ++cycle) {
+    ASSERT_TRUE(guest.prepare_for_discovery());
+
+    const int app_fd = guest.open();
+    ASSERT_GE(app_fd, 0);
+    EXPECT_EQ(execution_driver->local_open_ref_count(), 1u)
+        << "application open must reuse the discovery-owned reference";
+
+    EXPECT_EQ(::close(app_fd), 0);
+    EXPECT_EQ(guest.close(), 0);
+    EXPECT_EQ(execution_driver->local_open_ref_count(), 0u)
+        << "last guest close must release the simulated process";
+  }
+}
+
+TEST_F(SimulatedKfdTest, GuestOpenSurvivesExecutionPrimaryOverwrite) {
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+  ASSERT_NE(vm, nullptr);
+  ASSERT_NE(vm->vm, nullptr);
+  auto *execution_driver = vm->vm->driver();
+  ASSERT_NE(execution_driver, nullptr);
+  ASSERT_EQ(execution_driver->local_open_ref_count(), 1u);
+
+  rocjitsu::config::DbtGuestConfig config;
+  config.enabled = true;
+  config.guest_isa = "gfx950";
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.guest_device = vm->loaded.device;
+  config.guest_device.gpu_id += 1;
+  config.guest_device.drm_render_minor += 1;
+
+  rocjitsu::GuestKfd guest(std::move(config), execution_driver);
+  ASSERT_TRUE(guest.prepare_for_discovery());
+  const int app_fd = guest.open();
+  ASSERT_GE(app_fd, 0);
+  ASSERT_EQ(execution_driver->local_open_ref_count(), 1u);
+  const uint32_t process_id = execution_driver->local_process_id();
+
+  const int hidden_fd = execution_driver->fd();
+  ASSERT_GE(hidden_fd, 0);
+  int pipefd[2];
+  ASSERT_EQ(::pipe(pipefd), 0);
+  ASSERT_EQ(::dup2(pipefd[0], hidden_fd), hidden_fd);
+  ASSERT_EQ(::close(pipefd[0]), 0);
+
+  EXPECT_EQ(guest.invalidate_primary_fd(hidden_fd),
+            rocjitsu::LinuxKfd::PrimaryInvalidation::kClearedKeepRefs);
+  EXPECT_EQ(execution_driver->fd(), -1);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 1u)
+      << "hidden-fd overwrite must not release GuestKfd's backend open";
+  EXPECT_EQ(execution_driver->local_process_id(), process_id);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(guest.ioctl(AMDKFD_IOC_GET_VERSION, &version), 0)
+      << "the surviving app open must keep the simulated process usable";
+
+  const int reopened_fd = guest.open();
+  ASSERT_GE(reopened_fd, 0);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 1u)
+      << "re-minting the simulator primary must not leak another backend open";
+  EXPECT_EQ(execution_driver->local_process_id(), process_id);
+
+  EXPECT_EQ(::close(reopened_fd), 0);
+  EXPECT_EQ(guest.close(), 0);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 1u);
+  EXPECT_EQ(::close(app_fd), 0);
+  EXPECT_EQ(guest.close(), 0);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 0u);
+
+  EXPECT_EQ(::close(hidden_fd), 0);
+  EXPECT_EQ(::close(pipefd[1]), 0);
 }
 
 TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {

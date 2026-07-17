@@ -24,8 +24,7 @@ bool ncclKernelHasConfigOption(const char* option);
 
 // Read the first available kernel config from the standard search paths.
 // Returns false when no config file could be read.
-bool ncclKernelConfigReadFirstAvailable(std::string* content, char* pathOut,
-                                        size_t pathOutLen);
+bool ncclKernelConfigReadFirstAvailable(std::string* content, char* pathOut, size_t pathOutLen);
 
 // True when IOMMU passthrough is configured via cmdline or kernel build default.
 // A null cmdline skips the cmdline check (e.g. when /proc/cmdline could not be read).

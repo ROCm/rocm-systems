@@ -832,5 +832,27 @@ __device__ void ROContext::broadcastmem_wg(rocshmem_team_t team, void *dest,
   __syncthreads();
 }
 
+__device__ int ROContext::fcollectmem_wave([[maybe_unused]] rocshmem_team_t team,
+                                            [[maybe_unused]] void *dest,
+                                            [[maybe_unused]] const void *source,
+                                            [[maybe_unused]] int nelems) {
+  LOGD_WARN("fcollectmem_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ void ROContext::fcollectmem_wg(rocshmem_team_t team, void *dest,
+                                    const void *source, int nelems) {
+  if (is_thread_zero_in_block()) {
+    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+    build_queue_element(RO_NET_FCOLLECT, dest, const_cast<void *>(source), nelems, 0,
+                        0, 0, 0, team_obj->ata_buffer, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                        RO_NET_CHAR);
+  }  
+
+  __syncthreads();
+}
 
 }  // namespace rocshmem
