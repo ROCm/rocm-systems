@@ -189,6 +189,7 @@ jobs:
             "VectorAddStressTest\.AllCUsGoldenReference"
             "Gfx1250SimulationTest\.*"
             "Gfx1250ExecutionTest\.*"
+            "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable"
           )
 
           CMAKE_CONFIG_FLAGS=()

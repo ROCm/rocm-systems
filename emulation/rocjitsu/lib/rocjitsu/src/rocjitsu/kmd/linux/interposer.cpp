@@ -1254,6 +1254,7 @@ public:
         in_construction = false;
         return nullptr;
       }
+
       // Publish the fully-constructed, not-yet-running driver BEFORE starting the
       // engine thread: the release-store of active_driver_ pairs with acquire
       // loads in driver()/initialized(), so any reader that observes the driver
