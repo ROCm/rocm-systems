@@ -27,7 +27,7 @@ class GenericAllocation : public amd::RuntimeObject {
   hipMemAllocationProp properties_;  //<! Allocation Properties
 
  public:
-  GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop)
+  GenericAllocation(amd::Memory& phys_mem_ref, const hipMemAllocationProp& prop)
       : phys_mem_ref_(phys_mem_ref), properties_(prop) {}
   ~GenericAllocation() {
     // Host-backed allocations (Host / HostNuma / HostNumaCurrent) are allocated on
