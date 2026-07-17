@@ -206,6 +206,7 @@ HIP_TEST_CASE(Contract_ContextConfig_PeerAccessSelf_IsRejectedOrUnsupportedOrNoO
   const hipError_t enable_status = hipCtxEnablePeerAccess(current, 0);
   REQUIRE((enable_status == hipSuccess ||
            enable_status == hipErrorPeerAccessAlreadyEnabled ||
+           enable_status == hipErrorPeerAccessUnsupported ||
            enable_status == hipErrorInvalidDevice ||
            enable_status == hipErrorInvalidValue ||
            enable_status == hipErrorInvalidContext ||
