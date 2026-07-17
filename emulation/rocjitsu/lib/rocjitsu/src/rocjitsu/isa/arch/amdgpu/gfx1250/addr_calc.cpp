@@ -238,9 +238,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     uint64_t total_offset =
         amdgpu::addr_calc::buffer_total_offset(index, stride, offset_part, soffset_val);
     bool oob;
-    if (oob_raw) {
-      oob = offset_part >= num_records;
-    } else if (stride > 0) {
+    if (!oob_raw && stride > 0) {
       oob = index >= num_records;
     } else {
       oob = offset_part >= num_records;
