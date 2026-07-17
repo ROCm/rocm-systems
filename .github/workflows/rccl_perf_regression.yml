@@ -8,6 +8,11 @@
 # The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
+# The Slurm submit/poll/report scripts these steps call
+# (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py)
+# are version-controlled in ROCm/cvs:
+#   https://github.com/ROCm/cvs/tree/main/ci/rccl_perf_gate
+#
 # Flow per PR:
 #   1. Check out PR head with full history (merge-base resolution needs it).
 #   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
@@ -101,7 +106,7 @@ jobs:
             sbatch --wait \
               --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
               --reservation="${SLURM_RESERVATION}" \
-              "${RCCL_CI_ROOT}/sbatch/rccl_build.sbatch"
+              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch"
             echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
           else
             echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
@@ -126,12 +131,12 @@ jobs:
         env:
           _CONFIG: ${{ needs.build.outputs.config_json }}
         run: |
-          bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" "${_CONFIG}"
+          bash "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/submit_and_poll.sh" "${_CONFIG}"
 
       - name: Render report
         if: always()
         run: |
-          python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
+          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --no-exit-code \
             --output "${RUNNER_TEMP}/rccl_report.md"
@@ -175,6 +180,6 @@ jobs:
             echo "::error::Detector failed to run (SLURM submission/polling error or timeout). Report on NFS may be stale — not gating on it."
             exit 2
           fi
-          python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
+          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --output /dev/null
