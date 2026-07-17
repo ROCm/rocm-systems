@@ -342,6 +342,7 @@ TEST_F(HostApiTest, PutSignalEnqueueIsAsync)
 
     // Measurement: occupy the stream, then time a batch of putSignal enqueues.
     MPI_Barrier(MPI_COMM_WORLD);
+    // NOTE: sink value and winBuf have no meaningfull values, thus should not be checked
     hipLaunchKernelGGL(hostApiSpinKernel, dim3(1), dim3(1), 0, stream,
                        spinCycles, static_cast<volatile int*>(sink));
 
