@@ -258,7 +258,11 @@ uint32_t Isa::localMemSizePerCU() const {
 }
 
 uint32_t Isa::localMemBanks() const {
-  return cachedIsaMetaUint(*this, "LDSBankCount", 32);
+  const uint32_t fallback = ((versionMajor_ == 9 && versionMinor_ == 5) ||
+                             (versionMajor_ == 12 && versionMinor_ == 5))
+                                ? 64
+                                : 32;
+  return cachedIsaMetaUint(*this, "LDSBankCount", fallback);
 }
 
 bool Isa::isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa) {
