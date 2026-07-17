@@ -136,9 +136,13 @@ bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAlloc
 
 HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
   SkipIfVmmUnsupported();
+  // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
+  // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
+  // are destroyed in reverse declaration order, so declaring alloc first means it
+  // outlives cleanup and is still alive when ~ContractCleanup executes the lambdas.
+  MappedAllocation alloc;
   hip::contract::ContractCleanup cleanup;
 
-  MappedAllocation alloc;
   if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
@@ -152,9 +156,13 @@ HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
 
 HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   SkipIfVmmUnsupported();
+  // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
+  // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
+  // are destroyed in reverse declaration order, so declaring alloc first means it
+  // outlives cleanup and is still alive when ~ContractCleanup executes the lambdas.
+  MappedAllocation alloc;
   hip::contract::ContractCleanup cleanup;
 
-  MappedAllocation alloc;
   if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }
@@ -170,9 +178,13 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
 
 HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
   SkipIfVmmUnsupported();
+  // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
+  // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
+  // are destroyed in reverse declaration order, so declaring alloc first means it
+  // outlives cleanup and is still alive when ~ContractCleanup executes the lambdas.
+  MappedAllocation alloc;
   hip::contract::ContractCleanup cleanup;
 
-  MappedAllocation alloc;
   if (!CreateMappedAllocation(cleanup, &alloc)) {
     HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
   }

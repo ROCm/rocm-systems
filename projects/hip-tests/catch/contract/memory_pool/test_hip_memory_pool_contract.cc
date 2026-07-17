@@ -91,8 +91,15 @@ HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, 128, stream));
+  // Register the free immediately so a failing REQUIRE or a throwing hipFreeAsync
+  // below cannot leak the allocation. The guard frees only if the explicit free
+  // has not already run (tracked by nulling ptr), avoiding a double free.
+  cleanup.Add([&] {
+    if (ptr != nullptr) (void)hipFreeAsync(ptr, stream);
+  });
   REQUIRE(ptr != nullptr);
   HIP_CHECK(hipFreeAsync(ptr, stream));
+  ptr = nullptr;
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
