@@ -66,6 +66,14 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
+inline bool isCeAllReduceDispatchConfigured()
+{
+    constexpr int kCeAllReduceDefault = 0;
+    constexpr int kCeAllReduceEnabled = 1;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
+}
 // Batch path prediction helpers
 
 // Mirrors the thresholds from ce_coll.cc (CE_COLL_INTRA_BATCH_SYNC_FREQ /
