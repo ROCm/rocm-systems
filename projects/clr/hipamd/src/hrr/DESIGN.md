@@ -1,6 +1,6 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
-User-facing quick start: [README.md](README.md). Agent decode & triage: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
+User-facing quick start: [README.md](README.md).
 
 ## Quick Start
 
