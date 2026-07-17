@@ -8,10 +8,76 @@ import sys
 import time
 from pathlib import Path
 
-from amdsmi_cli_exceptions import AmdSmiInvalidCommandException, AmdSmiInvalidFilePathException
+from amdsmi import amdsmi_exception, amdsmi_interface
+
+from amdsmi_cli_exceptions import (
+    AmdSmiInvalidCommandException,
+    AmdSmiInvalidFilePathException,
+    AmdSmiLibraryErrorException,
+)
+
+_CPER_DECODE_MESSAGES = {
+    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL: "Invalid CPER file input",
+    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE: "Unexpected CPER file data size",
+    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA: "Unexpected data in the CPER file",
+    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED: "AFID decoding is not supported",
+}
 
 
 class RasCommands:
+    def _build_afid_record(self, cper_file, afids=None, code=None):
+        """Build one unified AFID result record for a CPER file.
+
+        ``code=None`` means a successful decode; otherwise it is the failing
+        AMDSMI_STATUS_*. Every output format (json/csv/human) renders these same
+        fields: cper_file, afids, status, code, message.
+        """
+        if code is None:
+            return {
+                "cper_file": str(cper_file),
+                "afids": " ".join(map(str, afids)) if afids else "N/A",
+                "status": "AMDSMI_STATUS_SUCCESS",
+                "message": "Success",
+                "code": 0,
+            }
+        exc = AmdSmiLibraryErrorException(
+            self.logger.format, code, detail=_CPER_DECODE_MESSAGES.get(code)
+        )
+        return {
+            "cper_file": str(cper_file),
+            "afids": "N/A",
+            "status": exc.status_name,
+            "message": exc.status_message,
+            "code": exc.value,
+        }
+
+    def _emit_afid_records(self, records):
+        """Render decoded --afid records.
+
+        Human output is a compact ``file_name | list of afids`` table (the
+        logger's tabular renderer smushes these wide rows). json/csv keep the
+        structured schema (cper_file, afids, status, code, message) so machine
+        consumers still get the real AMDSMI_STATUS per file.
+        """
+        if self.logger.is_human_readable_format():
+            name_w = max([len("file_name")] + [len(Path(r["cper_file"]).name) for r in records])
+            print(f"{'file_name':<{name_w}}  list of afids")
+            for r in records:
+                name = Path(r["cper_file"]).name
+                # On a decode failure fold the status into the afids column
+                # (mirrors develop's "decode failed" placement) so the reason
+                # stays visible in the table instead of only in the exit code.
+                if r["code"] == 0:
+                    afids_cell = r["afids"]
+                else:
+                    afids_cell = f"[{r['status']}] {r['message']}"
+                print(f"{name:<{name_w}}  {afids_cell}")
+        else:
+            self.logger.multiple_device_output = records
+            # emit_empty keeps a folder whose files were all skipped rendering as
+            # `[]` rather than nothing, so stdout stays parseable.
+            self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
+
     def _validate_ras_args(self, args):
         """Validate ``ras`` arguments up front, before any driver call or file I/O.
 
@@ -104,31 +170,18 @@ class RasCommands:
             finally:
                 os.close(fd)
 
-            decode_failed = False
-            afids = []
             try:
                 afids = self.helpers.cper_dump_afids(raw)
-            except Exception as e:
+                results.append(self._build_afid_record(cper_path, afids=afids))
+            except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to decode AFIDs from %s: %s", cper_path, e)
-                decode_failed = True
-            results.append(
-                {"cper_file": str(cper_path), "afids": afids, "decode_failed": decode_failed}
-            )
+                # Record the real library status so a decode failure is reflected
+                # in the final exit code instead of silently returning 0.
+                code = e.get_error_code()
+                self.helpers.error_collector.record_library_error(code)
+                results.append(self._build_afid_record(cper_path, code=code))
 
-        if self.logger.is_json_format():
-            self.logger.multiple_device_output = results
-            self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
-        else:
-            print(f"{'file_name':<32} list of afids")
-            for entry in results:
-                if entry["decode_failed"]:
-                    afids_str = "decode failed"
-                elif entry["afids"]:
-                    afids_str = " ".join(map(str, entry["afids"]))
-                else:
-                    afids_str = "-"
-                fname = Path(entry["cper_file"]).name
-                print(f"{fname:<32} {afids_str}")
+        self._emit_afid_records(results)
 
     def ras(
         self,
@@ -179,13 +232,23 @@ class RasCommands:
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.cper_dump_afids(args.cper_file)
-                if self.logger.is_json_format():
-                    afid_output = {"cper_file": str(args.cper_file), "afids": afids}
-                    self.logger.output = afid_output
-                    self.logger.print_output()
-                else:
-                    print(" ".join(map(str, afids)) if afids else "-")
+                # Read failure -> clean file-path error. Decode failure -> a
+                # unified per-file record with its AMDSMI_STATUS (same schema as
+                # --folder), and a non-zero exit via the error collector.
+                try:
+                    afids = self.helpers.cper_dump_afids(args.cper_file)
+                    record = self._build_afid_record(args.cper_file, afids=afids)
+                except OSError as e:
+                    raise AmdSmiInvalidFilePathException(
+                        args.cper_file,
+                        self.logger.format,
+                        f"Unable to read CPER file '{args.cper_file}': {e}",
+                    ) from e
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    code = e.get_error_code()
+                    self.helpers.error_collector.record_library_error(code)
+                    record = self._build_afid_record(args.cper_file, code=code)
+                self._emit_afid_records([record])
                 return
 
             # --afid --folder: read-only decode of a pre-existing folder.
