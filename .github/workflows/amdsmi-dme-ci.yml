@@ -108,12 +108,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        run: git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"
 
       - name: Locate AMDSMI Project
         run: |
           set -euo pipefail
-          PROJECT_DIR=$(find "$GITHUB_WORKSPACE" -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \; | head -1)
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE" -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \; -quit)
           if [ -z "${PROJECT_DIR}" ]; then
             echo "::error::Could not locate projects/amdsmi/CMakeLists.txt"
             exit 1
@@ -383,5 +383,5 @@ jobs:
         if: always()
         working-directory: ${{ env.AMDSMI_TESTS_DIR }}
         run: |
-          python3 -m dme_integration stop-service --name dme      --pid-file /tmp/dme.pid      || true
-          python3 -m dme_integration stop-service --name gpuagent --pid-file /tmp/gpuagent.pid || true
+          python3 -m dme_integration stop-service --name dme      --pid-file /tmp/dme.pid      --expected amd-metrics-exporter || true
+          python3 -m dme_integration stop-service --name gpuagent --pid-file /tmp/gpuagent.pid --expected gpuagent             || true
