@@ -508,7 +508,7 @@ Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`
 Performance
 --------------
 
-On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:warp_reduction_functions`. The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
+On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`Warp reduction functions <warp_reduction_functions>`. The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
