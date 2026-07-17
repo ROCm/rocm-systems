@@ -650,6 +650,7 @@ private:
     uint64_t kd_vaddr;
     int64_t entry_off;
     uint32_t inst_pref;
+    std::string name;  // kernel/shader symbol name (for logging)
   };
   bool trampoline_enabled_gfx125x_ = false;
   bool trampoline_no_wa_gfx125x_ = false;

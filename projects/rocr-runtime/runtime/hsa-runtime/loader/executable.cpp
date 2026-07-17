@@ -232,13 +232,25 @@ static constexpr size_t kTrampolineStubStride =
 // and readable, which the allocation's zero-fill already guarantees.
 static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
 
+// The GFX1250 unclaused-VMEM workaround prologue (llvm PR #208467). The compiler
+// emits these 4 dwords -- global_wb <scope:SCOPE_CU> followed by v_nop -- at every
+// hardware kernel entry so the first VMEM instruction is unclaused. It is exactly
+// the sequence the entry trampoline itself prepends, so when a kernel's entry
+// already begins with it the trampoline would only duplicate the workaround.
+static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
+    0xEE0B007C,  // global_wb <scope:SCOPE_CU>
+    0x00000000,  // :
+    0x00000000,  // :
+    0x7E000000,  // v_nop
+};
+
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
 
-  w[0] = 0xEE0B007C;  // global_wb <scope:SCOPE_CU>
-  w[1] = 0x00000000;  // :
-  w[2] = 0x00000000;  // :
-  w[3] = 0x7E000000;  // v_nop (padding)
+  w[0] = kGfx1250UnclausedVmemPrologue[0];  // global_wb <scope:SCOPE_CU>
+  w[1] = kGfx1250UnclausedVmemPrologue[1];  // :
+  w[2] = kGfx1250UnclausedVmemPrologue[2];  // :
+  w[3] = kGfx1250UnclausedVmemPrologue[3];  // v_nop (padding)
   w[4] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
   w[5] = static_cast<uint32_t>(target);
   w[6] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
@@ -1582,8 +1594,42 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
+// Returns true if the kernel entry at entry_vaddr already begins with the GFX1250
+// unclaused-VMEM workaround prologue (see kGfx1250UnclausedVmemPrologue). The check
+// reads the post-relocation host shadow of the code segment (valid pre-Freeze).
+static bool KernelEntryHasUnclausedVmemPrologue(Context* context, Segment* code_seg,
+                                                uint64_t entry_vaddr) {
+  static constexpr size_t kPrologueBytes = sizeof(kGfx1250UnclausedVmemPrologue);
+  if (!code_seg->IsAddressInSegment(entry_vaddr) ||
+      !code_seg->IsAddressInSegment(entry_vaddr + kPrologueBytes - 1)) {
+    return false;
+  }
+  void* host = context->SegmentHostAddress(code_seg->ElfSegment(), code_seg->Agent(),
+                                           code_seg->Ptr(), code_seg->Offset(entry_vaddr));
+  if (host == nullptr) return false;
+  const uint32_t* w = reinterpret_cast<const uint32_t*>(host);
+  return w[0] == kGfx1250UnclausedVmemPrologue[0] &&
+         w[1] == kGfx1250UnclausedVmemPrologue[1] &&
+         w[2] == kGfx1250UnclausedVmemPrologue[2] &&
+         w[3] == kGfx1250UnclausedVmemPrologue[3];
+}
+
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
-  const size_t n = kd_fixups_.size();
+  // Skip kernels whose entry already carries the compiler-inserted unclaused-VMEM
+  // workaround prologue (llvm PR #208467): a trampoline would only duplicate the
+  // global_wb/v_nop that is already there, so dispatch can go straight to the real
+  // entry. Kernels still needing the workaround keep their trampoline.
+  std::vector<KdFixup> fixups;
+  fixups.reserve(kd_fixups_.size());
+  for (const auto& f : kd_fixups_) {
+    if (KernelEntryHasUnclausedVmemPrologue(context_, f.code_seg, f.kd_vaddr + f.entry_off)) {
+      continue;
+    }
+    fixups.push_back(f);
+  }
+  if (fixups.empty()) return HSA_STATUS_SUCCESS;
+
+  const size_t n = fixups.size();
 
   // Size the trailing prefetch guard from the largest CP instruction-prefetch
   // window among this pool's kernels (INST_PREF_SIZE lines * 128 B). The forward
@@ -1592,7 +1638,7 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   // remainder, (INST_PREF_SIZE*128 - stub_size), can spill past the pool and needs
   // a guard. (Clamp to 0 when the window fits within a stub slot.)
   uint32_t max_pref_lines = 0;
-  for (const auto& f : kd_fixups_) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
+  for (const auto& f : fixups) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
   const size_t pref_bytes = static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes;
   const size_t guard = pref_bytes > kTrampolineStubStride ? pref_bytes - kTrampolineStubStride : 0;
   const size_t pool = n * kTrampolineStubStride + guard;
@@ -1611,7 +1657,7 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   trampoline_segments_.push_back(tramp);  // frozen in ExecutableImpl::Freeze
 
   for (size_t i = 0; i < n; ++i) {
-    const KdFixup& f = kd_fixups_[i];
+    const KdFixup& f = fixups[i];
     const uint64_t stub_off = i * kTrampolineStubStride;
     // Device addresses are valid pre-Freeze (RegionMemory::ptr_ is set at alloc).
     const uint64_t kd_dev = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr));
@@ -1626,6 +1672,9 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
       BuildTrampolineGfx1250(blob, entry_dev);
     }
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
+
+    // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
+    logger_ << "Loader: injecting gfx125x entry trampoline for kernel " << f.name << "\n";
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
     int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
@@ -1693,8 +1742,8 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       // entry; captured here to size the trampoline's prefetch guard.
       uint32_t inst_pref = AMDHSA_BITS_GET(
           kd.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE);
-      kd_fixups_.push_back(
-          {SymbolSegment(agent, sym), sym->VAddr(), kd.kernel_code_entry_byte_offset, inst_pref});
+      kd_fixups_.push_back({SymbolSegment(agent, sym), sym->VAddr(),
+                            kd.kernel_code_entry_byte_offset, inst_pref, sym->GetSymbolName()});
     }
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
