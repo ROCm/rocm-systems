@@ -62,16 +62,44 @@ struct AgentGfxRevision;
 
 using OwnedElfBuffer = std::unique_ptr<void, decltype(&std::free)>;
 
-class RetargetedElf final {
+class RetargetCacheMemoryTracker;
+
+class SourceSnapshot final {
  public:
-  RetargetedElf(OwnedElfBuffer bytes, size_t size) : bytes_(std::move(bytes)), size_(size) {}
+  ~SourceSnapshot();
 
   const void* data() const { return bytes_.get(); }
   size_t size() const { return size_; }
+  bool Equals(const void* data, size_t size) const;
+
+ private:
+  friend class ContentRetargetCache;
+  friend class RetargetedElf;
+
+  SourceSnapshot(std::unique_ptr<unsigned char[]> bytes, size_t size,
+                 std::shared_ptr<RetargetCacheMemoryTracker> tracker);
+
+  std::unique_ptr<unsigned char[]> bytes_;
+  size_t size_ = 0;
+  std::shared_ptr<RetargetCacheMemoryTracker> tracker_;
+};
+
+using SourceSnapshotRef = std::shared_ptr<const SourceSnapshot>;
+
+class RetargetedElf final {
+ public:
+  RetargetedElf(OwnedElfBuffer bytes, size_t size, SourceSnapshotRef source = {});
+  ~RetargetedElf();
+
+  const void* data() const { return bytes_.get(); }
+  size_t size() const { return size_; }
+  const SourceSnapshotRef& source() const { return source_; }
 
  private:
   OwnedElfBuffer bytes_;
   size_t size_ = 0;
+  SourceSnapshotRef source_;
+  std::shared_ptr<RetargetCacheMemoryTracker> tracker_;
 };
 
 using RetargetedElfRef = std::shared_ptr<const RetargetedElf>;
@@ -110,35 +138,56 @@ struct RetargetCacheKey {
   }
 };
 
-class ReaderRetargetCache final {
+struct RetargetCacheMetrics {
+  uint64_t producer_calls = 0;
+  uint64_t producer_failures = 0;
+  uint64_t ready_hits = 0;
+  uint64_t cross_reader_results = 0;
+  uint64_t coalesced_results = 0;
+  uint64_t hash_bytes = 0;
+  uint64_t hash_nanoseconds = 0;
+  uint64_t exact_compare_bytes = 0;
+  uint64_t exact_compare_nanoseconds = 0;
+  uint64_t wait_nanoseconds = 0;
+  uint64_t lock_hold_nanoseconds = 0;
+  uint64_t source_snapshot_allocations = 0;
+  uint64_t source_snapshot_bytes = 0;
+  uint64_t live_source_snapshot_bytes = 0;
+  uint64_t peak_live_source_snapshot_bytes = 0;
+  uint64_t produced_output_bytes = 0;
+  uint64_t live_output_bytes = 0;
+  uint64_t peak_live_output_bytes = 0;
+  size_t bucket_entries = 0;
+  size_t content_bucket_entries = 0;
+  size_t transform_bucket_entries = 0;
+  size_t ready_entries = 0;
+  size_t in_flight_entries = 0;
+};
+
+class ContentRetargetCache final {
  public:
-  ReaderRetargetCache();
-  ~ReaderRetargetCache();
+  using Producer = std::function<RetargetOperationResult(const SourceSnapshotRef& source)>;
 
-  ReaderRetargetCache(const ReaderRetargetCache&) = delete;
-  ReaderRetargetCache& operator=(const ReaderRetargetCache&) = delete;
+  ContentRetargetCache();
+  ~ContentRetargetCache();
 
-  RetargetOperationResult GetOrCompute(const RetargetCacheKey& key,
-                                       const std::function<RetargetOperationResult()>& producer);
+  ContentRetargetCache(const ContentRetargetCache&) = delete;
+  ContentRetargetCache& operator=(const ContentRetargetCache&) = delete;
+
+  RetargetOperationResult GetOrCompute(const void* source_data, size_t source_size,
+                                       const void* reader_identity, const RetargetCacheKey& key,
+                                       const Producer& producer);
+
+  RetargetCacheMetrics SnapshotMetrics() const;
 
 #ifdef ROCR_HOTSWAP_TESTING
-  struct Metrics {
-    uint64_t producer_calls = 0;
-    uint64_t producer_failures = 0;
-    uint64_t ready_hits = 0;
-    uint64_t coalesced_results = 0;
-    uint64_t wait_nanoseconds = 0;
-    uint64_t lock_hold_nanoseconds = 0;
-    uint64_t produced_output_bytes = 0;
-    uint64_t live_output_bytes = 0;
-    uint64_t peak_live_output_bytes = 0;
-    size_t ready_entries = 0;
-    size_t in_flight_entries = 0;
-  };
+  using ContentHashFunction = std::function<uint64_t(const void*, size_t)>;
+
+  explicit ContentRetargetCache(ContentHashFunction hash_function);
 
   size_t ReadyEntryCountForTesting() const;
-  size_t WaiterCountForTesting(const RetargetCacheKey& key) const;
-  Metrics MetricsForTesting() const;
+  size_t WaiterCountForTesting(const void* source_data, size_t source_size,
+                               const RetargetCacheKey& key) const;
   void ResetMetricsForTesting();
 #endif
 
@@ -147,12 +196,14 @@ class ReaderRetargetCache final {
   std::unique_ptr<Impl> impl_;
 };
 
+ContentRetargetCache& GetProcessRetargetCache();
+
 struct CodeObjectView {
   const void* data = nullptr;
   size_t size = 0;
   std::string uri;
-  amd::hsa::loader::CodeObjectReaderImpl* reader = nullptr;
-  std::shared_ptr<ReaderRetargetCache> retarget_cache;
+  const void* reader_identity = nullptr;
+  ContentRetargetCache* retarget_cache = nullptr;
 };
 
 // Entry-trampoline rewriting is opt-in while validation is ongoing.
@@ -205,7 +256,8 @@ std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 RetargetOperationResult RetargetCodeObject(const void* elf_data, size_t elf_size,
                                            const char* source_isa, const char* target_isa,
                                            bool request_entry_trampolines = false,
-                                           bool request_strict_mode = false);
+                                           bool request_strict_mode = false,
+                                           SourceSnapshotRef source_snapshot = {});
 
 RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
                                                hsa_agent_t agent);

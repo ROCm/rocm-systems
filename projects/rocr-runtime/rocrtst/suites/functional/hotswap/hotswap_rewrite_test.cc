@@ -252,14 +252,15 @@ rocr::hotswap::CodeObjectView MakeRealCodeObjectView() {
   return code_object;
 }
 
-rocr::hotswap::RetargetOperationResult MakeTestRetargetedElf() {
+rocr::hotswap::RetargetOperationResult MakeTestRetargetedElf(
+    const rocr::hotswap::SourceSnapshotRef& source = {}) {
   constexpr size_t kSize = 16;
   rocr::hotswap::OwnedElfBuffer bytes(std::malloc(kSize), &std::free);
   if (!bytes) {
     return {{}, rocr::hotswap::RetargetError::kOutOfResources};
   }
   std::memcpy(bytes.get(), kGfx1250MinCo, kSize);
-  return {std::make_shared<const rocr::hotswap::RetargetedElf>(std::move(bytes), kSize),
+  return {std::make_shared<const rocr::hotswap::RetargetedElf>(std::move(bytes), kSize, source),
           rocr::hotswap::RetargetError::kNone};
 }
 
@@ -709,35 +710,42 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal)
 TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
-  auto cache = std::make_shared<rocr::hotswap::ReaderRetargetCache>();
-  auto code_object = MakeRealCodeObjectView();
-  code_object.retarget_cache = cache;
+  rocr::hotswap::ContentRetargetCache cache;
+  int first_reader = 0;
+  int second_reader = 0;
+  auto first_code_object = MakeRealCodeObjectView();
+  first_code_object.reader_identity = &first_reader;
+  first_code_object.retarget_cache = &cache;
+  auto second_code_object = MakeRealCodeObjectView();
+  second_code_object.reader_identity = &second_reader;
+  second_code_object.retarget_cache = &cache;
   LoadRecorder first_load;
   LoadRecorder second_load;
 
   EXPECT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x601),
-                                                          MakeTestAgent(), code_object, nullptr,
+                                                          MakeTestAgent(), first_code_object, nullptr,
                                                           nullptr, MakeLoadCallbacks(&first_load)),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x602),
-                                                          MakeTestAgent(), code_object, nullptr,
+                                                          MakeTestAgent(), second_code_object, nullptr,
                                                           nullptr, MakeLoadCallbacks(&second_load)),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(first_load.retained_owners.size(), 1u);
   ASSERT_EQ(second_load.retained_owners.size(), 1u);
   EXPECT_EQ(first_load.retained_owners[0].get(), second_load.retained_owners[0].get());
-  EXPECT_EQ(cache->ReadyEntryCountForTesting(), 1u);
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 1u);
+  EXPECT_EQ(cache.SnapshotMetrics().cross_reader_results, 1u);
 
   first_load.retained_owners.clear();
-  EXPECT_EQ(cache->ReadyEntryCountForTesting(), 1u);
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 1u);
   second_load.retained_owners.clear();
-  EXPECT_EQ(cache->ReadyEntryCountForTesting(), 0u);
+  EXPECT_EQ(cache.ReadyEntryCountForTesting(), 0u);
 }
 
 TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
   constexpr size_t kThreadCount = 8;
-  rocr::hotswap::ReaderRetargetCache cache;
+  rocr::hotswap::ContentRetargetCache cache;
   const rocr::hotswap::RetargetCacheKey key{kGfx1250B0Isa, kGfx1250A0Isa, false, false};
   std::atomic<size_t> producer_calls{0};
   std::atomic<size_t> started{0};
@@ -745,18 +753,19 @@ TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
   std::vector<rocr::hotswap::RetargetOperationResult> results(kThreadCount);
   std::vector<std::thread> threads;
 
-  auto producer = [&] {
+  auto producer = [&](const rocr::hotswap::SourceSnapshotRef& source) {
     producer_calls.fetch_add(1, std::memory_order_relaxed);
     while (!release_producer.load(std::memory_order_acquire)) {
       std::this_thread::yield();
     }
-    return MakeTestRetargetedElf();
+    return MakeTestRetargetedElf(source);
   };
 
   for (size_t i = 0; i < kThreadCount; ++i) {
     threads.emplace_back([&, i] {
       started.fetch_add(1, std::memory_order_release);
-      results[i] = cache.GetOrCompute(key, producer);
+      results[i] = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+                                      key, producer);
     });
   }
 
@@ -764,7 +773,8 @@ TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
   bool all_waiters_observed = false;
   while (std::chrono::steady_clock::now() < deadline) {
     if (started.load(std::memory_order_acquire) == kThreadCount &&
-        cache.WaiterCountForTesting(key) == kThreadCount - 1) {
+        cache.WaiterCountForTesting(kGfx1250MinCo, sizeof(kGfx1250MinCo), key) ==
+            kThreadCount - 1) {
       all_waiters_observed = true;
       break;
     }
@@ -789,18 +799,20 @@ TEST(HotswapRewrite, RetargetCacheCoalescesConcurrentMisses) {
 }
 
 TEST(HotswapRewrite, RetargetCacheRetriesFailures) {
-  rocr::hotswap::ReaderRetargetCache cache;
+  rocr::hotswap::ContentRetargetCache cache;
   const rocr::hotswap::RetargetCacheKey key{kGfx1250B0Isa, kGfx1250A0Isa, false, false};
   size_t producer_calls = 0;
 
-  const auto first = cache.GetOrCompute(key, [&] {
+  const auto first = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+                                       key, [&](const rocr::hotswap::SourceSnapshotRef&) {
     ++producer_calls;
     return rocr::hotswap::RetargetOperationResult{{},
                                                   rocr::hotswap::RetargetError::kOutOfResources};
   });
-  const auto second = cache.GetOrCompute(key, [&] {
+  const auto second = cache.GetOrCompute(kGfx1250MinCo, sizeof(kGfx1250MinCo), nullptr,
+                                        key, [&](const rocr::hotswap::SourceSnapshotRef& source) {
     ++producer_calls;
-    return MakeTestRetargetedElf();
+    return MakeTestRetargetedElf(source);
   });
 
   EXPECT_FALSE(first.succeeded());

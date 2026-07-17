@@ -403,7 +403,8 @@ void LogRequiredRewrittenLoadFailure(hsa_status_t status) {
 RetargetOperationResult RetargetCodeObject(const void* elf_data, size_t elf_size,
                                            const char* source_isa, const char* target_isa,
                                            bool request_entry_trampolines,
-                                           bool request_strict_mode) {
+                                           bool request_strict_mode,
+                                           SourceSnapshotRef source_snapshot) {
   if (!elf_data || elf_size == 0 || !source_isa || !target_isa) {
     return {{}, RetargetError::kInvalidArgument};
   }
@@ -471,7 +472,8 @@ RetargetOperationResult RetargetCodeObject(const void* elf_data, size_t elf_size
 
   api->release_data(output);
   try {
-    return {std::make_shared<const RetargetedElf>(std::move(output_buffer), output_size),
+    return {std::make_shared<const RetargetedElf>(std::move(output_buffer), output_size,
+                                                  std::move(source_snapshot)),
             RetargetError::kNone};
   } catch (const std::bad_alloc&) {
     return {{}, RetargetError::kOutOfResources};
@@ -506,29 +508,33 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
                                    decision->request_entry_trampolines,
                                    decision->request_strict_mode};
 
-  auto producer = [&]() -> RetargetOperationResult {
+  auto producer = [&](const SourceSnapshotRef& source_snapshot) -> RetargetOperationResult {
 #ifdef ROCR_HOTSWAP_TESTING
     if (g_force_retarget_code_object_failure_for_testing.load(std::memory_order_relaxed)) {
       HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
       return {{}, RetargetError::kComgrFailure};
     }
 #endif
-    return RetargetCodeObject(code_object.data, code_object.size, decision->source_isa.c_str(),
+    const void* source_data = source_snapshot ? source_snapshot->data() : code_object.data;
+    const size_t source_size = source_snapshot ? source_snapshot->size() : code_object.size;
+    return RetargetCodeObject(source_data, source_size, decision->source_isa.c_str(),
                               decision->target_isa.c_str(), decision->request_entry_trampolines,
-                              decision->request_strict_mode);
+                              decision->request_strict_mode, source_snapshot);
   };
 
-  std::shared_ptr<ReaderRetargetCache> cache = code_object.retarget_cache;
-  if (!cache && code_object.reader) {
+  ContentRetargetCache* cache = code_object.retarget_cache;
+  if (!cache) {
     try {
-      cache = code_object.reader->GetOrCreateRetargetCache();
+      cache = &GetProcessRetargetCache();
     } catch (const std::bad_alloc&) {
-      HOTSWAP_LOG("hotswap: reader cache unavailable (OOM), rewriting without cache\n");
+      HOTSWAP_LOG("hotswap: process cache unavailable (OOM), rewriting without cache\n");
     }
   }
 
-  const RetargetOperationResult operation =
-      cache ? cache->GetOrCompute(cache_key, producer) : producer();
+  const RetargetOperationResult operation = cache
+      ? cache->GetOrCompute(code_object.data, code_object.size, code_object.reader_identity,
+                            cache_key, producer)
+      : producer({});
 
   HOTSWAP_LOG(
       "hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d required=%d "
@@ -538,6 +544,39 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
       decision->rewrite_required, code_object.size,
       operation.succeeded() ? operation.elf->size() : 0, operation.succeeded() ? 1 : 0,
       static_cast<int>(operation.source), static_cast<int>(operation.error));
+  if (cache && IsVerboseLoggingEnabled()) {
+    const RetargetCacheMetrics metrics = cache->SnapshotMetrics();
+    fprintf(stderr,
+            "hotswap cache: producer_calls=%llu producer_failures=%llu ready_hits=%llu "
+            "cross_reader_results=%llu coalesced_results=%llu hash_bytes=%llu "
+            "hash_nanoseconds=%llu exact_compare_bytes=%llu exact_compare_nanoseconds=%llu "
+            "wait_nanoseconds=%llu lock_hold_nanoseconds=%llu "
+            "source_snapshot_allocations=%llu source_snapshot_bytes=%llu "
+            "live_source_snapshot_bytes=%llu peak_live_source_snapshot_bytes=%llu "
+            "produced_output_bytes=%llu live_output_bytes=%llu peak_live_output_bytes=%llu "
+            "content_bucket_entries=%zu transform_bucket_entries=%zu ready_entries=%zu "
+            "in_flight_entries=%zu\n",
+            static_cast<unsigned long long>(metrics.producer_calls),
+            static_cast<unsigned long long>(metrics.producer_failures),
+            static_cast<unsigned long long>(metrics.ready_hits),
+            static_cast<unsigned long long>(metrics.cross_reader_results),
+            static_cast<unsigned long long>(metrics.coalesced_results),
+            static_cast<unsigned long long>(metrics.hash_bytes),
+            static_cast<unsigned long long>(metrics.hash_nanoseconds),
+            static_cast<unsigned long long>(metrics.exact_compare_bytes),
+            static_cast<unsigned long long>(metrics.exact_compare_nanoseconds),
+            static_cast<unsigned long long>(metrics.wait_nanoseconds),
+            static_cast<unsigned long long>(metrics.lock_hold_nanoseconds),
+            static_cast<unsigned long long>(metrics.source_snapshot_allocations),
+            static_cast<unsigned long long>(metrics.source_snapshot_bytes),
+            static_cast<unsigned long long>(metrics.live_source_snapshot_bytes),
+            static_cast<unsigned long long>(metrics.peak_live_source_snapshot_bytes),
+            static_cast<unsigned long long>(metrics.produced_output_bytes),
+            static_cast<unsigned long long>(metrics.live_output_bytes),
+            static_cast<unsigned long long>(metrics.peak_live_output_bytes),
+            metrics.content_bucket_entries, metrics.transform_bucket_entries,
+            metrics.ready_entries, metrics.in_flight_entries);
+  }
   if (operation.succeeded()) {
     return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required, operation.elf,
             RetargetError::kNone};
@@ -558,7 +597,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(amd::hsa::loader::CodeObjectReade
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
-  code_object.reader = reader;
+  code_object.reader_identity = reader;
   return TryRetargetCodeObject(code_object, agent);
 }
 
@@ -618,22 +657,4 @@ void ForceRetargetCodeObjectFailureForTesting(bool force) {
 #endif
 
 }  // namespace hotswap
-}  // namespace rocr
-
-namespace rocr {
-namespace amd {
-namespace hsa {
-namespace loader {
-
-std::shared_ptr<hotswap::ReaderRetargetCache> CodeObjectReaderImpl::GetOrCreateRetargetCache() {
-  std::lock_guard<std::mutex> lock(retarget_cache_mutex);
-  if (!retarget_cache) {
-    retarget_cache = std::make_shared<hotswap::ReaderRetargetCache>();
-  }
-  return retarget_cache;
-}
-
-}  // namespace loader
-}  // namespace hsa
-}  // namespace amd
 }  // namespace rocr

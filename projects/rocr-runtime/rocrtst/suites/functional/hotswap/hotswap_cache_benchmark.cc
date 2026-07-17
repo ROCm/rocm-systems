@@ -24,10 +24,11 @@
 namespace {
 
 using Clock = std::chrono::steady_clock;
-using rocr::hotswap::ReaderRetargetCache;
+using rocr::hotswap::ContentRetargetCache;
 using rocr::hotswap::RetargetCacheKey;
 using rocr::hotswap::RetargetError;
 using rocr::hotswap::RetargetOperationResult;
+using rocr::hotswap::SourceSnapshotRef;
 
 enum class Phase { kCold, kWarm };
 
@@ -44,6 +45,9 @@ struct Outcome {
   uint64_t payload_allocations = 0;
   uint64_t peak_payload_bytes = 0;
   uint64_t retained_payload_bytes = 0;
+  uint64_t source_snapshot_allocations = 0;
+  uint64_t peak_source_snapshot_bytes = 0;
+  uint64_t retained_source_snapshot_bytes = 0;
   uint64_t ready_hits = 0;
   uint64_t coalesced_results = 0;
 };
@@ -194,6 +198,9 @@ Outcome RunNoCache(size_t thread_count, size_t payload_size, size_t producer_mic
       tracker.peak_bytes(),
       tracker.live_bytes(),
       0,
+      0,
+      0,
+      0,
       0};
 }
 
@@ -251,26 +258,36 @@ Outcome RunCopyCache(Phase phase, size_t thread_count, size_t payload_size,
       tracker.allocations(),
       tracker.peak_bytes(),
       tracker.live_bytes(),
+      0,
+      0,
+      0,
       ready_hits.load(std::memory_order_relaxed),
       0};
 }
 
-RetargetOperationResult MakeRetargetedElf(size_t size, size_t producer_microseconds) {
+RetargetOperationResult MakeRetargetedElf(const SourceSnapshotRef& source, size_t size,
+                                          size_t producer_microseconds) {
   std::this_thread::sleep_for(std::chrono::microseconds(producer_microseconds));
   rocr::hotswap::OwnedElfBuffer bytes(std::malloc(size), &std::free);
   if (!bytes) return {{}, RetargetError::kOutOfResources};
   std::memset(bytes.get(), 0x5a, size);
-  return {std::make_shared<const rocr::hotswap::RetargetedElf>(std::move(bytes), size),
+  return {std::make_shared<const rocr::hotswap::RetargetedElf>(std::move(bytes), size, source),
           RetargetError::kNone};
 }
 
 Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
                         size_t producer_microseconds) {
-  ReaderRetargetCache cache;
+  ContentRetargetCache cache;
   const RetargetCacheKey key{"source", "target", false, false};
+  const std::vector<unsigned char> source(payload_size, 0x21);
   rocr::hotswap::RetargetedElfRef warm_owner;
   if (phase == Phase::kWarm) {
-    warm_owner = cache.GetOrCompute(key, [&] { return MakeRetargetedElf(payload_size, 0); }).elf;
+    warm_owner = cache
+                     .GetOrCompute(source.data(), source.size(), nullptr, key,
+                                   [&](const SourceSnapshotRef& snapshot) {
+                                     return MakeRetargetedElf(snapshot, payload_size, 0);
+                                   })
+                     .elf;
   }
   cache.ResetMetricsForTesting();
 
@@ -283,12 +300,14 @@ Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
     threads.emplace_back([&, i] {
       start.ArriveAndWait();
       results[i] = cache.GetOrCompute(
-          key, [&] { return MakeRetargetedElf(payload_size, producer_microseconds); });
+          source.data(), source.size(), nullptr, key, [&](const SourceSnapshotRef& snapshot) {
+            return MakeRetargetedElf(snapshot, payload_size, producer_microseconds);
+          });
     });
   }
   for (auto& thread : threads) thread.join();
 
-  const ReaderRetargetCache::Metrics metrics = cache.MetricsForTesting();
+  const auto metrics = cache.SnapshotMetrics();
   for (const auto& result : results) {
     if (!result.succeeded()) {
       std::cerr << "single-flight allocation failed\n";
@@ -302,6 +321,9 @@ Outcome RunSingleFlight(Phase phase, size_t thread_count, size_t payload_size,
       metrics.produced_output_bytes / payload_size,
       metrics.peak_live_output_bytes,
       metrics.live_output_bytes,
+      metrics.source_snapshot_allocations,
+      metrics.peak_live_source_snapshot_bytes,
+      metrics.live_source_snapshot_bytes,
       metrics.ready_hits,
       metrics.coalesced_results};
 }
@@ -322,8 +344,9 @@ void PrintOutcome(const char* strategy, Phase phase, size_t thread_count, size_t
             << ',' << payload_size << ',' << producer_microseconds << ','
             << outcome.elapsed_microseconds << ',' << outcome.producer_calls << ','
             << outcome.payload_allocations << ',' << outcome.peak_payload_bytes << ','
-            << outcome.retained_payload_bytes << ',' << outcome.ready_hits << ','
-            << outcome.coalesced_results << '\n';
+            << outcome.retained_payload_bytes << ',' << outcome.source_snapshot_allocations << ','
+            << outcome.peak_source_snapshot_bytes << ',' << outcome.retained_source_snapshot_bytes
+            << ',' << outcome.ready_hits << ',' << outcome.coalesced_results << '\n';
 }
 
 }  // namespace
@@ -331,8 +354,9 @@ void PrintOutcome(const char* strategy, Phase phase, size_t thread_count, size_t
 int main(int argc, char** argv) {
   const Options options = ParseOptions(argc, argv);
   std::cout << "strategy,phase,threads,payload_bytes,producer_us,latency_us,producer_calls,"
-               "payload_allocations,peak_payload_bytes,retained_payload_bytes,ready_hits,"
-               "coalesced_results\n";
+               "payload_allocations,peak_payload_bytes,retained_payload_bytes,"
+               "source_snapshot_allocations,peak_source_snapshot_bytes,"
+               "retained_source_snapshot_bytes,ready_hits,coalesced_results\n";
 
   for (const size_t payload_size : options.payload_sizes) {
     for (const size_t thread_count : options.thread_counts) {
@@ -346,7 +370,7 @@ int main(int argc, char** argv) {
                        return RunCopyCache(phase, thread_count, payload_size,
                                            options.producer_microseconds);
                      }));
-        PrintOutcome("reader-single-flight", phase, thread_count, payload_size,
+        PrintOutcome("content-single-flight", phase, thread_count, payload_size,
                      options.producer_microseconds, MedianOutcome(options.iterations, [&] {
                        return RunSingleFlight(phase, thread_count, payload_size,
                                               options.producer_microseconds);

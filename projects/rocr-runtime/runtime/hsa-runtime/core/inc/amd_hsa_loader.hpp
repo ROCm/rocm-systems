@@ -104,10 +104,6 @@ enum amd_loaded_segment_info_t {
 };
 
 namespace rocr {
-namespace hotswap {
-class ReaderRetargetCache;
-}
-
 namespace amd {
 namespace hsa {
 namespace loader {
@@ -153,15 +149,11 @@ struct CodeObjectReaderImpl final {
 
   std::string GetUri() const { return uri; };
 
-  std::shared_ptr<hotswap::ReaderRetargetCache> GetOrCreateRetargetCache();
-
  private:
   const void *code_object_memory{nullptr};
   size_t code_object_size{0};
   std::string uri{};
   bool is_mmap{false};
-  std::mutex retarget_cache_mutex{};
-  std::shared_ptr<hotswap::ReaderRetargetCache> retarget_cache{};
 #if defined(_WIN32) || defined(_WIN64)
   // Bookkeeping for MapViewOfFile-backed mappings (file-backed code objects on
   // Windows). map_base is the unadjusted pointer returned by MapViewOfFile and
