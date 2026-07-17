@@ -1683,7 +1683,22 @@ class AccumulateCommand : public Command {
   //! ties the strings' lifetime to the consumer (this command) rather than to
   //! the graph launch, with no string copies. Set via the constructor.
   ReferenceCountedObject* kernelNamesOwner_ = nullptr;
-  std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+
+ public:
+  //! Sentinel queue index meaning "unknown; fall back to the command's queue".
+  static constexpr uint32_t kInvalidQueueIndex = 0xFFFFFFFFu;
+
+  //! One kernel dispatch's GPU timing plus the queue (vGPU index) it ran on.
+  //! Graphs span multiple streams under one command, so the queue is tracked
+  //! per timestamp rather than taken from the command's queue.
+  struct KernelTimestamp {
+    uint64_t start;
+    uint64_t end;
+    uint32_t queue_index;
+  };
+
+ private:
+  std::vector<KernelTimestamp> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1748,9 +1763,11 @@ class AccumulateCommand : public Command {
     kernelNamesRef_ = kernelNames;
   }
 
-  //! Add kernel timestamp to the list if available
-  void addTimestamps(uint64_t startTs, uint64_t endTs) {
-    tsList_.push_back(std::make_pair(startTs, endTs));
+  //! Add kernel timestamp to the list if available. queue_index is the vGPU
+  //! index of the stream the kernel ran on (kInvalidQueueIndex when unknown).
+  void addTimestamps(uint64_t startTs, uint64_t endTs,
+                     uint32_t queue_index = kInvalidQueueIndex) {
+    tsList_.push_back(KernelTimestamp{startTs, endTs, queue_index});
   }
 
   //! Return the kernel names (pointers to stable strings, no copies)
@@ -1759,7 +1776,7 @@ class AccumulateCommand : public Command {
   }
 
   //! Return the kernel timestamps
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }
+  const std::vector<KernelTimestamp>& getTimestamps() const { return tsList_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }
