@@ -17,13 +17,19 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
-import smtplib
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
+
+from rccl_ci_utils import (
+    find_rccl_library,
+    parse_junit_xml,
+    send_email_report,
+    set_github_output,
+    verify_rccl_override,
+    write_github_summary,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -57,65 +63,22 @@ XLA_ENV = {
 }
 
 
-def find_rccl_library(artifact_dir: Path) -> Path:
-    """Find librccl.so in the artifact directory tree."""
-    matches = list(artifact_dir.rglob("librccl.so"))
-    if not matches:
-        so_files = list(artifact_dir.rglob("*.so"))[:20]
-        log.error("librccl.so not found in %s", artifact_dir)
-        log.error("Shared libraries found: %s", [str(f) for f in so_files])
-        sys.exit(1)
-    lib_path = matches[0].resolve()
-    log.info("Found librccl.so at: %s", lib_path)
-    return lib_path
+def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
+    """Find the dist/rocm/lib directory in artifacts."""
+    for d in artifact_dir.rglob("dist/rocm/lib"):
+        if d.is_dir():
+            log.info("Found ROCm lib dir: %s", d)
+            return d
+    return None
 
 
-def find_lib_dirs(artifact_dir: Path) -> list[Path]:
-    """Find all directories containing .so files in the artifact tree."""
-    lib_dirs: set[Path] = set()
-    for so_file in artifact_dir.rglob("*.so"):
-        lib_dirs.add(so_file.parent.resolve())
-    for so_file in artifact_dir.rglob("*.so.*"):
-        lib_dirs.add(so_file.parent.resolve())
-    sorted_dirs = sorted(lib_dirs)
-    for d in sorted_dirs:
-        count = sum(1 for f in d.iterdir() if ".so" in f.name)
-        log.info("Found lib dir: %s (%d libs)", d, count)
-    return sorted_dirs
-
-
-def create_soname_symlinks(lib_dirs: list[Path]) -> None:
-    """Create missing SONAME symlinks (e.g. libfoo.so.1 -> libfoo.so.1.2.3).
-
-    Artifact flattening can strip versioned symlinks. JAX wheels link
-    against SONAME versions (librocprofiler-sdk.so.1) that may only
-    exist as librocprofiler-sdk.so.1.0.0 after flattening.
-    """
-    for d in lib_dirs:
-        for so_file in d.glob("*.so.*"):
-            name = so_file.name
-            # Match libfoo.so.X.Y.Z — create libfoo.so.X symlink
-            parts = name.split(".so.")
-            if len(parts) != 2:
-                continue
-            version_parts = parts[1].split(".")
-            if len(version_parts) <= 1:
-                continue
-            soname = f"{parts[0]}.so.{version_parts[0]}"
-            soname_path = d / soname
-            if not soname_path.exists():
-                soname_path.symlink_to(so_file.name)
-                log.info("Created symlink: %s -> %s", soname_path, so_file.name)
-
-
-def setup_ld_library_path(lib_dirs: list[Path]) -> str:
-    """Prepend all artifact lib dirs to LD_LIBRARY_PATH."""
-    create_soname_symlinks(lib_dirs)
-
-    parts = [str(d) for d in lib_dirs]
-    rocm_lib = Path("/opt/rocm/lib")
-    if rocm_lib.is_dir():
-        parts.insert(0, str(rocm_lib))
+def setup_ld_library_path(
+    rccl_lib_dir: Path, rocm_lib_dir: Path | None
+) -> str:
+    """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
+    parts = [str(rccl_lib_dir.resolve())]
+    if rocm_lib_dir:
+        parts.append(str(rocm_lib_dir.resolve()))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -123,87 +86,6 @@ def setup_ld_library_path(lib_dirs: list[Path]) -> str:
     os.environ["LD_LIBRARY_PATH"] = new_path
     log.info("LD_LIBRARY_PATH=%s", new_path)
     return new_path
-
-
-def diagnose_shared_libs(lib_dirs: list[Path]) -> None:
-    """Run ldd on critical libraries to surface missing transitive deps."""
-    targets = ["librocprofiler-sdk.so.1", "libamdhip64.so"]
-    for d in lib_dirs:
-        for name in targets:
-            lib = d / name
-            if lib.exists():
-                log.info("ldd %s:", lib)
-                result = subprocess.run(
-                    ["ldd", str(lib)],
-                    capture_output=True, text=True,
-                )
-                for line in result.stdout.splitlines():
-                    log.info("  %s", line)
-                if result.returncode != 0:
-                    log.warning("ldd stderr: %s", result.stderr.strip())
-
-    try:
-        import jax_plugins.xla_rocm7 as xla_mod
-        plugin_dir = Path(xla_mod.__file__).parent
-        plugin_so = plugin_dir / "xla_rocm_plugin.so"
-        if plugin_so.exists():
-            log.info("ldd %s:", plugin_so)
-            result = subprocess.run(
-                ["ldd", str(plugin_so)],
-                capture_output=True, text=True,
-            )
-            for line in result.stdout.splitlines():
-                if "not found" in line:
-                    log.warning("  MISSING: %s", line.strip())
-                else:
-                    log.info("  %s", line)
-            log.info("readelf -d %s (RPATH/RUNPATH):", plugin_so)
-            result = subprocess.run(
-                ["readelf", "-d", str(plugin_so)],
-                capture_output=True, text=True,
-            )
-            for line in result.stdout.splitlines():
-                if "RPATH" in line or "RUNPATH" in line:
-                    log.info("  %s", line.strip())
-    except ImportError:
-        log.info("xla_rocm7 plugin not installed — skipping plugin ldd")
-
-
-def populate_rocm_lib_dir(lib_dirs: list[Path]) -> None:
-    """Populate /opt/rocm/lib with symlinks to artifact libraries.
-
-    JAX's xla_rocm_plugin.so typically has RUNPATH set to /opt/rocm/lib.
-    With ELF RUNPATH semantics, transitive dependencies are resolved via
-    RUNPATH rather than LD_LIBRARY_PATH. In a container with no system
-    ROCm, we populate /opt/rocm/lib so the loader can find them.
-    """
-    rocm_lib = Path("/opt/rocm/lib")
-    try:
-        rocm_lib.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        log.warning("Cannot create %s — not running as root", rocm_lib)
-        return
-
-    count = 0
-    for d in lib_dirs:
-        for so_file in d.iterdir():
-            if ".so" not in so_file.name:
-                continue
-            target = rocm_lib / so_file.name
-            if target.exists() or target.is_symlink():
-                continue
-            target.symlink_to(so_file.resolve())
-            count += 1
-    log.info("Created %d symlinks in %s", count, rocm_lib)
-
-
-def verify_rccl_override(rccl_lib_dir: Path) -> None:
-    """Verify that the CI-built librccl.so exists on disk."""
-    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
-    if not ci_rccl.exists():
-        log.error("CI-built librccl.so not found at %s", ci_rccl)
-        sys.exit(1)
-    log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_rccl.stat().st_size)
 
 
 def setup_xla_environment() -> None:
@@ -277,53 +159,6 @@ def print_environment_info() -> None:
     for key in sorted(XLA_ENV):
         log.info("%s=%s", key, os.environ.get(key, "<unset>"))
     log.info("--- End Environment Info ---")
-
-
-def parse_junit_xml(xml_path: Path) -> dict:
-    """Parse JUnit XML and return structured results."""
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-
-    passed_tests = []
-    failed_tests = []
-    error_details = []
-    tests_run = 0
-    failures = 0
-    errors = 0
-
-    for suite in root.iter("testsuite"):
-        tests_run = int(suite.get("tests", 0))
-        failures = int(suite.get("failures", 0))
-        errors = int(suite.get("errors", 0))
-
-    for tc in root.iter("testcase"):
-        name = tc.get("name", "")
-        time_s = tc.get("time", "")
-        duration = f"{float(time_s):.2f}s" if time_s else ""
-
-        failure = tc.find("failure")
-        error = tc.find("error")
-        if failure is not None:
-            failed_tests.append(name)
-            error_details.append(
-                f"FAILED: {name}\n  {failure.get('message', '')}"
-            )
-        elif error is not None:
-            failed_tests.append(name)
-            error_details.append(
-                f"ERROR: {name}\n  {error.get('message', '')}"
-            )
-        else:
-            passed_tests.append((name, duration))
-
-    return {
-        "passed": passed_tests,
-        "failed": failed_tests,
-        "error_details": error_details,
-        "tests_run": tests_run,
-        "failures": failures,
-        "errors": errors,
-    }
 
 
 def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
@@ -450,46 +285,6 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
     return "\n".join(lines)
 
 
-def write_github_summary(report: str) -> None:
-    """Write report to GITHUB_STEP_SUMMARY if available."""
-    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_file:
-        with open(summary_file, "a") as f:
-            f.write("```\n")
-            f.write(report)
-            f.write("\n```\n")
-        log.info("Summary written to GITHUB_STEP_SUMMARY")
-
-
-def send_email_report(report: str, recipient: str, status: str) -> None:
-    """Send the summary report via email."""
-    subject = f"RCCL JAX Collective Test: {status}"
-    msg = MIMEText(report)
-    msg["Subject"] = subject
-    msg["From"] = "rccl-ci@amd.com"
-    msg["To"] = recipient
-
-    smtp_servers = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
-    for server in smtp_servers:
-        try:
-            with smtplib.SMTP(server, timeout=10) as s:
-                s.sendmail(msg["From"], [recipient], msg.as_string())
-            log.info("Email sent to %s via %s", recipient, server)
-            return
-        except Exception as e:
-            log.debug("SMTP %s failed: %s", server, e)
-            continue
-    log.warning("Could not send email to %s (tried: %s)", recipient, ", ".join(smtp_servers))
-
-
-def set_github_output(key: str, value: str) -> None:
-    """Write a key=value pair to GITHUB_OUTPUT if available."""
-    output_file = os.environ.get("GITHUB_OUTPUT")
-    if output_file:
-        with open(output_file, "a") as f:
-            f.write(f"{key}={value}\n")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -524,21 +319,21 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Step 1: Discover RCCL library and all lib dirs in artifacts
+    # Step 1: Discover RCCL library path
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
-    lib_dirs = find_lib_dirs(args.artifact_dir)
+    rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
 
     set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
+    if rocm_lib_dir:
+        set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
 
     if args.discover_only:
         return
 
-    # Step 2: Set up library paths and verify override
-    populate_rocm_lib_dir(lib_dirs)
-    setup_ld_library_path(lib_dirs)
+    # Step 2: Set up LD_LIBRARY_PATH and verify override
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
     verify_rccl_override(rccl_lib_dir)
-    diagnose_shared_libs(lib_dirs)
 
     # Step 3: Set XLA environment variables
     setup_xla_environment()
@@ -561,7 +356,8 @@ def main() -> None:
 
     if args.notify_email:
         status = "PASSED" if exit_code == 0 else "FAILED"
-        send_email_report(report, args.notify_email, status)
+        send_email_report(report, args.notify_email, status,
+                          subject_prefix="RCCL JAX Collective Test")
 
     sys.exit(exit_code)
 
