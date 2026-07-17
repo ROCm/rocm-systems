@@ -60,6 +60,12 @@ def make_policy(**overrides: Any) -> pc.Policy:
             re.compile(r"^dependabot\/.+"),
             re.compile(r"^revert-[0-9]+-.+"),
         ],
+        title_patterns=[
+            re.compile(
+                r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
+                r"(\([a-z0-9\-]+\))?(!)?: .+"
+            )
+        ],
         title_min_length=10,
         title_max_length=80,
         description_min_length=30,
@@ -177,6 +183,11 @@ class TitleTests(unittest.TestCase):
     def test_too_long(self) -> None:
         long_title = "feat: " + ("x" * 90)
         self.assertTrue(any("too long" in x for x in self._errs(long_title)))
+
+    def test_bad_type_fails_pattern(self) -> None:
+        self.assertTrue(
+            any("Conventional Commits" in x for x in self._errs("feature: do stuff"))
+        )
 
     def test_forbidden_word(self) -> None:
         self.assertTrue(
@@ -364,6 +375,111 @@ class UnitTestRuleTests(unittest.TestCase):
                 files = [make_file("src/module.py"), make_file(test_path)]
                 self.assertEqual(self._errs(files), [])
 
+    def test_exempt_path_passes_when_configured(self) -> None:
+        # The exempt-path feature still works when EXPLICITLY configured, even
+        # though the shipped policy now exempts nothing.
+        policy = make_policy(unit_test_exempt_paths=["tools/**"])
+        e: List[str] = []
+        pc.ensure_unit_tests(policy, [make_file("tools/build.py")], e)
+        self.assertEqual(e, [])
+
+    def test_unit_folder_files_pass(self) -> None:
+        # Files under any 'unit/' directory are treated as test files.
+        policy = make_policy()
+        files = [
+            make_file("src/module.py"),
+            make_file("projects/hip-tests/catch/unit/memory/hipHostRegister.cc"),
+        ]
+        e: List[str] = []
+        pc.ensure_unit_tests(policy, files, e)
+        self.assertEqual(e, [])
+
+    def test_unit_folder_files_fail_without_matching_basename(self) -> None:
+        # Since 'unit/**' is no longer a recognized test pattern, files under
+        # unit/ folders do NOT satisfy the unit test requirement unless their
+        # basename also matches test_* / *_test.* / Test*.
+        policy = make_policy()
+        files = [
+            make_file("src/module.py"),
+            # File under unit/ but basename does NOT match test pattern.
+            make_file("projects/hip-tests/catch/unit/memory/hipHostRegister.cc"),
+        ]
+        e: List[str] = []
+        pc.ensure_unit_tests(policy, files, e)
+        # This should FAIL because hipHostRegister.cc is not a test file by basename.
+        self.assertTrue(
+            e, "File under unit/ folder without test_* basename should fail"
+        )
+
+    def test_unit_folder_with_matching_basename_passes(self) -> None:
+        # Files under unit/ ARE treated as tests ONLY if their basename matches.
+        policy = make_policy()
+        files = [
+            make_file("src/module.py"),
+            make_file("projects/hip-tests/catch/unit/test_memory.cc"),
+        ]
+        e: List[str] = []
+        pc.ensure_unit_tests(policy, files, e)
+        # This PASSES because test_memory.cc matches the test_* pattern.
+        self.assertEqual(e, [])
+
+    def test_testing_prefix_satisfies_requirement(self) -> None:
+        # Files with the 'testing_' prefix are recognized as test files.
+        files = [make_file("src/module.py"), make_file("tests/testing_module.py")]
+        self.assertEqual(self._errs(files), [])
+
+    def test_plural_tests_suffix_satisfies_requirement(self) -> None:
+        # Files matching '*_tests.*' (plural) are recognized as test files.
+        for test_path in [
+            "tests/module_tests.py",
+            "src/parser_tests.cpp",
+            "deep/nested/foo_tests.cc",
+        ]:
+            with self.subTest(test_path=test_path):
+                files = [make_file("src/module.py"), make_file(test_path)]
+                self.assertEqual(self._errs(files), [])
+
+    def test_gtest_folder_files_satisfy_requirement(self) -> None:
+        # Any file under a 'test/gtest/' directory counts as a unit test,
+        # regardless of its basename.
+        for test_path in [
+            "projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp",
+            "test/gtest/foo.cpp",
+            "a/b/c/test/gtest/deep/bar.cc",
+        ]:
+            with self.subTest(test_path=test_path):
+                files = [make_file("src/module.py"), make_file(test_path)]
+                self.assertEqual(self._errs(files), [])
+
+
+# ----------------------------- reviewable size -------------------------------
+
+
+class ReviewableSizeTests(unittest.TestCase):
+    def test_total_changes_limit(self) -> None:
+        policy = make_policy(
+            max_total_changes=10, max_files_changed=0, max_single_file_changes=0
+        )
+        e: List[str] = []
+        pc.ensure_pr_reviewable(policy, [make_file("a.py", additions=20)], e)
+        self.assertTrue(any("Total diff" in x for x in e))
+
+    def test_single_file_limit(self) -> None:
+        policy = make_policy(
+            max_total_changes=0, max_files_changed=0, max_single_file_changes=5
+        )
+        e: List[str] = []
+        pc.ensure_pr_reviewable(policy, [make_file("big.py", additions=50)], e)
+        self.assertTrue(any("single file" in x for x in e))
+
+    def test_within_limits_passes(self) -> None:
+        policy = make_policy()
+        e: List[str] = []
+        pc.ensure_pr_reviewable(
+            policy, [make_file("a.py", additions=5, deletions=5)], e
+        )
+        self.assertEqual(e, [])
+
 
 # ----------------------------- draft + bump ----------------------------------
 
@@ -477,6 +593,7 @@ class LoadPolicyTests(unittest.TestCase):
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
         self.assertGreater(len(policy.branch_patterns), 0)
+        self.assertGreater(len(policy.title_patterns), 0)
         self.assertIn("pre-commit", policy.required_checks)
         self.assertGreaterEqual(policy.title_max_length, policy.title_min_length)
 
