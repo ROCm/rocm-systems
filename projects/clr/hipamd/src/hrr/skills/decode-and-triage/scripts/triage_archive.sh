@@ -73,7 +73,11 @@ echo "[triage_archive] archive=$ARCHIVE replay=$mode" >&2
 
 if [[ "$mode" == "docker" ]]; then
   HRR_ROOT="${HRR_ROOT:-$WORKDIR}"
-  export CLR_BUILD="${CLR_BUILD:-/var/lib/rancher/hrr-develop-wt/projects/clr/build-hrr}"
+  if [[ -z "${CLR_BUILD:-}" && -x "$SCRIPT_DIR/ensure_playback.sh" ]]; then
+    play="$("$SCRIPT_DIR/ensure_playback.sh")" || play=""
+    [[ -n "$play" ]] && export CLR_BUILD="$(cd "$(dirname "$play")/../../../.." && pwd)"
+  fi
+  export CLR_BUILD="${CLR_BUILD:-}"
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
   echo "[triage_archive] docker replay -> $LOG" >&2
   set +e

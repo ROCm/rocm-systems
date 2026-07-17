@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANALYZER="$SCRIPT_DIR/analyze_replay_finding.py"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+ENSURE="$SCRIPT_DIR/ensure_playback.sh"
 
 ARCHIVE=""
 LOGS=()
@@ -46,11 +47,7 @@ resolve_playback() {
   if [[ -n "${CLR_BUILD:-}" ]]; then
     candidates+=("${CLR_BUILD}/hipamd/src/hrr/playback/hrr-playback")
   fi
-  candidates+=(
-    "/var/lib/rancher/hrr-develop-wt/projects/clr/build-hrr/hipamd/src/hrr/playback/hrr-playback"
-    "$ROCM_PATH/bin/hrr-playback"
-    "/opt/rocm/bin/hrr-playback"
-  )
+  candidates+=("$ROCM_PATH/bin/hrr-playback")
   local p
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
@@ -66,6 +63,9 @@ if [[ -n "$ARCHIVE" ]]; then
 fi
 
 HRR_PLAY="$(resolve_playback)"
+if [[ -n "$ARCHIVE" && -z "$HRR_PLAY" && -x "$ENSURE" ]]; then
+  HRR_PLAY="$("$ENSURE")" || HRR_PLAY=""
+fi
 if [[ -n "$ARCHIVE" && -z "$HRR_PLAY" ]]; then
   echo "warning: hrr-playback not found; skipping --info (log-only triage still works)" >&2
   echo "warning: set HRR_PLAYBACK or install/build hrr-playback (see $SKILL_DIR/reference.md)" >&2

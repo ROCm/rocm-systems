@@ -19,7 +19,7 @@ The user does not mention scripts, `HRR_PLAYBACK`, or GPU numbers.
 ## What the agent does
 
 1. Resolves `pid-1842` (or largest `events.bin` if only root given)
-2. Finds `hrr-playback` for `--info` (PATH → `$ROCM_PATH/bin` → user path)
+2. Runs `ensure_playback.sh` if needed (finds or **builds** `hrr-playback` from `rocm-systems`)
 3. Runs `decode_finding.sh --archive ...` (and `--log` if provided)
 4. **Prints the finding summary in the chat reply** (required — user must not need to open a file)
 5. Adds **capture explainer** (events.bin, blobs, completeness, version)
@@ -63,9 +63,9 @@ all complete events; replay/analysis can proceed.
 
 ## If `hrr-playback` is not in a standard location
 
-User answers: *"It's in `/home/me/rocm-build/hrr-playback`"*
-
-Agent sets `HRR_PLAYBACK=/home/me/rocm-build/hrr-playback` for that session and re-runs `decode_finding.sh`.
+The agent runs `ensure_playback.sh`, which builds from the in-tree CLR path or
+`$HRR_ROOT/projects/clr` when cmake/ninja and the source tree are present. Only if that
+fails should the agent ask where the checkout or a prebuilt `hrr-playback` lives.
 
 ## When the user asks for full replay
 

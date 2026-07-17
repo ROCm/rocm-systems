@@ -30,16 +30,17 @@ The user only needs the archive path. **Default is read-only** (`--info` + log p
 | Missing | Ask once |
 |---------|----------|
 | Archive path | *"Which `capture.hrr/pid-*` directory should I use?"* |
-| `hrr-playback` not found after discovery | *"Where is `hrr-playback` installed?"* |
 | Full replay requested but no GPU/docker | Confirm native replay is OK or use `--no-replay` |
+| `ensure_playback.sh` fails (no CLR tree, no cmake/ninja) | Only then ask where `rocm-systems` / `hrr-playback` lives |
 
 Do **not** ask for GPU index, Docker, ROCm version, or HIP library paths unless replay fails.
+Do **not** ask the user to run cmake/ninja manually — the skill builds playback itself.
 
 ## Agent workflow
 
 ```
 1. Resolve archive — user path, or largest events.bin under capture.hrr/pid-*
-2. Discover hrr-playback (see below)
+2. Bootstrap playback — ensure_playback.sh (find or build hrr-playback from CLR tree)
 3. Run decode_finding.sh --archive <pid-dir>   # read-only by default
 4. Print finding summary + capture explainer in the chat reply (required)
 5. If user asked for full replay: triage_archive.sh --archive <dir> --replay
@@ -52,8 +53,12 @@ Do **not** read stale `hrr-replay-*.log` or `*.finding.md` files unless the user
 ### Primary commands
 
 ```bash
-SKILL=<path-to>/.cursor/skills/hrr-decode-and-triage
-# or: hipamd/src/hrr/skills/decode-and-triage
+SKILL=<path-to>/skills/decode-and-triage
+# In-tree: hipamd/src/hrr/skills/decode-and-triage
+# Optional when symlinked outside the repo: export HRR_ROOT=<workspace-with-rocm-systems>
+
+# Bootstrap (find or build hrr-playback; sets CLR_BUILD / HRR_PLAYBACK / LD_LIBRARY_PATH):
+HRR_PLAYBACK="$("$SKILL/scripts/ensure_playback.sh")"
 
 # Read-only (default):
 "$SKILL/scripts/decode_finding.sh" --archive <pid-dir>
@@ -71,13 +76,16 @@ requires `hrr-playback` and `libamdhip64` from the same build on `LD_LIBRARY_PAT
 - Full replay writes `hrr-replay-<pid>-<timestamp>.log` and a finding file under cwd
 - Prints the finding to stdout — **copy the summary into your reply**
 
-### Discover `hrr-playback`
+### Bootstrap `hrr-playback` (agent runs this — not the user)
 
-1. `command -v hrr-playback`
-2. `${CLR_BUILD}/hipamd/src/hrr/playback/hrr-playback`
-3. `/var/lib/rancher/hrr-develop-wt/projects/clr/build-hrr/hipamd/src/hrr/playback/hrr-playback`
-4. `$ROCM_PATH/bin/hrr-playback` (default `ROCM_PATH=/opt/rocm`)
-5. User-provided path → `HRR_PLAYBACK` for that run only
+Run **`ensure_playback.sh`** before decode/replay. It:
+
+1. Reuses an existing binary (`PATH`, `HRR_PLAYBACK`, `CLR_BUILD`, `/opt/rocm/bin`)
+2. Else finds CLR source from the in-tree skill path or `$HRR_ROOT/projects/clr`
+3. Else runs `cmake` + `ninja amdhip64 hrr-playback` into `build-hrr/`
+4. Exports `CLR_BUILD`, `HRR_PLAYBACK`, and `LD_LIBRARY_PATH`
+
+Manual build details: [reference.md](reference.md).
 
 ### Reply to the user (required)
 

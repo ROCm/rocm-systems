@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-CLR_BUILD_DEFAULT="/var/lib/rancher/hrr-develop-wt/projects/clr/build-hrr"
+ENSURE="$SCRIPT_DIR/ensure_playback.sh"
 
 ARCHIVE=""
 LOG=""
@@ -32,11 +32,7 @@ resolve_playback() {
   if [[ -n "${CLR_BUILD:-}" ]]; then
     candidates+=("${CLR_BUILD}/hipamd/src/hrr/playback/hrr-playback")
   fi
-  candidates+=(
-    "${CLR_BUILD_DEFAULT}/hipamd/src/hrr/playback/hrr-playback"
-    "$ROCM_PATH/bin/hrr-playback"
-    "/opt/rocm/bin/hrr-playback"
-  )
+  candidates+=("$ROCM_PATH/bin/hrr-playback")
   local p
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
@@ -54,7 +50,7 @@ setup_library_path() {
   if [[ "$bin_dir" == *"/hipamd/src/hrr/playback" ]]; then
     lib_dirs+=("$(cd "$bin_dir/../../../lib" && pwd)")
   fi
-  lib_dirs+=("$ROCM_PATH/lib" "/opt/rocm/lib")
+  lib_dirs+=("$ROCM_PATH/lib")
   local sib="$(cd "$bin_dir/.." && pwd)/lib"
   [[ -d "$sib" ]] && lib_dirs+=("$sib")
   for p in "${lib_dirs[@]}"; do
@@ -95,8 +91,11 @@ pick_gpu() {
 }
 
 HRR_PLAY="$(resolve_playback)"
+if [[ -z "$HRR_PLAY" && -x "$ENSURE" ]]; then
+  HRR_PLAY="$("$ENSURE")" || HRR_PLAY=""
+fi
 [[ -n "$HRR_PLAY" ]] || {
-  echo "error: hrr-playback not found. Set HRR_PLAYBACK or CLR_BUILD." >&2
+  echo "error: hrr-playback not found (ensure_playback.sh failed). Set HRR_PLAYBACK or CLR_BUILD." >&2
   exit 1
 }
 
