@@ -3542,10 +3542,10 @@ generate_output(cleanup_mode _cleanup_mode)
     generate_output(rocdecode_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
-    generate_output(rocshmem_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
     generate_output(spm_counters_output, outdata, contributions, cleanups);
     generate_output(hip_graph_output, outdata, contributions, cleanups);
+    generate_output(rocshmem_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
