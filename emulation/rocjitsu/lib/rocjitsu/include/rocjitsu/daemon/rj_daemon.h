@@ -68,6 +68,9 @@ RJ_API_EXPORT rj_status_t rj_daemon_stop(rj_daemon_t *daemon);
 /// @details Thread-safe while the handle remains valid. A NULL handle reports
 /// RJ_DAEMON_STATUS_STOPPED.
 ///
+/// @note Do NOT call on a daemon after rj_daemon_stop has been called,
+/// as the handle is invalid and may have been freed.
+///
 /// @param[in] daemon Daemon handle, or NULL.
 RJ_API_EXPORT rj_daemon_status_t rj_daemon_status(const rj_daemon_t *daemon);
 
