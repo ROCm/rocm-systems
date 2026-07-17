@@ -31,12 +31,6 @@ _AINIC_SYMBOLS = [
     "amdsmi_get_nic_port_info",
 ]
 
-# String literals embedded only when ROCPROFSYS_BUILD_AINIC=ON.
-_AINIC_STRINGS = [
-    "ROCPROFSYS_USE_AINIC",
-    "ainic",
-]
-
 
 def _find_librocprof_sys(lib_dir: Path) -> Path:
     """Return the versioned or unversioned librocprof-sys.so under lib_dir."""
