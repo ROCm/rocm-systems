@@ -2402,10 +2402,14 @@ inline void execute_s_sext_i32_i8_sop1([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.cu().request_functional_yield();
+}
 
 template <typename Inst>
-inline void execute_s_sleep_var_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_sleep_var_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.cu().request_functional_yield();
+}
 
 template <typename Inst>
 inline void execute_s_sub_co_ci_u32_sop2([[maybe_unused]] Inst &inst,
@@ -16602,22 +16606,14 @@ inline void execute_v_pk_mov_b32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_lo_w = inst.src0.read_lane(wf, lane);
-    uint32_t s0_hi_w = s0_lo_w;
-    if (inst.src0.encoding_value_ >= 256 && inst.src0.encoding_value_ <= 511) {
-      uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane);
-      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
-      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
-    }
-    uint32_t s1_lo_w = inst.src1.read_lane(wf, lane);
-    uint32_t s1_hi_w = s1_lo_w;
-    if (inst.src1.encoding_value_ >= 256 && inst.src1.encoding_value_ <= 511) {
-      uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane);
-      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
-      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
-    }
+    uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane);
+    uint32_t s0_lo_w = static_cast<uint32_t>(s0_pair_w);
+    uint32_t s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
+    uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane);
+    uint32_t s1_lo_w = static_cast<uint32_t>(s1_pair_w);
+    uint32_t s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
     uint32_t lo = (inst.inst_.op_sel & 1) ? s0_hi_w : s0_lo_w;
-    uint32_t hi = (inst.inst_.op_sel_hi & 2) ? s1_hi_w : s1_lo_w;
+    uint32_t hi = (inst.inst_.op_sel & 2) ? s1_hi_w : s1_lo_w;
     inst.vdst.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));
   }
 }

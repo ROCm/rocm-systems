@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file instruction_execution_harness_test.cpp
-/// @brief Phase E parameterized test: execute every instruction on every ISA.
+/// @brief Phase E parameterized test: execute safe scalar encodings on every ISA.
 ///
-/// For each ISA, iterates all auto-generated test encodings, decodes the
-/// instruction, and calls execute() on a zeroed wavefront.  Instructions that
-/// throw UnimplementedInst are recorded as coverage exceptions; the test
-/// reports a per-ISA coverage percentage.
+/// For each ISA, iterates auto-generated encodings that are safe to execute on
+/// a zeroed wavefront, decodes them, and calls execute(). Decode failures are
+/// rejected, and UnimplementedInst results must exactly match the explicit
+/// expectation for that ISA.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
@@ -39,11 +39,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -179,6 +182,33 @@ inline bool should_skip_inst(std::string_view mn) {
   return false;
 }
 
+constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
+constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
+    "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
+constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
+                                                                          "s_subvector_loop_end"};
+constexpr std::array<std::string_view, 0> EXPECTED_NO_UNIMPLEMENTED = {};
+
+struct HarnessExpectation {
+  std::string_view arch_name;
+  std::span<const std::string_view> unimplemented;
+};
+
+constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
+    {"cdna1", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna2", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna4", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
+    {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
+};
+
+const HarnessExpectation *harness_expectation(std::string_view arch_name) {
+  for (const auto &expectation : HARNESS_EXPECTATIONS)
+    if (expectation.arch_name == arch_name)
+      return &expectation;
+  return nullptr;
+}
+
 /// @brief Helper to run all test encodings for a given ISA.
 void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
                            const TestEncEntry *encodings, size_t num_encodings) {
@@ -200,12 +230,13 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
   ASSERT_NE(decoder, nullptr) << "Failed to create decoder for " << arch_name;
 
   size_t total = num_encodings;
-  [[maybe_unused]] size_t decoded = 0;
+  size_t decoded = 0;
   size_t executed = 0;
-  size_t unimplemented = 0;
-  size_t skipped_mem = 0;
-  std::vector<std::string> unimpl_list;
+  size_t skipped = 0;
+  std::vector<std::string_view> unimpl_list;
   std::vector<std::string> decode_fail_list;
+  std::vector<std::string> mnemonic_mismatch_list;
+  std::vector<std::string> execution_fail_list;
 
   for (size_t i = 0; i < total; ++i) {
     const auto &te = encodings[i];
@@ -213,7 +244,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     // Skip memory instructions — they require valid addresses and will
     // crash or hang when executed on zeroed wavefront/memory state.
     if (should_skip_inst(te.mnemonic)) {
-      ++skipped_mem;
+      ++skipped;
       continue;
     }
 
@@ -232,6 +263,13 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
       decode_fail_list.emplace_back(te.mnemonic);
       continue;
     }
+
+    const std::string_view decoded_mnemonic = inst->mnemonic();
+    if (decoded_mnemonic != te.mnemonic) {
+      mnemonic_mismatch_list.emplace_back(
+          std::string(te.mnemonic).append(" decoded as ").append(decoded_mnemonic));
+      continue;
+    }
     ++decoded;
 
     // Dispatch a fresh wavefront for each instruction to avoid state leaks.
@@ -248,38 +286,53 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
       cu->execute_instruction(inst.get(), *wf);
       ++executed;
     } catch (const util::UnimplementedInst &) {
-      ++unimplemented;
       unimpl_list.emplace_back(te.mnemonic);
+    } catch (const std::exception &error) {
+      execution_fail_list.emplace_back(std::string(te.mnemonic).append(": ").append(error.what()));
     } catch (...) {
-      ++executed; // Other exceptions are acceptable on zeroed state.
+      execution_fail_list.emplace_back(te.mnemonic);
     }
 
     // Reset the wavefront for the next instruction.
     cu->reset_all_wf();
   }
 
-  size_t testable = total - skipped_mem;
-  double coverage = testable > 0 ? 100.0 * executed / testable : 0.0;
-  std::printf(
-      "\n  %.*s: %zu/%zu executed (%.1f%%), %zu unimplemented, %zu decode fail, %zu mem skipped\n",
-      static_cast<int>(arch_name.size()), arch_name.data(), executed, testable, coverage,
-      unimplemented, decode_fail_list.size(), skipped_mem);
+  size_t testable = total - skipped;
+  std::printf("\n  %.*s: %zu/%zu testable encodings executed, %zu unimplemented, "
+              "%zu decode fail, %zu execution fail, %zu skipped\n",
+              static_cast<int>(arch_name.size()), arch_name.data(), executed, testable,
+              unimpl_list.size(), decode_fail_list.size(), execution_fail_list.size(), skipped);
 
   if (!unimpl_list.empty()) {
     std::printf("  Unimplemented (%zu):", unimpl_list.size());
-    for (size_t i = 0; i < std::min(unimpl_list.size(), size_t{20}); ++i)
-      std::printf(" %s", unimpl_list[i].c_str());
+    for (size_t i = 0; i < std::min(unimpl_list.size(), size_t{20}); ++i) {
+      const auto mnemonic = unimpl_list[i];
+      std::printf(" %.*s", static_cast<int>(mnemonic.size()), mnemonic.data());
+    }
     if (unimpl_list.size() > 20)
       std::printf(" ... +%zu more", unimpl_list.size() - 20);
     std::printf("\n");
   }
 
-  // Decode failures are expected for sub-decoded encodings where the
-  // synthesized test word doesn't match the decoder's sub-dispatch path.
-  // The primary coverage metric is: of the instructions that DO decode,
-  // how many execute without throwing UnimplementedInst?
-  // Unimplemented instructions are tracked in coverage_exceptions files.
+  // Every encoding admitted by should_skip_inst must decode. Known
+  // UnimplementedInst results are named explicitly so failures identify the
+  // exact instruction that regressed instead of only crossing a numeric
+  // coverage threshold.
   EXPECT_GT(decoded, 0u) << "No instructions decoded for " << arch_name;
+  EXPECT_EQ(decode_fail_list.size(), 0u) << arch_name << " gained decode failures";
+  EXPECT_TRUE(mnemonic_mismatch_list.empty())
+      << arch_name << " encodings decoded as a different instruction: "
+      << ::testing::PrintToString(mnemonic_mismatch_list);
+  EXPECT_EQ(execution_fail_list.size(), 0u)
+      << arch_name << " failed to execute implemented instructions";
+
+  const auto *expectation = harness_expectation(arch_name);
+  ASSERT_NE(expectation, nullptr) << "Missing harness expectation for " << arch_name;
+  std::sort(unimpl_list.begin(), unimpl_list.end());
+  std::vector<std::string_view> expected(expectation->unimplemented.begin(),
+                                         expectation->unimplemented.end());
+  std::sort(expected.begin(), expected.end());
+  EXPECT_EQ(unimpl_list, expected) << arch_name << " unimplemented instruction set changed";
 }
 
 // --- Parameterized tests per ISA ---
@@ -302,11 +355,143 @@ TEST(InstructionExecutionHarness, Rdna3_5) {
   RUN_HARNESS(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5");
 }
 TEST(InstructionExecutionHarness, Rdna4) { RUN_HARNESS(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
+
+TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
+  amdgpu::GpuMemory gpu_mem("rdna4_exec_hi_mem");
+  amdgpu::L2Cache l2("rdna4_exec_hi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_exec_hi", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  cu->write_sgpr(wf->sgpr_alloc().base, 0xffffffffu);
+  wf->set_exec(0xffffffffu);
+
+  constexpr uint32_t kInline16 = 128u + 16u;
+  const std::array<std::pair<uint32_t, std::string_view>, 3> sequence{{
+      {encode_sop2(/*s_lshr_b32=*/10, /*exec_lo=*/126, /*s0=*/0, kInline16)[0], "s_lshr_b32"},
+      {encode_sop2(/*s_lshl_b32=*/8, /*exec_hi=*/127, /*s0=*/0, kInline16)[0], "s_lshl_b32"},
+      {encode_sop2(/*s_or_b32=*/24, /*exec_lo=*/126, /*exec_lo=*/126, /*exec_hi=*/127)[0],
+       "s_or_b32"},
+  }};
+
+  for (size_t i = 0; i < sequence.size(); ++i) {
+    const uint32_t words[] = {sequence[i].first, 0};
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), sequence[i].second);
+    cu->execute_instruction(inst.get(), *wf);
+    if (i == 1) {
+      EXPECT_EQ(wf->exec(), 0x0000ffffu);
+      EXPECT_EQ(wf->exec_raw(), 0xffff0000'0000ffffULL);
+    }
+  }
+
+  EXPECT_EQ(wf->exec(), 0xffffffffu);
+  EXPECT_EQ(wf->exec_raw(), 0xffff0000'ffffffffULL);
+
+  constexpr uint64_t kRawExec = 0x2468ace0'13579bdfULL;
+  cu->write_sgpr(wf->sgpr_alloc().base, static_cast<uint32_t>(kRawExec));
+  cu->write_sgpr(wf->sgpr_alloc().base + 1, static_cast<uint32_t>(kRawExec >> 32));
+  wf->set_exec_raw(0xdeadbeef'ffffffffULL);
+
+  const auto mov_b64 = encode_sop1(/*s_mov_b64=*/1, /*exec=*/126, /*s0=*/0);
+  std::unique_ptr<Instruction> inst(decoder->decode(mov_b64.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_mov_b64");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(wf->exec_raw(), kRawExec);
+  EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
+}
 TEST(InstructionExecutionHarness, Gfx1250) {
   RUN_HARNESS(gfx1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
 }
 
 #undef RUN_HARNESS
+
+TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_memory_harness_mem");
+  amdgpu::L2Cache l2("gfx1250_memory_harness_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kGlobalAddr = 0x2000;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kGlobalAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kGlobalAddr >> 32));
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    gpu_mem.write32(kGlobalAddr + lane * sizeof(uint32_t), 0u);
+    cu.write_vgpr(vb + 0, lane, lane * sizeof(uint32_t));
+    cu.write_vgpr(vb + 1, lane, 0x11000000u + lane);
+  }
+
+  // global_store_b32 v0, v1, s[4:5]
+  const uint32_t global_store_words[] = {0xEE068004u, 0x00800000u, 0x00000000u};
+  std::unique_ptr<Instruction> global_store(decoder->decode(global_store_words));
+  ASSERT_NE(global_store, nullptr);
+  ASSERT_EQ(std::string_view(global_store->mnemonic()), "global_store_b32");
+  cu.execute_and_route(global_store.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr), 0x11000000u);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + sizeof(uint32_t)), 0x11000001u);
+
+  constexpr uint64_t kBufferAddr = 0x3000;
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kBufferAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kBufferAddr >> 32));
+  cu.write_sgpr(sb + 6, 0x1000u);
+  cu.write_sgpr(sb + 7, 0u);
+  wf->set_m0(16u);
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    gpu_mem.write32(kBufferAddr + lane * 32, 0u);
+    gpu_mem.write32(kBufferAddr + 16 + lane * 32, 0u);
+    cu.write_vgpr(vb + 0, lane, 0x22000000u + lane);
+    cu.write_vgpr(vb + 5, lane, lane * 32);
+  }
+
+  // buffer_store_b32 v0, v5, s[4:7], m0 offen
+  const uint32_t buffer_store_words[] = {0xC406807Du, 0x40800800u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_store(decoder->decode(buffer_store_words));
+  ASSERT_NE(buffer_store, nullptr);
+  ASSERT_EQ(std::string_view(buffer_store->mnemonic()), "buffer_store_b32");
+  cu.execute_and_route(buffer_store.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 16), 0x22000000u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
+
+  cu.reset_all_wf();
+}
 
 TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   amdgpu::GpuMemory gpu_mem("rdna4_scc_i32_overflow_mem");
@@ -2613,8 +2798,44 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     std::unique_ptr<Instruction> and_inst(decoder->decode(and_words));
     ASSERT_NE(and_inst, nullptr);
     ASSERT_EQ(std::string_view(and_inst->mnemonic()), "v_and_b16");
+    ASSERT_NE(and_inst->src_operand(0), nullptr);
+    EXPECT_EQ(static_cast<uint32_t>(and_inst->src_operand(0)->encoding_value()), 0xFFFF8000u);
+    EXPECT_EQ(and_inst->src_operand(0)->name(), "0x8000");
+    EXPECT_NE(and_inst->disassemble().find("0x8000"), std::string::npos);
+    EXPECT_EQ(and_inst->disassemble().find("0x-"), std::string::npos);
     cu->execute_instruction(and_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x11118000u);
+
+    cu->write_vgpr(vb + 1, 0, 0x22220000u);
+
+    // v_and_b16 v1.l, 0x8000, v3.l op_sel:[1,0,0]
+    const uint32_t and_high_words[] = {0xD7620801U, 0x020206FFU, 0x80000000U};
+    std::unique_ptr<Instruction> and_high_inst(decoder->decode(and_high_words));
+    ASSERT_NE(and_high_inst, nullptr);
+    ASSERT_EQ(std::string_view(and_high_inst->mnemonic()), "v_and_b16");
+    ASSERT_NE(and_high_inst->src_operand(0), nullptr);
+    EXPECT_EQ(static_cast<uint32_t>(and_high_inst->src_operand(0)->encoding_value()), 0x80000000u);
+    EXPECT_EQ(and_high_inst->src_operand(0)->name(), "0x8000");
+    EXPECT_NE(and_high_inst->disassemble().find("0x8000"), std::string::npos);
+    EXPECT_EQ(and_high_inst->disassemble().find("0x-"), std::string::npos);
+    cu->execute_instruction(and_high_inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x22228000u);
+
+    cu->write_vgpr(vb + 1, 0, 0x33330000u);
+
+    // v_and_b16 v1.l, v3.l, 0x8000 op_sel:[0,1,0]
+    const uint32_t and_src1_high_words[] = {0xD7621001U, 0x0201FF03U, 0x80000000U};
+    std::unique_ptr<Instruction> and_src1_high_inst(decoder->decode(and_src1_high_words));
+    ASSERT_NE(and_src1_high_inst, nullptr);
+    ASSERT_EQ(std::string_view(and_src1_high_inst->mnemonic()), "v_and_b16");
+    ASSERT_NE(and_src1_high_inst->src_operand(1), nullptr);
+    EXPECT_EQ(static_cast<uint32_t>(and_src1_high_inst->src_operand(1)->encoding_value()),
+              0x80000000u);
+    EXPECT_EQ(and_src1_high_inst->src_operand(1)->name(), "0x8000");
+    EXPECT_NE(and_src1_high_inst->disassemble().find("0x8000"), std::string::npos);
+    EXPECT_EQ(and_src1_high_inst->disassemble().find("0x-"), std::string::npos);
+    cu->execute_instruction(and_src1_high_inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x33338000u);
 
     // v_xor_b16 v0.l, v1.l, v0.l
     const uint32_t xor_words[] = {0xD7640000U, 0x02020101U};

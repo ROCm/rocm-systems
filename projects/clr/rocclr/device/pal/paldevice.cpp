@@ -636,7 +636,11 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
       }
     }
   }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
+  info_.hasExpertSchedMode_ = palProp.gfxTriple >= Pal::IpLevel(12, 0);
+#else
   info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
+#endif
 }
 
 Device::XferBuffers::~XferBuffers() {
@@ -1169,7 +1173,12 @@ bool Device::initializeHeapResources() {
           // Loader returns an absolute address, but PAL accepts base + offset, hense find offset
           auto offset = program->GetTrapHandlerAddress() - memRef.pGpuMemory->Desc().gpuVirtAddr;
           // Bind the trap handler's executable to the kernel mode driver
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 974
+          result = iDev()->SetHipTrapHandler(
+              memRef.pGpuMemory->Desc().gpuVirtAddr + offset, 0);
+#else
           result = iDev()->SetHipTrapHandler(memRef.pGpuMemory, offset, nullptr, 0);
+#endif
           if (result != Pal::Result::Success) {
             LogError("KMD failed to setup the trap handler");
           }

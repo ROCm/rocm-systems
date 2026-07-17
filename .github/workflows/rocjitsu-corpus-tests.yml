@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/07/07.
-        default: "3278883f548e1353ffbda1a8090219d866eca035"
+        # Last updated on 2026/07/15.
+        default: "441f97b633933bb44520b50a96004270c163d359"
         required: true
 
 concurrency:
@@ -102,8 +102,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/07.
-          ref: 3278883f548e1353ffbda1a8090219d866eca035
+          # Last updated on 2026/07/15.
+          ref: ${{ github.event.inputs.corpus_ref || '441f97b633933bb44520b50a96004270c163d359' }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -134,6 +134,8 @@ jobs:
           ASAN_UBSAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            "Cdna4ToCdna3SimulatedDispatchTest\..*"
+            "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
@@ -147,7 +149,8 @@ jobs:
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
-            "InterposerTest\..*"
+            "Interposer.*Test\..*"
+            "GuestKfd.*\..*"
             "RaceTest\..*"
           )
 
@@ -181,11 +184,14 @@ jobs:
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
 
-          cmake --build "${ROCJITSU_BUILD_DIR}"
+          # Set a conservative number of workers to avoid OOM and excessive system load.
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -E "${EXCLUDED_TESTS}" \
-            --output-on-failure
+            --output-on-failure \
+            -j "${WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
@@ -211,30 +217,19 @@ jobs:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
-          targets=(
-            "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
-            "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
-            "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
-            "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
-            "gfx1250 gfx1250.json gfx1250_skip_tests.json"
-          )
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          corpus_status=0
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config skip_tests_config <<< "${target}"
-            echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              tests/test_corpus.py -vv \
-              --target "${name}" \
-              --suite iree,kernels,cts \
-              --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
-              corpus_status=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "${corpus_status}"
+          export ROCJITSU_SOURCE_DIR
+
+          corpus_test_status=0
+
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          corpus_test_flags=(
+            --workers "${WORKERS}" \
+            --soft-timeout 15 \
+            --hard-timeout 30 \
+            --rerun-failed \
+          )
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
+          exit "${corpus_test_status}"

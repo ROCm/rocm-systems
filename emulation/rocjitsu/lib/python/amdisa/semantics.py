@@ -1534,7 +1534,7 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
     if name == 'V_PK_MOV_B32':
-        return InstructionSemantics(name, 'pk_mov_b32', accvgpr_srcs=True)
+        return InstructionSemantics(name, 'pk_mov_b32')
 
     # Packed min3/max3 (CDNA4 / RDNA4)
     if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):
