@@ -9,7 +9,7 @@ Install hipFile
 ****************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see :doc:`Install AMD ROCm <rocm:install/rocm>`.
 
 For source builds, CMake options, and sparse-checkout layout from ``rocm-systems``,
 see :doc:`./build-from-source`. For the Python bindings after the C library is on
