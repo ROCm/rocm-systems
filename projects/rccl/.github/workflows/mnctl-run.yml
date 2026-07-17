@@ -164,6 +164,9 @@ jobs:
           TEST_CONFIG: ${{ matrix.test_config }}
           TEST_SUITE: ${{ matrix.test_suite }}
           TEST_NAME: ${{ matrix.test_name }}
+          # Coverage reporting toggle (per-target; empty = on). Clusters whose
+          # image lacks codecov tooling (e.g. ruby) set this to "false".
+          COVERAGE_REPORT: ${{ matrix.coverage_report }}
           NIC_TYPE: ${{ matrix.nic_type }}
           # Per-cluster SLURM settings come from the matrix (CLUSTERS table).
           PARTITION: ${{ matrix.partition }}

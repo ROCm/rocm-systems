@@ -266,6 +266,7 @@ def build_matrix(env: Mapping[str, str]) -> list:
         e.setdefault("test_name", env.get("INPUT_TEST_NAME", ""))
         e.setdefault("test_config", "")
         e.setdefault("extra_volumes", "")   # optional host->ctr bind mounts
+        e.setdefault("coverage_report", "") # per-target; empty = coverage on
     return entries
 
 

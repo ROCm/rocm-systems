@@ -70,6 +70,8 @@ targets:
     params:
       test_config: mi355x_thor2_roce.json
       extra_volumes: /opt/rocm:/opt/rocm
+      # ManyLinux base image has no codecov/gcov tooling -> skip coverage report.
+      coverage_report: "false"
 
   # Tensorwave / gfx950 (disabled). Same self-installing ALinux9.7022 image, but
   # ainic → mnctl auto-prepends post-setup/ainic. TODO(tw): confirm the ainic
@@ -85,6 +87,8 @@ targets:
     nodes: "2"
     params:
       test_config: mi455_ainic_roce.json
+      # ManyLinux/ALinux9 base has no codecov/gcov tooling -> skip coverage report.
+      coverage_report: "false"
 
   # Example rccl-tests target (enable once the payload lands in Phase 4).
   - name: rccl-tests-gfx942-ubuntu24-7.13.0rc2

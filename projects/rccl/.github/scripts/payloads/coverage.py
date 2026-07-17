@@ -29,6 +29,19 @@ class CoveragePayload(Payload):
         self.test_name = os.environ.get("TEST_NAME", "")
         self.rccl_tests_dir = os.environ.get("RCCL_TESTS_DIR", "")
         self.mpi_hostfile = ""              # resolved in prelaunch/validate
+        # Coverage reporting needs lcov/codecov tooling, which only the Ubuntu
+        # ROCm image ships. Explicit COVERAGE_REPORT wins (set by ci_targets.yml
+        # in CI, or by hand locally); otherwise auto-disable for the ManyLinux /
+        # ALinux bases that lack it. This works for local runs too, which never
+        # read ci_targets.yml (RunConfig is env-only).
+        cov = os.environ.get("COVERAGE_REPORT", "").strip().lower()
+        if cov:
+            self.coverage_report = cov not in ("0", "false", "no", "off")
+        else:
+            dockerfile = os.environ.get("DOCKERFILE", "")
+            self.coverage_report = not any(
+                base in dockerfile for base in ("ManyLinux", "ALinux")
+            )
 
     # rccl-tests source (perf binaries): override wins, else the sibling checkout.
     def validate(self, orch) -> None:
@@ -97,7 +110,9 @@ done'''
 
     def run(self, orch) -> None:
         c = orch.cfg
-        print(">>> Running test_runner.py --coverage-report ...", flush=True)
+        cov_flag = " --coverage-report" if self.coverage_report else ""
+        print(f">>> Running test_runner.py{cov_flag or ' (no coverage report)'} ...",
+              flush=True)
         filters = ""
         if self.test_suite:
             filters += f" --suite-name {shlex.quote(self.test_suite)}"
@@ -109,8 +124,8 @@ done'''
             f"RCCL_TEST_MPI_HOSTFILE={shlex.quote(self.mpi_hostfile)} "
             "python3 tools/scripts/test_runner/test_runner.py "
             f"--config tools/scripts/test_runner/configs/{shlex.quote(self.test_config)}"
-            f"{filters} --report-suffix {shlex.quote(c.run_id)} "
-            "--coverage-report --verbose --emit-results"
+            f"{filters} --report-suffix {shlex.quote(c.run_id)}"
+            f"{cov_flag} --verbose --emit-results"
         )
         # Run as the host uid:gid (the entrypoint remaps the container user to
         # HOST_UID) so builds write into the bind-mounted host repos
