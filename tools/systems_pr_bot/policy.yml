@@ -1,4 +1,5 @@
 version: 2
+# Policy configuration for the rocm-systems PR bot.
 
 pr:
   # Branch naming rules:
