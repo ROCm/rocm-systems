@@ -74,6 +74,12 @@ public:
   /// @details Idempotent, subsequent calls after the first are no-ops.
   void adopt_page(void *ptr, size_t size);
 
+  /// @brief If @p ptr is the adopted event page, clear page/page_size and return true.
+  /// @details Clears the fields under mutex_ so the CP interrupt thread (which
+  /// reads page/page_size under the same lock in signal_interrupt) can never race
+  /// a concurrent munmap tearing the mapping down.
+  [[nodiscard]] bool release_page(void *ptr);
+
   /// @brief Signal event(s) from the CP's interrupt callback.
   /// @details When event_id is non-zero, signals that specific event. When
   ///          event_id is zero, broadcasts to all type-0 events — matching

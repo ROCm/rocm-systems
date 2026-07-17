@@ -24,8 +24,7 @@ struct bitsetCtx {
 };
 
 template <typename EnumT, size_t N>
-ncclResult_t bitsetResolve(const void* ctx, const char* input,
-                           std::underlying_type_t<EnumT>& out) {
+ncclResult_t bitsetResolve(const void* ctx, const char* input, std::underlying_type_t<EnumT>& out) {
   using ResultT = std::underlying_type_t<EnumT>;
   if (input == nullptr) return ncclInvalidArgument;
   auto& bc = *static_cast<const bitsetCtx<EnumT, N>*>(ctx);
@@ -40,7 +39,9 @@ ncclResult_t bitsetResolve(const void* ctx, const char* input,
       bool found = false;
       for (const auto& opt : bc.options) {
         if (nccl::param::utils::iequals(opt.name, token)) {
-          res |= static_cast<ResultT>(opt.value); found = true; break;
+          res |= static_cast<ResultT>(opt.value);
+          found = true;
+          break;
         }
       }
       if (!found) return ncclInvalidArgument;
@@ -53,7 +54,9 @@ ncclResult_t bitsetResolve(const void* ctx, const char* input,
 }
 
 template <typename EnumT, size_t N>
-bool bitsetValidate(const void*, const std::underlying_type_t<EnumT>&) { return true; }
+bool bitsetValidate(const void*, const std::underlying_type_t<EnumT>&) {
+  return true;
+}
 
 template <typename EnumT, size_t N>
 std::string bitsetToString(const void* ctx, const std::underlying_type_t<EnumT>& value) {
@@ -97,16 +100,17 @@ template <typename EnumT, size_t N>
 ncclParamParser<std::underlying_type_t<EnumT>> ncclParamBitsetOf(ncclOptionSet<EnumT, N> options,
                                                                  char delimiter = ',') {
   using namespace nccl::param::parser;
-  auto ctx = std::make_shared<bitsetCtx<EnumT, N>>(
-    bitsetCtx<EnumT, N>{std::move(options), delimiter});
+  auto ctx = std::make_shared<bitsetCtx<EnumT, N>>(bitsetCtx<EnumT, N>{std::move(options), delimiter});
   std::string d = "Comma-separated list of:";
   for (const auto& opt : ctx->options) {
     d += "\n        ";
     d += opt.name;
-    if (opt.desc != nullptr) { d += " - "; d += opt.desc; }
+    if (opt.desc != nullptr) {
+      d += " - ";
+      d += opt.desc;
+    }
   }
-  return {bitsetResolve<EnumT, N>, bitsetValidate<EnumT, N>, bitsetToString<EnumT, N>,
-          std::move(ctx), std::move(d)};
+  return {bitsetResolve<EnumT, N>, bitsetValidate<EnumT, N>, bitsetToString<EnumT, N>, std::move(ctx), std::move(d)};
 }
 
 #endif /* PARAM_PARSER_BITSET_H_INCLUDED */

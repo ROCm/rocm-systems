@@ -40,14 +40,13 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <thread>
 #include <cstring>
 #include <regex>
 #include <string>
-#include <algorithm>
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
@@ -338,11 +337,14 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
-  hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
+  DriverMemoryHandle driver_handle{};
+  hsa_status_t status = region->Allocate(size, alloc_flags, agent_node_id, &driver_handle);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
+    *address = driver_handle.vaddr;
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    allocation_map_[*address] = AllocationRegion(region, size, size_requested, alloc_flags);
+    allocation_map_[*address] =
+        AllocationRegion(region, size, size_requested, alloc_flags, driver_handle);
   }
 
   return status;
@@ -354,9 +356,9 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   const MemoryRegion* region = nullptr;
-  size_t size = 0;
   std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
   MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateNoFlags;
+  DriverMemoryHandle driver_handle{};
 
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -368,8 +370,8 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     region = it->second.region;
-    size = it->second.size;
     alloc_flags = it->second.alloc_flags;
+    driver_handle = it->second.driver_handle;
 
     // Imported fragments can't be released with FreeMemory.
     if (region == nullptr) {
@@ -430,7 +432,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     UNUSED(asan_status);
   }
 
-  const hsa_status_t err = region->Free(ptr, size);
+  const hsa_status_t err = region->Free(driver_handle);
   if (err != HSA_STATUS_SUCCESS) {
     // hsaKmtFreeMemory failed to free this pointer. Throw a memory error event
 
@@ -477,6 +479,68 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t Runtime::FindDriverMemoryHandle(const void* ptr, const Agent* requesting_agent,
+                                             void** base, DriverMemoryHandle* handle) {
+  if (ptr == nullptr || requesting_agent == nullptr || base == nullptr || handle == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const DriverType requesting_driver = requesting_agent->driver().kernel_driver_type_;
+
+  std::shared_lock<std::shared_mutex> lock(memory_lock_);
+
+  // Check classic allocations (hsa_amd_memory_pool_allocate). These carry only the owner's driver
+  // handle and have no per-agent imports, so they resolve only for the owning driver.
+  auto it = allocation_map_.upper_bound(ptr);
+  if (it != allocation_map_.begin()) {
+    --it;
+    // ptr must fall within [base, base + size) of the preceding allocation.
+    const auto* alloc_base = reinterpret_cast<const uint8_t*>(it->first);
+    if (ptr >= alloc_base && ptr < alloc_base + it->second.size) {
+      const MemoryRegion* region = it->second.region;
+      const Agent* owner = region ? region->owner() : nullptr;
+      if (owner != nullptr && owner->driver().kernel_driver_type_ == requesting_driver) {
+        *base = const_cast<void*>(it->first);
+        *handle = it->second.driver_handle;
+        return HSA_STATUS_SUCCESS;
+      }
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+  }
+
+  // Check VMM-mapped allocations (hsa_amd_vmem_map). These are mapped at a reserved VA and do not
+  // appear in allocation_map_. The owner's handle lives on the backing MemoryHandle; for an agent
+  // on a different driver, the handle imported for that agent by hsa_amd_vmem_set_access lives in
+  // the MappedHandle's per-agent allowed_agents entry.
+  auto mapped_it = mapped_handle_map_.upper_bound(ptr);
+  if (mapped_it != mapped_handle_map_.begin()) {
+    --mapped_it;
+    const MappedHandle& mappedHandle = mapped_it->second;
+    const auto* mapped_base = reinterpret_cast<const uint8_t*>(mapped_it->first);
+    if (ptr >= mapped_base && ptr < mapped_base + mappedHandle.size) {
+      // Imported handles have no owning region, so resolve the owner null-safely.
+      const MemoryRegion* owner_region = mappedHandle.mem_handle->region;
+      const Agent* owner = owner_region ? owner_region->owner() : nullptr;
+      if (owner != nullptr && owner->driver().kernel_driver_type_ == requesting_driver) {
+        *base = const_cast<void*>(mapped_it->first);
+        *handle = mappedHandle.mem_handle->driver_handle;
+        return HSA_STATUS_SUCCESS;
+      }
+
+      // Cross-driver: use the handle imported for the requesting agent, if access was granted.
+      auto agentIt = mappedHandle.allowed_agents.find(const_cast<Agent*>(requesting_agent));
+      if (agentIt != mappedHandle.allowed_agents.end()) {
+        *base = const_cast<void*>(mapped_it->first);
+        *handle = agentIt->second.driver_handle;
+        return HSA_STATUS_SUCCESS;
+      }
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+  }
+
+  return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
 hsa_status_t Runtime::RegisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback,
@@ -2402,6 +2466,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
         fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
       else if (amd::coredump::dump_gpu_core())
         fprintf(stderr, "GPU core dump failed\n");
+      // Process will abort - no need to resume queues
     }
     assert(false && "GPU memory access fault.");
     std::abort();
@@ -3919,16 +3984,15 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   }
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  void *mem;
+  core::DriverMemoryHandle driver_handle = {};
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, &mem, 0);
+  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;
-    core::DriverMemoryHandle driver_handle = {};
     auto agentOwner = region->owner();
 
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select 
+    /* For CPU-owned memory, DRM operations require a GPU agent. Select
     the first available GPU agent before calling CreateShareableHandle.
     For device memory, use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
@@ -3936,16 +4000,20 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
       if (gpus.empty()) {
-        region->Free(mem, size);
+        region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
       agent_for_drm = gpus.front();
       drm_owner = agent_for_drm;
     }
 
-    auto ret = agent_for_drm->driver().CreateShareableHandle(nullptr, mem, size, *agent_for_drm, &driver_handle, &offset);
+    // alloc_handle goes in as the allocation handle and is transformed in place into the shareable
+    // memory handle. This lets the driver recover the allocation from its native id (no virtual
+    // address, which may be null for memory-only allocations) without a pointer lookup.
+    auto ret =
+        agent_for_drm->driver().CreateShareableHandle(&driver_handle, *agent_for_drm, &offset);
     if (ret != HSA_STATUS_SUCCESS) {
-      region->Free(mem, size);
+      region->Free(driver_handle);
       return ret;
     }
 
@@ -4527,6 +4595,15 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
   auto agentOwner = memoryHandle->region->owner();
+
+  if (agentOwner->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  hsa_status_t status = static_cast<AMD::GpuAgent*>(agentOwner)->CheckAcceleratorReadiness();
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::FABRIC_HANDLE, fabric_handle);

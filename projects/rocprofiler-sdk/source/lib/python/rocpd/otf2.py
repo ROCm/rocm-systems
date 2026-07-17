@@ -59,6 +59,7 @@ def get_perfetto_category_name(category):
         "ROCDECODE_API": "rocdecode_api",
         "ROCJPEG_API": "rocjpeg_api",
         "HIP_STREAM": "hip_api",
+        "HIP_GRAPH": "hip_api",
         "HIP_RUNTIME_API_EXT": "hip_api",
         "HIP_COMPILER_API_EXT": "hip_api",
         "ROCDECODE_API_EXT": "rocdecode_api",
@@ -142,6 +143,34 @@ def write_otf2(importData, config):
                         perfetto_category: "memory_allocation"
                     }
                     kernel_attributes = {perfetto_category: "kernel_dispatch"}
+                    graph_launch_attributes = {perfetto_category: "hip_api"}
+                    graph_exec_attribute = archive.definitions.attribute(
+                        name="graph_exec_id",
+                        description="process-monotonic hipGraphExec_t identifier",
+                    )
+                    graph_node_attribute = archive.definitions.attribute(
+                        name="graph_node_id",
+                        description=(
+                            "Zero-based HIP graph node ordinal within a launch; "
+                            "valid only when graph_exec_id is nonzero"
+                        ),
+                    )
+                    kernel_dispatch_count_attribute = archive.definitions.attribute(
+                        name="kernel_dispatch_count",
+                        description="kernel dispatch packets written during a HIP graph launch",
+                    )
+
+                    def add_graph_attributes(
+                        attributes, graph_exec_id, graph_node_id=None
+                    ):
+                        if not graph_exec_id:
+                            return attributes
+                        ret = dict(attributes)
+                        ret[graph_exec_attribute] = graph_exec_id
+                        if graph_node_id is not None:
+                            ret[graph_node_attribute] = graph_node_id
+                        return ret
+
                     kernel_rename = getattr(config, "kernel_rename")
                     agent_index_value = getattr(config, "agent_index_value")
 
@@ -173,6 +202,7 @@ def write_otf2(importData, config):
                             memory_deallocations = defaultdict(list)
                             memory_unknown = defaultdict(list)
                             kernel_dispatches = defaultdict(list)
+                            graph_launches = defaultdict(list)
                             agents = {}
 
                             cursor = conn.cursor()
@@ -187,14 +217,25 @@ def write_otf2(importData, config):
 
                             cursor = conn.cursor()
                             cursor.execute(
-                                """SELECT tid, dst_agent_abs_index, start, end, name
+                                """SELECT tid, dst_agent_abs_index, start, end, name,
+                                graph_exec_id, graph_node_id
                                 FROM memory_copies WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
                                 (guid, nid, pid),
                             )
                             for row in cursor:
-                                tid, agent, start, end, name = row
-                                memory_copies[(tid, agent)].append((start, end, name))
+                                (
+                                    tid,
+                                    agent,
+                                    start,
+                                    end,
+                                    name,
+                                    graph_exec_id,
+                                    graph_node_id,
+                                ) = row
+                                memory_copies[(tid, agent)].append(
+                                    (start, end, name, graph_exec_id, graph_node_id)
+                                )
 
                             cursor = conn.cursor()
                             cursor.execute(
@@ -218,21 +259,56 @@ def write_otf2(importData, config):
                             cursor = conn.cursor()
                             cursor.execute(
                                 """SELECT tid, agent_abs_index, queue_id,
-                                start, end, name, region
+                                start, end, name, region, graph_exec_id, graph_node_id
                                 FROM kernels WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
                                 (guid, nid, pid),
                             )
                             for row in cursor:
-                                tid, agent, queue, start, end, name, region = row
+                                (
+                                    tid,
+                                    agent,
+                                    queue,
+                                    start,
+                                    end,
+                                    name,
+                                    region,
+                                    graph_exec_id,
+                                    graph_node_id,
+                                ) = row
                                 if kernel_rename and region:
                                     kernel_dispatches[(tid, agent, queue)].append(
-                                        (start, end, region)
+                                        (start, end, region, graph_exec_id, graph_node_id)
                                     )
                                 else:
                                     kernel_dispatches[(tid, agent, queue)].append(
-                                        (start, end, name)
+                                        (start, end, name, graph_exec_id, graph_node_id)
                                     )
+
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                """SELECT tid, start, end, graph_exec_id,
+                                kernel_dispatch_count
+                                FROM graph_launches WHERE guid = ? AND nid = ?
+                                AND pid = ? ORDER BY start ASC""",
+                                (guid, nid, pid),
+                            )
+                            for row in cursor:
+                                (
+                                    tid,
+                                    start,
+                                    end,
+                                    graph_exec_id,
+                                    kernel_dispatch_count,
+                                ) = row
+                                graph_launches[tid].append(
+                                    (
+                                        start,
+                                        end,
+                                        graph_exec_id,
+                                        kernel_dispatch_count,
+                                    )
+                                )
 
                             cursor = conn.cursor()
                             cursor.execute(
@@ -313,24 +389,92 @@ def write_otf2(importData, config):
                                     archive, memory_copy_location
                                 )
                                 memory_copy_events = []
-                                for start, end, name in data:
+                                for (
+                                    start,
+                                    end,
+                                    name,
+                                    graph_exec_id,
+                                    graph_node_id,
+                                ) in data:
                                     region = archive.definitions.region(
                                         name=name,
                                         region_role=RegionRole.DATA_TRANSFER,
                                         paradigm=Paradigm.HIP,
                                     )
-                                    memory_copy_events.append((start, "enter", region))
-                                    memory_copy_events.append((end, "leave", region))
+                                    attributes = add_graph_attributes(
+                                        memory_copy_attributes,
+                                        graph_exec_id,
+                                        graph_node_id,
+                                    )
+                                    memory_copy_events.append(
+                                        (start, "enter", region, attributes)
+                                    )
+                                    memory_copy_events.append(
+                                        (end, "leave", region, None)
+                                    )
                                 memory_copy_events.sort(key=lambda x: x[0])
-                                for timestamp, event_type, region in memory_copy_events:
+                                for (
+                                    timestamp,
+                                    event_type,
+                                    region,
+                                    attributes,
+                                ) in memory_copy_events:
                                     if event_type == "enter":
                                         memory_copy_writer.enter(
                                             timestamp,
                                             region,
-                                            attributes=memory_copy_attributes,
+                                            attributes=attributes,
                                         )
                                     else:  # if event_type == "leave":
                                         memory_copy_writer.leave(timestamp, region)
+
+                            # Write HIP Graph Launch Events
+                            for tid, data in graph_launches.items():
+                                graph_launch_location = archive.definitions.location(
+                                    name=f"Thread {tid}, HIP Graph Launch",
+                                    type=LocationType.CPU_THREAD,
+                                    group=cpu_location_group,
+                                )
+                                graph_launch_writer = otf2.writer.EventWriter(
+                                    archive, graph_launch_location
+                                )
+                                graph_launch_events = []
+                                for (
+                                    start,
+                                    end,
+                                    graph_exec_id,
+                                    kernel_dispatch_count,
+                                ) in data:
+                                    # use [...] syntax to convey this is a metadata region
+                                    region = archive.definitions.region(
+                                        name="[Graph Execution]",
+                                        region_role=RegionRole.FUNCTION,
+                                        paradigm=Paradigm.HIP,
+                                    )
+                                    attributes = dict(graph_launch_attributes)
+                                    attributes[graph_exec_attribute] = graph_exec_id
+                                    attributes[kernel_dispatch_count_attribute] = (
+                                        kernel_dispatch_count
+                                    )
+                                    graph_launch_events.append(
+                                        (start, "enter", region, attributes)
+                                    )
+                                    graph_launch_events.append(
+                                        (end, "leave", region, None)
+                                    )
+                                graph_launch_events.sort(key=lambda x: x[0])
+                                for (
+                                    timestamp,
+                                    event_type,
+                                    region,
+                                    attributes,
+                                ) in graph_launch_events:
+                                    if event_type == "enter":
+                                        graph_launch_writer.enter(
+                                            timestamp, region, attributes=attributes
+                                        )
+                                    else:  # if event_type == "leave":
+                                        graph_launch_writer.leave(timestamp, region)
 
                             # Write Memory Allocation Events
                             for (tid, agent_id), data in memory_allocations.items():
@@ -449,21 +593,37 @@ def write_otf2(importData, config):
                                     archive, kernel_location
                                 )
                                 kernel_events = []
-                                for start, end, name in data:
+                                for (
+                                    start,
+                                    end,
+                                    name,
+                                    graph_exec_id,
+                                    graph_node_id,
+                                ) in data:
                                     region = archive.definitions.region(
                                         name=name,
                                         region_role=RegionRole.FUNCTION,
                                         paradigm=Paradigm.HIP,
                                     )
-                                    kernel_events.append((start, "enter", region))
-                                    kernel_events.append((end, "leave", region))
+                                    attributes = add_graph_attributes(
+                                        kernel_attributes, graph_exec_id, graph_node_id
+                                    )
+                                    kernel_events.append(
+                                        (start, "enter", region, attributes)
+                                    )
+                                    kernel_events.append((end, "leave", region, None))
                                 kernel_events.sort(key=lambda x: x[0])
-                                for timestamp, event_type, region in kernel_events:
+                                for (
+                                    timestamp,
+                                    event_type,
+                                    region,
+                                    attributes,
+                                ) in kernel_events:
                                     if event_type == "enter":
                                         kernel_writer.enter(
                                             timestamp,
                                             region,
-                                            attributes=kernel_attributes,
+                                            attributes=attributes,
                                         )
                                     else:  # if event_type == "leave":
                                         kernel_writer.leave(timestamp, region)

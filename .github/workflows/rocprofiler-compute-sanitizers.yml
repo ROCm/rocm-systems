@@ -55,7 +55,7 @@ env:
 jobs:
   sanitizer:
     name: ${{ matrix.sanitizer.name }}
-    runs-on: linux-mi355-1gpu-ossci-rocm
+    runs-on: linux-gfx950-1gpu-ccs-ossci-rocm
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -182,7 +182,7 @@ jobs:
           python3 ./tools/run-ci.py \
             --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
             --actor "${{ github.actor }}" \
-            --site linux-mi355-1gpu-ossci-rocm \
+            --site linux-gfx950-1gpu-ccs-ossci-rocm \
             --mode Continuous \
             --build-jobs 16 \
             --repeat-until-pass 1 \
