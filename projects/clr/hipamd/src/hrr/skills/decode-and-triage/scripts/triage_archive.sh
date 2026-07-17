@@ -8,14 +8,30 @@ DECODE="$SCRIPT_DIR/decode_finding.sh"
 REPLAY="$SCRIPT_DIR/run_hrr_replay.sh"
 
 ARCHIVE=""
-REPLAY_MODE="auto"   # auto | native | docker | skip
+REPLAY_MODE="skip"   # skip | auto | native | docker
 OUTPUT=""
 FORMAT="markdown"
+
+finding_ext() {
+  if [[ "$FORMAT" == "json" ]]; then
+    echo ".finding.json"
+  else
+    echo ".finding.md"
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --archive) ARCHIVE="$2"; shift 2 ;;
-    --replay) REPLAY_MODE="${2:-native}"; shift 2 ;;
+    --replay)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        REPLAY_MODE="native"
+        shift
+      else
+        REPLAY_MODE="$2"
+        shift 2
+      fi
+      ;;
     --no-replay) REPLAY_MODE="skip"; shift ;;
     -o|--output) OUTPUT="$2"; shift 2 ;;
     --format) FORMAT="$2"; shift 2 ;;
@@ -61,9 +77,14 @@ if [[ "$mode" == "docker" ]]; then
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
   echo "[triage_archive] docker replay -> $LOG" >&2
   set +e
-  sudo -E GPU="${GPU:-1}" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-    bash "$HRR_ROOT/scripts/maf-hrr-docker-playback.sh" "$ARCHIVE" \
-    2>&1 | tee "$LOG"
+  if sudo -n true 2>/dev/null; then
+    sudo -n -E GPU="${GPU:-1}" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
+      bash "$HRR_ROOT/scripts/maf-hrr-docker-playback.sh" "$ARCHIVE" \
+      2>&1 | tee "$LOG"
+  else
+    echo "error: docker replay requires passwordless sudo (sudo -n); use --replay native or --no-replay" >&2
+    exit 1
+  fi
   RC=${PIPESTATUS[0]}
   set -e
   echo "[triage_archive] replay exit=$RC" >&2
@@ -78,7 +99,7 @@ else
   echo "[triage_archive] skipping GPU replay (no /dev/kfd or --no-replay)" >&2
 fi
 
-FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}.finding.md}"
+FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}$(finding_ext)}"
 DECODE_ARGS=(--archive "$ARCHIVE" -o "$FINDING" --format "$FORMAT")
 [[ -n "$LOG" && -f "$LOG" ]] && DECODE_ARGS+=(--log "$LOG")
 

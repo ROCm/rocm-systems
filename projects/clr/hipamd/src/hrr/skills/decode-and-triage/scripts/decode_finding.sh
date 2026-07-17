@@ -13,6 +13,14 @@ OUTPUT=""
 FORMAT="markdown"
 EXTRA_ANALYZER=()
 
+finding_ext() {
+  if [[ "$FORMAT" == "json" ]]; then
+    echo ".finding.json"
+  else
+    echo ".finding.md"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --archive) ARCHIVE="$2"; shift 2 ;;
@@ -60,7 +68,7 @@ fi
 HRR_PLAY="$(resolve_playback)"
 if [[ -n "$ARCHIVE" && -z "$HRR_PLAY" ]]; then
   echo "warning: hrr-playback not found; skipping --info (log-only triage still works)" >&2
-  echo "warning: set HRR_PLAYBACK or install/build hrr-playback (see skills/decode-and-triage/reference.md)" >&2
+  echo "warning: set HRR_PLAYBACK or install/build hrr-playback (see $SKILL_DIR/reference.md)" >&2
 fi
 
 CMD=(python3 "$ANALYZER" --format "$FORMAT")
@@ -72,17 +80,18 @@ done
 CMD+=("${EXTRA_ANALYZER[@]}")
 
 if [[ -z "$OUTPUT" ]]; then
+  ext="$(finding_ext)"
   if [[ ${#LOGS[@]} -gt 0 ]]; then
     base="${LOGS[0]%.log}"
-    OUTPUT="${base}.finding.md"
+    OUTPUT="${base}${ext}"
   elif [[ -n "$ARCHIVE" ]]; then
     name="$(basename "$ARCHIVE")"
     parent="$(dirname "$ARCHIVE")"
-    candidate="${parent%/}/${name}.finding.md"
+    candidate="${parent%/}/${name}${ext}"
     if [[ -w "$parent" ]]; then
       OUTPUT="$candidate"
     else
-      OUTPUT="$(pwd)/${name}.finding.md"
+      OUTPUT="$(pwd)/${name}${ext}"
     fi
   fi
 fi

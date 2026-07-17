@@ -23,7 +23,7 @@ Print the finding summary in your reply (outcome, fault class, kernel, fault
 address, failing call, archive stats) plus a short capture explainer.
 ```
 
-The user only needs the archive path. Full GPU replay is **allowed by default** when `/dev/kfd` is available.
+The user only needs the archive path. **Default is read-only** (`--info` + log parse). Run full GPU replay only when the user explicitly asks.
 
 ## What to ask the user (only if missing)
 
@@ -31,6 +31,7 @@ The user only needs the archive path. Full GPU replay is **allowed by default** 
 |---------|----------|
 | Archive path | *"Which `capture.hrr/pid-*` directory should I use?"* |
 | `hrr-playback` not found after discovery | *"Where is `hrr-playback` installed?"* |
+| Full replay requested but no GPU/docker | Confirm native replay is OK or use `--no-replay` |
 
 Do **not** ask for GPU index, Docker, ROCm version, or HIP library paths unless replay fails.
 
@@ -39,28 +40,32 @@ Do **not** ask for GPU index, Docker, ROCm version, or HIP library paths unless 
 ```
 1. Resolve archive — user path, or largest events.bin under capture.hrr/pid-*
 2. Discover hrr-playback (see below)
-3. Run triage_archive.sh --archive <pid-dir>   # decode + replay + finding
+3. Run decode_finding.sh --archive <pid-dir>   # read-only by default
 4. Print finding summary + capture explainer in the chat reply (required)
+5. If user asked for full replay: triage_archive.sh --archive <dir> --replay
 ```
 
 **Execute in the same turn** — do not narrate planning steps.
 
 Do **not** read stale `hrr-replay-*.log` or `*.finding.md` files unless the user gives that path.
 
-### Primary command
+### Primary commands
 
 ```bash
 SKILL=<path-to>/.cursor/skills/hrr-decode-and-triage
 # or: hipamd/src/hrr/skills/decode-and-triage
 
-"$SKILL/scripts/triage_archive.sh" --archive <pid-dir>
+# Read-only (default):
+"$SKILL/scripts/decode_finding.sh" --archive <pid-dir>
+
+# Full replay + finding (only when user asks):
+"$SKILL/scripts/triage_archive.sh" --archive <pid-dir> --replay
+# or: --replay native | --replay docker | --replay auto
 ```
 
-- Runs `hrr-playback --info` + full GPU replay (docker if `scripts/maf-hrr-docker-playback.sh` exists, else native) + parser
-- Writes fresh `hrr-replay-<pid>-<timestamp>.log` and `<pid>-<timestamp>.finding.md` under cwd
-- Prints the finding markdown to stdout — **copy the summary into your reply**
-
-Read-only (no replay): `"$SKILL/scripts/triage_archive.sh" --archive <dir> --no-replay`
+- Read-only path runs `hrr-playback --info` + parser (no GPU)
+- Full replay writes `hrr-replay-<pid>-<timestamp>.log` and a finding file under cwd
+- Prints the finding to stdout — **copy the summary into your reply**
 
 ### Discover `hrr-playback`
 
@@ -118,6 +123,7 @@ After `triage_archive.sh`, **always** include this in your message:
 | `hang` | Device/queue hang |
 | `replay_oom` | Out of VRAM |
 | `replay_fatal_api` | HIP API error stopped replay |
+| `replay_aborted` | Replay stopped before classification |
 | `version_mismatch` | Archive wire version ≠ playback reader |
 
 ## Building `hrr-playback`
