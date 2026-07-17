@@ -831,19 +831,59 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
         uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
         uint32_t numSEs = pNodeProperties->NumShaderBanks;
+        /*
+         * On a multi-XCC node the driver distributes the linear CU mask across
+         * all XCCs: bit i of the mask is applied to XCC (i % NumXcc). A PM4
+         * dispatch (as used by this test), however, only executes on a single
+         * XCC (pm4_target_xcc defaults to 0). If we set mask bits contiguously,
+         * bits 1..NumXcc-1 land on XCCs that never run the dispatch, so the CU
+         * count on the executing XCC never grows and no speedup is observed.
+         *
+         * To measure scaling on the XCC that actually runs the work, stride the
+         * mask by NumXcc so every enabled CU maps onto XCC0. For single-XCC
+         * parts NumXcc == 1 and this reduces to the original contiguous mask.
+         */
+        uint32_t numXcc = pNodeProperties->NumXcc ? pNodeProperties->NumXcc : 1;
+        uint32_t CUsPerXcc = ActiveCU / numXcc;
+        /*
+         * On gfx12.1 the multi-XCC CU mask ABI is one bit per WGP (the driver
+         * interleaves one WGP bit per XCC), so only CUsPerXcc/2 mask units
+         * address real WGPs on the executing XCC. Sweeping past that point
+         * keeps growing the expected CU count while the measured time has
+         * already saturated (all WGPs on), driving the ratio below tolerance
+         * and failing. Cap the sweep at the WGP count for that case. On other
+         * parts one mask bit maps to one CU, so sweep all CUsPerXcc.
+         */
+        bool oneBitPerWgp = (m_FamilyId >= FAMILY_GFX12) && (numXcc > 1);
+        uint32_t unitsPerXcc = oneBitPerWgp ? CUsPerXcc / 2 : CUsPerXcc;
+        /*
+         * The driver enables the (strided) CU mask round-robin across the
+         * shader engines of the executing XCC, and the dispatch spreads its
+         * workgroups evenly across those engines. The usable parallelism is
+         * therefore bounded by the least-populated engine, so it only grows in
+         * steps of SEsPerXcc: enabling an odd extra CU adds a WGP to one engine
+         * without a matching WGP on the other, yielding no speedup. Compare the
+         * measured time against this SE-balanced effective CU count instead of
+         * the raw CU count so the expectation matches what the HW can deliver.
+         */
+        uint32_t SEsPerXcc = (numXcc > 1 && numSEs >= numXcc) ? numSEs / numXcc : 1;
         LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
         LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
         LOG() << std::dec << "# Shader engines: " << numSEs << std::endl;
         LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
+        LOG() << std::dec << "# XCCs: " << numXcc << std::endl;
+        LOG() << std::dec << "# Active CUs per XCC: " << CUsPerXcc << std::endl;
+        LOG() << std::dec << "# Mask units per XCC: " << unitsPerXcc << std::endl;
+        LOG() << std::dec << "# Shader engines per XCC: " << SEsPerXcc << std::endl;
         HSAint64 TimewithCU1, TimewithCU;
         uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
         uint32_t maskNumBits = maskNumDwords * 32;
         uint32_t mask[maskNumDwords];
         double ratio;
 
-        mask[0] = 0x1;
-        for (int i = 1; i < maskNumDwords; i++)
+        for (uint32_t i = 0; i < maskNumDwords; i++)
             mask[i] = 0x0;
+        mask[0] = 0x1;
 
         /* Execute once to get any HW optimizations out of the way */
         TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
@@ -851,14 +891,22 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
         TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
-        for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
-            int maskIndex = (nCUs - 1) / 32;
-            mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
+        for (uint32_t nCUs = 2; nCUs <= unitsPerXcc; nCUs++) {
+            uint32_t maskBit = (nCUs - 1) * numXcc;
+            uint32_t maskIndex = maskBit / 32;
+            mask[maskIndex] |= 1U << (maskBit % 32);
+
+            /* SE-balanced effective CU count (see comment above). Reduces to
+             * nCUs on single-XCC parts (SEsPerXcc handling is a no-op there).
+             */
+            uint32_t effCUs = (SEsPerXcc > 1 && nCUs >= SEsPerXcc) ?
+                              SEsPerXcc * (nCUs / SEsPerXcc) : nCUs;
 
             TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
-            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
+            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * effCUs);
 
-            LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
+            LOG() << "Expected performance of " << nCUs << " CUs (effective "
+                  << effCUs << ") vs 1 CU:" << std::endl;
             LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
                   << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
