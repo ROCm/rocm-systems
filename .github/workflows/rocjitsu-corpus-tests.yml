@@ -188,6 +188,7 @@ jobs:
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
             "Gfx1250SimulationTest\.*"
+            "Gfx1250ExecutionTest\.*"
           )
 
           CMAKE_CONFIG_FLAGS=()
