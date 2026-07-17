@@ -70,7 +70,15 @@ namespace hotswap {
 namespace {
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
-std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
+std::unordered_map<uint64_t, std::vector<ElfBufferRef>> g_retained_rewritten_elf_buffers;
+
+// Fallback owner for retarget buffers that could not be recorded in the
+// per-executable keepalive map due to allocation failure. The loader holds a
+// raw pointer into the buffer for the executable's lifetime, so on OOM we move
+// the reference here rather than let it drop and dangle. Bounded to genuine
+// keepalive-OOM events; never cleared at runtime.
+std::mutex g_oom_retained_elf_buffers_mutex;
+std::vector<ElfBufferRef> g_oom_retained_elf_buffers;
 #ifdef ROCR_HOTSWAP_TESTING
 std::atomic<bool> g_force_retarget_code_object_failure_for_testing{false};
 #endif
@@ -449,24 +457,22 @@ void LogRequiredRewrittenLoadFailure(hsa_status_t status) {
 
 }  // namespace
 
-bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
-                        const char* target_isa, OwnedElfBuffer* out_elf_buffer,
-                        size_t* out_elf_size, bool request_entry_trampolines,
-                        bool request_strict_mode) {
+ElfBufferRef RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
+                                const char* target_isa, bool request_entry_trampolines,
+                                bool request_strict_mode) {
   ComgrApi* api = GetComgrApi();
-  if (!api || !elf_data || elf_size == 0 || !source_isa || !target_isa || !out_elf_buffer ||
-      !out_elf_size) {
-    return false;
+  if (!api || !elf_data || elf_size == 0 || !source_isa || !target_isa) {
+    return nullptr;
   }
 
   ComgrData input = {};
   if (api->create_data(kComgrDataKindExecutable, &input) != kComgrStatusSuccess) {
-    return false;
+    return nullptr;
   }
 
   if (api->set_data(input, elf_size, static_cast<const char*>(elf_data)) != kComgrStatusSuccess) {
     api->release_data(input);
-    return false;
+    return nullptr;
   }
 
   ComgrData output = {};
@@ -478,7 +484,7 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
     if (!api->hotswap_rewrite_with_options) {
       api->release_data(input);
       HOTSWAP_LOG("hotswap: COMGR rewrite-with-options entry point unavailable\n");
-      return false;
+      return nullptr;
     }
     const ComgrHotswapRewriteOptions options{
         sizeof(ComgrHotswapRewriteOptions),
@@ -492,38 +498,44 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   if (status != kComgrStatusSuccess) {
     HOTSWAP_LOG("hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n", source_isa, target_isa,
                 status);
-    return false;
+    return nullptr;
   }
 
   size_t output_size = 0;
   if (api->get_data(output, &output_size, nullptr) != kComgrStatusSuccess || output_size == 0) {
     api->release_data(output);
-    return false;
+    return nullptr;
   }
 
-  OwnedElfBuffer output_buffer(std::malloc(output_size), &std::free);
-  if (!output_buffer) {
+  // The one unavoidable copy: COMGR owns the output across the C ABI, so its
+  // bytes must be copied out into a buffer we own. From here on the buffer is
+  // shared (never copied again) across the cache and every consuming load.
+  ElfBufferRef output_buffer;
+  try {
+    output_buffer = std::make_shared<std::vector<uint8_t>>(output_size);
+  } catch (const std::bad_alloc&) {
     api->release_data(output);
-    return false;
+    return nullptr;
   }
 
   size_t copy_size = output_size;
-  if (api->get_data(output, &copy_size, static_cast<char*>(output_buffer.get())) !=
+  if (api->get_data(output, &copy_size, reinterpret_cast<char*>(output_buffer->data())) !=
       kComgrStatusSuccess) {
     api->release_data(output);
-    return false;
+    return nullptr;
   }
 
   api->release_data(output);
-  *out_elf_buffer = std::move(output_buffer);
-  *out_elf_size = output_size;
-  return true;
+  return output_buffer;
 }
 
 RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
                                                hsa_agent_t agent,
-                                               OwnedElfBuffer* out_elf_buffer,
-                                               size_t* out_elf_size) {
+                                               ElfBufferRef* out_elf_buffer) {
+  if (!out_elf_buffer) {
+    return {};
+  }
+  out_elf_buffer->reset();
   if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
     return {};
   }
@@ -583,18 +595,16 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
     }
 
     if (cached_bytes) {
-      OwnedElfBuffer buf(std::malloc(cached_bytes->size()), &std::free);
-      if (buf) {
-        std::memcpy(buf.get(), cached_bytes->data(), cached_bytes->size());
-        *out_elf_buffer = std::move(buf);
-        *out_elf_size = cached_bytes->size();
-        HOTSWAP_LOG("hotswap: cache hit (success) src=%s tgt=%s entry_trampolines=%d strict=%d "
-                    "in=%zu out=%zu\n",
-                    decision->source_isa.c_str(), decision->target_isa.c_str(),
-                    decision->request_entry_trampolines, decision->request_strict_mode,
-                    code_object.size, cached_bytes->size());
-        return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required};
-      }
+      // Hand back the cached buffer itself (refcount++), no copy. The loader
+      // reads it read-only and the ref is retained per-executable, so every
+      // load of this code object shares one buffer.
+      *out_elf_buffer = std::move(cached_bytes);
+      HOTSWAP_LOG("hotswap: cache hit (success) src=%s tgt=%s entry_trampolines=%d strict=%d "
+                  "in=%zu out=%zu\n",
+                  decision->source_isa.c_str(), decision->target_isa.c_str(),
+                  decision->request_entry_trampolines, decision->request_strict_mode,
+                  code_object.size, (*out_elf_buffer)->size());
+      return {RetargetCodeObjectStatus::kRewritten, decision->rewrite_required};
     }
   }
 
@@ -607,16 +617,21 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   } else
 #endif
   {
-    rewritten = RetargetCodeObject(code_object.data, code_object.size,
-                                   decision->source_isa.c_str(), decision->target_isa.c_str(),
-                                   out_elf_buffer, out_elf_size,
-                                   decision->request_entry_trampolines,
-                                   decision->request_strict_mode);
+    *out_elf_buffer = RetargetCodeObject(code_object.data, code_object.size,
+                                         decision->source_isa.c_str(),
+                                         decision->target_isa.c_str(),
+                                         decision->request_entry_trampolines,
+                                         decision->request_strict_mode);
+    rewritten = (*out_elf_buffer != nullptr);
   }
 
   // Cache the result. Only deterministic COMGR outcomes are cached; transient
   // allocation failures and test-forced failures are not, so a later attempt
-  // with the same code object can still succeed.
+  // with the same code object can still succeed. On success the SAME buffer is
+  // stored and returned (no copy) — cache and caller share one refcounted
+  // object. Concurrent cold misses on the same key may each run COMGR and race
+  // to store (first-wins); the loser still returns its own valid buffer, so a
+  // single shared buffer is only guaranteed once an entry is committed.
   if (retarget_attempted) {
     try {
       std::scoped_lock lock(g_retarget_cache_mutex);
@@ -624,8 +639,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
         CachedRetargetResult entry;
         entry.succeeded = rewritten;
         if (rewritten) {
-          const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
-          entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
+          entry.elf_bytes = *out_elf_buffer;
         }
         g_retarget_cache.emplace(cache_key, std::move(entry));
         HOTSWAP_LOG("hotswap: cached key=0x%llx src=%s tgt=%s entry_trampolines=%d strict=%d "
@@ -645,8 +659,8 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
               "in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
               decision->request_entry_trampolines, decision->request_strict_mode,
-              decision->rewrite_required, code_object.size, rewritten ? *out_elf_size : 0,
-              rewritten ? 1 : 0);
+              decision->rewrite_required, code_object.size,
+              rewritten ? (*out_elf_buffer)->size() : 0, rewritten ? 1 : 0);
   if (rewritten) {
     return {RetargetCodeObjectStatus::kRewritten,
             decision->rewrite_required};
@@ -659,7 +673,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
 
 RetargetCodeObjectResult TryRetargetCodeObject(
     amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+    ElfBufferRef* out_elf_buffer) {
   if (!reader) {
     return {};
   }
@@ -668,7 +682,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
-  return TryRetargetCodeObject(code_object, agent, out_elf_buffer, out_elf_size);
+  return TryRetargetCodeObject(code_object, agent, out_elf_buffer);
 }
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_agent_t agent,
@@ -681,15 +695,14 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
 
   hsa_code_object_t original_code_object = {reinterpret_cast<uint64_t>(code_object.data)};
 
-  OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  ElfBufferRef rewritten_elf_buffer;
   const RetargetCodeObjectResult retarget_result =
-      TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size);
+      TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer);
   if (retarget_result.status == RetargetCodeObjectStatus::kRewritten) {
     hsa_code_object_t rewritten_code_object = {
-        reinterpret_cast<uint64_t>(rewritten_elf_buffer.get())};
+        reinterpret_cast<uint64_t>(rewritten_elf_buffer->data())};
     hsa_status_t status = callbacks.load_rewritten_code_object(
-        callbacks.context, agent, rewritten_code_object, rewritten_elf_size, options,
+        callbacks.context, agent, rewritten_code_object, rewritten_elf_buffer->size(), options,
         code_object.uri, loaded_code_object);
     if (status == HSA_STATUS_SUCCESS) {
       RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
@@ -710,14 +723,26 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
                                              options, code_object.uri, loaded_code_object);
 }
 
-void RetainRewrittenElfBuffer(hsa_executable_t executable, OwnedElfBuffer elf_buffer) {
+void RetainRewrittenElfBuffer(hsa_executable_t executable, ElfBufferRef elf_buffer) {
+  if (!elf_buffer) {
+    return;
+  }
   try {
     std::scoped_lock lock(g_retained_rewritten_elf_buffers_mutex);
     g_retained_rewritten_elf_buffers[executable.handle].push_back(std::move(elf_buffer));
   } catch (const std::bad_alloc&) {
-    // If the keepalive container cannot grow, preserve the loaded code object's
-    // raw ELF pointer by intentionally leaking this allocation.
-    (void)elf_buffer.release();
+    // The per-executable keepalive map could not grow. The loader holds a raw
+    // pointer into this buffer for the executable's lifetime, so the reference
+    // must not drop here. Park it in a global fallback that outlives the
+    // executable rather than leaking it irrecoverably; if even that cannot
+    // grow, the reference is intentionally leaked as a last resort so the
+    // loaded code object's ELF pointer stays valid.
+    try {
+      std::scoped_lock lock(g_oom_retained_elf_buffers_mutex);
+      g_oom_retained_elf_buffers.push_back(std::move(elf_buffer));
+    } catch (const std::bad_alloc&) {
+      new ElfBufferRef(std::move(elf_buffer));  // deliberate last-resort leak
+    }
   }
 }
 

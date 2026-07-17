@@ -214,12 +214,9 @@ bool ComgrHotswapOptionsApiAvailable() {
 bool ComgrStrictModeApiAvailable() {
   if (!ComgrHotswapOptionsApiAvailable()) return false;
 
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
   if (rocr::hotswap::RetargetCodeObject(
           kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250B0Isa, kGfx1250B0Isa,
-          &rewritten_elf_buffer, &rewritten_elf_size,
-          false, true)) {
+          false, true) != nullptr) {
     return true;
   }
 
@@ -422,20 +419,16 @@ TEST(HotswapRewrite, GetIsaNameInvalidCodeObject) {
 }
 
 TEST(HotswapRewrite, RetargetRealCodeObject) {
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const rocr::hotswap::ElfBufferRef rewritten_elf_buffer =
+      rocr::hotswap::RetargetCodeObject(kGfx1250MinCo, sizeof(kGfx1250MinCo),
+                                        kGfx1250Isa, kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250Isa, kGfx1250Isa,
-      &rewritten_elf_buffer, &rewritten_elf_size);
-
-  ASSERT_TRUE(rewritten);
-  ASSERT_NE(rewritten_elf_buffer.get(), nullptr);
-  EXPECT_NE(rewritten_elf_buffer.get(),
+  ASSERT_NE(rewritten_elf_buffer, nullptr);
+  EXPECT_NE(static_cast<const void*>(rewritten_elf_buffer->data()),
             static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_GT(rewritten_elf_size, 0u);
-  EXPECT_EQ(rocr::hotswap::GetCodeObjectIsaName(rewritten_elf_buffer.get(),
-                                                rewritten_elf_size),
+  EXPECT_GT(rewritten_elf_buffer->size(), 0u);
+  EXPECT_EQ(rocr::hotswap::GetCodeObjectIsaName(rewritten_elf_buffer->data(),
+                                                rewritten_elf_buffer->size()),
             kGfx1250Isa);
 }
 
@@ -443,52 +436,32 @@ TEST(HotswapRewrite, RetargetInvalidCodeObjectFails) {
   const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
                                     0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                                     0x00, 0x00, 0x00, 0x00};
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const rocr::hotswap::ElfBufferRef rewritten_elf_buffer =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), kGfx1250Isa,
+                                        kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, kGfx1250Isa,
-      &rewritten_elf_buffer, &rewritten_elf_size);
-
-  EXPECT_FALSE(rewritten);
-  EXPECT_EQ(rewritten_elf_buffer.get(), nullptr);
-  EXPECT_EQ(rewritten_elf_size, 0u);
-}
-
-TEST(HotswapRewrite, RetargetNullOutputPointers) {
-  const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
-
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, kGfx1250Isa, nullptr, nullptr);
-
-  EXPECT_FALSE(rewritten);
+  EXPECT_EQ(rewritten_elf_buffer, nullptr);
 }
 
 TEST(HotswapRewrite, RetargetNullInputs) {
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
+  const rocr::hotswap::ElfBufferRef rewritten_elf_buffer =
+      rocr::hotswap::RetargetCodeObject(nullptr, 0, kGfx1250Isa, kGfx1250Isa);
 
-  const bool rewritten = rocr::hotswap::RetargetCodeObject(
-      nullptr, 0, kGfx1250Isa, kGfx1250Isa, &rewritten_elf_buffer,
-      &rewritten_elf_size);
-
-  EXPECT_FALSE(rewritten);
+  EXPECT_EQ(rewritten_elf_buffer, nullptr);
 }
 
 TEST(HotswapRewrite, RetargetNullSourceOrTarget) {
   const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
-  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
 
-  const bool source_missing_rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), nullptr, kGfx1250Isa, &rewritten_elf_buffer,
-      &rewritten_elf_size);
-  const bool target_missing_rewritten = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), kGfx1250Isa, nullptr, &rewritten_elf_buffer,
-      &rewritten_elf_size);
+  const rocr::hotswap::ElfBufferRef source_missing =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), nullptr,
+                                        kGfx1250Isa);
+  const rocr::hotswap::ElfBufferRef target_missing =
+      rocr::hotswap::RetargetCodeObject(fake_elf, sizeof(fake_elf), kGfx1250Isa,
+                                        nullptr);
 
-  EXPECT_FALSE(source_missing_rewritten);
-  EXPECT_FALSE(target_missing_rewritten);
+  EXPECT_EQ(source_missing, nullptr);
+  EXPECT_EQ(target_missing, nullptr);
 }
 
 TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
@@ -780,6 +753,47 @@ TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
 
   // Cache size should not have grown (hit, not a new entry).
   EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), cache_size_after_first);
+  rocr::hotswap::ClearRetargetCacheForTesting();
+}
+
+TEST(HotswapRewrite, CachedLoadsShareOneBufferNoCopy) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ClearRetargetCacheForTesting();
+  ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+
+  // First load populates the cache and records the buffer pointer handed to the
+  // loader. Keep the executable's retained reference alive for the comparison.
+  const hsa_executable_t exec_a = MakeTestExecutable(0x610);
+  LoadRecorder load_a;
+  ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+                exec_a, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
+                nullptr, MakeLoadCallbacks(&load_a)),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_a.calls.size(), 1u);
+  ASSERT_EQ(load_a.calls[0].path, LoadPath::kRewritten);
+
+  // Second load of the identical code object hits the cache. With zero-copy
+  // sharing the loader must receive the SAME buffer pointer, not a fresh copy.
+  const hsa_executable_t exec_b = MakeTestExecutable(0x611);
+  LoadRecorder load_b;
+  ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+                exec_b, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
+                nullptr, MakeLoadCallbacks(&load_b)),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_b.calls.size(), 1u);
+  ASSERT_EQ(load_b.calls[0].path, LoadPath::kRewritten);
+
+  // Same underlying buffer (shared, not copied) and equal size.
+  EXPECT_EQ(load_a.calls[0].code_object, load_b.calls[0].code_object);
+  EXPECT_EQ(load_a.calls[0].code_object_size, load_b.calls[0].code_object_size);
+
+  // Both executables retain a reference to that one buffer; it stays valid until
+  // the last executable releases it.
+  EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(exec_a), 1u);
+  EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(exec_b), 1u);
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(exec_a);
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(exec_b);
   rocr::hotswap::ClearRetargetCacheForTesting();
 }
 

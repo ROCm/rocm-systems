@@ -44,10 +44,11 @@
 #define HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
 
 #include <cstddef>
-#include <cstdlib>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/inc/amd_hsa_loader.hpp"
 #include "inc/hsa.h"
@@ -57,7 +58,14 @@ namespace hotswap {
 
 struct AgentGfxRevision;
 
-using OwnedElfBuffer = std::unique_ptr<void, decltype(&std::free)>;
+// Retargeted code objects are shared, not uniquely owned: a single retarget
+// result is handed to every agent that loads the same code object (e.g. all
+// GPUs in a multi-GPU job) and is simultaneously held by the in-memory retarget
+// cache, so consumers reference-count one buffer instead of each holding a
+// private copy. The loader consumes the ELF read-only (it copies segments out
+// into its own memory and applies relocations there), so sharing one immutable
+// buffer across concurrent loads is safe.
+using ElfBufferRef = std::shared_ptr<std::vector<uint8_t>>;
 
 struct CodeObjectView {
   const void* data = nullptr;
@@ -110,19 +118,20 @@ struct LoadAgentCodeObjectCallbacks {
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
-bool RetargetCodeObject(const void* elf_data, size_t elf_size,
-                        const char* source_isa, const char* target_isa,
-                        OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size,
-                        bool request_entry_trampolines = false,
-                        bool request_strict_mode = false);
+// Returns the retargeted ELF as a shared buffer, or nullptr on failure. The
+// size is carried by the buffer itself (ElfBufferRef->size()).
+ElfBufferRef RetargetCodeObject(const void* elf_data, size_t elf_size,
+                                const char* source_isa, const char* target_isa,
+                                bool request_entry_trampolines = false,
+                                bool request_strict_mode = false);
 
 RetargetCodeObjectResult TryRetargetCodeObject(
     const CodeObjectView& code_object, hsa_agent_t agent,
-    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+    ElfBufferRef* out_elf_buffer);
 
 RetargetCodeObjectResult TryRetargetCodeObject(
     amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+    ElfBufferRef* out_elf_buffer);
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,
@@ -131,7 +140,7 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(
     const LoadAgentCodeObjectCallbacks& callbacks);
 
 void RetainRewrittenElfBuffer(hsa_executable_t executable,
-                              OwnedElfBuffer elf_buffer);
+                              ElfBufferRef elf_buffer);
 void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
 
 #ifdef ROCR_HOTSWAP_TESTING
