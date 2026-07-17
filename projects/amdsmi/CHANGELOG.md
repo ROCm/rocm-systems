@@ -85,6 +85,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - An out-of-range value on one GPU is reported for that GPU, while in-range GPUs still apply.
   - The process exit code reflects the per-device failure.
 
+- **Clearer, more consistent `amd-smi` error messages.**
+  - Errors now read `[AMDSMI_STATUS_<name>] <message>`, so the underlying status is obvious at a glance. The internal class name is no longer prepended, and `--json`/`--csv` errors are now valid JSON/CSV.
+    - Before: `amdsmi_cli_exceptions.AmdSmiLibraryErrorException: AMDSMI has returned error '-1002' - 'Command not supported' Error code: -1002`
+    - After (human): `[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported Error code: 2`
+    - After (`--json`): `{"error": "[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported", "code": 2}`
+  - `amd-smi ras` no longer prints a Python traceback when a CPER file can't be read or decoded (`--afid --cper-file`, `--afid --folder`, `--cper`). It reports the failure and exits with the matching status code.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  

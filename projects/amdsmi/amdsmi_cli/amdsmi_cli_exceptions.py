@@ -153,6 +153,26 @@ def _get_error_message(error_code):
     return f"Unrecognized error code {code}"
 
 
+def _get_error_name(error_code):
+    """Return the AMDSMI_STATUS_* name for a status code.
+
+    e.g. 43 -> 'AMDSMI_STATUS_UNEXPECTED_DATA'. Imports the wrapper lazily so
+    this module stays importable without the amdsmi package, and falls back to
+    a synthetic 'AMDSMI_STATUS_<code>' if the code is not recognized (e.g. a
+    mismatched library version).
+    """
+    code = abs(int(error_code))
+    try:
+        from amdsmi import amdsmi_wrapper
+
+        name = amdsmi_wrapper.amdsmi_status_t__enumvalues.get(code)
+        if name:
+            return name
+    except Exception:
+        pass
+    return f"AMDSMI_STATUS_{code}"
+
+
 class AmdSmiException(Exception):
     # Default: an unclassified error stops everything. Per-device failures
     # (see AmdSmiLibraryErrorException) override this to DEVICE.
@@ -368,16 +388,20 @@ class AmdSmiLibraryErrorException(AmdSmiException):
     # recorded and the command keeps going to the next device.
     severity = AmdSmiErrorSeverity.DEVICE
 
-    def __init__(self, outputformat: str, error_code):
+    def __init__(self, outputformat: str, error_code, detail=None):
         super().__init__()
         # Surface the underlying AMDSMI_STATUS_* value as the exit code.
         self.value = library_code_to_exit_code(error_code)
-        self.smilibcode = error_code
+        self.amdsmi_lib_code = error_code
         self.output_format = outputformat
 
-        common_message = (
-            f"AMDSMI has returned error '{self.value}' - '{_get_error_message(self.smilibcode)}'"
-        )
+        # Format: "[AMDSMI_STATUS_<name>] <message>". ``detail`` overrides the
+        # generic library message with caller-specific context when provided.
+        # status_name / status_message are exposed so callers can render the
+        # pieces separately (e.g. structured JSON/CSV rows).
+        self.status_name = _get_error_name(self.amdsmi_lib_code)
+        self.status_message = detail if detail else _get_error_message(self.amdsmi_lib_code)
+        common_message = f"[{self.status_name}] {self.status_message}"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

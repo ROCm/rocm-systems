@@ -246,32 +246,41 @@ must be supplied. Unlike the `--cper --folder` write path, the AFID `--folder`
 must already exist and contain at least one `.cper` file — it is not
 auto-created.
 
+Human output is a `file_name | list of afids` table. `--json` and `--csv` emit a
+structured per-file record instead (`cper_file, afids, status, message, code`).
+Either way the command exits with the underlying `AMDSMI_STATUS_*` on a decode
+failure (or `205` when files fail with differing codes), so a scripted caller
+sees the failure.
+
 :::::{tab-set}
 
 ::::{tab-item} Single file
-Parse one CPER record and print the space-separated list of AFIDs encoded in
-it. A single `-` is printed when the record contains no AFID payload (e.g.
-corrected entries).
+Parse one CPER record and print a one-row `file_name | list of afids` table.
+`N/A` is shown when the record contains no AFID payload (e.g. corrected
+entries). A file that cannot be decoded shows `[AMDSMI_STATUS_<name>] <message>`
+in place of its AFIDs and the command exits with that status.
 
 ```shell-session
 ~$ amd-smi ras --afid --cper-file /tmp/cper_dump/fatal-1.cper
-30 31 32 33
+file_name     list of afids
+fatal-1.cper  30 31 32 33
 ```
 ::::
 
 ::::{tab-item} Folder
 Parse every `*.cper` in a pre-existing directory and print a
 `file_name | list of afids` table, one row per record. A record with no AFID
-payload shows `-`, and a file that cannot be parsed shows `decode failed`.
+payload shows `N/A`, and a file that cannot be parsed shows
+`[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs.
 Symlinks in the folder are skipped (they are never followed).
 
 ```shell-session
 ~$ amd-smi ras --afid --folder /tmp/cper_dump/
-file_name                        list of afids
-fatal-1.cper                     30 31 32 33
-fatal-2.cper                     30 31 32 33
-nonfatal-1.cper                  -
-truncated.cper                   decode failed
+file_name        list of afids
+fatal-1.cper     30 31 32 33
+fatal-2.cper     30 31 32 33
+nonfatal-1.cper  N/A
+truncated.cper   [AMDSMI_STATUS_UNEXPECTED_DATA] Unexpected data in the CPER file
 ```
 ::::
 
