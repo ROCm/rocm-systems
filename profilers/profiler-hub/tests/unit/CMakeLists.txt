@@ -10,6 +10,7 @@ set(UNIT_TEST_SOURCES
     entity_utility_test.cpp
     json_serializer_test.cpp
     symbol_seal_test.cpp
+    writer_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
@@ -48,10 +49,6 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/source/queries
 )
 
-# backend_over_mock_test.cpp includes sqlite_backend_impl.hpp directly to
-# instantiate database_backend over the mock policy, so this target needs
-# the same schema configuration as profiler-hub-objects (see top-level
-# CMakeLists.txt) for the impl header to resolve the correct branch.
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     target_link_libraries(
         profiler-hub_unit_tests
