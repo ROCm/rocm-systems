@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/kernel_replay.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
@@ -167,6 +168,11 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     {
         RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain_op(
             ctx->callback_tracer->domains, kind, operations[i]));
+    }
+
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
+    {
+        rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
