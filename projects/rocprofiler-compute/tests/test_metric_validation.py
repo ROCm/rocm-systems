@@ -21,6 +21,15 @@ def get_hbm_data_transfer(analysis_workload_dir, data):
     return bw * duration_ns / 1e9
 
 
+def get_hbm_bandwidth_peak(analysis_workload_dir, data):
+    bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
+    bw_rows = bw_df[
+        (bw_df["metric_id"] == data["bw_metric_id"])
+        & (bw_df["value_name"] == data["bw_value_name"])
+    ]
+    return bw_rows["value"].values[0]
+
+
 # workload -> gfx -> metric definition. CSV references point at the per-view
 # CSVs produced by analyze: workload/kernel-level metric values live in
 # workload_metric.csv / kernel_metric.csv (filter by metric_id + value_name),
@@ -79,7 +88,32 @@ VALIDATE_METRICS = {
         # Collect roofline block
         "profile_options": ["-d", "2:1001", "-b", "4"],
         "roof": True,
-    }
+    },
+    "hbm_bandwidth": {
+        # Roofline needs an app to profile; memcopy is used only as the vehicle.
+        # The validated value is the empirical HBM peak from the roofline
+        # benchmark, not the memcopy kernel's achieved bandwidth.
+        "command": ["tests/memcopy"],
+        "name": "HBM Bandwidth (Empirical Peak)",
+        "get_actual_func": get_hbm_bandwidth_peak,
+        # Expected value measured on MI300X (gfx942). MI300 series may need
+        # additional expected values for other SKUs (e.g. MI300A, MI308).
+        "MI300": [
+            {
+                "profile_metric_id": ["4.1.9"],
+                "expected_values": [4916.0],
+                "tolerance": 0.10,
+                "get_actual_data": {
+                    "soc": "MI300",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.9",
+                    "bw_value_name": "Peak (Empirical)",
+                },
+            },
+        ],
+        "profile_options": ["-d", "2:1001", "-b", "4"],
+        "roof": True,
+    },
 }
 
 
