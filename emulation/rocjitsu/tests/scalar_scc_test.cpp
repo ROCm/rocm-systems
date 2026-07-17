@@ -647,9 +647,13 @@ void run_mulk_cases(const ScalarSccProfile &profile) {
     auto inst = fixture.decode(words, "s_mulk_i32");
     ASSERT_NE(inst, nullptr) << profile.name;
 
-    fixture.cu->write_sgpr(sb + 4, test_case.initial);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
-    EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
+    for (const bool initial_scc : {false, true}) {
+      fixture.cu->write_sgpr(sb + 4, test_case.initial);
+      fixture.wf->write_scc(initial_scc);
+      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
+      fixture.expect_scc_consumer(initial_scc, "s_mulk_i32");
+    }
   }
 }
 
