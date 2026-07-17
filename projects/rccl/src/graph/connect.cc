@@ -1211,15 +1211,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
       // Remove when all collectives have been optimized
       nc /= 2;
     }
-
-    // Clamp the final single-node channel count to MAXCHANNELS/2 so the subsequent channel
-    // duplication cannot overrun the fixed comm->channels[MAXCHANNELS] array (for example nc
-    // reaches 1760 in CPX mode at 64 ranks). Applying the cap *after* the halving above
-    // preserves the full budget for the common cases (8-GPU: nc stays 224) while still
-    // permitting up to MAXCHANNELS/2 channels.
-    if (!userUpdatedMaxChannels && singleNode) {
-      nc = std::min(nc, MAXCHANNELS / 2);
-    }
     INFO(NCCL_TUNING, "WarpSpeed enabled: warpSpeedChannelMultiplier %d, maxNchannels %d, nc %d", channelMultiplier,
          maxNchannels, nc);
   } else {
