@@ -87,24 +87,6 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*",
 ]
 
-# Paths that are never part of a build subtree and should not trigger CI when
-# they are the only files changed.  If ALL modified paths match one of these
-# prefixes the subtree detection returns an empty set and CI is skipped.
-CI_SKIP_PATH_PREFIXES = [
-    "tools/",
-]
-
-
-def is_ci_skip_path(path: str) -> bool:
-    """Return True if `path` belongs to a directory that never affects any build subtree."""
-    return any(path.startswith(prefix) for prefix in CI_SKIP_PATH_PREFIXES)
-
-
-def check_only_ci_skip_paths(paths: Optional[Iterable[str]]) -> bool:
-    """Return True if every modified path is a CI-skip path (i.e. no build impact)."""
-    path_list = list(paths or [])
-    return bool(path_list) and all(is_ci_skip_path(p) for p in path_list)
-
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
     return any(
@@ -239,7 +221,8 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
 
     # Check for HIP/ROCR code changes (excluding ignored files)
     return any(
-        is_hip_rocr_code(path) and not is_ignored(path) for path in modified_paths
+        is_hip_rocr_code(path) and not is_ignored(path)
+        for path in modified_paths
     )
 
 
@@ -313,9 +296,7 @@ def retrieve_projects(args):
 
         # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info(
-                "CI workflow files changed, evaluating all subtrees with quick tests"
-            )
+            logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
             subtrees = list(subtree_to_project_map.keys())
             test_type = "quick"
         elif matched_subtrees:
@@ -324,10 +305,6 @@ def retrieve_projects(args):
         elif check_only_rccl_changes(modified_paths):
             # Only RCCL changes - skip regular CI, RCCL CI will handle it
             logging.info("Only RCCL changes detected on push, skipping regular CI")
-            subtrees = []
-        elif check_only_ci_skip_paths(modified_paths):
-            # Only tooling/bot paths changed — no build impact, skip CI
-            logging.info("Only CI-skip paths changed (e.g. tools/), skipping CI")
             subtrees = []
         elif modified_paths:
             # Files changed but no known subtree matched (and not RCCL-only)
@@ -355,9 +332,7 @@ def retrieve_projects(args):
 
         # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info(
-                "CI workflow files changed, evaluating all subtrees with quick tests"
-            )
+            logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
             subtrees = list(subtree_to_project_map.keys())
             test_type = "quick"
 
@@ -372,16 +347,12 @@ def retrieve_projects(args):
         else:
             subtrees = list(matched_subtrees)
 
-        # If files changed but no subtree matched → evaluate all, unless all
-        # changes are in CI-skip paths (tooling/bot dirs with no build impact).
+        # If files changed but no subtree matched → evaluate all
         if modified_paths and not subtrees and not check_rccl_changes(modified_paths):
-            if check_only_ci_skip_paths(modified_paths):
-                logging.info("Only CI-skip paths changed (e.g. tools/), skipping CI")
-            else:
-                logging.info(
-                    "Modified files did not match known subtrees, evaluating all projects"
-                )
-                subtrees = list(subtree_to_project_map.keys())
+            logging.info(
+                "Modified files did not match known subtrees, evaluating all projects"
+            )
+            subtrees = list(subtree_to_project_map.keys())
 
     # Holds the python-specific cmake options passed to TheRock build.
     common_python_options = []
@@ -513,9 +484,7 @@ def run(args):
         if args.get("is_pull_request"):
             base_ref = args.get("base_ref")
             modified_paths = get_modified_paths(base_ref)
-            if check_for_workflow_file_related_to_ci(
-                modified_paths
-            ) or check_hip_rocr_changes(modified_paths):
+            if check_for_workflow_file_related_to_ci(modified_paths) or check_hip_rocr_changes(modified_paths):
                 outputs["run_mi455_test"] = "true"
             else:
                 outputs["run_mi455_test"] = "false"
