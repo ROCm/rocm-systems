@@ -308,33 +308,34 @@ rocpd_processor_t::handle(const in_time_sample& its)
 }
 
 void
-rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
+rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
 {
     const auto& process_info = m_metadata->get_process_info();
     const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
-        _pmc.device_id, static_cast<agent_type>(_pmc.device_type));
+        pmc.device_id, static_cast<agent_type>(pmc.device_type));
 
-    auto event    = make_event(_pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
-                               _pmc.track_name.c_str());
-    event.extdata = _pmc.event_metadata;
+    auto event    = make_event(pmc.stack_id, pmc.parent_stack_id, pmc.correlation_id,
+                               pmc.track_name.c_str());
+    event.extdata = pmc.event_metadata;
 
     profiler_hub::writer_types::pmc_event_data_t pmc_data;
-    pmc_data.event = event;
-    pmc_data.value = _pmc.value;
+    pmc_data.event   = event;
+    pmc_data.value   = pmc.value;
+    pmc_data.extdata = pmc.event_metadata;
 
     profiler_hub::writer_types::track_info_t track;
-    track.name       = _pmc.track_name;
+    track.name       = pmc.track_name;
     track.node_id    = node_info::get_instance().id;
     track.process_id = process_info.pid;
-    track.thread_id  = _pmc.system_tid;
+    track.thread_id  = pmc.system_tid;
 
     profiler_hub::writer_types::sample_data_t sample;
-    sample.timestamp = _pmc.timestamp_ns;
+    sample.timestamp = pmc.timestamp_ns;
     sample.track     = track;
     pmc_data.sample  = sample;
 
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-    pmc_uid.name     = _pmc.pmc_info_name;
+    pmc_uid.name     = pmc.pmc_info_name;
     pmc_uid.agent_id = make_agent_uid(agent_ref);
 
     m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
