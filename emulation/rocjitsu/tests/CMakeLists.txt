@@ -334,6 +334,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    sparse_memory_test.cpp
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
