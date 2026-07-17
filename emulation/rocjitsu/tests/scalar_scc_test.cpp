@@ -559,7 +559,7 @@ TEST(ScalarSccTest, AddkRegistersDestinationRead) {
     ASSERT_NE(decoder, nullptr) << profile.name;
     const auto mnemonic = addk_mnemonic(profile);
     const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
-    auto inst = decoder->decode(words.data());
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
     ASSERT_NE(inst, nullptr) << profile.name;
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
