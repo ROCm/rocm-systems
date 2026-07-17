@@ -28,7 +28,7 @@ WORKLOAD=coverage ALLOC_MODE=existing GPU_ARCH=gfx942 TEST_SUITE=ubr_multi_node 
 bash .github/scripts/run_coverage.sh
 ```
 
-Environment variables: `ROCM_IMAGE`, `NODES`, `PARTITION`, `ACCOUNT`, `GPUS_PER_NODE`, `TIME_LIMIT`, `RESERVATION`, `ALLOC_MODE`, `RCCL_DIR`, `MNCTL_DIR`, `RCCL_TESTS_DIR`, `RCCL_TEST_MPI_HOSTFILE`, `REGISTRY_USER`/`REGISTRY_TOKEN`, `FORCE_REBUILD`, `SHARED_FS_ROOT`. Output lands in `rccl_test_artifacts_<RUN_ID>_<timestamp>/`.
+Environment variables: `ROCM_IMAGE`, `NODES`, `PARTITION`, `ACCOUNT`, `GPUS_PER_NODE`, `TIME_LIMIT`, `RESERVATION`, `ALLOC_MODE`, `RCCL_DIR`, `MNCTL_DIR`, `RCCL_TESTS_DIR`, `RCCL_TEST_MPI_HOSTFILE`, `REGISTRY_USER`/`REGISTRY_TOKEN`, `MNCTL_REBUILD`, `SHARED_FS_ROOT`. Output lands in `rccl_test_artifacts_<RUN_ID>_<timestamp>/`.
 
 ## Adding a workload
 

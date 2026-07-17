@@ -53,20 +53,23 @@ targets:
     params:
       test_config: mi300x_mellanox_ib.json
 
-  # Ruby / gfx950: ALinux9.7022 builds ROCm 7.0.2.2 from public almalinux:9 (no
-  # harbor/creds). Ruby is Thor2 RoCE; nic_type "thor2" has no mnctl recipe
-  # (skipped) — RoCE env comes from the test_config.
+  # Ruby / gfx950: the 7.0.2.2 ROCm packages aren't available to install in the
+  # container, so instead of building ROCm in-image we use the generic ManyLinux
+  # image (SSH + build tools on a plain EL9 base) and bind-mount the host
+  # /opt/rocm at runtime (extra_volumes). Ruby is Thor2 RoCE; nic_type "thor2"
+  # has no mnctl recipe (skipped) — RoCE env comes from the test_config.
   - name: coverage-gfx950-alinux9-7022
     workload: coverage
     enabled: true
     cluster: ruby
     rocm_image: almalinux:9
-    dockerfile: Dockerfile.Multinode.ALinux9.7022
+    dockerfile: Dockerfile.Multinode.ManyLinux
     gpu_arch: gfx950
     nic_type: thor2
     nodes: "2"
     params:
       test_config: mi355x_thor2_roce.json
+      extra_volumes: /opt/rocm:/opt/rocm
 
   # Tensorwave / gfx950 (disabled). Same self-installing ALinux9.7022 image, but
   # ainic → mnctl auto-prepends post-setup/ainic. TODO(tw): confirm the ainic

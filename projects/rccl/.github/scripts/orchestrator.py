@@ -62,12 +62,18 @@ class RunConfig:
     reservation: str = field(default_factory=lambda: _env("RESERVATION", ""))
     alloc_mode: str = field(default_factory=lambda: _env("ALLOC_MODE", "auto"))
 
+    # Extra host->container bind mounts (comma/space-separated "host:ctr[:ro]").
+    # Used e.g. on clusters where ROCm can't be installed in-container and the
+    # host /opt/rocm is mounted instead (see ci_targets.yml ruby target).
+    extra_volumes: str = field(default_factory=lambda: _env("EXTRA_VOLUMES", ""))
+
     rccl_dir: str = ""
     mnctl_dir: str = ""
     run_id: str = ""
     container: str = ""
     hostfile: str = ""
-    force_rebuild: bool = field(default_factory=lambda: _env("FORCE_REBUILD", "0") == "1")
+    # Forces `mnctl --rebuild` (full `docker build --no-cache`).
+    force_rebuild: bool = field(default_factory=lambda: _env("MNCTL_REBUILD", "0") == "1")
 
     shared_fs_root: str = field(default_factory=lambda: _env("SHARED_FS_ROOT", os.path.expanduser("~")))
     shared_dir: str = ""
@@ -142,6 +148,7 @@ class RunConfig:
             TIME_LIMIT=self.time_limit, RESERVATION=self.reservation,
             CONTAINER=self.container, HOSTFILE=self.hostfile, RCCL_DIR=self.rccl_dir,
             MNCTL_DIR=self.mnctl_dir, SHARED_FS_ROOT=self.shared_fs_root,
+            EXTRA_VOLUMES=self.extra_volumes,
         )
 
     def child_env(self) -> dict:
@@ -329,6 +336,9 @@ class Orchestrator:
     def launch_containers(self) -> None:
         c = self.cfg
         mounts = [f"--volume {shlex.quote(c.rccl_dir + ':/work/rccl')}"] + self.payload.mounts(self)
+        # Extra bind mounts (e.g. host /opt/rocm on clusters without in-container ROCm).
+        for vol in c.extra_volumes.replace(",", " ").split():
+            mounts.append(f"--volume {shlex.quote(vol)}")
         rebuild = "--rebuild" if c.force_rebuild else ""
         log("Launching containers via mnctl ...")
         cmd = (
