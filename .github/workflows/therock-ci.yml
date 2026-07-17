@@ -11,6 +11,11 @@ on:
       - synchronize
       - reopened
       - labeled
+    paths-ignore:
+      # Bot/tooling changes don't affect any build subtree — skip full CI.
+      - 'tools/**'
+      - '.github/therock_pr_bot/**'
+      - '.github/scripts/systems_pr_bot/**'
   workflow_dispatch:
     inputs:
       projects:
