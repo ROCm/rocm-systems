@@ -1070,7 +1070,7 @@ std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words
 }
 
 TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
-  // v_cmp_eq_u32_e64 s53, 32, v4. MI400 is wave32-only, so the comparison
+  // v_cmp_eq_u32_e64 s53, 32, v4. gfx1250 is wave32-only, so the comparison
   // mask occupies s53 and must not make liveness treat the adjacent s54 as
   // clobbered.
   auto inst = decode_gfx1250({0xD44A0035u, 0x020208A0u});
