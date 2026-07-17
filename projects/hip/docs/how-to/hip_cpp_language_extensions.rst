@@ -907,6 +907,8 @@ The different shuffle functions behave as following:
   the current subgroup. If it tries to read values from later subgroups, the
   function returns the ``var`` of the calling thread.
 
+.. _warp_reduction_functions:
+
 Warp reduction functions
 -------------------------------------------------------------------------------------------------------------
 Arithmetic reduces:
