@@ -9,6 +9,7 @@ rj_add_object_library(rocjitsu_code
     kernel_symbol.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
+    dbt/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp

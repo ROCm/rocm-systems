@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -425,6 +426,68 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   }
 }
 
+[[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                         std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                                         uint64_t old_text_size, uint64_t new_text_size,
+                                         std::span<const TextOffsetRelocation> relocations) {
+  if (relocations.empty())
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  target_by_source.reserve(relocations.size());
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return false;
+    // A helper block can be copied into more than one kernel-local body. ELF
+    // has only one value for its local label, so retain the first deterministic
+    // placement. Control-flow fixups remain kernel-local and do not depend on
+    // this tooling/debug symbol choice.
+    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+  }
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  constexpr uint8_t kElfSymbolTypeSection = 3;
+  for (const Elf64_Shdr &symtab : shdrs) {
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size))
+      continue;
+
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t symbol_offset = symtab.sh_offset + i * sizeof(Elf64_Sym);
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbol_offset, sizeof(symbol));
+      if (symbol.st_shndx != text_index || elf_symbol_type(symbol.st_info) == kElfSymbolTypeSection)
+        continue;
+
+      uint64_t source_text_offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text.sh_addr)
+          continue;
+        source_text_offset = symbol.st_value - text.sh_addr;
+      }
+      const auto relocated_start = target_by_source.find(source_text_offset);
+      if (relocated_start == target_by_source.end())
+        continue;
+
+      const uint64_t old_size = symbol.st_size;
+      if (old_size <= old_text_size - source_text_offset) {
+        const auto relocated_end = target_by_source.find(source_text_offset + old_size);
+        if (relocated_end != target_by_source.end() &&
+            relocated_end->second >= relocated_start->second) {
+          symbol.st_size = relocated_end->second - relocated_start->second;
+        }
+      }
+      symbol.st_value =
+          ehdr.e_type == ET_REL ? relocated_start->second : text.sh_addr + relocated_start->second;
+      std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool relocation_place_was_moved(uint64_t place, std::span<const Elf64_Shdr> shdrs,
                                               const std::vector<bool> &shift_section_vaddr,
                                               uint64_t delta) {
@@ -604,7 +667,8 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
+bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
+                                     std::span<const TextOffsetRelocation> text_relocations) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -691,7 +755,15 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
   shdrs[*text_index].sh_size = new_text.size();
-  grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
+  if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
+                             text_relocations)) {
+    return false;
+  }
+  // Instrumentation appends a cave without relocating the original body and
+  // therefore supplies no offset map. Preserve its historical function-range
+  // growth. DBT supplies exact starts/ends and gets precise relocated sizes.
+  if (text_relocations.empty())
+    grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
   text_size_ = new_text.size();
 
   for (const Elf64_Phdr &phdr : phdrs) {

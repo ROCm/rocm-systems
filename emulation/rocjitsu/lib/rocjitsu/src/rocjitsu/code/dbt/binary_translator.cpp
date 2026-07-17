@@ -15,6 +15,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
@@ -429,15 +430,16 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   return scopes;
 }
 
-/// @brief Return whether an instruction is an `s_setpc_b64` through one SGPR pair.
+/// @brief Return whether an instruction is a scalar set-PC through one SGPR pair.
 ///
 /// @details Return-like scalar control flow is left as an indirect branch in the
 /// translated instruction stream, so DBT must validate that the block terminator
 /// reads the call edge's saved return SGPR. This helper intentionally checks the
 /// raw SOP1 source field instead of broader instruction semantics: only the exact
-/// `s_setpc_b64 s[return:return+1]` form is a scoped call return.
+/// `s_setpc_b64`/`s_set_pc_i64 s[return:return+1]` form is a scoped call return.
 [[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  if (inst.size() != sizeof(uint32_t) || inst.mnemonic() != "s_setpc_b64")
+  const std::string_view mnemonic = inst.mnemonic();
+  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
@@ -569,6 +571,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
 /// copy, so any failure leaves the caller free to return the original code object.
 [[nodiscard]] std::optional<std::vector<uint8_t>> materialize_translated_code_object(
     CodeObjectPatcher patcher, std::vector<uint8_t> translated_text, uint64_t original_text_size,
+    std::span<const TextOffsetRelocation> text_relocations,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
@@ -592,7 +595,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     }
   }
 
-  if (!patcher.replace_text(translated_text)) {
+  if (!patcher.replace_text(translated_text, text_relocations)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -773,7 +776,22 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)), options_(options),
       encoding_translate_(select_encoding_translator(guest_arch, host_arch)),
       legalization_lookup_(select_legalization(guest_arch, host_arch)),
-      semantic_translator_(std::make_unique<SemanticTranslator>(guest_arch, host_arch)) {}
+      semantic_translator_(std::make_unique<SemanticTranslator>(
+          guest_arch, host_arch, options.input_revision, options.output_revision)) {}
+
+const InstructionLegalization *
+BinaryTranslator::lookup_legalization(const Instruction &inst) const {
+  // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
+  // tables cannot express their revision-specific behavior. Affected decoded
+  // instructions are classified by the handwritten errata policy; everything
+  // else intentionally has no entry and follows the raw same-ISA copy path.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options_.input_revision == ProcessorRevision::Gfx1250B0 &&
+      options_.output_revision == ProcessorRevision::Gfx1250A0)
+    return gfx1250_b0_to_a0_legalization(inst);
+
+  return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
+}
 
 void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
   trace_callback_ = std::move(callback);
@@ -789,6 +807,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     result.elf_bytes.assign(image, image + obj.image_size());
     return result;
   };
+
+  // The implemented errata are deliberately one-way. Treating A0 input as B0
+  // output would silently preserve A0 workaround sequences while claiming the
+  // opposite direction, so fail before modifying the code object.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options_.input_revision == ProcessorRevision::Gfx1250A0 &&
+      options_.output_revision == ProcessorRevision::Gfx1250B0) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "gfx1250 A0-to-B0 translation is not supported");
+    return leave_unchanged();
+  }
+
   auto text = patcher.text_bytes();
   if (text.empty()) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
@@ -1100,6 +1130,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return base;
   };
 
+  std::vector<TextOffsetRelocation> text_relocations;
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
@@ -1126,6 +1157,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         failure.required_work = diagnostic.required_work;
         break;
       }
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
+        continue;
+      return leave_unchanged();
+    }
+
+    const auto opaque_fallthrough = std::ranges::find_if(scope.blocks, [](const BasicBlock *block) {
+      return block != nullptr && block->falls_through_to_undecodable_text();
+    });
+    if (opaque_fallthrough != scope.blocks.end()) {
+      auto failure =
+          make_kernel_failure(DiagnosticKind::Legalization,
+                              "reachable kernel code falls through into undecodable .text bytes",
+                              (*opaque_fallthrough)->end_offset());
       if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
         continue;
       return leave_unchanged();
@@ -1202,6 +1246,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const bool can_use_long_direct_branches =
         next_long_branch_sgpr_pair(kernel_context, host_arch_).has_value();
     LivenessAnalysisOptions liveness_options;
+    liveness_options.arch = guest_arch_;
+    liveness_options.entry_block = scope.entry;
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     std::vector<const Instruction *> live_before_instructions;
@@ -1295,15 +1341,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     kernel_text.reserve(static_cast<size_t>(std::min<uint64_t>(
         source_body_size + recovered_window_growth, std::numeric_limits<size_t>::max())));
 
-    std::unordered_set<uint64_t> needed_builder_source_offsets;
-    needed_builder_source_offsets.reserve(pending_builder_fixups.size() * 3);
-    for (const IndirectCallFixup &fixup : pending_builder_fixups) {
-      needed_builder_source_offsets.insert(fixup.source_getpc_offset);
-      needed_builder_source_offsets.insert(fixup.source_recovery_begin_offset);
-      needed_builder_source_offsets.insert(fixup.source_recovery_end_offset);
-    }
     std::unordered_map<uint64_t, uint64_t> target_offset_by_source_offset;
-    target_offset_by_source_offset.reserve(needed_builder_source_offsets.size());
+    target_offset_by_source_offset.reserve(
+        static_cast<size_t>(source_body_size / sizeof(uint32_t)) + scope.blocks.size());
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = first_direct_branch_island_pool_offset();
@@ -1325,8 +1365,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             live_before_instructions[next_semantic_expand_instruction] == &inst;
         if (has_semantic_expand_rule)
           ++next_semantic_expand_instruction;
-        if (needed_builder_source_offsets.contains(offset))
-          target_offset_by_source_offset.emplace(offset, target_offset);
+        // Record every instruction start, not just recovered-PC builder
+        // boundaries. The same final map keeps ELF labels attached to the
+        // relocated instruction stream after semantic expansions change sizes.
+        target_offset_by_source_offset.emplace(offset, target_offset);
 
         const auto recovered_it = recovered_indirect_by_call.find(offset);
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
@@ -1401,9 +1443,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             return leave_unchanged();
           }
 
-          const InstructionLegalization *branch_leg = nullptr;
-          if (legalization_lookup_)
-            branch_leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
+          const InstructionLegalization *branch_leg = lookup_legalization(inst);
           const uint16_t branch_dst_opcode = branch_leg ? branch_leg->target_opcode : inst.opcode();
 
           bool copied_original = false;
@@ -1442,9 +1482,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           continue;
         }
 
-        const InstructionLegalization *leg = nullptr;
-        if (legalization_lookup_)
-          leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
+        const InstructionLegalization *leg = lookup_legalization(inst);
 
         const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 
@@ -1554,8 +1592,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         break;
       placement.target_end = kernel_text.size();
       layout.blocks.push_back(placement);
-      if (needed_builder_source_offsets.contains(block->end_offset()))
-        target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
+      target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
       if (!can_use_long_direct_branches && block != scope.blocks.back() &&
           kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
@@ -1605,6 +1642,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
     const uint64_t target_delta = materialized.target_delta;
+    for (const auto &[source_offset, target_offset] : target_offset_by_source_offset) {
+      text_relocations.push_back(
+          {.source_offset = source_offset, .target_offset = target_offset + target_delta});
+    }
 
     // Phase 5: now that every emitted source block has a final target offset,
     // patch explicit direct branches, recovered source-side builders, and
@@ -1694,7 +1735,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         updated->kernel_name = translation.kernel_name;
         updated->sidecar_descriptor = translation.sidecar_descriptor;
         updated->virtual_lds_lowering = translation.virtual_lds_lowering;
-        if (!append_virtual_lds_entry_prologue(*updated, guest_arch_, host_arch_)) {
+        // Register feedback also recomputes ordinary, non-virtual descriptors.
+        // Only a virtual-LDS variant owns a backing-pointer entry prologue;
+        // asking an unrelated ISA pair to materialize one makes otherwise
+        // valid SGPR/VGPR growth fail after semantic lowering.
+        if (updated->needs_lds_overflow_buf &&
+            !append_virtual_lds_entry_prologue(*updated, guest_arch_, host_arch_)) {
           auto failure = make_kernel_failure(
               DiagnosticKind::KernelDescriptor,
               "virtual LDS lowering cannot materialize backing-buffer pointer entry prologue");
@@ -1777,8 +1823,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Phase 6 commits the completed translation plan without mixing ELF mutation
   // and sidecar metadata construction into the per-kernel lowering transaction.
   auto materialized = materialize_translated_code_object(
-      std::move(patcher), std::move(translated_text), text.size(), descriptor_translations,
-      host_arch_, target_mach_, result.diagnostics);
+      std::move(patcher), std::move(translated_text), text.size(), text_relocations,
+      descriptor_translations, host_arch_, target_mach_, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);

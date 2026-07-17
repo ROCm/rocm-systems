@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -159,6 +160,7 @@ enum class ScalarSop2Op {
   AddI32,
   AddcU32,
   SubbU32,
+  AddNcU64,
 };
 
 /// @brief Concrete PC-builder value carried by one SGPR pair.
@@ -443,8 +445,8 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -464,6 +466,21 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+    switch (op) {
+    case ScalarSop2Op::AddU32:
+      return 0;
+    case ScalarSop2Op::SubU32:
+      return 1;
+    case ScalarSop2Op::AddI32:
+      return 2;
+    case ScalarSop2Op::AddcU32:
+      return 4;
+    case ScalarSop2Op::SubbU32:
+      return 5;
+    case ScalarSop2Op::AddNcU64:
+      return std::nullopt;
+    }
+    return std::nullopt;
   case ROCJITSU_CODE_ARCH_GFX1250:
     switch (op) {
     case ScalarSop2Op::AddU32:
@@ -476,6 +493,8 @@ private:
       return 4;
     case ScalarSop2Op::SubbU32:
       return 5;
+    case ScalarSop2Op::AddNcU64:
+      return 83;
     }
     return std::nullopt;
   case ROCJITSU_CODE_ARCH_RV32I:
@@ -838,6 +857,55 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
+[[nodiscard]] bool apply_gfx1250_add_nc_u64_update(const Instruction &inst, uint32_t word,
+                                                   std::span<const uint8_t> text,
+                                                   rj_code_arch_t arch, uint16_t pair_lo,
+                                                   PcValue &value) {
+  // gfx1250 compilers use one SCC-neutral 64-bit add instead of the legacy
+  // low-add/high-carry pair:
+  //
+  //   s_get_pc_i64  s[lo:lo+1]
+  //   s_add_nc_u64  s[lo:lo+1], s[lo:lo+1], literal
+  //   s_set_pc_i64  s[lo:lo+1]
+  //
+  // Match only the self-update literal forms. Register addends would require a
+  // separate constant-propagation proof and must continue to fail closed.
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+      inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
+    return false;
+
+  const Operand *dst = inst.dst_operand(0);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  if (dst == nullptr || src0 == nullptr || src1 == nullptr)
+    return false;
+  const auto dst_ref = dst->to_register_ref();
+  const auto src0_ref = src0->to_register_ref();
+  if (!dst_ref || !src0_ref || dst_ref->cls != RegClass::SGPR || src0_ref->cls != RegClass::SGPR ||
+      dst_ref->index != pair_lo || src0_ref->index != pair_lo || dst_ref->width != 2 ||
+      src0_ref->width != 2)
+    return false;
+
+  uint64_t literal = 0;
+  if (auto literal64 = src1->literal64_value()) {
+    literal = *literal64;
+  } else {
+    constexpr uint16_t kLiteralOperand = 255;
+    if (inst.size() != 2 * sizeof(uint32_t) || ((word >> 8) & 0xffu) != kLiteralOperand)
+      return false;
+    literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
+  }
+
+  // s_add_nc_u64 performs modulo-2^64 arithmetic. A valid local text target is
+  // representable as a non-negative int64 offset after the modulo addition.
+  const uint64_t updated = static_cast<uint64_t>(value.offset) + literal;
+  if (updated > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    return false;
+  value.offset = static_cast<int64_t>(updated);
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
@@ -955,6 +1023,8 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   for (size_t i = 0; i < ctx.insts.size(); ++i) {
     const Instruction &inst = *ctx.insts[i];
     const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    if (i + 1 < ctx.insts.size() && ctx.insts[i + 1]->src_loc() != next_offset)
+      leaders[i + 1] = 1;
     if (is_block_terminator(inst) && next_offset < section_end) {
       // Splitting after terminators makes each setpc/swappc the last
       // instruction in its analysis block. That is important because the block
@@ -1191,7 +1261,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
-    if (!apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+    if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
+        !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
 

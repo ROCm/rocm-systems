@@ -8,6 +8,7 @@
 #define ROCJITSU_TOOLS_DBT_TRANSLATE_H_
 
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 #include "tool_result.h"
@@ -71,6 +72,8 @@ struct TranslateOptions {
   rj_code_arch_t guest_arch = ROCJITSU_CODE_ARCH_CDNA4;
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_RDNA4;
   uint32_t target_mach = 0;
+  ProcessorRevision input_revision = ProcessorRevision::Unspecified;
+  ProcessorRevision output_revision = ProcessorRevision::Unspecified;
 
   bool collect_diagnostics = false;
   std::optional<uint16_t> debug_min_free_vgpr;
@@ -83,6 +86,8 @@ struct TranslateOutput {
   std::vector<uint8_t> elf_bytes;
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID;
   uint32_t target_mach = 0;
+  ProcessorRevision input_revision = ProcessorRevision::Unspecified;
+  ProcessorRevision output_revision = ProcessorRevision::Unspecified;
   CodeObjectReport source_report;
   CodeObjectReport translated_report;
   std::vector<InstructionTranslationReport> instruction_translations;

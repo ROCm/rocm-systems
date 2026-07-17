@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -94,6 +95,18 @@ using TranslationTraceCallback = std::function<void(const TranslationTraceEvent 
 
 /// @brief Optional controls for DBT translation.
 struct BinaryTranslatorOptions {
+  /// @brief Input silicon revision used to determine translation direction.
+  ///
+  /// @details The command-line translation tool requires this when the input
+  /// architecture is gfx1250. Other architectures leave it unspecified.
+  ProcessorRevision input_revision = ProcessorRevision::Unspecified;
+
+  /// @brief Output silicon revision used to determine translation direction.
+  ///
+  /// @details The command-line translation tool requires this when the output
+  /// architecture is gfx1250. Other architectures leave it unspecified.
+  ProcessorRevision output_revision = ProcessorRevision::Unspecified;
+
   /// @brief Force liveness-based VGPR scratch allocation above a debug floor.
   ///
   /// @details This debug mode leaves normal liveness dataflow untouched, but
@@ -150,7 +163,7 @@ public:
   /// @brief Construct a translator for the given (guest, host) ISA pair.
   /// @param guest_arch    Source ISA architecture.
   /// @param host_arch     Target ISA architecture.
-  /// @param target_mach   EF_AMDGPU_MACH value for the target GPU stepping.
+  /// @param target_mach   EF_AMDGPU_MACH value for the target processor.
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
   BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0,
                    BinaryTranslatorOptions options = {});
@@ -165,6 +178,9 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Return the generated or revision-specific legalization for an instruction.
+  [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
+
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
   /// @details Extracts raw encoding words, calls the per-pair encoding translate
@@ -185,7 +201,7 @@ private:
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.
-  uint32_t target_mach_;                                    ///< ELF MACH flag for target stepping.
+  uint32_t target_mach_;                                    ///< ELF MACH flag for target processor.
   TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
   BinaryTranslatorOptions options_;                         ///< Optional translation controls.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.

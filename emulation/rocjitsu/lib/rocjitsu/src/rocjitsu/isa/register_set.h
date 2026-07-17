@@ -28,9 +28,22 @@ namespace rocjitsu {
 /// number of SGPR/VGPR indices addressable within a wavefront register file.
 inline constexpr size_t REGISTER_SET_MAX_SGPRS =
     std::max<size_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
-inline constexpr size_t REGISTER_SET_MAX_VGPRS =
-    std::max<size_t>(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF);
+// gfx1250 compute wave32 can address four 256-VGPR banks through
+// WAVE_MODE.VGPR_MSB. Keep the architecture-independent analysis set large
+// enough to distinguish those physical registers even though ordinary encoded
+// operands still contain only an eight-bit VGPR index.
+inline constexpr size_t REGISTER_SET_MAX_VGPRS = 1024;
 inline constexpr size_t REGISTER_SET_MAX_ACC_VGPRS = REGISTER_SET_MAX_VGPRS;
+
+/// @brief VGPRs generic semantic scratch allocation may directly encode.
+///
+/// @details Tracking 1024 gfx1250 VGPRs does not by itself make a scratch
+/// operand above v255 safe: a lowering must also establish the appropriate
+/// VGPR_MSB field around every generated instruction. Keep allocation at the
+/// common directly-addressable range until a lowering explicitly manages that
+/// architectural state.
+inline constexpr size_t REGISTER_SET_ALLOCATABLE_VGPRS =
+    std::min<size_t>(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF);
 
 /// @brief Normal SGPRs safe for scratch allocation across supported families.
 ///

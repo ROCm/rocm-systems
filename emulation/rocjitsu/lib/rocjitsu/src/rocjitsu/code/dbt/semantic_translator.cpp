@@ -18,12 +18,20 @@ namespace {
 /// @brief Select the handwritten semantic rule table for one ISA pair.
 /// @details Empty spans are intentional: most ISA pairs currently rely
 /// entirely on generated legalization and encoding translation.
-[[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_for(rj_code_arch_t guest,
-                                                                         rj_code_arch_t host) {
+[[nodiscard]] std::span<const TranslationRule>
+semantic_expand_rules_for(rj_code_arch_t guest, rj_code_arch_t host,
+                          ProcessorRevision input_revision, ProcessorRevision output_revision) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return semantic_expand_rules_cdna4_to_rdna4();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
     return semantic_expand_rules_cdna4_to_cdna3();
+  // gfx1250 A0 and B0 share one architectural target ID. Apply the errata only
+  // for the explicit B0-to-A0 direction; same-ISA translation alone must not
+  // silently select a silicon workaround policy.
+  if (guest == ROCJITSU_CODE_ARCH_GFX1250 && host == ROCJITSU_CODE_ARCH_GFX1250 &&
+      input_revision == ProcessorRevision::Gfx1250B0 &&
+      output_revision == ProcessorRevision::Gfx1250A0)
+    return semantic_expand_rules_gfx1250_b0_to_a0();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     return semantic_expand_rules_cdna4_to_rdna3();
   return {};
@@ -31,8 +39,11 @@ namespace {
 
 } // namespace
 
-SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host)
-    : expand_rules_(semantic_expand_rules_for(guest, host)), host_arch_(host) {
+SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host,
+                                       ProcessorRevision input_revision,
+                                       ProcessorRevision output_revision)
+    : expand_rules_(semantic_expand_rules_for(guest, host, input_revision, output_revision)),
+      host_arch_(host) {
   expand_rule_keys_.reserve(expand_rules_.size());
   uint16_t max_encoding_id = 0;
   for (const TranslationRule &rule : expand_rules_) {

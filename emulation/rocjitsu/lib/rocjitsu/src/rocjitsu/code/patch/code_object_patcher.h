@@ -16,6 +16,16 @@ namespace rocjitsu {
 class AmdGpuCodeObject;
 struct KdTranslation;
 
+/// @brief One exact source-to-target offset mapping inside `.text`.
+///
+/// @details DBT supplies instruction starts and block ends after final kernel
+/// placement. The ELF patcher uses these mappings to keep local labels and
+/// function symbols attached to relocated code without interpreting the ISA.
+struct TextOffsetRelocation {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
 /// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
 struct AppendedSidecarDescriptor {
   uint64_t file_offset = 0;
@@ -39,7 +49,8 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
+                                  std::span<const TextOffsetRelocation> text_relocations = {});
 
   void update_elf_flags(uint32_t new_flags);
 

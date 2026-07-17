@@ -18,6 +18,9 @@ namespace rocjitsu {
 /// @brief CDNA4 source rules for the CDNA3 target.
 [[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_cdna4_to_cdna3();
 
+/// @brief gfx1250 B0 errata expansions required by gfx1250 A0.
+[[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_gfx1250_b0_to_a0();
+
 /// @brief CDNA4 source rules for the RDNA3 target.
 [[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_cdna4_to_rdna3();
 
