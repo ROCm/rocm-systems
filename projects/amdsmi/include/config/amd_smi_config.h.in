@@ -2,3 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #define LIBDRM_AMDGPU_SONAME "@LIBDRM_AMDGPU_SONAME@"
+
+// WSL (Windows Subsystem for Linux) GPU backend.
+//
+// When enabled at build time (-DENABLE_WSL_BACKEND=ON), amd-smi can route a
+// subset of GPU queries through a WSL/WDDM (D3DKMT via /dev/dxg) backend instead
+// of the native DRM/sysfs path. The backend stays inert unless it is also
+// activated at runtime (see amd_smi_wsl_backend.h). When this macro is undefined
+// the intercept hooks compile to nothing, so native builds are unaffected.
+#cmakedefine AMDSMI_ENABLE_WSL_BACKEND

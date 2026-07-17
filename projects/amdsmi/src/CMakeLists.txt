@@ -59,6 +59,12 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
+# WSL/WDDM backend source is compiled only when the feature is enabled. Native
+# builds never see it, so the default library is unchanged.
+if(ENABLE_WSL_BACKEND)
+    set(SRC_LIST ${SRC_LIST} "${SRC_DIR}/amd_smi_wsl_backend.cc")
+endif()
+
 # CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
 # impl header triggers a regenerate instead of going unnoticed until a clean build.
 file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
