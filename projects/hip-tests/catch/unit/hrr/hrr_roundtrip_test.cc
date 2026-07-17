@@ -768,36 +768,23 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   }
 
   fs::path archive_path = hrr_single_process_archive(cap.path);
-  REQUIRE(fs::exists(cap.path / "manifest.json"));
   REQUIRE(fs::exists(archive_path / "manifest.json"));
 
-  const std::string root_manifest = read_text_file(cap.path / "manifest.json");
   const std::string proc_manifest = read_text_file(archive_path / "manifest.json");
   const std::string metadata = json_object_value(proc_manifest, "metadata");
 
-  INFO("Root manifest:\n" << root_manifest);
   INFO("Process manifest:\n" << proc_manifest);
   INFO("Metadata:\n" << metadata);
 
-  REQUIRE(json_integer_value(root_manifest, "version") == 2);
-  REQUIRE(json_has_key(root_manifest, "metadata"));
-  REQUIRE(json_has_key(proc_manifest, "metadata"));
   REQUIRE_FALSE(metadata.empty());
-  REQUIRE(json_has_key(root_manifest, "has_metadata"));
-  REQUIRE(root_manifest.find("\"has_metadata\": true") != std::string::npos);
 
   CHECK(json_integer_value(metadata, "schema_version") == 1);
   const std::string runtime_version = json_string_value(metadata, "hip_runtime_version");
-  const std::string driver_version = json_string_value(metadata, "hip_driver_version");
+  const std::string comgr_version = json_string_value(metadata, "comgr_version");
   INFO("hip_runtime_version=" << runtime_version);
-  INFO("hip_driver_version=" << driver_version);
+  INFO("comgr_version=" << comgr_version);
   CHECK_FALSE(runtime_version.empty());
-  CHECK_FALSE(driver_version.empty());
-  CHECK(json_has_key(metadata, "comgr"));
-  const std::string comgr = json_object_value(metadata, "comgr");
-  CHECK_FALSE(comgr.empty());
-  CHECK(json_has_key(comgr, "major"));
-  CHECK(json_has_key(comgr, "minor"));
+  CHECK_FALSE(comgr_version.empty());
   CHECK(json_has_key(metadata, "device_count"));
   CHECK(json_integer_value(metadata, "device_count") >= 1);
   CHECK(json_has_key(metadata, "devices"));
@@ -807,6 +794,7 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK(json_has_key(metadata, "gcn_arch_name"));
   CHECK(json_has_key(metadata, "total_global_mem"));
   CHECK(json_has_key(metadata, "multi_processor_count"));
+  CHECK(json_has_key(metadata, "compute_mode"));
   CHECK(json_has_key(metadata, "compute_capability"));
   CHECK(json_has_key(metadata, "pci"));
   CHECK(json_has_key(metadata, "uuid"));

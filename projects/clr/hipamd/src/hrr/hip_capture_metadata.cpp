@@ -90,7 +90,7 @@ std::string uuid_to_hex(const hipUUID& uuid) {
   return bytes_to_hex(uuid.bytes, sizeof(uuid.bytes));
 }
 
-void append_prop_fields(std::ostringstream& os, const hipDeviceProp_tR0600& prop) {
+void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
   os << "      \"properties\": {\n"
      << "        \"name\": " << quote(prop.name) << ",\n"
      << "        \"gcn_arch_name\": " << quote(prop.gcnArchName) << ",\n"
@@ -105,27 +105,24 @@ void append_prop_fields(std::ostringstream& os, const hipDeviceProp_tR0600& prop
      << "        \"integrated\": " << prop.integrated << ",\n"
      << "        \"managed_memory\": " << prop.managedMemory << ",\n"
      << "        \"memory_pools_supported\": " << prop.memoryPoolsSupported << ",\n"
-     << "        \"compute_capability\": { \"major\": " << prop.major
-     << ", \"minor\": " << prop.minor << " },\n"
-     << "        \"pci\": { \"domain\": " << prop.pciDomainID
-     << ", \"bus\": " << prop.pciBusID
-     << ", \"device\": " << prop.pciDeviceID << " },\n"
+     << "        \"compute_mode\": " << prop.computeMode << ",\n"
+     << "        \"compute_capability\": " << quote(std::to_string(prop.major) + "." +
+                                                  std::to_string(prop.minor)) << ",\n"
+     << "        \"pci\": " << quote(std::to_string(prop.pciDomainID) + ":" +
+                                    std::to_string(prop.pciBusID) + ":" +
+                                    std::to_string(prop.pciDeviceID)) << ",\n"
      << "        \"uuid\": " << quote(uuid_to_hex(prop.uuid)) << ",\n"
      << "        \"luid\": " << quote(bytes_to_hex(prop.luid, sizeof(prop.luid))) << ",\n"
      << "        \"luid_device_node_mask\": " << prop.luidDeviceNodeMask << "\n"
      << "      }";
 }
 
-std::string collect_comgr_json() {
+std::string collect_comgr_version() {
   size_t major = 0;
   size_t minor = 0;
   amd_comgr_get_version(&major, &minor);
-  std::ostringstream os;
-  os << "{\n"
-     << "    \"major\": " << static_cast<unsigned long long>(major) << ",\n"
-     << "    \"minor\": " << static_cast<unsigned long long>(minor) << "\n"
-     << "  }";
-  return os.str();
+  return std::to_string(static_cast<unsigned long long>(major)) + "." +
+         std::to_string(static_cast<unsigned long long>(minor));
 }
 
 std::string collect_runtime_json() {
@@ -134,10 +131,7 @@ std::string collect_runtime_json() {
 
   const int hip_version = HIP_VERSION;
   os << "    \"hip_runtime_version\": " << quote(version_string_from_int(hip_version)) << ",\n"
-     << "    \"hip_driver_version\": " << quote(version_string_from_int(hip_version));
-
-  os << ",\n"
-     << "    \"comgr\": " << collect_comgr_json() << "\n"
+     << "    \"comgr_version\": " << quote(collect_comgr_version()) << "\n"
      << "  }";
   return os.str();
 }
@@ -154,7 +148,7 @@ std::string collect_devices_json() {
        << "    {\n"
        << "      \"ordinal\": " << device << ",\n";
 
-    hipDeviceProp_tR0600 prop{};
+    hipDeviceProp_t prop{};
     const hipError_t prop_err = hip::ihipGetDeviceProperties(&prop, device);
     if (prop_err == hipSuccess) {
       append_prop_fields(os, prop);

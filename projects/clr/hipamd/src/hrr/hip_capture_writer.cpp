@@ -157,7 +157,6 @@ static constexpr size_t   kBufCap           = 256u * 1024u;
 static constexpr uint64_t kCheckpointEvents = 4096;
 // Path buffers are filled at open() so the signal path never touches std::string.
 static constexpr size_t   kPathMax          = 4096;
-static constexpr uint32_t kRootManifestVersion = 2;
 
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
@@ -511,7 +510,6 @@ struct ProcessManifestEntry {
   uint64_t event_count = 0;
   uint64_t blob_count = 0;
   bool complete = false;
-  std::string metadata_json;
 };
 
 static bool read_process_manifest(const std::string& path, ProcessManifestEntry* out) {
@@ -552,65 +550,6 @@ static bool read_process_manifest(const std::string& path, ProcessManifestEntry*
   return true;
 }
 
-static std::string read_text_file(const std::string& path) {
-  FILE* f = fopen(path.c_str(), "rb");
-  if (!f) return {};
-  if (fseek(f, 0, SEEK_END) != 0) {
-    fclose(f);
-    return {};
-  }
-  const long len = ftell(f);
-  if (len < 0) {
-    fclose(f);
-    return {};
-  }
-  rewind(f);
-  std::string out(static_cast<size_t>(len), '\0');
-  if (!out.empty() && fread(out.data(), 1, out.size(), f) != out.size()) {
-    fclose(f);
-    return {};
-  }
-  fclose(f);
-  return out;
-}
-
-static std::string extract_json_object_member(const std::string& json, const char* key) {
-  const std::string needle = std::string("\"") + key + "\"";
-  size_t pos = json.find(needle);
-  if (pos == std::string::npos) return {};
-  pos = json.find(':', pos + needle.size());
-  if (pos == std::string::npos) return {};
-  pos = json.find('{', pos + 1);
-  if (pos == std::string::npos) return {};
-
-  int depth = 0;
-  bool in_string = false;
-  bool escape = false;
-  for (size_t i = pos; i < json.size(); ++i) {
-    const char c = json[i];
-    if (in_string) {
-      if (escape) {
-        escape = false;
-      } else if (c == '\\') {
-        escape = true;
-      } else if (c == '"') {
-        in_string = false;
-      }
-      continue;
-    }
-    if (c == '"') {
-      in_string = true;
-    } else if (c == '{') {
-      ++depth;
-    } else if (c == '}') {
-      --depth;
-      if (depth == 0)
-        return json.substr(pos, i - pos + 1);
-    }
-  }
-  return {};
-}
-
 static uint64_t derive_owner_pid(const std::vector<ProcessManifestEntry>& entries) {
   if (entries.empty()) return 0;
   for (const auto& candidate : entries) {
@@ -632,40 +571,19 @@ static void update_root_manifest() {
     if (name.rfind("pid-", 0) != 0) continue;
     ProcessManifestEntry entry{};
     const std::string manifest_path = (ent.path() / "manifest.json").string();
-    if (read_process_manifest(manifest_path, &entry)) {
-      std::string metadata = extract_json_object_member(read_text_file(manifest_path), "metadata");
-      if (is_json_object_fragment(metadata))
-        entry.metadata_json = std::move(metadata);
+    if (read_process_manifest(manifest_path, &entry))
       entries.push_back(entry);
-    }
   }
 
   std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.pid < b.pid; });
   const uint64_t owner_pid = derive_owner_pid(entries);
-  std::string root_metadata;
-  for (const auto& e : entries) {
-    if (e.pid == owner_pid && is_json_object_fragment(e.metadata_json)) {
-      root_metadata = e.metadata_json;
-      break;
-    }
-  }
-  if (root_metadata.empty()) {
-    for (const auto& e : entries) {
-      if (is_json_object_fragment(e.metadata_json)) {
-        root_metadata = e.metadata_json;
-        break;
-      }
-    }
-  }
 
   std::string json;
   json += "{\n";
-  json += "  \"version\": " + std::to_string(kRootManifestVersion) + ",\n";
+  json += "  \"version\": 1,\n";
   json += "  \"capture_mode\": \"in-tree\",\n";
   json += "  \"owner_pid\": " + std::to_string(owner_pid) + ",\n";
-  if (is_json_object_fragment(root_metadata))
-    json += "  \"metadata\": " + root_metadata + ",\n";
   json += "  \"processes\": [\n";
   for (size_t i = 0; i < entries.size(); ++i) {
     const auto& e = entries[i];
@@ -673,9 +591,7 @@ static void update_root_manifest() {
             ", \"parent_pid\": " + std::to_string(e.parent_pid) +
             ", \"complete\": " + (e.complete ? "true" : "false") +
             ", \"event_count\": " + std::to_string(e.event_count) +
-            ", \"blob_count\": " + std::to_string(e.blob_count) +
-            ", \"has_metadata\": " + (is_json_object_fragment(e.metadata_json) ? "true" : "false") +
-            " }";
+            ", \"blob_count\": " + std::to_string(e.blob_count) + " }";
     json += (i + 1 == entries.size()) ? "\n" : ",\n";
   }
   json += "  ]\n";
