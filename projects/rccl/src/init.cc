@@ -445,8 +445,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   if (comm->nNodes == 1) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
-    NCCLCHECK(ncclMemFree(comm->gatheredSizes));    
-	  
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
+
     comm->localSizes = nullptr;
     comm->gatheredSizes = nullptr;
   }
