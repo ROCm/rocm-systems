@@ -893,8 +893,8 @@ class AMDSMIHelpers:
                 raise
             # A device-scoped CLI error; prefer its underlying library status
             # code when present so it matches the record-and-return path.
-            if hasattr(e, "smilibcode"):
-                self.error_collector.record_library_error(e.smilibcode)
+            if hasattr(e, "amdsmi_lib_code"):
+                self.error_collector.record_library_error(e.amdsmi_lib_code)
             else:
                 self.error_collector.record(e.value)
         except amdsmi_exception.AmdSmiLibraryException as e:
@@ -2660,24 +2660,11 @@ class AMDSMIHelpers:
             raw = cper_file.read_bytes()
         else:
             raw = cper_file
-        try:
-            afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
-            return afids
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                raise ValueError("Invalid CPER file inputs") from e
-            elif (
-                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE
-            ):
-                raise ValueError("Invalid CPER file data size") from e
-            elif (
-                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA
-            ):
-                raise ValueError("Unexpected data in CPER file") from e
-            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                raise NotImplementedError("AFID decoding not supported") from e
-            else:
-                raise ValueError("Unexpected Error getting afids from CPER file") from e
+        # A decode failure raises AmdSmiLibraryException carrying the real
+        # AMDSMI_STATUS_*; callers catch it (or let it reach the top-level
+        # handler) to surface a truthful exit code. No translation here.
+        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
+        return afids
 
     def get_partition_id(self, device_handle, gpu_id=None) -> int:
         partition_id = -1
@@ -2818,11 +2805,17 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise FileNotFoundError(
-                        "Error accessing CPER files. This command requires CPER to be enabled."
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
                     ) from e
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
-                    raise OSError("Error opening CPER file. Unable to read CPER File") from e
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Error opening CPER file. Unable to read CPER File",
+                    ) from e
                 else:
                     logging.debug(f"Cannot retrieve CPER entries: {e}")
                     break
