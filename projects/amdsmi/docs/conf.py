@@ -66,7 +66,7 @@ html_css_files = ["amdsmi_docs.css"]
 # https://llmstxt.org/). See the rocm-docs-core guide:
 # https://rocm.docs.amd.com/projects/rocm-docs-core/en/latest/user_guide/llms.html
 html_extra_path = ["llms.txt"]
-rocm_docs_generate_llms_full = True
+rocm_docs_generate_llms = True
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "extension"))
