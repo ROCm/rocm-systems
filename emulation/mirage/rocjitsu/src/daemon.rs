@@ -66,7 +66,13 @@ impl Daemon {
 
     /// Current status reported by `librocjitsu`.
     pub fn status(&self) -> RjDaemonStatus {
-        unsafe { self.lib.daemon_status(self.handle) }
+        match unsafe { self.lib.daemon_status(self.handle) } {
+            Ok(status) => status,
+            Err(status) => {
+                tracing::error!(status, "librocjitsu returned an invalid daemon status");
+                RjDaemonStatus::Error
+            }
+        }
     }
 
     /// Tear the daemon down. Idempotent; called by both `stop` and `drop`.

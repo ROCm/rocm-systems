@@ -67,6 +67,21 @@ pub enum RjDaemonStatus {
     Error = 4,
 }
 
+impl TryFrom<c_int> for RjDaemonStatus {
+    type Error = c_int;
+
+    fn try_from(value: c_int) -> Result<Self, c_int> {
+        match value {
+            0 => Ok(Self::Stopped),
+            1 => Ok(Self::Starting),
+            2 => Ok(Self::Running),
+            3 => Ok(Self::Stopping),
+            4 => Ok(Self::Error),
+            value => Err(value),
+        }
+    }
+}
+
 /// VM creation mode (`rj_vm_mode_t`).
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +238,7 @@ type FnVmGetSharedMemAs = unsafe extern "C" fn(*mut RjVm, u32, i64, *mut RjHandl
 type FnDaemonStart =
     unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut RjDaemon) -> RjStatus;
 type FnDaemonStop = unsafe extern "C" fn(*mut RjDaemon) -> RjStatus;
-type FnDaemonStatus = unsafe extern "C" fn(*const RjDaemon) -> RjDaemonStatus;
+type FnDaemonStatus = unsafe extern "C" fn(*const RjDaemon) -> c_int;
 
 /// A loaded rocjitsu shared library with its `rj_vm_*` entry points
 /// resolved.
@@ -535,10 +550,13 @@ impl Lib {
 
     /// Return the current lifecycle state of a daemon.
     ///
+    /// Returns the unrecognized raw value when an ABI-incompatible library
+    /// produces something other than a valid [`RjDaemonStatus`] discriminant.
+    ///
     /// # Safety
     /// `daemon` must be null or remain live for the duration of this call.
-    pub unsafe fn daemon_status(&self, daemon: *const RjDaemon) -> RjDaemonStatus {
-        unsafe { (self.daemon_status)(daemon) }
+    pub unsafe fn daemon_status(&self, daemon: *const RjDaemon) -> Result<RjDaemonStatus, c_int> {
+        RjDaemonStatus::try_from(unsafe { (self.daemon_status)(daemon) })
     }
 }
 
@@ -563,5 +581,16 @@ mod tests {
         assert_eq!(RjDaemonStatus::Stopped as i32, 0);
         assert_eq!(RjDaemonStatus::Running as i32, 2);
         assert_eq!(RjDaemonStatus::Error as i32, 4);
+    }
+
+    #[test]
+    fn daemon_status_rejects_unknown_discriminants() {
+        assert_eq!(RjDaemonStatus::try_from(0), Ok(RjDaemonStatus::Stopped));
+        assert_eq!(RjDaemonStatus::try_from(1), Ok(RjDaemonStatus::Starting));
+        assert_eq!(RjDaemonStatus::try_from(2), Ok(RjDaemonStatus::Running));
+        assert_eq!(RjDaemonStatus::try_from(3), Ok(RjDaemonStatus::Stopping));
+        assert_eq!(RjDaemonStatus::try_from(4), Ok(RjDaemonStatus::Error));
+        assert_eq!(RjDaemonStatus::try_from(-1), Err(-1));
+        assert_eq!(RjDaemonStatus::try_from(5), Err(5));
     }
 }
