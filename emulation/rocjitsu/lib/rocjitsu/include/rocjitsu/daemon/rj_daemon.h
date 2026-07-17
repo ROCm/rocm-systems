@@ -7,6 +7,8 @@
 #ifndef ROCJITSU_DAEMON_RJ_DAEMON_H_
 #define ROCJITSU_DAEMON_RJ_DAEMON_H_
 
+#include <stdint.h>
+
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/base/rj_status.h"
 
@@ -21,7 +23,7 @@ extern "C" {
 typedef struct rj_daemon_t rj_daemon_t;
 
 /// @brief Observable daemon lifecycle state.
-typedef enum rj_daemon_status_t {
+typedef enum rj_daemon_status_t : int32_t {
   RJ_DAEMON_STATUS_STOPPED = 0,
   RJ_DAEMON_STATUS_STARTING = 1,
   RJ_DAEMON_STATUS_RUNNING = 2,
