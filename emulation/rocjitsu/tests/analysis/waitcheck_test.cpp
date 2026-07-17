@@ -1615,7 +1615,7 @@ TEST(WaitcheckTest, AcceptsOrderedImageSampleOverwrite) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ReportsFlatToVmemLoadOverwriteOnBothPossibleFlatCounters) {
+TEST(WaitcheckTest, ReportsFlatToVmemLoadOverwriteOnUnresolvedDsCounter) {
   std::vector<uint32_t> program;
   append_inst(program, flat_load_b32(0));
   append_inst(program, global_load_b32(0));
@@ -1623,15 +1623,27 @@ TEST(WaitcheckTest, ReportsFlatToVmemLoadOverwriteOnBothPossibleFlatCounters) {
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
   ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 2u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
-  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
-  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
-  EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
-  EXPECT_EQ(report.diagnostics[1].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, AcceptsGfx942FlatToScratchOverwriteAfterLgkmcntWaitLikeLlvm) {
+  // LLVM SIInsertWaitcnts relies on same-class VMEM loads writing VGPR
+  // results in order.  The lgkmcnt wait retires the older generic FLAT load's
+  // possible LDS completion; no vmcnt wait is needed before the scratch load.
+  std::vector<uint32_t> program{
+      0xDC500000u, 0x6D00000Cu, // flat_load_dword v109, v[12:13]
+      0xBF8CC07Fu,              // s_waitcnt lgkmcnt(0)
+      0xDC504000u, 0x6D210000u, // scratch_load_dword v109, off, s33
+  };
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
 TEST(WaitcheckTest, ReportsFlatToDsLoadOverwriteOnBothPossibleFlatCounters) {

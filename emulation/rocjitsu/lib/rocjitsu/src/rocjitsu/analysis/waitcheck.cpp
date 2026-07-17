@@ -2200,6 +2200,23 @@ private:
 
   [[nodiscard]] static bool ordered_waw(const PendingEvent &event,
                                         std::span<const ClassifiedEvent> current_events) {
+    // Match LLVM SIInsertWaitcnts' asymmetric generic-FLAT WAW rule.  Once a
+    // wait has retired the LDS-counter facet of an older FLAT load, its
+    // remaining VMEM result is ordered with a newer non-sampler VMEM load.
+    // The reverse is not true: a newer generic FLAT load may complete through
+    // LDS and overwrite an older VMEM result out of order.
+    if (event.kind == WaitEventKind::FlatLoad) {
+      if (event.counter != WaitCounterKind::Load)
+        return false;
+      return std::ranges::any_of(current_events, [&](const ClassifiedEvent &current_event) {
+        if (current_event.counter != WaitCounterKind::Load)
+          return false;
+        // Generic FLAT is deliberately excluded here because it is not a
+        // VMEM-only instruction.
+        return current_event.kind == WaitEventKind::VmemNoSamplerLoad;
+      });
+    }
+
     switch (event.kind) {
     case WaitEventKind::VmemNoSamplerLoad:
     case WaitEventKind::Ds:
