@@ -34,7 +34,6 @@ from rocprofsys import RocprofsysConfig
 pytestmark = [
     pytest.mark.amdsmi_min_version("26.3"),
     pytest.mark.ainic,
-    pytest.mark.network,
 ]
 
 # =============================================================================
@@ -143,6 +142,7 @@ class TestAINIC(RocprofsysTest):
         )
 
     @pytest.mark.ainic_required
+    @pytest.mark.network
     @pytest.mark.rocpd("ainic_perf_env")
     @pytest.mark.timeout(120)
     def test_performance_tracks(
