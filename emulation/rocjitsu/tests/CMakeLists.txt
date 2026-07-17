@@ -1976,6 +1976,12 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_INSTALL_LIBDIR}"
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
+        set(RJ_DAEMON_SANITIZER_PRELOAD "")
+        if(RJ_ENABLE_ASAN AND RJ_SANITIZE_SHARED)
+            set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}:")
+        elseif(RJ_ENABLE_TSAN AND RJ_SANITIZE_SHARED)
+            set(RJ_DAEMON_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}:")
+        endif()
 
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
@@ -1984,6 +1990,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
                 RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
                 RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
+                RJ_DAEMON_SANITIZER_PRELOAD="${RJ_DAEMON_SANITIZER_PRELOAD}"
                 RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
