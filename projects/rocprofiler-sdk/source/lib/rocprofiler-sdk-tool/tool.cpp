@@ -69,6 +69,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
@@ -1560,11 +1561,20 @@ generate_agent_profiles()
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
 }
 
+// Shared, lazily-built per-agent profile set (one config per counter group). Used by both the
+// non-replay round-robin and the kernel-replay per-dispatch selector so they see identical groups.
+agent_profiles&
+get_agent_profiles()
+{
+    static auto profiles = generate_agent_profiles();
+    return profiles;
+}
+
 // this function creates a rocprofiler profile config on the first entry
 std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto agent_profiles = generate_agent_profiles();
+    auto& agent_profiles = get_agent_profiles();
 
     auto agent_iter = agent_profiles.current_iter.find(agent_id);
     if(agent_iter == agent_profiles.current_iter.end())
@@ -1584,6 +1594,34 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 
     uint64_t profile_pos = my_iter / agent_profiles.rotation;
     return profiles->second[profile_pos % profiles->second.size()];
+}
+
+// Kernel replay: deterministic per-dispatch group selection. All N passes of one dispatch share the
+// same dispatch_id (the SDK fixes it) and the counter dispatch callback fires once per pass in
+// order, so the k-th call for a given dispatch_id returns counter group k -- keeping pass i aligned
+// with group i regardless of interleaving with other dispatches (unlike the free-running
+// round-robin). The per-dispatch counter is erased once every group has been handed out.
+std::optional<rocprofiler_counter_config_id_t>
+get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t dispatch_id)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
+
+    const auto n_groups = profiles->second.size();
+
+    static std::mutex                             pass_pos_mutex;
+    static std::unordered_map<uint64_t, uint64_t> pass_pos;
+    uint64_t                                      idx = 0;
+    {
+        auto  _lk = std::lock_guard<std::mutex>{pass_pos_mutex};
+        auto& pos = pass_pos[dispatch_id];
+        idx       = pos++;
+        if(pos >= n_groups) pass_pos.erase(dispatch_id);
+    }
+
+    return profiles->second[idx % n_groups];
 }
 
 int64_t
@@ -1869,6 +1907,15 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     if(!is_targeted_kernel(kernel_id, kernel_iteration))
     {
         return;
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        // Deterministic pass i -> counter group i for this dispatch (all passes share dispatch_id).
+        if(auto profile = get_replay_profile(agent_id, dispatch_data.dispatch_info.dispatch_id))
+        {
+            *config          = *profile;
+            user_data->value = common::get_tid();
+        }
     }
     else if(auto profile = get_device_counting_service(agent_id))
     {
@@ -2294,6 +2341,34 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
 }
 
+// Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
+// The pass count is the number of counter groups (--pmc groups) the tool wants collected; each pass
+// collects one group via counter_dispatch_callback -> get_replay_profile. Returning 1 (a single
+// group, or none) disables replay.
+uint64_t kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t /*dispatch_info*/,
+                                           rocprofiler_user_data_t /*user_data*/)
+{
+    const auto n = tool::get_config().counters.size();
+    return (n == 0) ? 1 : n;
+}
+
+// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
+// query the number of replay passes for each dispatch.
+void
+kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t* /*user_data*/,
+                       void* /*data*/)
+{
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY &&
+       record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        auto* payload =
+            static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+        payload->pass_count_cb = kernel_replay_pass_count_callback;
+    }
+}
+
 struct real_callbacks_t
 {};
 
@@ -2321,6 +2396,7 @@ struct tracing_callbacks_t
     , counter_dispatch{counter_dispatch_callback}
     , counter_record{counter_record_callback}
     , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
+    , kernel_replay{kernel_replay_callback}
     {}
 
     explicit tracing_callbacks_t(dummy_callbacks_t)
@@ -2334,6 +2410,7 @@ struct tracing_callbacks_t
     , pc_sampling{dummy_buffered_tracing_callback}
     , counter_dispatch{dummy_counter_dispatch_callback}
     , counter_record{dummy_counter_record_callback}
+    , kernel_replay{dummy_callback_tracing_callback}
     {}
 
     const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
@@ -2349,6 +2426,7 @@ struct tracing_callbacks_t
     const rocprofiler_dispatch_counting_service_cb_t      counter_dispatch                = nullptr;
     const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
     const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
 };
 
 auto
@@ -3202,6 +3280,29 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                      "runtime initialization tracing configure failed");
 
     start_context(runtime_initialization_ctx, "runtime initialization");
+
+    // Kernel replay: collect every --pmc counter group within a single application run by replaying
+    // each dispatch once per group (device memory is snapshot/restored between passes). The tool
+    // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
+    // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
+    if(tool::get_config().kernel_replay)
+    {
+        auto kernel_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
+                         "failed to create kernel replay context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             kernel_replay_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                             nullptr,
+                             0,
+                             callbacks.kernel_replay,
+                             nullptr),
+                         "kernel replay tracing configure failed");
+
+        start_context(kernel_replay_ctx, "kernel replay");
+    }
 
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
