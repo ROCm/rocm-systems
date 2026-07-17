@@ -679,19 +679,8 @@ void GDABackend::setup_symm_registration() {
 
 void GDABackend::cleanup_symm_registration() {
 #if HIP_VERSION >= 70000000
-  /*
-   * Unregister anything the user left registered. buffer_unregister_symmetric
-   * mutates gda_symm_records_, so iterate over a snapshot of the keys. The flat
-   * entry table itself is freed later in cleanup_gpu_qps().
-   */
-  std::vector<uintptr_t> addrs;
-  addrs.reserve(gda_symm_records_.size());
-  for (auto &kv : gda_symm_records_) {
-    addrs.push_back(kv.first);
-  }
-  for (auto a : addrs) {
-    buffer_unregister_symmetric(reinterpret_cast<void *>(a));
-  }
+  /* Unregister anything the user left registered. */
+  symmetric_buffer_unregister_all();
 
   /* Free the shared IPC registration table (no-op if never allocated). */
   free_ipc_symm_table();
@@ -987,34 +976,77 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
                       hipMemcpyHostToDevice));
 
   /*
-   * Now that the region is no longer advertised, deregister the per-NIC MRs,
-   * then close their dmabuf fds. The fd must outlive the MR (the NIC references
-   * the dmabuf), so it is closed only after dereg_mr, mirroring the ibv_reg_mr
-   * wrapper's teardown order.
+   * Now that the region is no longer advertised, release its NIC resources
+   * (per-NIC MRs, dmabuf fds, and the retained VMM handle). Done before the
+   * base-class alias unmap so the retained reference is dropped before the
+   * alias mapping is torn down.
    */
-  for (size_t n = 0; n < it->second.mrs.size(); n++) {
-    if (it->second.mrs[n]) {
-      (void)ibv.dereg_mr(it->second.mrs[n]);
-    }
-    if (n < it->second.mr_fds.size() && it->second.mr_fds[n] != -1) {
-      close(it->second.mr_fds[n]);
-    }
-  }
-
-  /*
-   * Release the backing VMM handle retained at registration, now that the MRs
-   * referencing its dmabuf are gone. Done before the base-class alias unmap so
-   * the retained reference is dropped before the alias mapping is torn down,
-   * leaving both the alias and the user's original buffer in a clean state.
-   */
-  if (it->second.has_gen_handle) {
-    (void)hipMemRelease(it->second.gen_handle);
-  }
+  release_symm_record_nic_resources(it->second);
 
   gda_symm_records_.erase(it);
   return ROCSHMEM_SUCCESS;
 #else
   return ROCSHMEM_ERROR;
+#endif
+}
+
+void GDABackend::release_symm_record_nic_resources(
+    [[maybe_unused]] GdaSymmRecord &rec) {
+#if HIP_VERSION >= 70000000
+  /*
+   * Deregister the per-NIC MRs, then close their dmabuf fds. The fd must
+   * outlive the MR (the NIC references the dmabuf), so it is closed only after
+   * dereg_mr, mirroring the ibv_reg_mr wrapper's teardown order.
+   */
+  for (size_t n = 0; n < rec.mrs.size(); n++) {
+    if (rec.mrs[n]) {
+      (void)ibv.dereg_mr(rec.mrs[n]);
+    }
+    if (n < rec.mr_fds.size() && rec.mr_fds[n] != -1) {
+      close(rec.mr_fds[n]);
+    }
+  }
+
+  /* Release the backing VMM handle retained at registration. */
+  if (rec.has_gen_handle) {
+    (void)hipMemRelease(rec.gen_handle);
+  }
+#endif
+}
+
+void GDABackend::symmetric_buffer_unregister_all() {
+#if HIP_VERSION >= 70000000
+  if (gda_symm_records_.empty()) {
+    return;
+  }
+
+  /*
+   * Unpublish the whole device-visible table up front, before tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * are about to be invalidated.
+   */
+  symm_count_host_ = 0;
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                        hipMemcpyHostToDevice));
+  }
+
+  /*
+   * Now tear down each registration's transport resources and host bookkeeping,
+   * mirroring buffer_unregister_symmetric (IPC exposure, NIC resources, common
+   * base-class bookkeeping).
+   */
+  for (auto &[key, rec] : gda_symm_records_) {
+    void *addr = reinterpret_cast<void *>(key);
+    if (ipcImpl.symm_table != nullptr &&
+        ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
+      (void)unregister_ipc_symm_region(addr);
+    }
+    release_symm_record_nic_resources(rec);
+    (void)Backend::buffer_unregister_symmetric(addr);
+  }
+
+  gda_symm_records_.clear();
 #endif
 }
 

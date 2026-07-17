@@ -513,6 +513,27 @@ class GDABackend : public Backend {
   int gda_nic_unregister(uintptr_t key);
 
   /**
+   * @brief Release the NIC-side resources held by one registration record:
+   * the per-NIC MRs, their dmabuf fds, and the retained VMM handle.
+   *
+   * Does not touch the device-visible entry table or @ref gda_symm_records_;
+   * the caller owns those updates. Shared by the single-registration teardown
+   * (@ref gda_nic_unregister) and the bulk shutdown path
+   * (@ref symmetric_buffer_unregister_all).
+   */
+  void release_symm_record_nic_resources(GdaSymmRecord &rec);
+
+  /**
+   * @brief Tear down every outstanding symmetric registration at shutdown.
+   *
+   * Unregisters each record in place (IPC exposure, NIC resources, and common
+   * base-class bookkeeping) without per-item device-table compaction, then
+   * clears @ref gda_symm_records_ and resets the shared count. The flat entry
+   * table itself is freed later in cleanup_gpu_qps().
+   */
+  void symmetric_buffer_unregister_all();
+
+  /**
    * @brief Allocate and initialize barrier operation addresses on
    * symmetric heap.
    *
