@@ -288,6 +288,14 @@ else()
     message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
 endif()
 
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
+endif()
+
 # ----------------------------------------------------------------------------------------#
 #
 # ROCpd
