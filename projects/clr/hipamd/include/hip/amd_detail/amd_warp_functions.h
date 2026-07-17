@@ -108,6 +108,7 @@ __device__ static inline int __hip_move_dpp_N(int src) {
   __builtin_trap();
 }
 
+/// @cond
 inline __device__ const struct {
   __device__ __attribute__((always_inline, const)) operator int() const noexcept {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_wavefrontsize))
@@ -115,6 +116,7 @@ inline __device__ const struct {
     __builtin_trap();
   }
 } warpSize{};
+/// @endcond
 
 // warp vote function __all __any __ballot
 __device__ inline int __all(int predicate) { return __ockl_wfall_i32(predicate); }

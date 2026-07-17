@@ -11,7 +11,7 @@
  *  - HIP allows developers to use the "best" development environment and tools on each target platform.
  *  - HIP allows coding in a single-source C++ programming language including features such as templates, C++11 lambdas,and more.
  *  - HIPIFY tools automatically convert CUDA sources to HIP.
- *  - Developers can specialize for CUDA or HIP to tune for performance or handle tricky cases with #ifdef.
+ *  - Developers can specialize for CUDA or HIP to tune for performance or handle tricky cases with \#ifdef.
 
  *  - See the @ref API.
 
