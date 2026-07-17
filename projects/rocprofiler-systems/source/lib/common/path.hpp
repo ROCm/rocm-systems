@@ -94,7 +94,7 @@ find_path(const std::string& _path, int _verbose,
 inline std::string
 dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
-inline std::string
+[[nodiscard]] inline std::string
 realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline bool
@@ -281,7 +281,7 @@ readlink(const std::string& _path)
     return _path;
 }
 
-std::string
+[[nodiscard]] std::string
 realpath(const std::string& path)
 {
     std::error_code error;
