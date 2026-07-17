@@ -21,6 +21,7 @@ This is a curated index of the AMD SMI documentation following the [llms.txt sta
 - [CLI tool usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cli-tool.html): Reference for the `amd-smi` command-line tool and its subcommands.
 - [AI NIC integration](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-nic-integration.html): Monitor AMD AI NIC devices through AMD SMI.
 - [Use AMD SMI in a Docker container](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html): Run AMD SMI inside a container.
+- [Using AMD SMI under WSL (experimental)](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html): Build and run the experimental WSL/WDDM backend.
 
 ## Reference
 
