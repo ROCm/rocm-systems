@@ -107,11 +107,15 @@ function(copy_image_files_and_make_copies)
                 )
             endforeach()
         endforeach()
+        set(ROCJPEG_IMAGES_AVAILABLE TRUE PARENT_SCOPE)
     else()
         message(
-            AUTHOR_WARNING
-            "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist"
+            STATUS
+            "rocJPEG images not found at ${rocjpeg_ROOT_DIR}/share/rocjpeg/images; "
+            "jpegdecode will be built without image data (the jpeg_decode test "
+            "requires these images and will be skipped)."
         )
+        set(ROCJPEG_IMAGES_AVAILABLE FALSE PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -146,11 +150,17 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
-        install(
-            DIRECTORY ${CMAKE_BINARY_DIR}/images/
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
-            COMPONENT rocprofiler-systems-examples
-        )
+        # Only install the image data when it was actually found/copied; otherwise
+        # `cmake --install` would fail on a non-existent directory and abort the
+        # whole build (e.g. ROCm tarballs that ship no share/rocjpeg/images).
+        if(ROCJPEG_IMAGES_AVAILABLE)
+            install(
+                DIRECTORY ${CMAKE_BINARY_DIR}/images/
+                DESTINATION
+                    ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endif()
 else()
     message(
