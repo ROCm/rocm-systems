@@ -52,7 +52,7 @@ jobs:
       gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -70,7 +70,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: false
@@ -133,7 +133,7 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util

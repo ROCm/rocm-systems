@@ -58,7 +58,7 @@ jobs:
       gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -105,7 +105,7 @@ jobs:
       run: |
         ln -s -f /usr/bin/git /usr/local/bin/git
 
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
@@ -176,7 +176,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true

@@ -87,7 +87,7 @@ jobs:
       gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -127,7 +127,7 @@ jobs:
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -166,7 +166,7 @@ jobs:
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
@@ -174,7 +174,7 @@ jobs:
         path: 'rocDecode'
 
     - name: Clone ROCJPEG
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
@@ -311,7 +311,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -366,7 +366,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 10
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       env:
         COMMENT_BODY: |
           <details>

@@ -37,7 +37,7 @@ jobs:
         gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
     steps:
       - name: Checkout (shallow)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk/requirements.txt
@@ -60,17 +60,17 @@ jobs:
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: docker.io
           username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
           password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build & Push (to Docker Hub; cache to GHA)
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: projects/rocprofiler-sdk/docker/Dockerfile.ci
