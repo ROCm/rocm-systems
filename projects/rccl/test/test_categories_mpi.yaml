@@ -54,6 +54,24 @@ test_categories:
       - "NCCL_LOCAL_REGISTER=1"
       - "NCCL_LEGACY_CUDA_REGISTER=1"
       - "NCCL_GRAPH_REGISTER=1"
+  quick_env_ce_allreduce:
+    description: "CE AllReduce MPI smoke under CE dispatch env (CTA_POLICY=2, CUMEM=1, RCCL_CE_ALLREDUCE=1)."
+    test_patterns:
+      - "CeMPI_AllReduce.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_CTA_POLICY=2"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=0"
+      - "RCCL_CE_ALLREDUCE=1"
   quick_env_shm_ce_memcpy_send:
     description: "Shared-memory CE memcpy on send side (mode 1, locality 1)."
     test_patterns:
@@ -355,6 +373,7 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 1200
+    quick_env_ce_allreduce: 1200
     quick_env_shm_ce_memcpy_send: 1200
     quick_env_shm_ce_memcpy_recv: 1200
     quick_env_shm_ce_memcpy_both_simple: 1200

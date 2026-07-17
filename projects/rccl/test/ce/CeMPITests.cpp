@@ -151,6 +151,31 @@ protected:
         }
     }
 
+    bool isCeAllReduceExpected() const { return isCeAllReduceDispatchConfigured(); }
+
+    void assertCEAllReducePathTaken(const char* context)
+    {
+        const std::string log = readAllLogs();
+
+        if(isCeAllReduceExpected())
+        {
+            EXPECT_TRUE(ceLogShowsAllReducePath(log))
+                << context
+                << ": CE AllReduce log marker absent"
+                   " (RCCL_CE_ALLREDUCE=1 and CE prerequisites met but CE AR path not taken)";
+            if(ceLogShowsAllReducePath(log))
+                TEST_INFO("%s: assertion passed — CE AllReduce path taken", context);
+        }
+        else
+        {
+            EXPECT_FALSE(ceLogShowsAllReducePath(log))
+                << context
+                << ": CE AllReduce log marker found but CE AR was not expected";
+            TEST_INFO("%s: assertion passed — non-CE-AR path (CE AR prerequisites not met)",
+                      context);
+        }
+    }
+
     // Assert CE was explicitly NOT taken.  Prints an info line in all cases.
     void assertCEPathNotTaken(const char* context)
     {
@@ -429,13 +454,98 @@ TEST_F(CeMPI_Gather, FourRanksRoot1)  { runGather(kMinRanks4, kSmallCount, 1, "C
 TEST_F(CeMPI_Gather, EightRanksRoot0) { runGather(kMinRanks8, kSmallCount, 0, "CeMPI_Gather/EightRanksRoot0"); }
 
 // ===========================================================================
-// CeMPI_Fallback – CE not taken for AllReduce; SM path when CE env is off
+// CeMPI_AllReduce – ncclAllReduce CE AR correctness + log verification
+// ===========================================================================
+
+class CeMPI_AllReduce : public CeMPITest
+{
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> ceAllReduceGuard_;
+
+    void SetUp() override
+    {
+        CeMPITest::SetUp();
+        ceAllReduceGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_ALLREDUCE", "1");
+    }
+
+    void TearDown() override
+    {
+        ceAllReduceGuard_.reset();
+        CeMPITest::TearDown();
+    }
+
+    void runAllReduce(int minRanks, size_t count, ncclRedOp_t op, const char* testId)
+    {
+        if(!validateTestPrerequisites(minRanks))
+            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        const size_t alignedCount = ceAllReduceAlignedCount(count, nRanks);
+        const size_t bytes        = alignedCount * sizeof(float);
+
+        SymBuf sendSym, recvSym;
+        ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
+        ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
+
+        fillRankScalar(sendSym.ptr, alignedCount, rank);
+
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
+                                getActiveCommunicator(), getActiveStream()));
+        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+        if(op == ncclSum)
+        {
+            ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount,
+                                                [expectedSum](size_t) { return expectedSum; }))
+                << "Rank " << rank << ": CE AllReduce Sum verification failed";
+        }
+
+        assertCEAllReducePathTaken(testId);
+    }
+};
+
+// CE-MPI-AR-01: 2 ranks, small buffers.
+TEST_F(CeMPI_AllReduce, TwoRanks)
+{
+    runAllReduce(kMinRanks2, kSmallCount, ncclSum, "CeMPI_AllReduce/TwoRanks");
+}
+// CE-MPI-AR-02: 4 ranks, medium buffers.
+TEST_F(CeMPI_AllReduce, FourRanks)
+{
+    runAllReduce(kMinRanks4, kMediumCount, ncclSum, "CeMPI_AllReduce/FourRanks");
+}
+// CE-MPI-AR-03: 8 ranks, medium buffers.
+TEST_F(CeMPI_AllReduce, EightRanks)
+{
+    runAllReduce(kMinRanks8, kMediumCount, ncclSum, "CeMPI_AllReduce/EightRanks");
+}
+// CE-MPI-AR-04: Odd rank count (3) with count aligned to 3.
+TEST_F(CeMPI_AllReduce, ThreeRanks)
+{
+    runAllReduce(3, kSmallCount, ncclSum, "CeMPI_AllReduce/ThreeRanks");
+}
+// CE-MPI-AR-05: Pipelined message (multiple chunks per shard).
+TEST_F(CeMPI_AllReduce, LargeMessage)
+{
+    const size_t largeCount = 8 * 1024 * 1024 / sizeof(float); // 8 MiB per rank
+    runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
+}
+
+// ===========================================================================
+// CeMPI_Fallback – CE not taken for AllReduce when RCCL_CE_ALLREDUCE is off
 // ===========================================================================
 
 class CeMPI_Fallback : public CeMPITest
 {};
 
-// CE-MPI-FALLBACK-01: AllReduce never uses CE (not a CE collective).
+// CE-MPI-FALLBACK-01: AllReduce does not use CE AR unless RCCL_CE_ALLREDUCE=1.
 // Plain hipMalloc avoids the symmetric-SM kernel path (absent with GENERATE_SYM_KERNELS=OFF).
 TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
 {
@@ -475,6 +585,8 @@ TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
         << "Rank " << rank << ": AllReduce data verification failed";
 
     assertCEPathNotTaken("CeMPI_Fallback/AllReduceNeverUsesCE");
+    EXPECT_FALSE(ceLogShowsAllReducePath(readAllLogs()))
+        << "CE AllReduce path taken without RCCL_CE_ALLREDUCE=1";
 }
 
 // CE-MPI-FALLBACK-02: AllGather with plain hipMalloc (no symmetric window) falls back to SM.
