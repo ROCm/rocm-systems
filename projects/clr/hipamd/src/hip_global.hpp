@@ -96,8 +96,6 @@ class Var {
   std::string name_;                //!< Symbol name for code-object lookup (not a unique key)
   DeviceVarKind dVarKind_;          //!< Classification: regular, surface, texture, or managed
   size_t size_;                     //!< Size of the variable in bytes
-  [[maybe_unused]] int type_;       //!< Channel type (textures/surfaces only)
-  [[maybe_unused]] int norm_;       //!< Normalisation flag (textures/surfaces only)
   FatBinaryInfo** modules_;         //!< Owning fat binary; nullptr for dynamic COs
   void* managedVarPtr_;             //!< Host pointer to managed-memory allocation (DVK_Managed)
   size_t align_;                    //!< Alignment of the managed allocation in bytes

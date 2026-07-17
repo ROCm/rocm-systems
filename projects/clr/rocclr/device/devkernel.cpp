@@ -21,16 +21,6 @@
 namespace amd::device {
 
 // ================================================================================================
-[[maybe_unused]] static constexpr clk_value_type_t ClkValueMapType[6][6] = {
-    {T_CHAR, T_CHAR2, T_CHAR3, T_CHAR4, T_CHAR8, T_CHAR16},
-    {T_SHORT, T_SHORT2, T_SHORT3, T_SHORT4, T_SHORT8, T_SHORT16},
-    {T_INT, T_INT2, T_INT3, T_INT4, T_INT8, T_INT16},
-    {T_LONG, T_LONG2, T_LONG3, T_LONG4, T_LONG8, T_LONG16},
-    {T_FLOAT, T_FLOAT2, T_FLOAT3, T_FLOAT4, T_FLOAT8, T_FLOAT16},
-    {T_DOUBLE, T_DOUBLE2, T_DOUBLE3, T_DOUBLE4, T_DOUBLE8, T_DOUBLE16},
-};
-
-// ================================================================================================
 amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
                    std::string* str) {
   size_t size = 0;
