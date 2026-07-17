@@ -297,6 +297,80 @@ static uint64_t CheckPattern(const void *buf, uint64_t size, uint32_t seed)
     return mismatches;
 }
 
+/* UALink loopback variant: a single GPU acts as both the exporter and the
+ * importer. The amdgpu UALink loopback mode owns two accelerator IDs on this
+ * one device and routes the import through the full NPA path (the local-accel
+ * dma_buf shortcut is disabled in loopback), so both roles use the same GPU
+ * node / render-node fd. Runs entirely on one host, no remote/SSH handshake.
+ */
+TEST_P(KFDUALinkTest, WriteExporterReadImporterLoopback) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (m_FamilyId != FAMILY_GFX125X) {
+        LOG() << "Skipping test: Test requires gfx125x asic." << std::endl;
+        return;
+    }
+
+    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    if (gpuNodes.empty()) {
+        LOG() << "Skipping test: At least one GPU is required." << std::endl;
+        return;
+    }
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    /* Loopback: same GPU exports and imports over its own UALink. */
+    int exporterGPU = defaultGPUNode;
+    int importerGPU = defaultGPUNode;
+    amdgpu_bo_handle expBoHandle = NULL, impAppBoHandle = NULL;
+    amdgpu_va_handle expBoVaHandle, impAppBoVaHandle;
+    uint64_t expBoAddr, imp_app_addr;
+    void *expBoCpuAddr;
+    uint64_t ualink_handle[2];
+    uint64_t size = GetParam();
+    int ret;
+
+    LOG() << std::dec << "UALink loopback buffer size: " << size << " bytes" << std::endl;
+
+    /* Setup the Exporter side, Allocate a BO and export it through the ioctl */
+    ret = SetupExporter(exporterGPU, expBoHandle, expBoVaHandle, expBoAddr,
+                        expBoCpuAddr, size, ualink_handle);
+
+    ASSERT_SUCCESS(ret);
+
+    LOG() << "Exporter BO addr: " << expBoAddr << " handle[0]: " << ualink_handle[0]
+            << " handle[1]: " << ualink_handle[1] << std::endl;
+
+    /* Setup the Importer side, Import the UALink handle */
+    ret = SetupImporter(importerGPU, impAppBoHandle, impAppBoVaHandle, ualink_handle,
+                        size, imp_app_addr);
+    if (ret) {
+        CleanupExporter(expBoHandle, expBoVaHandle, expBoAddr, size);
+        FAIL();
+    }
+
+    /* Write a pattern to the whole buffer on the exporter. */
+    FillPattern(expBoCpuAddr, size, 0xdeadbeef);
+
+    /* Importer app memory is not CPU accessible, so copy all of it over
+     * UALink into system memory on the importer and verify it there.
+     */
+    HsaMemoryBuffer readBuffer(size, importerGPU);
+    ASSERT_NO_FATAL_FAILURE(CopyBuffer(importerGPU, readBuffer.As<void *>(),
+                                       reinterpret_cast<void *>(imp_app_addr), size));
+    EXPECT_EQ(0ULL, CheckPattern(readBuffer.As<void *>(), size, 0xdeadbeef));
+
+    /* Cleanup the Importer */
+    CleanupImporter(impAppBoHandle, impAppBoVaHandle, imp_app_addr, size);
+
+    /* Cleanup the Exporter */
+    CleanupExporter(expBoHandle, expBoVaHandle, expBoAddr, size);
+
+    TEST_END
+}
+
 TEST_P(KFDUALinkTest, WriteExporterReadImporter) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
