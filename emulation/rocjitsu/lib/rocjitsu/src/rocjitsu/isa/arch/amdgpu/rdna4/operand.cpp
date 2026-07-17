@@ -68,6 +68,14 @@ Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_va
                  bool packed_16bit_source)
     : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source) {}
 
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
+                 uint16_t literal16_display_value, bool has_literal16_display)
+    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
+      literal16_display_value_(literal16_display_value),
+      has_literal16_display_(has_literal16_display) {
+  is_vgpr_ = is_vgpr_operand_type(opr_type);
+}
+
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
     : AmdgpuIsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
@@ -83,6 +91,8 @@ std::optional<uint64_t> Operand::literal64_value() const {
 std::string Operand::name() const {
   if (has_literal64_)
     return std::format("0x{:x}", literal64_value_);
+  if (has_literal16_display_)
+    return std::format("0x{:x}", literal16_display_value_);
   if (auto packed =
           packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
@@ -551,7 +561,7 @@ std::string Operand::name() const {
   case OperandType::OPR_SIMM24:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM32:
-    return std::format("0x{:x}", encoding_value_);
+    return std::format("0x{:x}", static_cast<uint32_t>(encoding_value_));
   case OperandType::OPR_SIMM5:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM8:

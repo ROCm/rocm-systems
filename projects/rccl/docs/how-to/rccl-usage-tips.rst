@@ -92,6 +92,22 @@ ignore the job's supplied CPU affinity and use the GPU affinity only.
 For general usage, this environment variable is not set so it doesn't interfere with the user or launcher
 supplied preferences.
 
+Improving performance on the MI200 series
+=========================================
+
+On MI200 series (gfx90a) systems, such as MI210, MI250, and MI250X, running
+ROCm 7.13 or later, set ``HSA_NO_SCRATCH_RECLAIM=1`` when running RCCL:
+
+.. code-block:: shell
+
+   export HSA_NO_SCRATCH_RECLAIM=1
+
+Without this setting, per-launch scratch-memory reclaim in the runtime adds a
+fixed overhead to every collective launch. This overhead dominates
+small-message (under 16 MB) latency and can degrade it by roughly
+5-10x compared to earlier ROCm releases. Setting ``HSA_NO_SCRATCH_RECLAIM=1``
+removes the overhead and restores the expected small-message latency.
+
 Improving performance on the MI300X 
 ===================================
 

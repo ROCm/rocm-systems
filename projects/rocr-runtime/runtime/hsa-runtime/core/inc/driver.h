@@ -68,15 +68,19 @@ enum class DriverType {
   NUM_DRIVER_TYPES
 };
 
-/// @brief Handle for exported / imported memory.
+/// @brief Handle for a driver memory allocation and export / import.
 struct DriverMemoryHandle {
+  /// @brief Driver-native allocation id
+  /// - allocation address / thunk buffer handle for @ref KfdDriver
+  /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
+  /// Virtual address mmap'd by the driver for this allocation, or nullptr if the
+  /// driver does not own a mapping. When set, FreeMemory unmaps it.
+  void* vaddr{};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};
   hsa_fabric_handle_t fabric_handle{};
-
-  bool IsValid() const { return handle != 0; }
 
   bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
   bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
@@ -156,16 +160,19 @@ public:
                                           std::vector<HsaCacheProperties>& cache_props) const = 0;
 
   /// @brief Allocate agent-accessible memory (system or agent-local memory).
-  /// @param[out] mem pointer to newly allocated memory.
+  /// @param[out] handle driver identity for this allocation. The handle word and
+  /// size are populated; export-only fields (dmabuf_fd/mmap_offset/fabric_handle)
+  /// are left unset and filled lazily by ExportMemoryHandle/CreateShareableHandle.
+  /// The handle must be passed to @ref FreeMemory to release the allocation.
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
-  virtual hsa_status_t AllocateMemory(const MemoryRegion &mem_region,
-                                      MemoryRegion::AllocateFlags alloc_flags,
-                                      void **mem, size_t size,
-                                      uint32_t node_id) = 0;
+  virtual hsa_status_t AllocateMemory(const MemoryRegion& mem_region,
+                                      MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                      uint32_t node_id, DriverMemoryHandle* handle) = 0;
 
   /// @brief Free memory allocated by @ref AllocateMemory.
-  virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
+  /// @param[in] handle driver identity returned by @ref AllocateMemory.
+  virtual hsa_status_t FreeMemory(const DriverMemoryHandle& handle) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
   /// @param[in] node_id Node ID of the agent on which the queue is being created.
@@ -270,15 +277,13 @@ public:
   ///
   /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
-  /// @param[in] va virtual address
-  /// @param[in] mem physical memory handle
-  /// @param[in] size memory size in bytes
-  /// @param[in] agent agent associated with @p mem
-  /// @param[out] handle handle of the memory object
+  /// @param[in,out] handle on input, the allocation handle from @ref AllocateMemory whose native id
+  /// and size identify the memory to share; on success, transformed in place into the shareable
+  /// memory handle (which must be destroyed with @ref DestroyMemoryHandle). Left unchanged on
+  /// failure.
+  /// @param[in] agent agent associated with the allocation
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
-                                             const core::Agent& agent,
-                                             core::DriverMemoryHandle* handle,
+  virtual hsa_status_t CreateShareableHandle(DriverMemoryHandle* handle, const core::Agent& agent,
                                              uint64_t* offset) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
@@ -470,6 +475,13 @@ public:
   /// @param[out] size Size of the used queue save area in bytes
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
+
+
+  /// @brief Checks if the accelerator is ready to be used.
+  /// @param[in] agent Agent to check the readiness of.
+  /// @param[out] ready True if the accelerator is ready, false otherwise.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully checks the accelerator readiness.
+  virtual hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
