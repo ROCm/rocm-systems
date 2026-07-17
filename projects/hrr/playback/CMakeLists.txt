@@ -62,6 +62,14 @@ if(HRR_BUILD_PLAYBACK)
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
+  # The playback tool replays captured traces verbatim, which legitimately calls
+  # deprecated HIP entry points (hipTexRefGetArray, hipMallocHost, ...). Keep the
+  # target strict under -Werror, but disable -Wdeprecated-declarations entirely so
+  # those intentional calls don't warn — the project-wide -Wno-error softening
+  # leaves them as noisy warnings, which isn't applicable here.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(hrr-playback PRIVATE -Werror -Wall -Wno-deprecated-declarations)
+  endif()
   target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
 
   # Build identity reported by --version. Stamped by a build rule rather than at
