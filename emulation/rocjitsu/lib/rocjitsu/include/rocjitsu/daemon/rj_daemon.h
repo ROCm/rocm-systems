@@ -31,21 +31,22 @@ typedef enum rj_daemon_status_t {
 
 /// @brief Start a daemon-mode VM and its Unix-socket RPC server.
 ///
-/// @details Returns only after the socket is bound and listening and the engine
-/// and accept threads have started. The caller owns the returned handle and
-/// must eventually pass it to rj_daemon_stop. An abandoned socket is recovered,
-/// while a live socket or non-socket path is never removed.
+/// @details Parses the supplied JSON configuration and returns only after the
+/// socket is bound and listening and the engine and accept threads have
+/// started. The caller owns the returned handle and must eventually pass it to
+/// rj_daemon_stop. An abandoned socket is recovered, while a live socket or
+/// non-socket path is never removed.
 ///
-/// @param[in] json_path Path to the VM JSON configuration.
+/// @param[in] json VM JSON configuration string.
 /// @param[in] socket_path Filesystem path for the Unix domain socket.
 /// @param[out] daemon Newly created daemon handle. Set to NULL on failure.
 /// @retval ROCJITSU_STATUS_SUCCESS The daemon is running.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the
-/// socket path cannot be represented by sockaddr_un.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The VM configuration could not be read.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, the
+/// JSON configuration is invalid, or the socket path cannot be represented by
+/// sockaddr_un.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation or thread creation failed.
 /// @retval ROCJITSU_STATUS_ERROR Socket setup or VM initialization failed.
-RJ_API_EXPORT rj_status_t rj_daemon_start(const char *json_path, const char *socket_path,
+RJ_API_EXPORT rj_status_t rj_daemon_start(const char *json, const char *socket_path,
                                           rj_daemon_t **daemon);
 
 /// @brief Stop a daemon and release its handle.

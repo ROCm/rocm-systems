@@ -3,6 +3,7 @@
 
 #include "rocjitsu/daemon/rj_daemon.h"
 
+#include "rocjitsu/kmd/linux/fd_utils.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -49,34 +50,6 @@ namespace {
 using namespace rocjitsu;
 
 constexpr uint32_t kMaxPayloadBytes = 16 * 1024 * 1024;
-
-class OwnedFd {
-public:
-  explicit OwnedFd(int fd = -1) : fd_(fd) {}
-  ~OwnedFd() { reset(); }
-
-  OwnedFd(const OwnedFd &) = delete;
-  OwnedFd &operator=(const OwnedFd &) = delete;
-
-  OwnedFd(OwnedFd &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-  OwnedFd &operator=(OwnedFd &&other) noexcept {
-    if (this != &other)
-      reset(std::exchange(other.fd_, -1));
-    return *this;
-  }
-
-  [[nodiscard]] int get() const { return fd_; }
-  [[nodiscard]] int release() { return std::exchange(fd_, -1); }
-
-  void reset(int fd = -1) {
-    if (fd_ >= 0)
-      ::close(fd_);
-    fd_ = fd;
-  }
-
-private:
-  int fd_;
-};
 
 bool checked_product(size_t lhs, size_t rhs, size_t *product) {
   if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs)
@@ -144,7 +117,7 @@ bool send_with_fd_exact(int socket, const void *data, size_t size, int fd) {
          rpc_send_exact(socket, static_cast<const uint8_t *>(data) + bytes_sent, size - bytes_sent);
 }
 
-bool receive_header_with_fd(int socket, RpcHeader *header, OwnedFd *fd) {
+bool receive_header_with_fd(int socket, RpcHeader *header, UniqueFd *fd) {
   int received_fds[1] = {-1};
   size_t received_fd_count = 1;
   ssize_t header_bytes = 0;
@@ -209,7 +182,7 @@ void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
   try {
     while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
       RpcHeader header{};
-      OwnedFd input_fd;
+      UniqueFd input_fd;
       if (!receive_header_with_fd(client_fd, &header, &input_fd))
         break;
 
@@ -493,7 +466,7 @@ bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
   if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode))
     return false;
 
-  OwnedFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (probe.get() < 0)
     return false;
   if (::connect(probe.get(), reinterpret_cast<const sockaddr *>(&address), address_length) == 0)
@@ -528,7 +501,7 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
       return ROCJITSU_STATUS_ERROR;
   }
 
-  OwnedFd socket_fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  UniqueFd socket_fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (socket_fd.get() < 0)
     return ROCJITSU_STATUS_ERROR;
 
@@ -558,10 +531,10 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
 
 } // namespace
 
-rj_status_t rj_daemon_start(const char *json_path, const char *socket_path, rj_daemon_t **daemon) {
+rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon_t **daemon) {
   if (daemon)
     *daemon = nullptr;
-  if (!json_path || !socket_path || !daemon)
+  if (!json || !socket_path || !daemon)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   const size_t socket_path_length = std::strlen(socket_path);
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
@@ -575,7 +548,7 @@ rj_status_t rj_daemon_start(const char *json_path, const char *socket_path, rj_d
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;
   }
 
-  rj_status_t status = rj_vm_create(json_path, RJ_VM_MODE_DAEMON, &created->vm);
+  rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
   if (status != ROCJITSU_STATUS_SUCCESS)
     return status;
 

@@ -13,6 +13,7 @@
 #define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
 
 #include "rocjitsu/kmd/linux/events.h"
+#include "rocjitsu/kmd/linux/fd_utils.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <atomic>
@@ -25,45 +26,8 @@
 #include <vector>
 
 #include <sys/types.h> // pid_t
-#include <unistd.h>
 
 namespace rocjitsu {
-
-/// @brief Move-only RAII owner of a file descriptor.
-///
-/// @details Closes the descriptor on destruction, reset, or move-assignment.
-/// Used where a KfdProcess must deterministically release a descriptor it owns
-/// — e.g. the daemon-mode debugger notifier the transport dup'd into our fd
-/// table via SCM_RIGHTS. A -1 descriptor owns nothing.
-class UniqueFd {
-public:
-  UniqueFd() = default;
-  explicit UniqueFd(int fd) : fd_(fd) {}
-  UniqueFd(UniqueFd &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
-  UniqueFd &operator=(UniqueFd &&other) noexcept {
-    if (this != &other) {
-      reset(other.fd_);
-      other.fd_ = -1;
-    }
-    return *this;
-  }
-  UniqueFd(const UniqueFd &) = delete;
-  UniqueFd &operator=(const UniqueFd &) = delete;
-  ~UniqueFd() { reset(); }
-
-  /// @brief The owned descriptor, or -1 if none.
-  [[nodiscard]] int get() const { return fd_; }
-
-  /// @brief Close the current descriptor and take ownership of @p fd (none by default).
-  void reset(int fd = -1) {
-    if (fd_ >= 0 && fd_ != fd)
-      ::close(fd_);
-    fd_ = fd;
-  }
-
-private:
-  int fd_ = -1;
-};
 
 /// @brief Per-process KFD state.
 ///

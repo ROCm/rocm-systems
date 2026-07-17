@@ -10,11 +10,13 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iterator>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 
@@ -42,9 +44,42 @@ private:
   std::filesystem::path path_;
 };
 
-std::string daemon_config() {
-  return (std::filesystem::path(CONFIG_DIR) / "gfx950_cdna4_kmd.json").string();
+const std::string &daemon_json() {
+  static const std::string config = [] {
+    std::ifstream input(std::filesystem::path(CONFIG_DIR) / "gfx950_cdna4_kmd.json");
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+  }();
+  return config;
 }
+
+class TestDaemon {
+public:
+  explicit TestDaemon(const std::filesystem::path &socket_path)
+      : TestDaemon(daemon_json().c_str(), socket_path.c_str()) {}
+
+  TestDaemon(const char *json, const char *socket_path)
+      : start_status_(rj_daemon_start(json, socket_path, &daemon_)) {}
+
+  ~TestDaemon() { (void)stop(); }
+
+  TestDaemon(const TestDaemon &) = delete;
+  TestDaemon &operator=(const TestDaemon &) = delete;
+  TestDaemon(TestDaemon &&) = delete;
+  TestDaemon &operator=(TestDaemon &&) = delete;
+
+  [[nodiscard]] rj_status_t start_status() const { return start_status_; }
+  [[nodiscard]] rj_daemon_t *get() const { return daemon_; }
+  [[nodiscard]] rj_daemon_status_t status() const { return rj_daemon_status(daemon_); }
+
+  rj_status_t stop() {
+    rj_daemon_t *daemon = std::exchange(daemon_, nullptr);
+    return rj_daemon_stop(daemon);
+  }
+
+private:
+  rj_daemon_t *daemon_ = nullptr;
+  rj_status_t start_status_ = ROCJITSU_STATUS_ERROR;
+};
 
 int connect_to(const std::filesystem::path &socket_path) {
   const std::string path = socket_path.string();
@@ -105,58 +140,64 @@ TEST(DaemonApi, RejectsInvalidArguments) {
 
   EXPECT_EQ(rj_daemon_start(nullptr, socket.c_str(), &daemon), ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(daemon, nullptr);
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), nullptr, &daemon),
+  EXPECT_EQ(rj_daemon_start(daemon_json().c_str(), nullptr, &daemon),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(daemon, nullptr);
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), socket.c_str(), nullptr),
+  EXPECT_EQ(rj_daemon_start(daemon_json().c_str(), socket.c_str(), nullptr),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), "", &daemon),
-            ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(rj_daemon_start(daemon_json().c_str(), "", &daemon), ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(daemon, nullptr);
   EXPECT_EQ(rj_daemon_status(nullptr), RJ_DAEMON_STATUS_STOPPED);
   EXPECT_EQ(rj_daemon_stop(nullptr), ROCJITSU_STATUS_SUCCESS);
 }
 
-TEST(DaemonApi, RejectsInvalidConfigAndLongSocketPath) {
+TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
   TempDirectory directory;
-  rj_daemon_t *daemon = nullptr;
   const std::string socket = (directory.path() / "daemon.sock").string();
 
-  EXPECT_EQ(rj_daemon_start("/does/not/exist.json", socket.c_str(), &daemon),
-            ROCJITSU_STATUS_INVALID_FILE);
-  EXPECT_EQ(daemon, nullptr);
+  TestDaemon empty_json("", socket.c_str());
+  EXPECT_EQ(empty_json.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(empty_json.get(), nullptr);
+  EXPECT_FALSE(std::filesystem::exists(socket));
+
+  TestDaemon invalid_json("not json", socket.c_str());
+  EXPECT_EQ(invalid_json.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(invalid_json.get(), nullptr);
+  EXPECT_FALSE(std::filesystem::exists(socket));
+
+  TestDaemon path_as_json("/does/not/exist.json", socket.c_str());
+  EXPECT_EQ(path_as_json.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(path_as_json.get(), nullptr);
   EXPECT_FALSE(std::filesystem::exists(socket));
 
   const std::string long_socket(sizeof(sockaddr_un::sun_path), 'x');
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), long_socket.c_str(), &daemon),
-            ROCJITSU_STATUS_INVALID_ARGUMENT);
-  EXPECT_EQ(daemon, nullptr);
+  TestDaemon invalid_socket(daemon_json().c_str(), long_socket.c_str());
+  EXPECT_EQ(invalid_socket.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(invalid_socket.get(), nullptr);
 }
 
 TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "daemon.sock";
-  rj_daemon_t *first = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &first),
-            ROCJITSU_STATUS_SUCCESS);
+  TestDaemon first(socket_path);
+  ASSERT_EQ(first.start_status(), ROCJITSU_STATUS_SUCCESS);
 
   struct stat before {};
   ASSERT_EQ(lstat(socket_path.c_str(), &before), 0);
-  rj_daemon_t *second = nullptr;
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &second),
-            ROCJITSU_STATUS_ERROR);
-  EXPECT_EQ(second, nullptr);
+  TestDaemon second(socket_path);
+  EXPECT_EQ(second.start_status(), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(second.get(), nullptr);
   struct stat after {};
   ASSERT_EQ(lstat(socket_path.c_str(), &after), 0);
   EXPECT_EQ(after.st_dev, before.st_dev);
   EXPECT_EQ(after.st_ino, before.st_ino);
-  EXPECT_EQ(rj_daemon_status(first), RJ_DAEMON_STATUS_RUNNING);
-  EXPECT_EQ(rj_daemon_stop(first), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(first.status(), RJ_DAEMON_STATUS_RUNNING);
+  EXPECT_EQ(first.stop(), ROCJITSU_STATUS_SUCCESS);
 
   std::ofstream(socket_path) << "sentinel";
-  EXPECT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &second),
-            ROCJITSU_STATUS_ERROR);
-  EXPECT_EQ(second, nullptr);
+  TestDaemon non_socket(socket_path);
+  EXPECT_EQ(non_socket.start_status(), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(non_socket.get(), nullptr);
   std::ifstream input(socket_path);
   std::string contents;
   input >> contents;
@@ -177,46 +218,44 @@ TEST(DaemonApi, RecoversAbandonedSocket) {
   ASSERT_EQ(bind(stale, reinterpret_cast<const sockaddr *>(&address), length), 0);
   close(stale);
 
-  rj_daemon_t *daemon = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &daemon),
-            ROCJITSU_STATUS_SUCCESS);
-  EXPECT_EQ(rj_daemon_status(daemon), RJ_DAEMON_STATUS_RUNNING);
-  EXPECT_EQ(rj_daemon_stop(daemon), ROCJITSU_STATUS_SUCCESS);
+  {
+    TestDaemon daemon(socket_path);
+    ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+  }
   EXPECT_FALSE(std::filesystem::exists(socket_path));
 }
 
 TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "nested" / "daemon.sock";
-  rj_daemon_t *daemon = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &daemon),
-            ROCJITSU_STATUS_SUCCESS);
-  EXPECT_NE(daemon, nullptr);
-  EXPECT_EQ(rj_daemon_status(daemon), RJ_DAEMON_STATUS_RUNNING);
-  EXPECT_TRUE(std::filesystem::is_socket(socket_path));
+  {
+    TestDaemon daemon(socket_path);
+    ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_NE(daemon.get(), nullptr);
+    EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+    EXPECT_TRUE(std::filesystem::is_socket(socket_path));
 
-  const int first = connect_to(socket_path);
-  const int second = connect_to(socket_path);
-  ASSERT_GE(first, 0);
-  ASSERT_GE(second, 0);
-  const auto first_handshake = handshake(first, 10);
-  const auto second_handshake = handshake(second, 20);
-  EXPECT_EQ(first_handshake.version, kRpcProtocolVersion);
-  EXPECT_EQ(second_handshake.version, kRpcProtocolVersion);
-  EXPECT_EQ(first_handshake.gpu_id, second_handshake.gpu_id);
-  close_session(first, 11);
-  close_session(second, 21);
-
-  EXPECT_EQ(rj_daemon_stop(daemon), ROCJITSU_STATUS_SUCCESS);
+    const int first = connect_to(socket_path);
+    const int second = connect_to(socket_path);
+    ASSERT_GE(first, 0);
+    ASSERT_GE(second, 0);
+    const auto first_handshake = handshake(first, 10);
+    const auto second_handshake = handshake(second, 20);
+    EXPECT_EQ(first_handshake.version, kRpcProtocolVersion);
+    EXPECT_EQ(second_handshake.version, kRpcProtocolVersion);
+    EXPECT_EQ(first_handshake.gpu_id, second_handshake.gpu_id);
+    close_session(first, 11);
+    close_session(second, 21);
+  }
   EXPECT_FALSE(std::filesystem::exists(socket_path));
 }
 
 TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "daemon.sock";
-  rj_daemon_t *daemon = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &daemon),
-            ROCJITSU_STATUS_SUCCESS);
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
   const int active = connect_to(socket_path);
   const int partial = connect_to(socket_path);
@@ -228,7 +267,7 @@ TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
             static_cast<ssize_t>(sizeof(truncated_header)));
 
   const auto start = std::chrono::steady_clock::now();
-  EXPECT_EQ(rj_daemon_stop(daemon), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(daemon.stop(), ROCJITSU_STATUS_SUCCESS);
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
   EXPECT_FALSE(std::filesystem::exists(socket_path));
 
@@ -242,44 +281,45 @@ TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
 TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "daemon.sock";
-  rj_daemon_t *daemon = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &daemon),
-            ROCJITSU_STATUS_SUCCESS);
+  {
+    TestDaemon daemon(socket_path);
+    ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
-  const int malformed = connect_to(socket_path);
-  ASSERT_GE(malformed, 0);
-  EXPECT_EQ(handshake(malformed).version, kRpcProtocolVersion);
-  RpcHeader bad{};
-  bad.opcode = RPC_IOCTL;
-  bad.request_id = 2;
-  bad.payload_bytes = sizeof(RpcIoctlRequest);
-  RpcIoctlRequest bad_request{};
-  bad_request.ioctl_cmd = AMDKFD_IOC_GET_VERSION;
-  bad_request.args_bytes = UINT32_MAX;
-  ASSERT_TRUE(rpc_send_exact(malformed, &bad, sizeof(bad)));
-  ASSERT_TRUE(rpc_send_exact(malformed, &bad_request, sizeof(bad_request)));
-  RpcHeader response{};
-  EXPECT_FALSE(rpc_recv_exact(malformed, &response, sizeof(response)));
-  close(malformed);
+    const int malformed = connect_to(socket_path);
+    ASSERT_GE(malformed, 0);
+    EXPECT_EQ(handshake(malformed).version, kRpcProtocolVersion);
+    RpcHeader bad{};
+    bad.opcode = RPC_IOCTL;
+    bad.request_id = 2;
+    bad.payload_bytes = sizeof(RpcIoctlRequest);
+    RpcIoctlRequest bad_request{};
+    bad_request.ioctl_cmd = AMDKFD_IOC_GET_VERSION;
+    bad_request.args_bytes = UINT32_MAX;
+    ASSERT_TRUE(rpc_send_exact(malformed, &bad, sizeof(bad)));
+    ASSERT_TRUE(rpc_send_exact(malformed, &bad_request, sizeof(bad_request)));
+    RpcHeader response{};
+    EXPECT_FALSE(rpc_recv_exact(malformed, &response, sizeof(response)));
+    close(malformed);
 
-  const int healthy = connect_to(socket_path);
-  ASSERT_GE(healthy, 0);
-  EXPECT_EQ(handshake(healthy).version, kRpcProtocolVersion);
-  close_session(healthy);
-  EXPECT_EQ(rj_daemon_status(daemon), RJ_DAEMON_STATUS_RUNNING);
-  EXPECT_EQ(rj_daemon_stop(daemon), ROCJITSU_STATUS_SUCCESS);
+    const int healthy = connect_to(socket_path);
+    ASSERT_GE(healthy, 0);
+    EXPECT_EQ(handshake(healthy).version, kRpcProtocolVersion);
+    close_session(healthy);
+    EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+  }
+  EXPECT_FALSE(std::filesystem::exists(socket_path));
 }
 
 TEST(DaemonApi, DoesNotRemoveAReplacementSocketEntry) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "daemon.sock";
-  rj_daemon_t *daemon = nullptr;
-  ASSERT_EQ(rj_daemon_start(daemon_config().c_str(), socket_path.c_str(), &daemon),
-            ROCJITSU_STATUS_SUCCESS);
+  {
+    TestDaemon daemon(socket_path);
+    ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
-  ASSERT_EQ(unlink(socket_path.c_str()), 0);
-  std::ofstream(socket_path) << "replacement";
-  ASSERT_EQ(rj_daemon_stop(daemon), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_EQ(unlink(socket_path.c_str()), 0);
+    std::ofstream(socket_path) << "replacement";
+  }
   EXPECT_TRUE(std::filesystem::is_regular_file(socket_path));
   std::ifstream input(socket_path);
   std::string contents;

@@ -511,16 +511,16 @@ impl Lib {
     /// Start a daemon and return its opaque handle.
     ///
     /// # Safety
-    /// Both paths must be valid C strings. A non-null returned handle must be
-    /// released exactly once with [`Lib::daemon_stop`].
+    /// `json` and `socket_path` must be valid C strings. A non-null returned
+    /// handle must be released exactly once with [`Lib::daemon_stop`].
     pub unsafe fn daemon_start(
         &self,
-        json_path: &CStr,
+        json: &CStr,
         socket_path: &CStr,
     ) -> (RjStatus, *mut RjDaemon) {
         let mut daemon = std::ptr::null_mut();
         let status =
-            unsafe { (self.daemon_start)(json_path.as_ptr(), socket_path.as_ptr(), &mut daemon) };
+            unsafe { (self.daemon_start)(json.as_ptr(), socket_path.as_ptr(), &mut daemon) };
         (status, daemon)
     }
 

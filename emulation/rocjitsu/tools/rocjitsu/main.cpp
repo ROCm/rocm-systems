@@ -31,6 +31,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <poll.h>
 #include <string_view>
@@ -59,7 +60,18 @@ int run_daemon_server(const char *config_path, int ready_fd = -1) {
 
   rj_daemon_t *daemon = nullptr;
   const std::string socket_path = rpc_default_socket_path();
-  if (rj_daemon_start(config_path, socket_path.c_str(), &daemon) != ROCJITSU_STATUS_SUCCESS) {
+  std::ifstream config_stream(config_path);
+  const std::string json((std::istreambuf_iterator<char>(config_stream)),
+                         std::istreambuf_iterator<char>());
+  if (!config_stream) {
+    std::cerr << std::format("rocjitsu: failed to read daemon configuration from {}\n",
+                             config_path);
+    if (ready_fd >= 0)
+      close(ready_fd);
+    sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+    return 1;
+  }
+  if (rj_daemon_start(json.c_str(), socket_path.c_str(), &daemon) != ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
                              socket_path);
     if (ready_fd >= 0)

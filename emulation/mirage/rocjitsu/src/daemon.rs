@@ -32,12 +32,18 @@ impl Daemon {
     ) -> std::result::Result<Self, String> {
         let lib = unsafe { Lib::open(lib_path) }
             .map_err(|e| format!("rocjitsu daemon: cannot load {}: {e}", lib_path.display()))?;
-        let config = CString::new(config_path.as_os_str().as_encoded_bytes())
-            .map_err(|e| format!("rocjitsu daemon: invalid config path: {e}"))?;
+        let config = std::fs::read_to_string(config_path).map_err(|e| {
+            format!(
+                "rocjitsu daemon: cannot read {}: {e}",
+                config_path.display()
+            )
+        })?;
+        let json = CString::new(config)
+            .map_err(|e| format!("rocjitsu daemon: configuration contains a NUL byte: {e}"))?;
         let socket_path = runtime_dir.join("daemon.sock");
         let socket = CString::new(socket_path.as_os_str().as_encoded_bytes())
             .map_err(|e| format!("rocjitsu daemon: invalid socket path: {e}"))?;
-        let (status, handle) = unsafe { lib.daemon_start(&config, &socket) };
+        let (status, handle) = unsafe { lib.daemon_start(&json, &socket) };
         if status != ROCJITSU_STATUS_SUCCESS || handle.is_null() {
             return Err(format!(
                 "rocjitsu daemon: rj_daemon_start({}, {}) failed with status {status}",
