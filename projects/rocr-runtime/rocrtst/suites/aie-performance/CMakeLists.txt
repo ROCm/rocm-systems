@@ -211,3 +211,30 @@ target_link_libraries(vmem-alloc-hsa PRIVATE
   benchmark::benchmark_main
   hsa-runtime64::hsa-runtime64
 )
+
+# ---------------------------------------------------------------------------
+# HSA vmem size-sweep microbenchmark
+# ---------------------------------------------------------------------------
+
+add_executable(vmem-size-hsa vmem_size_hsa.cpp)
+target_compile_features(vmem-size-hsa PRIVATE cxx_std_20)
+target_link_libraries(vmem-size-hsa PRIVATE
+  benchmark::benchmark_main
+  hsa-runtime64::hsa-runtime64
+)
+
+# ---------------------------------------------------------------------------
+# XRT bo size-sweep microbenchmark
+# ---------------------------------------------------------------------------
+
+add_executable(vmem-size-xrt vmem_size_xrt.cpp)
+target_compile_features(vmem-size-xrt PRIVATE cxx_std_20)
+target_include_directories(vmem-size-xrt PRIVATE "${XRT_INC_DIR}")
+target_compile_definitions(vmem-size-xrt PRIVATE
+  DEFAULT_XCLBIN_PATH=${FINAL_XCLBIN}
+)
+target_link_directories(vmem-size-xrt PRIVATE "${XRT_LIB_DIR}")
+target_link_libraries(vmem-size-xrt PRIVATE
+  benchmark::benchmark_main
+  xrt_coreutil)
+add_dependencies(vmem-size-xrt aie_kernel_artifacts)
