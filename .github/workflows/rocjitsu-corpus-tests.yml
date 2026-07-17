@@ -187,8 +187,7 @@ jobs:
             "MatmulStressTest\.TiledAllCU"
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
-            "Gfx1250SimulationTest\.GlobalStoreWritesVisibleMemory"
-            "Gfx1250SimulationTest\.BufferStoreUsesM0Soffset"
+            "Gfx1250SimulationTest\.*"
           )
 
           CMAKE_CONFIG_FLAGS=()
