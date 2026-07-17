@@ -211,18 +211,22 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.d2h_pass = int(m.group(1))
         finding.d2h_fail = int(m.group(2))
 
-    if RE_PASS.search(text):
-        finding.outcome = "PASS"
-    elif RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
-        finding.outcome = "MAF"
-    elif RE_FAIL.search(text):
-        finding.outcome = "FAIL"
-    elif "aborting replay" in text or RE_FATAL_EVENT.search(text) or RE_VERSION_MISMATCH.search(text):
-        finding.outcome = "ABORT"
-    else:
-        finding.outcome = "UNKNOWN"
+    new_class = _classify(text, finding)
+    if new_class != "unknown" or finding.fault_class in (None, "unknown"):
+        finding.fault_class = new_class
 
-    finding.fault_class = _classify(text, finding)
+    new_outcome = finding.outcome
+    if RE_PASS.search(text):
+        new_outcome = "PASS"
+    elif RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
+        new_outcome = "MAF"
+    elif RE_FAIL.search(text):
+        new_outcome = "FAIL"
+    elif "aborting replay" in text or RE_FATAL_EVENT.search(text) or RE_VERSION_MISMATCH.search(text):
+        new_outcome = "ABORT"
+    elif finding.outcome == "UNKNOWN":
+        new_outcome = "UNKNOWN"
+    finding.outcome = new_outcome
     finding.kernel_family = _kernel_family(finding.kernel_name)
     return finding
 

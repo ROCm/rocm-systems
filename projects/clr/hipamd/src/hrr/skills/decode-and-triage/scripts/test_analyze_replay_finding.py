@@ -44,6 +44,18 @@ Reason: Write access to a read-only page
         self.assertEqual(finding.failing_call_index, 7352)
         self.assertEqual(finding.failing_api, "hipMemcpyWithStream")
 
+    def test_maf_not_overwritten_by_later_info_only_parse(self) -> None:
+        maf_log = (
+            "Memory access fault by GPU node-1 on address 0x1. "
+            "Reason: Write access to a read-only page\n"
+        )
+        info = "Complete: NO\nrecovered 100 events\n"
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(maf_log, "replay.log", finding)
+        arf.parse_text(info, "archive (--info)", finding)
+        self.assertEqual(finding.fault_class, "read_only_page_fault")
+        self.assertEqual(finding.outcome, "MAF")
+
     def test_to_dict_json_serializable(self) -> None:
         finding = arf.Finding(outcome="PASS", fault_class="replay_pass")
         payload = json.dumps(finding.to_dict())
