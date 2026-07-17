@@ -44,7 +44,6 @@ namespace rocjitsu {
 namespace {
 
 constexpr size_t kCounterCount = static_cast<size_t>(WaitCounterKind::Count);
-constexpr uint32_t kMaxEncodedSgpr = 105;
 using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size changed");
@@ -1557,37 +1556,6 @@ private:
     return false;
   }
 
-  [[nodiscard]] static bool is_cdna_buffer_vaddr_operand(const Instruction &inst, int operand_index,
-                                                         rj_code_arch_t arch) {
-    // The generated CDNA3/CDNA4 MUBUF decoder exposes the raw VADDR field as a
-    // two-register operand.  The actual width is selected by offen/idxen.
-    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
-      return false;
-
-    const std::string_view mnemonic = inst.mnemonic();
-    if (starts_with(mnemonic, "buffer_store") || starts_with(mnemonic, "tbuffer_store"))
-      return operand_index == 1;
-    if (starts_with(mnemonic, "buffer_") || starts_with(mnemonic, "tbuffer_"))
-      return operand_index == 0;
-    return false;
-  }
-
-  [[nodiscard]] static std::optional<uint8_t> cdna_buffer_vaddr_width(const Instruction &inst) {
-    if (inst.raw_encoding() == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
-      return std::nullopt;
-
-    constexpr uint32_t kOffenBit = 12;
-    constexpr uint32_t kIdxenBit = 13;
-    const uint32_t word0 = inst.raw_encoding()[0];
-    const bool offen = (word0 & (1u << kOffenBit)) != 0;
-    const bool idxen = (word0 & (1u << kIdxenBit)) != 0;
-    if (offen && idxen)
-      return 2;
-    if (offen || idxen)
-      return 1;
-    return 0;
-  }
-
   [[nodiscard]] static bool add_adjusted_source_use(InstDefUse &du, const Instruction &inst,
                                                     const Operand &op, int operand_index,
                                                     const VgprMsbState &state,
@@ -1602,30 +1570,6 @@ private:
         du.uses.expand(*ref);
       }
       return true;
-    }
-
-    if (is_cdna_buffer_vaddr_operand(inst, operand_index, arch)) {
-      if (const auto width = cdna_buffer_vaddr_width(inst)) {
-        if (*width == 0)
-          return true;
-        if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::VGPR) {
-          ref->width = *width;
-          expand_vgpr_msb_ref(du.uses, *ref, op, state, arch);
-          return true;
-        }
-      }
-    }
-
-    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        (starts_with(mnemonic, "buffer_") || starts_with(mnemonic, "tbuffer_"))) {
-      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR && ref->width == 4) {
-        if (const int encoded = op.encoding_value(); encoded >= 0) {
-          const uint32_t base = static_cast<uint32_t>(encoded) * 4u;
-          if (base <= kMaxEncodedSgpr)
-            du.uses.expand({RegClass::SGPR, static_cast<uint16_t>(base), 4});
-        }
-        return true;
-      }
     }
 
     if (operand_index == 0 && has_enabled_scalar_address(inst)) {
