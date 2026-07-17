@@ -63,6 +63,24 @@ bool CooperativeMultiDeviceLaunchSupported(int device) {
   return value != 0;
 }
 
+// True when every device in [0, kNumDevices) reports the same architecture name.
+// The module-cooperative test compiles a single code object (for the current
+// device's arch) and loads it on every participating device, so a mixed-arch
+// multi-GPU host would fail the load even though each device supports cooperative
+// multi-device launch. Callers skip when the participating devices differ.
+bool ParticipatingDevicesShareArch() {
+  hipDeviceProp_t first{};
+  HIP_CHECK(hipGetDeviceProperties(&first, 0));
+  for (int device = 1; device < kNumDevices; ++device) {
+    hipDeviceProp_t props{};
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    if (std::strcmp(props.gcnArchName, first.gcnArchName) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Skips unless at least kNumDevices discrete GPUs are present and every device in
 // [0, kNumDevices) advertises cooperative multi-device launch. Gating on the
 // discrete-device property keeps the multi-device launch path off integrated
@@ -199,8 +217,10 @@ bool CompileModuleSource(std::vector<char>& code) {
                                    nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_AMD__
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, current_device));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -298,6 +318,15 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
 // instance (module handles are context-bound) and must observe its written value.
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
+
+  // The single compiled code object is loaded on every participating device, so
+  // require a homogeneous architecture set: a mixed-arch host would fail the
+  // per-device module load even though cooperative multi-device launch is
+  // supported.
+  if (!ParticipatingDevicesShareArch()) {
+    HIP_SKIP_TEST("Module-cooperative multi-device launch requires all devices to share an "
+                  "architecture; this host is mixed-arch.");
+  }
 
   std::vector<char> code;
   if (!CompileModuleSource(code)) {

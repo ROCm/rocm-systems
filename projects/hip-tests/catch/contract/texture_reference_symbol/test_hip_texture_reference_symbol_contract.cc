@@ -28,6 +28,12 @@
 // treated as a graceful capability skip.
 //
 // The deprecated API family sets -Wno-deprecated-declarations globally.
+//
+// The legacy `texture<>` template and the tex-ref bind/query entry points were
+// removed in CUDA 12, so this whole domain is gated to the AMD backend (or a
+// CUDA runtime older than 12), matching the guard used by the unit texture-
+// reference tests. On CUDA 12+/NVIDIA the translation unit compiles empty.
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
 // File-scope device texture globals with EXTERNAL linkage. The compiler emits
 // __hipRegisterTexture for these, so the runtime can register and resolve the
@@ -41,13 +47,24 @@ texture<float, 2, hipReadModeElementType> g_tex_ref_symbol_2d;
 namespace {
 bool IsUnsupported(hipError_t status) { return status == hipErrorNotSupported; }
 
+int CurrentDevice() {
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  return device;
+}
+
 hipChannelFormatDesc FloatChannel() {
   return hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 }
 
 // HIPRTC-compiled module that declares a `texture<>` global named "tex" so
 // hipModuleGetTexRef can resolve a module-backed reference. Returns false when
-// HIPRTC is unavailable so the caller can skip.
+// HIPRTC is unavailable so the caller can skip. No runtime header is included in
+// the source: HIPRTC's compiler (comgr) implicitly provides the `texture<>`
+// template and hipReadModeElementType, and cannot resolve a
+// `#include <hip/hip_runtime.h>` from its in-memory input (it fails with "file
+// not found"). This whole domain is AMD-only (see the file-scope guard), so the
+// AMD HIPRTC behavior is the only one that applies.
 constexpr char const kModuleSource[] =
     "texture<float, 1, hipReadModeElementType> tex;\n"
     "extern \"C\" __global__ void touch() {}\n";
@@ -58,7 +75,7 @@ bool CompileModuleSource(std::vector<char>& code) {
                                    "texture_reference_symbol_contract.cu", 0, nullptr, nullptr));
 #ifdef __HIP_PLATFORM_AMD__
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -282,3 +299,5 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInval
   REQUIRE(clamp_status == hipErrorInvalidValue);
   (void)hipGetLastError();
 }
+
+#endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000

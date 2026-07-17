@@ -97,7 +97,7 @@ bool CompileModuleSource(std::vector<char>& code) {
                                    nullptr, nullptr));
 #ifdef __HIP_PLATFORM_AMD__
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
