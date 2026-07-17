@@ -1,356 +1,241 @@
-# Example 4: Data Race Detection
+# Example 4: LDS Data Race Detection
 
 ## Objective
 
-Learn to detect and fix data races in GPU kernels using rocjitsu's race detector:
-- Identify concurrent write conflicts
-- Understand race conditions in shared memory
-- Use atomic operations correctly
-- Enable and interpret race detection reports
+Learn to detect and fix **intra-workgroup LDS races** with rocjitsu's race detector (`RJ_RACE=1`):
+- Missing `__syncthreads()` before cross-wave shared-memory reads
+- Interpreting real `RACE type=LDS` reports
+- Fixing with a barrier; verifying with host golden checks
 
-## What This Example Demonstrates
+## What rocjitsu detects (and what it does not)
 
-1. **Data race patterns** - Unprotected concurrent writes
-2. **Race detector** - Built-in race detection plugin
-3. **Atomic operations** - `atomicAdd` for safe updates
-4. **Synchronization** - `__syncthreads()` usage
-5. **Fixing races** - Before/after comparison
+| Detected by `RJ_RACE=1` | **Not** detected |
+|---|---|
+| LDS read/write without `s_barrier` / `__syncthreads()` within a workgroup | Inter-workgroup global races (`bins[bin]++` across blocks) |
+| VGPR / SGPR hazards (missing `s_waitcnt`) | Host–device sync bugs |
 
-## Key Debugging Points
+Global histogram races without atomics are covered in [Example 5](../05-global-memory-race/).
 
-### 1. Detecting Races
-- Enable race detector: `RJ_SINKS=race_detector`
-- Look for "RACE DETECTED" messages
-- Identify conflicting memory addresses
+## The bug
 
-### 2. Understanding Race Reports
-```
-RACE DETECTED:
-  Address: 0x7f8a40000100
-  Thread 1 (block=0, thread=5): WRITE at PC=0x1234
-  Thread 2 (block=0, thread=12): WRITE at PC=0x1234
-  Both threads accessed same location without synchronization
+Each thread stores its bin index in `__shared__ thread_bin[]`, then reads **another wave's slot** before a barrier:
+
+```cpp
+__shared__ int thread_bin[128];
+// ...
+thread_bin[tid] = data[gid] % num_bins;
+// BUG: missing __syncthreads()
+int peer = (tid + 64) % 128;
+int bin = thread_bin[peer];          // cross-wave LDS read — race
+atomicAdd(&bins[bin], 1);
 ```
 
-### 3. Common Race Patterns
-- **Histogram updates** - Multiple threads incrementing same bin
-- **Reduction operations** - Summing to shared result
-- **Flag setting** - Multiple threads writing to same flag
+**Block size must be 128** (2 waves of 64 on CDNA) so wave 1 reads slots wave 0 may still be writing.
+
+### Fixed code
+
+```cpp
+thread_bin[tid] = data[gid] % num_bins;
+__syncthreads();                     // FIXED
+int bin = thread_bin[tid];           // read own slot after barrier
+atomicAdd(&bins[bin], 1);
+```
 
 ## Files
 
-- `src/histogram_race.cpp` - Buggy histogram with race condition
-- `src/histogram_fixed.cpp` - Fixed version using atomics
-- `Makefile` - Build and test both versions
-- `expected-output/race-report.txt` - Sample race detection output
+- `src/histogram_race.cpp` — missing barrier (LDS race)
+- `src/histogram_fixed.cpp` — adds `__syncthreads()`
+- `Makefile` — build and run targets
 
-## The Bug
-
-### Problematic Code (histogram_race.cpp)
-
-```cpp
-__global__ void histogram_buggy(int *data, int *bins, int N, int num_bins) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  
-  if (i < N) {
-    int bin = data[i] % num_bins;
-    bins[bin]++;  // RACE: multiple threads may update same bin!
-  }
-}
-```
-
-**Problem**: Multiple threads can read-modify-write the same bin concurrently, leading to lost updates.
-
-### Fixed Code (histogram_fixed.cpp)
-
-```cpp
-__global__ void histogram_atomic(int *data, int *bins, int N, int num_bins) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  
-  if (i < N) {
-    int bin = data[i] % num_bins;
-    atomicAdd(&bins[bin], 1);  // SAFE: atomic read-modify-write
-  }
-}
-```
-
-**Solution**: `atomicAdd` ensures the operation is atomic (indivisible).
-
-## Building
+## Build
 
 ```bash
 cd usage-examples/04-data-race-simple
 make
 ```
 
-Builds:
-- `build/histogram_race` - Buggy version
-- `build/histogram_fixed` - Fixed version
-
 ## Running
 
-### Run Buggy Version (Detect Race)
+### 1. Buggy kernel — wrong bins + LDS race reports
 
 ```bash
 make run-race
 ```
 
-Equivalent to:
+Equivalent:
+
 ```bash
-RJ_SINKS=race_detector rocjitsu --config ../../configs/amdgpu_cdna4_kmd.json -- ./build/histogram_race
+RJ_RACE=1 rocjitsu --config ../../configs/amdgpu_cdna4_kmd.json -- ./build/histogram_race
 ```
 
-### Run Fixed Version (No Race)
+### 2. Fixed kernel — correct bins, no races
 
 ```bash
 make run-fixed
 ```
 
-Equivalent to:
-```bash
-RJ_SINKS=race_detector rocjitsu --config ../../configs/amdgpu_cdna4_kmd.json -- ./build/histogram_fixed
-```
-
-### Compare Results
+### 3. Buggy kernel without detector (silent wrong bins)
 
 ```bash
-make compare
+make run-race-no-detector
 ```
 
-Runs both versions and compares output.
+### 4. Save race log to file
 
-## Expected Output
-
-### Buggy Version Output
-
+```bash
+make run-to-file
+# → logs/race.log
 ```
-Histogram Example - WITH DATA RACE
+
+## Expected output
+
+Output below is copied verbatim from a run on `sharkmi300x-4` (ROCm 7.2.1,
+`amdgpu_cdna4_kmd.json`) and is deterministic across runs.
+
+### Buggy + `RJ_RACE=1`
+
+Race reports go to **stderr** (or `race.log` with `RJ_SINKS=file`):
+
+```text
+[rocjitsu] Race detection enabled (RJ_RACE)
+[rocjitsu] Kernel dispatch: "?"
+[rocjitsu] Kernel dispatch: "?"
+RACE type=LDS reg=256 wave=0 lane=0 wg=7,0,0 conflict=unknown
+Race on LDS byte 256 [workgroup (7, 0, 0), wave 0, lane 0]
+  ==>  0x5400021a10  ds_write_b32 v1, v2  ; <-- wave 1
+  ==>  0x5400021a18  ds_read_b32 v0, v0  ; <-- wave 0 lane 0
+END_RACE
+[rocjitsu] Kernel dispatch: "?"
+```
+
+Reading the report:
+
+- `type=LDS` — a shared-memory (LDS) hazard; `reg=256` is the **LDS byte
+  address**, not a register.
+- `wave=0 lane=0 wg=7,0,0` — the read that observed the unsynchronized write.
+- `ds_write_b32 ... ; <-- wave 1` wrote the byte; `ds_read_b32 ... ; <-- wave 0`
+  read it with no `s_barrier` in between. The leading `0x5400...` is the PC.
+- `conflict=unknown` — this header field is currently hardcoded; the actual
+  conflicting instruction is shown on the `==>` lines.
+
+**Only one block appears** even though every workgroup has the bug: the plugin
+de-duplicates by PC pair, so the first workgroup to hit this read/write PC pair
+is reported (here `wg=7,0,0`) and the rest are suppressed.
+
+Application stdout (host golden check):
+
+```text
+Histogram Example - LDS SYNC BUG (for RJ_RACE=1)
   Input size: 10000 elements
   Number of bins: 256
-  
-Allocating memory...
-Copying data to device...
-Launching kernel: grid(157, 1, 1), block(64, 1, 1)
+  Block size: 128 (2 waves per block)
+  Run with: RJ_RACE=1 rocjitsu -- ... ./build/histogram_race
 
-[rocjitsu] RACE DETECTOR ENABLED
-[rocjitsu] RACE DETECTED at address 0x7f8a40001000
-  Workitem (0, 0, 5) wrote at PC 0x402150
-  Workitem (0, 0, 12) wrote at PC 0x402150
-  Both threads in same wavefront accessed same memory location
-  
-[rocjitsu] RACE DETECTED at address 0x7f8a40001004
-  Workitem (0, 0, 3) wrote at PC 0x402150
-  Workitem (0, 0, 9) wrote at PC 0x402150
-  
-[rocjitsu] Total races detected: 47
+Launching kernel: grid(79, 1, 1), block(128, 1, 1)
 
-Copying results back...
-  
+  Bin 0: expected=41, actual=57
+  Bin 19: expected=37, actual=35
+  Bin 20: expected=47, actual=46
+  Bin 37: expected=53, actual=52
+  Bin 38: expected=34, actual=33
 Verification: FAILED
   Expected sum: 10000
-  Actual sum: 9953
-  Lost updates: 47
+  Actual sum: 10000
+  Mismatched bins: 16
 
-RACE CONDITION DETECTED - Results are incorrect!
+Incorrect histogram — stale peer reads from missing __syncthreads().
+Check stderr for RJ_RACE=1 reports (RACE type=LDS ... END_RACE).
 ```
 
-### Fixed Version Output
+Note the **total sum stays 10000** while **16 bins hold the wrong counts** —
+each thread still does exactly one `atomicAdd`, just to the wrong bin because it
+read a peer slot before that peer had written it. A sum check alone would miss
+this; `RJ_RACE=1` points straight at the cause.
 
-```
-Histogram Example - FIXED WITH ATOMICS
+### Fixed + `RJ_RACE=1`
+
+```text
+Histogram Example - FIXED (LDS barrier before peer read)
   Input size: 10000 elements
   Number of bins: 256
-  
-Allocating memory...
-Copying data to device...
-Launching kernel: grid(157, 1, 1), block(64, 1, 1)
+  Block size: 128
 
-[rocjitsu] RACE DETECTOR ENABLED
-[rocjitsu] Kernel completed successfully
-[rocjitsu] No races detected
+Launching kernel: grid(79, 1, 1), block(128, 1, 1)
 
-Copying results back...
-  
 Verification: PASSED
   Expected sum: 10000
   Actual sum: 10000
   All histogram bins correct!
 
-NO RACES DETECTED - Results are correct!
+NO LDS RACES expected under RJ_RACE=1.
 ```
 
-## Common Race Patterns and Fixes
+No `RACE` / `END_RACE` lines on stderr.
 
-### Pattern 1: Histogram / Counting
+## Why the sum still equals 10000
 
-**Buggy**:
+This is the instructive part of the example: the histogram is **wrong** yet the
+total is **exactly right**. A sum check would pass while the data is corrupt.
+
+**The sum only counts how many `atomicAdd` calls happened — not where they
+landed.** Every in-range thread runs exactly one increment:
+
 ```cpp
-bins[index]++;  // Race condition
+int bin = thread_bin[peer];   // may be the WRONG bin (unsynchronized read)
+if (gid < N)
+  atomicAdd(&bins[bin], 1);   // but still exactly one atomic +1
 ```
 
-**Fixed**:
-```cpp
-atomicAdd(&bins[index], 1);
-```
+- 10000 threads have `gid < N` → exactly 10000 increments.
+- `atomicAdd` is atomic, so **no increment is ever lost**.
+- ⇒ `sum(bins) == 10000` no matter what `bin` holds. The bug corrupts *which*
+  bin each `+1` targets, not *how many* there are — "wrong data, right count."
 
-### Pattern 2: Finding Maximum
+> Contrast with a `bins[bin]++` global race (no atomics, [Example 5](../05-global-memory-race/)):
+> there the read-modify-write itself races and `+1`s are genuinely **lost**, so the
+> sum drops **below** 10000. Here the final write is atomic, so only the
+> distribution is wrong.
 
-**Buggy**:
-```cpp
-if (val > *max_val) {
-  *max_val = val;  // Race condition
-}
-```
+**Where the 16 wrong bins come from — the last, partial block.** The grid is
+`79 × 128 = 10112` threads but only 10000 are in range. Each thread counts its
+*peer's* bin, `thread_bin[(tid+64)%128]`:
 
-**Fixed**:
-```cpp
-atomicMax(max_val, val);
-```
+- The 78 **full** blocks stay correct: `peer` just swaps the two 64-lane halves,
+  a permutation, so the per-block multiset of counted bins is unchanged.
+- **Block 78 is partial:** only `tid 0..15` are in range (gids 9984–9999); the
+  rest took the `else` branch and stored `0`. Those 16 valid threads read peer
+  slots `64..79` — all `0` — so all 16 land in **bin 0** (`+16`), while the 16
+  elements' true bins each lose a count (`−16` across 15 bins).
 
-### Pattern 3: Reduction (Sum)
+`+16` and `−16` cancel → **sum unchanged, 16 bins wrong**. The takeaway: totals
+and checksums can hide real corruption; `RJ_RACE=1` flags the missing barrier
+directly.
 
-**Buggy**:
-```cpp
-*result += partial_sum;  // Race condition
-```
+## Debugging workflow
 
-**Fixed**:
-```cpp
-atomicAdd(result, partial_sum);
-```
+1. `make run-race-no-detector` — confirm wrong per-bin counts (no race lines).
+2. `RJ_RACE=1 make run-race` — read `RACE type=LDS` reports; note `ds_write` vs `ds_read` without barrier.
+3. `make run-fixed` — confirm PASSED and no race lines.
+4. For global races across workgroups, see Example 5 and use atomics or privatization.
 
-### Pattern 4: Shared Memory Reduction
+## Key environment variables
 
-**Safer approach using synchronization**:
-```cpp
-__shared__ float shared_data[256];
+| Variable | Purpose |
+|---|---|
+| `RJ_RACE=1` | **Enable** race detector (not `RJ_SINKS=race_detector`) |
+| `RJ_SINKS=file RJ_SINK_DIR=logs` | Write reports to `race.log` |
+| `RJ_LOG=1` | Kernel dispatch metadata |
 
-// Each thread writes to its own location (no race)
-shared_data[threadIdx.x] = my_value;
-__syncthreads();  // Ensure all writes complete
+See [race-detector.md](../../docs/race-detector.md) for full scope and limitations.
 
-// Reduction tree (carefully structured to avoid races)
-for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-  if (threadIdx.x < stride) {
-    shared_data[threadIdx.x] += shared_data[threadIdx.x + stride];
-  }
-  __syncthreads();  // Synchronize after each reduction step
-}
+## Key takeaways
 
-// Thread 0 writes final result
-if (threadIdx.x == 0) {
-  atomicAdd(global_result, shared_data[0]);
-}
-```
+- Use **`RJ_RACE=1`** to enable the race detector plugin.
+- The detector targets **intra-workgroup LDS/VGPR/SGPR** sync hazards.
+- A missing `__syncthreads()` before shared reads can corrupt results even when the total element count looks fine.
+- Always cross-check with a **host golden** reference.
 
-## Understanding Race Detection Output
+## Next steps
 
-### Race Report Format
-
-```
-[rocjitsu] RACE DETECTED at address 0xADDRESS
-  Workitem (block_x, block_y, thread_id) ACTION at PC PROGRAM_COUNTER
-  Workitem (block_x, block_y, thread_id) ACTION at PC PROGRAM_COUNTER
-  Description of the conflict
-```
-
-### Fields Explained
-
-- **Address**: Memory location where race occurred
-- **Workitem**: Block and thread IDs involved
-- **ACTION**: READ or WRITE
-- **PC**: Program counter (instruction location)
-- **Description**: Type of race detected
-
-### Race Types
-
-1. **Write-Write Race**: Two threads write to same location
-2. **Read-Write Race**: One reads while another writes
-3. **Write-Read Race**: One writes while another reads
-
-## Debugging Workflow
-
-### Step 1: Enable Race Detector
-
-```bash
-RJ_SINKS=race_detector make run-race
-```
-
-### Step 2: Analyze Reports
-
-- Count total races
-- Identify most frequent addresses
-- Note which kernel/PC causes races
-
-### Step 3: Fix the Code
-
-Common fixes:
-- Use atomic operations
-- Add synchronization (`__syncthreads()`)
-- Restructure algorithm to avoid conflicts
-- Use separate memory per thread
-
-### Step 4: Verify Fix
-
-```bash
-RJ_SINKS=race_detector make run-fixed
-```
-
-Should see: "No races detected"
-
-## Performance Considerations
-
-### Atomic Operations Cost
-
-Atomics are **slower** than regular operations:
-- Serialize updates to same location
-- May cause thread divergence
-- But: **correctness > performance**
-
-### Optimization Strategies
-
-1. **Reduce contention** - More bins in histogram
-2. **Local reduction first** - Accumulate locally, then atomic update
-3. **Shared memory** - Use shared memory + atomics, then global atomic
-
-Example optimization:
-```cpp
-__shared__ int local_bins[NUM_BINS];
-
-// Initialize shared bins
-if (threadIdx.x < NUM_BINS) {
-  local_bins[threadIdx.x] = 0;
-}
-__syncthreads();
-
-// Update local histogram
-int bin = data[i] % NUM_BINS;
-atomicAdd(&local_bins[bin], 1);
-__syncthreads();
-
-// One thread per bin writes to global memory
-if (threadIdx.x < NUM_BINS) {
-  atomicAdd(&global_bins[threadIdx.x], local_bins[threadIdx.x]);
-}
-```
-
-## Exercises
-
-1. **Create intentional race** - Modify fixed version to remove atomics
-2. **Test different patterns** - Implement finding min/max with atomics
-3. **Measure overhead** - Time buggy vs atomic versions
-4. **Optimize** - Implement two-level reduction (shared + global)
-
-## Key Takeaways
-
-- Race detector finds concurrent access conflicts
-- Atomics ensure safe read-modify-write operations
-- `__syncthreads()` coordinates threads in a block
-- Always verify with race detector enabled
-- Incorrect results often indicate hidden races
-
-## Next Steps
-
-- [Example 5: Global Memory Races](../05-global-memory-race/) - More complex race patterns
-- [Example 6: Memory Coalescing](../06-memory-coalescing/) - Performance optimization
-- [Example 8: GEMM Debugging](../08-gemm-debugging/) - Real-world matrix operations
+- [Example 5: Global Memory Races](../05-global-memory-race/) — inter-workgroup global RMW
+- [race-detector.md](../../docs/race-detector.md) — report format and limitations

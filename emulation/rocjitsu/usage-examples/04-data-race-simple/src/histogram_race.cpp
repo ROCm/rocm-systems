@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 /// @file histogram_race.cpp
-/// @brief Histogram example WITH data race - demonstrates race detection
+/// @brief Block-local histogram WITH an LDS sync bug for RJ_RACE=1
 ///
-/// This example intentionally contains a data race to demonstrate
-/// rocjitsu's race detector. Multiple threads update the same histogram
-/// bin without synchronization, causing lost updates.
+/// rocjitsu's race detector reports intra-workgroup LDS hazards (missing
+/// __syncthreads), not inter-workgroup global RMW on bins[bin]++. This kernel
+/// stores each thread's bin index in __shared__, then reads a peer slot from
+/// another wave without a barrier — the same pattern as lds_cross_wave_race in
+/// tests/race-detector/hip_race_tests.hip.
 
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
 #include <cstdlib>
-#include <ctime>
 
 #define HIP_CHECK(call)                                                        \
   do {                                                                         \
@@ -23,110 +24,103 @@
     }                                                                          \
   } while (0)
 
-/// GPU kernel: Compute histogram (BUGGY - has race condition)
-/// WARNING: This code has a data race! Multiple threads can update
-/// the same bin concurrently, causing lost updates.
-__global__ void histogram_buggy(const int *data, int *bins, int N, int num_bins) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void histogram_lds_race(const int *data, int *bins, int N, int num_bins) {
+  __shared__ int thread_bin[128];
 
-  if (i < N) {
-    int bin = data[i] % num_bins;
+  int tid = threadIdx.x;
+  int gid = blockIdx.x * blockDim.x + tid;
 
-    // BUG: Race condition here!
-    // Multiple threads may read-modify-write the same bin simultaneously
-    bins[bin]++;
-  }
+  if (gid < N)
+    thread_bin[tid] = data[gid] % num_bins;
+  else
+    thread_bin[tid] = 0;
+
+  // BUG: missing __syncthreads() — wave 1 reads thread_bin[] while wave 0
+  // may still be writing (LDS race reported by RJ_RACE=1).
+
+  int peer = (tid + 64) % 128;
+  int bin = thread_bin[peer];
+  if (gid < N)
+    atomicAdd(&bins[bin], 1);
 }
 
 int main(int argc, char **argv) {
-  // Parameters
-  const int N = 10000;          // Number of elements
-  const int num_bins = 256;     // Number of histogram bins
+  const int N = 10000;
+  const int num_bins = 256;
+  const int blockSize = 128;  // 2 waves — required for cross-wave LDS races
+  const int gridSize = (N + blockSize - 1) / blockSize;
   const size_t data_bytes = N * sizeof(int);
   const size_t bins_bytes = num_bins * sizeof(int);
 
-  std::cout << "Histogram Example - WITH DATA RACE" << std::endl;
+  std::cout << "Histogram Example - LDS SYNC BUG (for RJ_RACE=1)" << std::endl;
   std::cout << "  Input size: " << N << " elements" << std::endl;
   std::cout << "  Number of bins: " << num_bins << std::endl;
+  std::cout << "  Block size: " << blockSize << " (2 waves per block)" << std::endl;
+  std::cout << "  Run with: RJ_RACE=1 rocjitsu -- ... ./build/histogram_race"
+            << std::endl;
   std::cout << std::endl;
 
-  // Allocate host memory
   std::vector<int> h_data(N);
   std::vector<int> h_bins(num_bins, 0);
   std::vector<int> h_ref_bins(num_bins, 0);
 
-  // Initialize data with random values
-  std::srand(42);  // Fixed seed for reproducibility
+  std::srand(42);
   for (int i = 0; i < N; ++i) {
     h_data[i] = std::rand() % num_bins;
-    h_ref_bins[h_data[i]]++;  // CPU reference histogram
+    h_ref_bins[h_data[i]]++;
   }
 
-  // Allocate device memory
-  std::cout << "Allocating memory..." << std::endl;
   int *d_data = nullptr;
   int *d_bins = nullptr;
 
   HIP_CHECK(hipMalloc(&d_data, data_bytes));
   HIP_CHECK(hipMalloc(&d_bins, bins_bytes));
 
-  // Copy data to device
-  std::cout << "Copying data to device..." << std::endl;
   HIP_CHECK(hipMemcpy(d_data, h_data.data(), data_bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(d_bins, 0, bins_bytes));  // Zero histogram
-
-  // Launch kernel
-  const int blockSize = 64;
-  const int gridSize = (N + blockSize - 1) / blockSize;
+  HIP_CHECK(hipMemset(d_bins, 0, bins_bytes));
 
   std::cout << "Launching kernel: grid(" << gridSize << ", 1, 1), "
             << "block(" << blockSize << ", 1, 1)" << std::endl;
   std::cout << std::endl;
 
-  histogram_buggy<<<gridSize, blockSize>>>(d_data, d_bins, N, num_bins);
+  histogram_lds_race<<<gridSize, blockSize>>>(d_data, d_bins, N, num_bins);
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
-  // Copy results back
-  std::cout << "Copying results back..." << std::endl;
   HIP_CHECK(hipMemcpy(h_bins.data(), d_bins, bins_bytes, hipMemcpyDeviceToHost));
   std::cout << std::endl;
 
-  // Verify results
-  int expected_sum = 0;
+  int expected_sum = N;
   int actual_sum = 0;
   int bin_errors = 0;
 
   for (int i = 0; i < num_bins; ++i) {
-    expected_sum += h_ref_bins[i];
     actual_sum += h_bins[i];
-
     if (h_bins[i] != h_ref_bins[i]) {
       ++bin_errors;
-      if (bin_errors <= 5) {  // Print first 5 mismatches
+      if (bin_errors <= 5) {
         std::cout << "  Bin " << i << ": expected=" << h_ref_bins[i]
-                  << ", actual=" << h_bins[i]
-                  << ", diff=" << (h_ref_bins[i] - h_bins[i]) << std::endl;
+                  << ", actual=" << h_bins[i] << std::endl;
       }
     }
   }
 
-  std::cout << "Verification: " << (actual_sum == expected_sum ? "PASSED" : "FAILED") << std::endl;
+  std::cout << "Verification: " << (bin_errors == 0 ? "PASSED" : "FAILED") << std::endl;
   std::cout << "  Expected sum: " << expected_sum << std::endl;
   std::cout << "  Actual sum: " << actual_sum << std::endl;
 
-  if (actual_sum != expected_sum) {
-    std::cout << "  Lost updates: " << (expected_sum - actual_sum) << std::endl;
+  if (bin_errors != 0) {
+    std::cout << "  Mismatched bins: " << bin_errors << std::endl;
     std::cout << std::endl;
-    std::cout << "RACE CONDITION DETECTED - Results are incorrect!" << std::endl;
-    std::cout << "This is expected - the kernel has an intentional race condition." << std::endl;
-    std::cout << "Run with: RJ_SINKS=race_detector to see detailed race reports." << std::endl;
+    std::cout << "Incorrect histogram — stale peer reads from missing __syncthreads()."
+              << std::endl;
+    std::cout << "Check stderr for RJ_RACE=1 reports (RACE type=LDS ... END_RACE)."
+              << std::endl;
   }
 
-  // Cleanup
   HIP_CHECK(hipFree(d_data));
   HIP_CHECK(hipFree(d_bins));
 
-  return (actual_sum == expected_sum) ? EXIT_SUCCESS : EXIT_FAILURE;
+  return (bin_errors == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

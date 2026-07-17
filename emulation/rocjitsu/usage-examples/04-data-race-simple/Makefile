@@ -25,13 +25,13 @@ TARGET_FIXED = $(BUILD_DIR)/histogram_fixed
 SRC_RACE = $(SRC_DIR)/histogram_race.cpp
 SRC_FIXED = $(SRC_DIR)/histogram_fixed.cpp
 
-.PHONY: all build run-race run-fixed compare clean help
+.PHONY: all compile run-race run-fixed compare clean help
 
 # Default: build both versions
-all: build
+all: compile
 
 # Build both versions
-build: $(TARGET_RACE) $(TARGET_FIXED)
+compile: $(TARGET_RACE) $(TARGET_FIXED)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -44,7 +44,7 @@ $(TARGET_RACE): $(SRC_RACE) | $(BUILD_DIR)
 
 # Build fixed version
 $(TARGET_FIXED): $(SRC_FIXED) | $(BUILD_DIR)
-	@echo "Compiling histogram_fixed.cpp (with atomics)..."
+	@echo "Compiling histogram_fixed.cpp (with __syncthreads fix)..."
 	$(HIPCC) $(HIPFLAGS) $(CXXFLAGS) -o $@ $<
 	@echo "Built: $@"
 
@@ -54,7 +54,7 @@ run-race: $(TARGET_RACE)
 	@echo "Running BUGGY version (with race detector)"
 	@echo "========================================="
 	@echo ""
-	RJ_SINKS=race_detector $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
+	RJ_RACE=1 $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
 	@echo ""
 
 # Run fixed version with race detector
@@ -63,7 +63,7 @@ run-fixed: $(TARGET_FIXED)
 	@echo "Running FIXED version (with race detector)"
 	@echo "========================================="
 	@echo ""
-	RJ_SINKS=race_detector $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_FIXED)
+	RJ_RACE=1 $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_FIXED)
 	@echo ""
 
 # Run buggy version WITHOUT race detector (shows incorrect results)
@@ -80,12 +80,12 @@ compare: $(TARGET_RACE) $(TARGET_FIXED)
 	@echo "========================================="
 	@echo ""
 	@echo "--- Running BUGGY version ---"
-	@RJ_SINKS=race_detector $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) 2>&1 | head -30 || true
+	@RJ_RACE=1 $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) 2>&1 | head -30 || true
 	@echo ""
 	@echo "========================================="
 	@echo ""
 	@echo "--- Running FIXED version ---"
-	@RJ_SINKS=race_detector $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_FIXED) 2>&1 | head -30
+	@RJ_RACE=1 $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_FIXED) 2>&1 | head -30
 	@echo ""
 	@echo "========================================="
 	@echo "SUMMARY:"
@@ -96,13 +96,13 @@ compare: $(TARGET_RACE) $(TARGET_FIXED)
 # Run with verbose logging
 run-verbose: $(TARGET_RACE)
 	@echo "Running with verbose logging and race detection..."
-	RJ_LOG=1 RJ_SINKS=race_detector $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
+	RJ_LOG=1 RJ_RACE=1 $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
 
 # Run with output to file
 run-to-file: $(TARGET_RACE)
 	@mkdir -p logs
 	@echo "Running with file output (logs/race_report.txt)..."
-	RJ_SINKS=race_detector,file RJ_SINK_DIR=logs $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
+	RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=logs $(ROCJITSU_BIN) --config $(CONFIG) -- $(TARGET_RACE) || true
 	@echo ""
 	@echo "Race report saved to: logs/"
 	@ls -lh logs/
@@ -128,7 +128,7 @@ help:
 	@echo "  make help               - Show this help"
 	@echo ""
 	@echo "Key Environment Variables:"
-	@echo "  RJ_SINKS=race_detector  - Enable race detection"
+	@echo "  RJ_RACE=1               - Enable race detection"
 	@echo "  RJ_LOG=1                - Verbose logging"
 	@echo "  RJ_SINK_DIR=<dir>       - Output directory for logs"
 	@echo ""
