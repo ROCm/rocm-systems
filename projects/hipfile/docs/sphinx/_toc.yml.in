@@ -8,6 +8,8 @@ subtrees:
         title: Build from source
       - file: install/python-bindings
         title: Install Python bindings
+      - file: install/setup-local-nvme
+        title: Set up a local NVMe drive
   - caption: How to
     entries:
       - file: how-to/register-file-and-buffer
