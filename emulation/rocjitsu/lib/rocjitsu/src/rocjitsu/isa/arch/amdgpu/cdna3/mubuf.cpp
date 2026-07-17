@@ -24,13 +24,24 @@
 namespace rocjitsu {
 namespace cdna3 {
 
+namespace {
+template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+  if (inst->idxen && inst->offen)
+    return 64;
+  if (inst->idxen || inst->offen)
+    return 32;
+  return 0;
+}
+} // namespace
+
 BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<BufferLoadFormatXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -51,8 +62,9 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadFormatXyMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -73,8 +85,9 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadFormatXyzMubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -95,8 +108,9 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadFormatXyzwMubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -117,8 +131,9 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreFormatXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -139,8 +154,9 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreFormatXyMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -161,8 +177,9 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreFormatXyzMubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -183,8 +200,9 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreFormatXyzwMubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -205,8 +223,9 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadFormatD16XMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -227,8 +246,9 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadFormatD16XyMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -249,8 +269,9 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
             make_exec_fn<BufferLoadFormatD16XyzMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -271,8 +292,9 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
             make_exec_fn<BufferLoadFormatD16XyzwMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -293,8 +315,9 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreFormatD16XMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -315,8 +338,9 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
             make_exec_fn<BufferStoreFormatD16XyMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -337,8 +361,9 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
             make_exec_fn<BufferStoreFormatD16XyzMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -359,8 +384,9 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
             make_exec_fn<BufferStoreFormatD16XyzwMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -381,8 +407,9 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadUbyteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -426,8 +453,9 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadSbyteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -472,8 +500,9 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadUshortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -517,8 +546,9 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadSshortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -563,8 +593,9 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadDwordMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -608,8 +639,9 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadDwordx2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -653,8 +685,9 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadDwordx3Mubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -698,8 +731,9 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadDwordx4Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -743,8 +777,9 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreByteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -783,8 +818,9 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreByteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -824,8 +860,9 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreShortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -864,8 +901,9 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreShortD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -905,8 +943,9 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreDwordMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -945,8 +984,9 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreDwordx2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -987,8 +1027,9 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreDwordx3Mubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1031,8 +1072,9 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
             make_exec_fn<BufferStoreDwordx4Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1077,8 +1119,9 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadUbyteD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1123,8 +1166,9 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadUbyteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1169,8 +1213,9 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadSbyteD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1216,8 +1261,9 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadSbyteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1263,8 +1309,9 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadShortD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1309,8 +1356,9 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
             make_exec_fn<BufferLoadShortD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1355,8 +1403,9 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
             make_exec_fn<BufferLoadFormatD16HiXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1377,8 +1426,9 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
             make_exec_fn<BufferStoreFormatD16HiXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1421,8 +1471,9 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSwapMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1463,8 +1514,9 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicCmpswapMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1507,8 +1559,9 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAddMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1549,8 +1602,9 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSubMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1591,8 +1645,9 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSminMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1633,8 +1688,9 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicUminMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1675,8 +1731,9 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSmaxMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1717,8 +1774,9 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicUmaxMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1759,8 +1817,9 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAndMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1801,8 +1860,9 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicOrMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1843,8 +1903,9 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicXorMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1885,8 +1946,9 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicIncMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1927,8 +1989,9 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicDecMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1969,8 +2032,9 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAddF32Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2011,8 +2075,9 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicPkAddF16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2053,8 +2118,9 @@ BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAddF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2097,8 +2163,9 @@ BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicMinF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2141,8 +2208,9 @@ BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicMaxF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2185,8 +2253,9 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSwapX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2229,8 +2298,9 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicCmpswapX2Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2277,8 +2347,9 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAddX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2321,8 +2392,9 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSubX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2365,8 +2437,9 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSminX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2409,8 +2482,9 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicUminX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2453,8 +2527,9 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicSmaxX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2497,8 +2572,9 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicUmaxX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2541,8 +2617,9 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicAndX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2585,8 +2662,9 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicOrX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2629,8 +2707,9 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicXorX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2673,8 +2752,9 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicIncX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2717,8 +2797,9 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
             make_exec_fn<BufferAtomicDecX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;

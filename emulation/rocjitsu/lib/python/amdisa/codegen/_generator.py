@@ -2396,10 +2396,29 @@ class CodeGenerator:
         return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
 
     @staticmethod
-    def _vbuffer_vaddr_operand_size_expr(enc_name: str, opnd_name: str) -> str | None:
-        if enc_name.upper() != 'ENC_VBUFFER' or opnd_name != 'vaddr':
+    def _buffer_vaddr_operand_size_expr(enc_name: str, opnd_name: str) -> str | None:
+        if (
+            enc_name.upper() not in ('ENC_MUBUF', 'ENC_MTBUF', 'ENC_VBUFFER')
+            or opnd_name != 'vaddr'
+        ):
             return None
-        return 'vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+        if enc_name.upper() == 'ENC_VBUFFER':
+            return 'vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+        return 'buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+
+    @staticmethod
+    def _emit_legacy_buffer_helpers() -> str:
+        return textwrap.dedent('''\
+            namespace {
+            template <typename BufferMachineInst>
+            uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+              if (inst->idxen && inst->offen)
+                return 64;
+              if (inst->idxen || inst->offen)
+                return 32;
+              return 0;
+            }
+            } // namespace''')
 
     @staticmethod
     def _emit_vbuffer_helpers() -> str:
@@ -5742,20 +5761,22 @@ class CodeGenerator:
 
     @staticmethod
     def _operand_encoding_value_expr(
-        opnd_name: str, is_smem: bool, packed_16bit: bool
+        opnd_name: str, enc_name: str, packed_16bit: bool
     ) -> str:
         """C++ expression for the decoded value passed to an Operand constructor.
 
-        For most operands this is just the value. SMEM SBASE is an
-        exception, as it is encoded in units of 2 SGPRs (where N gets
-        s[2N:2N+1]), so this helper scales it to the real SGPR index.
-        This keeps the operand's register-ref (disassembly, def/use, liveness)
-        consistent with execution, which scales the raw field independently
-        (addr_calc_scalar.h: ``sbase = base + inst.sbase * 2``).
+        For most operands this is just the value. SMEM SBASE and legacy buffer
+        SRSRC fields are encoded in register groups, so this helper scales them
+        to the real SGPR index. This keeps the operand's register-ref
+        (disassembly, def/use, liveness) consistent with execution, which
+        scales the raw fields independently in its address calculations.
         """
         expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
-        if is_smem and opnd_name == 'sbase':
+        enc_name = enc_name.upper()
+        if enc_name == 'ENC_SMEM' and opnd_name == 'sbase':
             expr = f'({expr} * 2)'
+        elif enc_name in ('ENC_MUBUF', 'ENC_MTBUF') and opnd_name == 'srsrc':
+            expr = f'({expr} * 4)'
         if packed_16bit:
             expr = f'static_cast<unsigned short>({expr})'
         return expr
@@ -5849,7 +5870,7 @@ class CodeGenerator:
                             gfx1250_f8f6f4_shape, opnd.name
                         )
                         if opnd_size_expr is None:
-                            opnd_size_expr = self._vbuffer_vaddr_operand_size_expr(
+                            opnd_size_expr = self._buffer_vaddr_operand_size_expr(
                                 enc.enc_name, opnd.name
                             )
                         if opnd_size_expr is None:
@@ -5917,7 +5938,7 @@ class CodeGenerator:
                                 else ''
                             )
                             operand_value = self._operand_encoding_value_expr(
-                                opnd.name, is_smem, bool(packed_16bit_source_arg)
+                                opnd.name, enc.enc_name, bool(packed_16bit_source_arg)
                             )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
@@ -7124,7 +7145,11 @@ class CodeGenerator:
                         0, cgen.Line(self._emit_gfx1250_matrix_fmt_helpers())
                     )
 
-                if enc.enc_name.upper() == 'ENC_VBUFFER':
+                if enc.enc_name.upper() in ('ENC_MUBUF', 'ENC_MTBUF'):
+                    class_func_impls.insert(
+                        0, cgen.Line(self._emit_legacy_buffer_helpers())
+                    )
+                elif enc.enc_name.upper() == 'ENC_VBUFFER':
                     class_func_impls.insert(0, cgen.Line(self._emit_vbuffer_helpers()))
 
                 if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
