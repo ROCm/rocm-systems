@@ -9,8 +9,6 @@
 ## Issue Tracking
 
 <!-- Include a GitHub Issue and/or JIRA ID. Do not post any full JIRA links here. -->
-<!-- GitHub issue: https://github.com/ROCm/rocm-systems/issues/1234 -->
-<!-- JIRA ID: EXAMPLECOMPONENT-1234 -->
 
 ## Test Plan
 
