@@ -56,18 +56,18 @@ TEST(parse_gfx_target_version, packing_decomposition)
     ASSERT_TRUE(packed.has_value());
 
     const uint32_t value = *packed;
-    EXPECT_EQ(value / 10000, 11u);        // major
-    EXPECT_EQ((value / 100) % 100, 0u);   // minor
-    EXPECT_EQ(value % 100, 0u);           // step
+    EXPECT_EQ(value / 10000, 11u);       // major
+    EXPECT_EQ((value / 100) % 100, 0u);  // minor
+    EXPECT_EQ(value % 100, 0u);          // step
 }
 
 TEST(parse_gfx_target_version, rejects_malformed)
 {
     // Anything that is not "gfx" + >= 3 decimal digits must yield nullopt.
-    EXPECT_EQ(agent::parse_gfx_target_version(""), std::nullopt);       // empty
-    EXPECT_EQ(agent::parse_gfx_target_version("gfx"), std::nullopt);    // no digits
-    EXPECT_EQ(agent::parse_gfx_target_version("gfx11"), std::nullopt);  // too few digits
-    EXPECT_EQ(agent::parse_gfx_target_version("foo"), std::nullopt);    // wrong prefix
+    EXPECT_EQ(agent::parse_gfx_target_version(""), std::nullopt);         // empty
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx"), std::nullopt);      // no digits
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx11"), std::nullopt);    // too few digits
+    EXPECT_EQ(agent::parse_gfx_target_version("foo"), std::nullopt);      // wrong prefix
     EXPECT_EQ(agent::parse_gfx_target_version("gfx11xy"), std::nullopt);  // non-digit tail
     // Hex-suffixed names (e.g. the public gfx90a) are intentionally not handled
     // by this purely-numeric parser and must be rejected rather than misparsed.
