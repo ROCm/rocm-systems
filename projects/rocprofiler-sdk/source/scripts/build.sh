@@ -9,7 +9,7 @@ echo -e "Redirecting to location: $ROCPROFILER_SDK_PATH"
 cd ${ROCPROFILER_SDK_PATH}
 
 echo -e "Configuring rocprofiler-sdk: ${ROCPROFILER_SDK_PATH}/build"
-cmake -B build -DROCPROFILER_BUILD_{CI,TESTS,SAMPLES}=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON -DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON "${@}"
+cmake -B build -DROCPROFILER_BUILD_{CI,TESTS,SAMPLES}=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON "${@}"
 
 echo -e "Building rocprofiler-sdk: ${ROCPROFILER_SDK_PATH}/build"
 cmake --build build --target all --parallel $(nproc)
