@@ -402,7 +402,7 @@ constexpr bool is_blocking(MemcpyKind k) {
 }
 
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __attribute__((noinline)) void copy_bulk(void* dst, void* src,
+__device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;

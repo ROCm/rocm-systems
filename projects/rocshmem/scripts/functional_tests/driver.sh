@@ -194,7 +194,7 @@ if command -v rocminfo >/dev/null 2>&1; then
   if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201|gfx1250)$ ]]; then
     WAVE_SIZE=32
   fi
-  if [[ "$GPU_ARCH" == "gfx1201" ]]; then
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201)$ ]]; then
     GRID_SYNC_MAX_THREADS=$((32 * 1024))
   fi
 fi
