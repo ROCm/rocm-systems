@@ -86,9 +86,14 @@ jobs:
         # Intentionally installs latest nightly wheels against pinned test sources.
         # The 10 smoke tests use stable pmap/shard_map APIs that are compatible
         # across JAX versions. This lets us catch RCCL regressions with current JAX.
+        # rocm-sdk-core and rocm-sdk-libraries provide the ROCm runtime libs
+        # (hipBLASLt, hipFFT, MIOpen, rocBLAS, etc.) that xla_rocm_plugin.so
+        # links against via RUNPATH. The test script overrides librccl.so with
+        # the CI-built version via LD_LIBRARY_PATH.
         run: |
           uv pip install --prerelease=allow \
             jax-rocm7-plugin jax-rocm7-pjrt jax \
+            rocm-sdk-core rocm-sdk-libraries \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
             --extra-index-url https://pypi.org/simple/
           uv pip install \
