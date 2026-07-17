@@ -105,9 +105,10 @@ env:
   DEFAULT_SALLOC_TIME: '04:00:00'
   # Exclude known-broken GPU nodes: g24/g25
   DEFAULT_SALLOC_EXCLUDE: 'mia1-p01-g[24-25]'
-  # Fast smoke subset for the label-gated PR path: Group A component gtests + the
-  # C1 IONIC counter check (skips the long full-range B perf sweeps).
-  SMOKE_SUITES: 'A. Component*,C1. IONIC counter validation'
+  # PR subset for the label-gated path: Group A component gtests + selected B
+  # suites (IB baseline, CAST full alltoall, autodetect on/off, ROCM-IB no
+  # offload, CTS force-override, and the full-range guard). Skips B2-B6 and C1.
+  SMOKE_SUITES: 'A. Component*,B1. IB baseline,B1f. CAST alltoall full (1K-16G),B7. Autodetect (out-of-box),B7b. Autodetect off (fallback),B8. ROCM-IB / no CTS offload,B9. CTS force-override (PR#4657),B-large. alltoall full-range guard'
 
 jobs:
   ainic-test-runner:
