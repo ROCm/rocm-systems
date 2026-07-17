@@ -143,8 +143,6 @@ amd::GLFunctions::GLFunctions(HMODULE h, bool isEGL)
       missed_(0),
       eglDisplay_(EGL_NO_DISPLAY),
       eglOriginalContext_(EGL_NO_CONTEXT),
-      eglInternalContext_(EGL_NO_CONTEXT),
-      eglTempContext_(EGL_NO_CONTEXT),
       isEGL_(isEGL),
 #ifdef _WIN32
       hOrigGLRC_(0),

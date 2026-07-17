@@ -51,7 +51,7 @@ class UserObject : public amd::ReferenceCountedObject {
   std::unordered_set<Graph*> owning_graphs_;
 
   UserObject(UserCallbackDestructor callback, void* data, unsigned int flags)
-      : ReferenceCountedObject(), callback_(callback), data_(data), flags_(flags) {
+      : ReferenceCountedObject(), callback_(callback), data_(data) {
     amd::ScopedLock lock(UserObjectLock_);
     ObjectSet_.insert(this);
   }
@@ -98,7 +98,6 @@ class UserObject : public amd::ReferenceCountedObject {
  private:
   UserCallbackDestructor callback_;
   void* data_;
-  [[maybe_unused]] unsigned int flags_;
   //! Disable default operator=
   UserObject& operator=(const UserObject&) = delete;
   //! Disable copy constructor
