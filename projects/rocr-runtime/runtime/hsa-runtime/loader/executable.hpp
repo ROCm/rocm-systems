@@ -652,6 +652,7 @@ private:
     uint32_t inst_pref;
   };
   bool trampoline_enabled_gfx125x_ = false;
+  bool trampoline_no_wa_gfx125x_ = false;
   std::vector<KdFixup> kd_fixups_;
   std::vector<std::shared_ptr<Segment>> trampoline_segments_;
 };

@@ -119,6 +119,7 @@ public:
   const amd::options::PrefixOption* Substitute() const { return &substitute; }
 
   bool TrampolineEnabled() const { return trampoline_enabled_; }
+  bool TrampolineNoWaEnabled() const { return trampoline_no_wa_enabled_; }
 
   bool ParseOptions(const std::string& options);
   void Reset();
@@ -140,6 +141,7 @@ private:
   amd::options::PrefixOption substitute;
   amd::options::OptionParser option_parser;
   bool trampoline_enabled_ = false;
+  bool trampoline_no_wa_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -161,10 +163,16 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&substitute);
 
   // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines.
-  // Trampolines are disabled by default; this env var is for testing only.
+  // LOADER_ENABLE_TRAMPOLINE_NO_WA=1: enable trampolines without the global_wb
+  // cache-writeback workaround (s_mov + s_set_pc only). Trampolines are disabled
+  // by default; these env vars are for testing only.
   const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
   if (enable_trampoline && std::strcmp(enable_trampoline, "1") == 0) {
     trampoline_enabled_ = true;
+  }
+  const char* enable_trampoline_no_wa = getenv("LOADER_ENABLE_TRAMPOLINE_NO_WA");
+  if (enable_trampoline_no_wa && std::strcmp(enable_trampoline_no_wa, "1") == 0) {
+    trampoline_no_wa_enabled_ = true;
   }
 }
 
@@ -237,6 +245,20 @@ static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   w[7] = static_cast<uint32_t>(target >> 32);
   w[8] = 0xBE804864;  // s_set_pc_i64 s[100:101]
   for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
+    w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
+}
+
+// Minimal stub: load the 64-bit entry address into s[100:101] and set PC, with no
+// global_wb / v_nop cache-writeback workaround.
+static void BuildTrampolineGfx1250NoWa(uint8_t* buf, uint64_t target) {
+  auto* w = reinterpret_cast<uint32_t*>(buf);
+
+  w[0] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
+  w[1] = static_cast<uint32_t>(target);
+  w[2] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
+  w[3] = static_cast<uint32_t>(target >> 32);
+  w[4] = 0xBE804864;  // s_set_pc_i64 s[100:101]
+  for (size_t i = 5; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
 }
 
@@ -1340,9 +1362,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
 
   // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
-  // Set LOADER_ENABLE_TRAMPOLINE=1 to enable (for testing only).
+  // Set LOADER_ENABLE_TRAMPOLINE=1 or LOADER_ENABLE_TRAMPOLINE_NO_WA=1 to enable
+  // (for testing only). NO_WA selects the minimal stub without global_wb.
+  trampoline_no_wa_gfx125x_ = loaderOptions.TrampolineNoWaEnabled();
   trampoline_enabled_gfx125x_ =
-      loaderOptions.TrampolineEnabled() && CodeObjectIsaIsGfx125Family(codeIsa);
+      (loaderOptions.TrampolineEnabled() || trampoline_no_wa_gfx125x_) &&
+      CodeObjectIsaIsGfx125Family(codeIsa);
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1595,7 +1620,11 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
     uint8_t blob[kTrampolineStubStride];
-    BuildTrampolineGfx1250(blob, entry_dev);    // stub jumps to the real entry
+    if (trampoline_no_wa_gfx125x_) {
+      BuildTrampolineGfx1250NoWa(blob, entry_dev);
+    } else {
+      BuildTrampolineGfx1250(blob, entry_dev);
+    }
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
