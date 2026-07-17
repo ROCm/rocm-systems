@@ -339,9 +339,7 @@ class TestPlotMemChartGfx11:
     def test_returns_string(self):
         """Test that plot_mem_chart returns a string."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", metrics, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         clean = common.strip_ansi(result)
 
         assert isinstance(result, str)
@@ -354,9 +352,7 @@ class TestPlotMemChartGfx11:
         """RDNA3.5 output contains every rendered memory component."""
         metrics = mem_chart_gfx11.get_sample_metrics()
         output = common.strip_ansi(
-            mem_chart_gfx11.plot_mem_chart(
-                "per_kernel", metrics, chart_title=DEFAULT_TITLE
-            )
+            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         )
         expected_components = (
             "Kernel",
@@ -376,9 +372,7 @@ class TestPlotMemChartGfx11:
         """RDNA3.5 output exposes chart scope and connector directions."""
         metrics = mem_chart_gfx11.get_sample_metrics()
         output = common.strip_ansi(
-            mem_chart_gfx11.plot_mem_chart(
-                "per_kernel", metrics, chart_title=DEFAULT_TITLE
-            )
+            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         )
 
         assert DEFAULT_TITLE in output
@@ -394,9 +388,7 @@ class TestPlotMemChartGfx11:
     def test_contains_bandwidth_values(self):
         """Test that output contains formatted bandwidth values."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", metrics, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
 
         # Should contain GB/s units since sample data uses GB/s range
         assert "GB/s" in result
@@ -412,9 +404,7 @@ class TestPlotMemChartGfx11:
 
     def test_empty_metrics(self):
         """Test with empty metrics dictionary."""
-        result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", {}, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx11.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
 
         # Should still produce output (with N/A values)
         assert isinstance(result, str)
@@ -428,7 +418,7 @@ class TestPlotMemChartGfx11:
             # Missing many other metrics
         }
         result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", partial_metrics, chart_title=DEFAULT_TITLE
+            partial_metrics, chart_title=DEFAULT_TITLE
         )
 
         assert isinstance(result, str)
@@ -441,7 +431,7 @@ class TestPlotMemChartGfx11:
             "DRAM Write Bandwidth": 5e12,  # 5 TB/s
         }
         result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", extreme_metrics, chart_title=DEFAULT_TITLE
+            extreme_metrics, chart_title=DEFAULT_TITLE
         )
 
         assert "TB/s" in result
@@ -452,9 +442,7 @@ class TestPlotMemChartGfx11:
             "DRAM Read Bandwidth": 0,
             "DRAM Write Bandwidth": 0,
         }
-        result = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", zero_metrics, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx11.plot_mem_chart(zero_metrics, chart_title=DEFAULT_TITLE)
 
         assert "B/s" in result  # Zero formats as "0.0 B/s"
 
@@ -523,7 +511,6 @@ class TestIntegrationGfx11:
 
         # Generate chart
         chart = mem_chart_gfx11.plot_mem_chart(
-            "per_dispatch",
             metrics,
             chart_title="3. Memory Chart (Normalization: per_dispatch)",
         )
@@ -546,9 +533,7 @@ class TestIntegrationGfx11:
             "DRAM Write Bandwidth": 100e9,  # 100 GB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", metrics, chart_title=DEFAULT_TITLE
-        )
+        chart = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
 
         # All values should show in GB/s since they're in that range
         assert chart.count("GB/s") >= 6
@@ -562,9 +547,7 @@ class TestIntegrationGfx11:
             "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart(
-            "per_kernel", metrics, chart_title=DEFAULT_TITLE
-        )
+        chart = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
 
         # Should contain multiple unit types
         assert "TB/s" in chart
@@ -641,16 +624,14 @@ class TestPlotMemChartGfx9:
     def test_returns_non_empty_string(self):
         """Full sample metrics produce a non-empty chart string."""
         result = mem_chart_gfx9.plot_mem_chart(
-            "per_kernel", dict(GFX9_SAMPLE_METRICS), chart_title=DEFAULT_TITLE
+            dict(GFX9_SAMPLE_METRICS), chart_title=DEFAULT_TITLE
         )
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_empty_metrics(self):
         """Empty metric dict still produces a non-empty chart (N/A placeholders)."""
-        result = mem_chart_gfx9.plot_mem_chart(
-            "per_kernel", {}, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -661,9 +642,7 @@ class TestPlotMemChartGfx9:
             "L2 Hit": 75,
             "HBM Rd": 100,
         }
-        result = mem_chart_gfx9.plot_mem_chart(
-            "per_kernel", partial, chart_title=DEFAULT_TITLE
-        )
+        result = mem_chart_gfx9.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -671,7 +650,6 @@ class TestPlotMemChartGfx9:
         """CDNA output contains every component enabled by the renderer."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
-                "per_kernel",
                 dict(GFX9_SAMPLE_METRICS),
                 chart_title=DEFAULT_TITLE,
             )
@@ -699,7 +677,6 @@ class TestPlotMemChartGfx9:
         """CDNA output prints the heading once outside the chart, with connectors."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
-                "per_kernel",
                 dict(GFX9_SAMPLE_METRICS),
                 chart_title=DEFAULT_TITLE,
             )
@@ -737,7 +714,7 @@ class TestPlotMemChartGfx9:
 def test_chart_title_appears_as_first_line(renderer, metrics):
     """Both renderers print the caller's chart_title as the first line."""
     chart_title = "7. Memory Chart (Normalization: per_kernel)"
-    output = common.strip_ansi(renderer("per_kernel", metrics, chart_title=chart_title))
+    output = common.strip_ansi(renderer(metrics, chart_title=chart_title))
 
     assert output.strip().splitlines()[0] == chart_title
     assert "3. Memory Chart" not in output

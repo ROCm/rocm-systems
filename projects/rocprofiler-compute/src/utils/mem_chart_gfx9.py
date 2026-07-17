@@ -1259,7 +1259,6 @@ class MemChart:
 
 
 def plot_mem_chart(
-    normal_unit: str,
     metric_dict: dict[str, Any],
     *,
     chart_title: str,

@@ -294,9 +294,8 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     calls: dict[str, dict] = {}
 
     def record(name: str, return_value: str):
-        def stub(normal_unit: str, mem_data: dict, *, chart_title: str) -> str:
+        def stub(mem_data: dict, *, chart_title: str) -> str:
             calls[name] = {
-                "normal_unit": normal_unit,
                 "mem_data": mem_data,
                 "chart_title": chart_title,
             }
@@ -330,7 +329,6 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
     unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
     assert calls[expected] == {
-        "normal_unit": "per_wave",
         "mem_data": {"Metric A": 1},
         "chart_title": "7. Memory Chart (Normalization: per_wave)",
     }

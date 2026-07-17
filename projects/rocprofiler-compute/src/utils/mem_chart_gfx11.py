@@ -11,7 +11,7 @@ USAGE:
 
 API:
     normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
-    plot_mem_chart(..., *, chart_title=...) -> str
+    plot_mem_chart(metric_dict, *, chart_title=...) -> str
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
@@ -721,7 +721,6 @@ def create_mem_chart_diagram(
 
 
 def plot_mem_chart(
-    normal_unit: str,
     metric_dict: dict[str, Any],
     *,
     chart_title: str,
