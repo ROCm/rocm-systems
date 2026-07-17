@@ -43,7 +43,7 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
                                                  AddressMode{2, 1}, AddressMode{3, 2}};
 
   for (const auto &mode : kModes) {
-    // VADDR=63, VDATA=68, SRSRC=1 (the descriptor s[4:7]), SOFFSET=128 (zero).
+    // VADDR=63, VDATA=68, raw SRSRC=1 (descriptor s[4:7]), SOFFSET=128 (zero).
     const uint32_t words[] = {tc.encoding | (tc.address_mode_in_hi_word ? 0u : mode.fields << 12),
                               0x8001443fu | (tc.address_mode_in_hi_word ? mode.fields << 22 : 0u)};
     std::unique_ptr<Instruction> inst(decoder->decode(words));
@@ -79,10 +79,21 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
   const bool has_acc = tc.arch == ROCJITSU_CODE_ARCH_CDNA2 || tc.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
                        tc.arch == ROCJITSU_CODE_ARCH_CDNA4;
   if (has_acc) {
-    // Word 1 bit 23 selects the AccVGPR bank for VDATA on CDNA2+.
-    const uint32_t words[] = {tc.encoding, 0x8081443fu};
+    // Word 1 bit 23 selects the AccVGPR bank for VDATA on CDNA2+. Keep both
+    // address components enabled to cover the acc fold together with VADDR
+    // width and SRSRC scaling.
+    const uint32_t words[] = {tc.encoding | (3u << 12), 0x8081443fu};
     std::unique_ptr<Instruction> inst(decoder->decode(words));
     ASSERT_NE(inst, nullptr) << tc.label;
+
+    const auto vaddr = inst->src_operand(0)->to_register_ref();
+    ASSERT_TRUE(vaddr.has_value()) << tc.label;
+    EXPECT_EQ(*vaddr, (RegisterRef{RegClass::VGPR, 63, 2})) << tc.label;
+
+    const auto srsrc = inst->src_operand(1)->to_register_ref();
+    ASSERT_TRUE(srsrc.has_value()) << tc.label;
+    EXPECT_EQ(*srsrc, (RegisterRef{RegClass::SGPR, 4, 4})) << tc.label;
+
     const auto vdata = inst->dst_operand(0)->to_register_ref();
     ASSERT_TRUE(vdata.has_value()) << tc.label;
     EXPECT_EQ(*vdata, (RegisterRef{RegClass::ACC_VGPR, 68, 1})) << tc.label;

@@ -122,6 +122,16 @@ class _True16Vop3Info:
     enabled: bool
 
 
+@dataclass(frozen=True)
+class _OperandCtx:
+    opnd_name: str
+    enc_name: str
+    packed_16bit: bool
+    operand_type: str | None = None
+    has_acc_field: bool = False
+    has_acc_cd_field: bool = False
+
+
 class _SemanticEmitter:
     """Entry point for execute() body generation.
 
@@ -2407,29 +2417,37 @@ class CodeGenerator:
         return 'buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
 
     @staticmethod
-    def _emit_legacy_buffer_helpers() -> str:
-        return textwrap.dedent('''\
-            namespace {
-            template <typename BufferMachineInst>
-            uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+    def _emit_buffer_vaddr_helpers(
+        helper_name: str, machine_inst_type: str, *, templated: bool
+    ) -> str:
+        template_decl = (
+            'template <typename BufferMachineInst>\n            ' if templated else ''
+        )
+        return textwrap.dedent(f'''\
+            namespace {{
+            {template_decl}uint32_t {helper_name}(const {machine_inst_type} *inst) {{
               if (inst->idxen && inst->offen)
                 return 64;
               if (inst->idxen || inst->offen)
                 return 32;
               return 0;
-            }
-            } // namespace''')
+            }}
+            }} // namespace''')
 
     @staticmethod
-    def _emit_vbuffer_helpers() -> str:
+    def _emit_mfma_operand_helpers() -> str:
         return textwrap.dedent('''\
             namespace {
-            uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
-              if (inst->idxen && inst->offen)
-                return 64;
-              if (inst->idxen || inst->offen)
-                return 32;
-              return 0;
+            uint32_t mfma_src2_encoding(uint32_t value, bool acc_cd) {
+              constexpr uint32_t vgpr_min =
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN;
+              constexpr uint32_t vgpr_max =
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX;
+              constexpr uint32_t acc_min =
+                  OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN;
+              return value + (acc_cd && value >= vgpr_min && value <= vgpr_max
+                                  ? acc_min - vgpr_min
+                                  : 0);
             }
             } // namespace''')
 
@@ -5760,32 +5778,9 @@ class CodeGenerator:
         )
 
     @staticmethod
-    def _operand_encoding_value_expr(
-        opnd_name: str,
-        enc_name: str,
-        packed_16bit: bool,
-        operand_type: str | None = None,
-        has_acc_field: bool = False,
-        has_acc_cd_field: bool = False,
-    ) -> str:
-        """C++ expression for the decoded value passed to an Operand constructor.
-
-        For most operands this is just the value. SMEM SBASE and legacy buffer
-        SRSRC fields are encoded in register groups, so this helper scales them
-        to the real SGPR index. CDNA memory encodings also carry their AccVGPR
-        bank selection in a separate ``acc`` bit, so fold that bit into the
-        selector passed to OPR_VGPR_OR_ACCVGPR. MFMA's two ``acc`` bits select
-        the AccVGPR bank for its A/B inputs, and ``acc_cd`` selects it for the
-        C/D operands. This keeps the operand's register-ref (disassembly,
-        def/use, liveness) consistent with execution, which applies these
-        transformations independently.
-        """
-        expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
-        enc_name = enc_name.upper()
-        if enc_name == 'ENC_SMEM' and opnd_name == 'sbase':
-            expr = f'({expr} * 2)'
-        elif enc_name in ('ENC_MUBUF', 'ENC_MTBUF') and opnd_name == 'srsrc':
-            expr = f'({expr} * 4)'
+    def _fold_acc_bank_selector(ctx: _OperandCtx, expr: str) -> str:
+        """Fold separate CDNA accumulator-bank fields into an operand value."""
+        enc_name = ctx.enc_name.upper()
         acc_bank_encodings = {
             'ENC_DS',
             'ENC_MUBUF',
@@ -5797,51 +5792,65 @@ class CodeGenerator:
         }
         if (
             enc_name in acc_bank_encodings
-            and has_acc_field
-            and operand_type == 'OPR_VGPR_OR_ACCVGPR'
+            and ctx.has_acc_field
+            and ctx.operand_type == 'OPR_VGPR_OR_ACCVGPR'
         ):
             expr = (
                 f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc ? '
                 'OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))'
             )
-        elif enc_name in {'ENC_VOP3P', 'ENC_VOP3P_MFMA'} and has_acc_cd_field:
+        elif enc_name in {'ENC_VOP3P', 'ENC_VOP3P_MFMA'} and ctx.has_acc_cd_field:
             if (
-                opnd_name in {'src0', 'src1'}
-                and operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR'
-                and has_acc_field
+                ctx.opnd_name in {'src0', 'src1'}
+                and ctx.operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR'
+                and ctx.has_acc_field
             ):
-                acc_mask = '0x1u' if opnd_name == 'src0' else '0x2u'
+                acc_mask = '0x1u' if ctx.opnd_name == 'src0' else '0x2u'
                 expr = (
                     f'({expr} + ((reinterpret_cast<const OpEncoding*>(inst)->acc & '
                     f'{acc_mask}) ? (OpSelSrcVgprOrAccvgpr::'
                     'OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN - '
                     'OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN) : 0))'
                 )
-            elif opnd_name == 'vdst' and operand_type == 'OPR_VGPR_OR_ACCVGPR':
+            elif ctx.opnd_name == 'vdst' and ctx.operand_type == 'OPR_VGPR_OR_ACCVGPR':
                 expr = (
                     f'({expr} + (reinterpret_cast<const OpEncoding*>(inst)->acc_cd ? '
                     'OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN : 0))'
                 )
             elif (
-                opnd_name == 'src2'
-                and operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST'
+                ctx.opnd_name == 'src2'
+                and ctx.operand_type == 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST'
             ):
-                vgpr_min = (
-                    'OpSelSrcVgprOrAccvgprOrConst::'
-                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN'
-                )
-                vgpr_max = (
-                    'OpSelSrcVgprOrAccvgprOrConst::'
-                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX'
-                )
                 expr = (
-                    f'({expr} + ((reinterpret_cast<const OpEncoding*>(inst)->acc_cd '
-                    f'&& {expr} >= {vgpr_min} && {expr} <= {vgpr_max}) ? '
-                    '(OpSelSrcVgprOrAccvgprOrConst::'
-                    'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN - '
-                    f'{vgpr_min}) : 0))'
+                    f'mfma_src2_encoding({expr}, '
+                    'reinterpret_cast<const OpEncoding*>(inst)->acc_cd)'
                 )
-        if packed_16bit:
+        return expr
+
+    @classmethod
+    def _operand_encoding_value_expr(cls, ctx: _OperandCtx) -> str:
+        """C++ expression for the decoded value passed to an Operand constructor.
+
+        For most operands this is just the value. SMEM SBASE and legacy buffer
+        SRSRC fields are encoded in register groups, so this helper scales them
+        to the real SGPR index. CDNA memory encodings also carry their AccVGPR
+        bank selection in a separate ``acc`` bit, so fold that bit into the
+        selector passed to OPR_VGPR_OR_ACCVGPR. MFMA's two ``acc`` bits select
+        the AccVGPR bank for its A/B inputs, and ``acc_cd`` selects it for the
+        C/D operands. Folding A/B is deliberately gated on ``acc_cd`` so CDNA1,
+        which has ``acc`` but not ``acc_cd``, keeps its raw VGPR-only selectors.
+        This keeps the operand's register-ref (disassembly, def/use, liveness)
+        consistent with execution, which applies these transformations
+        independently.
+        """
+        expr = f'reinterpret_cast<const OpEncoding*>(inst)->{ctx.opnd_name}'
+        enc_name = ctx.enc_name.upper()
+        if enc_name == 'ENC_SMEM' and ctx.opnd_name == 'sbase':
+            expr = f'({expr} * 2)'
+        elif enc_name in ('ENC_MUBUF', 'ENC_MTBUF') and ctx.opnd_name == 'srsrc':
+            expr = f'({expr} * 4)'
+        expr = cls._fold_acc_bank_selector(ctx, expr)
+        if ctx.packed_16bit:
             expr = f'static_cast<unsigned short>({expr})'
         return expr
 
@@ -6002,12 +6011,14 @@ class CodeGenerator:
                                 else ''
                             )
                             operand_value = self._operand_encoding_value_expr(
-                                opnd.name,
-                                enc.enc_name,
-                                bool(packed_16bit_source_arg),
-                                operand_type=opr_type,
-                                has_acc_field='acc' in inst_field_names,
-                                has_acc_cd_field='acc_cd' in inst_field_names,
+                                _OperandCtx(
+                                    opnd_name=opnd.name,
+                                    enc_name=enc.enc_name,
+                                    packed_16bit=bool(packed_16bit_source_arg),
+                                    operand_type=opr_type,
+                                    has_acc_field='acc' in inst_field_names,
+                                    has_acc_cd_field='acc_cd' in inst_field_names,
+                                )
                             )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
@@ -7216,10 +7227,34 @@ class CodeGenerator:
 
                 if enc.enc_name.upper() in ('ENC_MUBUF', 'ENC_MTBUF'):
                     class_func_impls.insert(
-                        0, cgen.Line(self._emit_legacy_buffer_helpers())
+                        0,
+                        cgen.Line(
+                            self._emit_buffer_vaddr_helpers(
+                                'buffer_vaddr_bits',
+                                'BufferMachineInst',
+                                templated=True,
+                            )
+                        ),
                     )
                 elif enc.enc_name.upper() == 'ENC_VBUFFER':
-                    class_func_impls.insert(0, cgen.Line(self._emit_vbuffer_helpers()))
+                    class_func_impls.insert(
+                        0,
+                        cgen.Line(
+                            self._emit_buffer_vaddr_helpers(
+                                'vbuffer_vaddr_bits',
+                                'VbufferMachineInst',
+                                templated=False,
+                            )
+                        ),
+                    )
+
+                if (
+                    self.isa_spec.arch_name.lower() in {'cdna2', 'cdna3', 'cdna4'}
+                    and enc.enc_name.upper() == 'ENC_VOP3P'
+                ):
+                    class_func_impls.insert(
+                        0, cgen.Line(self._emit_mfma_operand_helpers())
+                    )
 
                 if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
                     class_func_impls.insert(0, cgen.Line(self._emit_hwreg_helpers()))

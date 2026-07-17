@@ -3,7 +3,7 @@
 
 """Codegen regressions for semantic register operands."""
 
-from amdisa.codegen._generator import CodeGenerator
+from amdisa.codegen._generator import CodeGenerator, _OperandCtx
 
 
 def test_legacy_buffer_vaddr_width_follows_address_mode():
@@ -16,6 +16,23 @@ def test_legacy_buffer_vaddr_width_follows_address_mode():
     )
 
 
+def test_buffer_vaddr_helper_maps_address_modes_to_zero_one_or_two_vgprs():
+    helper = CodeGenerator._emit_buffer_vaddr_helpers(
+        'buffer_vaddr_bits', 'BufferMachineInst', templated=True
+    )
+    assert helper == '''\
+namespace {
+template <typename BufferMachineInst>
+uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
+  if (inst->idxen && inst->offen)
+    return 64;
+  if (inst->idxen || inst->offen)
+    return 32;
+  return 0;
+}
+} // namespace'''
+
+
 def test_non_buffer_vaddr_keeps_xml_width():
     assert CodeGenerator._buffer_vaddr_operand_size_expr('ENC_FLAT', 'vaddr') is None
     assert CodeGenerator._buffer_vaddr_operand_size_expr('ENC_MUBUF', 'vdata') is None
@@ -24,14 +41,14 @@ def test_non_buffer_vaddr_keeps_xml_width():
 def test_legacy_buffer_srsrc_is_scaled_by_four():
     for enc_name in ('ENC_MUBUF', 'ENC_MTBUF'):
         expr = CodeGenerator._operand_encoding_value_expr(
-            'srsrc', enc_name=enc_name, packed_16bit=False
+            _OperandCtx('srsrc', enc_name, packed_16bit=False)
         )
         assert expr == '(reinterpret_cast<const OpEncoding*>(inst)->srsrc * 4)'
 
 
 def test_other_srsrc_fields_are_not_scaled():
     expr = CodeGenerator._operand_encoding_value_expr(
-        'srsrc', enc_name='ENC_VBUFFER', packed_16bit=False
+        _OperandCtx('srsrc', 'ENC_VBUFFER', packed_16bit=False)
     )
     assert expr == 'reinterpret_cast<const OpEncoding*>(inst)->srsrc'
 
@@ -47,11 +64,13 @@ def test_cdna_memory_acc_bit_selects_accvgpr_bank():
         'ENC_MIMG',
     ):
         expr = CodeGenerator._operand_encoding_value_expr(
-            'vdst',
-            enc_name=enc_name,
-            packed_16bit=False,
-            operand_type='OPR_VGPR_OR_ACCVGPR',
-            has_acc_field=True,
+            _OperandCtx(
+                'vdst',
+                enc_name,
+                packed_16bit=False,
+                operand_type='OPR_VGPR_OR_ACCVGPR',
+                has_acc_field=True,
+            )
         )
         assert expr == (
             '(reinterpret_cast<const OpEncoding*>(inst)->vdst + '
@@ -62,33 +81,39 @@ def test_cdna_memory_acc_bit_selects_accvgpr_bank():
 
 def test_non_accvgpr_operand_ignores_acc_bit():
     expr = CodeGenerator._operand_encoding_value_expr(
-        'addr',
-        enc_name='ENC_DS',
-        packed_16bit=False,
-        operand_type='OPR_VGPR',
-        has_acc_field=True,
+        _OperandCtx(
+            'addr',
+            'ENC_DS',
+            packed_16bit=False,
+            operand_type='OPR_VGPR',
+            has_acc_field=True,
+        )
     )
     assert expr == 'reinterpret_cast<const OpEncoding*>(inst)->addr'
 
 
 def test_non_memory_acc_field_does_not_select_accvgpr_bank():
     expr = CodeGenerator._operand_encoding_value_expr(
-        'vdst',
-        enc_name='ENC_VOP3P',
-        packed_16bit=False,
-        operand_type='OPR_VGPR_OR_ACCVGPR',
-        has_acc_field=True,
+        _OperandCtx(
+            'vdst',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_VGPR_OR_ACCVGPR',
+            has_acc_field=True,
+        )
     )
     assert expr == 'reinterpret_cast<const OpEncoding*>(inst)->vdst'
 
 
 def test_mfma_acc_cd_selects_accvgpr_c_and_d_banks():
     vdst_expr = CodeGenerator._operand_encoding_value_expr(
-        'vdst',
-        enc_name='ENC_VOP3P',
-        packed_16bit=False,
-        operand_type='OPR_VGPR_OR_ACCVGPR',
-        has_acc_cd_field=True,
+        _OperandCtx(
+            'vdst',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_VGPR_OR_ACCVGPR',
+            has_acc_cd_field=True,
+        )
     )
     assert vdst_expr == (
         '(reinterpret_cast<const OpEncoding*>(inst)->vdst + '
@@ -97,37 +122,31 @@ def test_mfma_acc_cd_selects_accvgpr_c_and_d_banks():
     )
 
     src2_expr = CodeGenerator._operand_encoding_value_expr(
-        'src2',
-        enc_name='ENC_VOP3P_MFMA',
-        packed_16bit=False,
-        operand_type='OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST',
-        has_acc_cd_field=True,
+        _OperandCtx(
+            'src2',
+            'ENC_VOP3P_MFMA',
+            packed_16bit=False,
+            operand_type='OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST',
+            has_acc_cd_field=True,
+        )
     )
     assert src2_expr == (
-        '(reinterpret_cast<const OpEncoding*>(inst)->src2 + '
-        '((reinterpret_cast<const OpEncoding*>(inst)->acc_cd && '
-        'reinterpret_cast<const OpEncoding*>(inst)->src2 >= '
-        'OpSelSrcVgprOrAccvgprOrConst::'
-        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN && '
-        'reinterpret_cast<const OpEncoding*>(inst)->src2 <= '
-        'OpSelSrcVgprOrAccvgprOrConst::'
-        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MAX) ? '
-        '(OpSelSrcVgprOrAccvgprOrConst::'
-        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN - '
-        'OpSelSrcVgprOrAccvgprOrConst::'
-        'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_VGPR_MIN) : 0))'
+        'mfma_src2_encoding(reinterpret_cast<const OpEncoding*>(inst)->src2, '
+        'reinterpret_cast<const OpEncoding*>(inst)->acc_cd)'
     )
 
 
 def test_mfma_acc_bits_select_accvgpr_multiplicand_banks():
     for operand_name, acc_mask in (('src0', '0x1u'), ('src1', '0x2u')):
         expr = CodeGenerator._operand_encoding_value_expr(
-            operand_name,
-            enc_name='ENC_VOP3P',
-            packed_16bit=False,
-            operand_type='OPR_SRC_VGPR_OR_ACCVGPR',
-            has_acc_field=True,
-            has_acc_cd_field=True,
+            _OperandCtx(
+                operand_name,
+                'ENC_VOP3P',
+                packed_16bit=False,
+                operand_type='OPR_SRC_VGPR_OR_ACCVGPR',
+                has_acc_field=True,
+                has_acc_cd_field=True,
+            )
         )
         assert expr == (
             f'(reinterpret_cast<const OpEncoding*>(inst)->{operand_name} + '
@@ -135,3 +154,18 @@ def test_mfma_acc_bits_select_accvgpr_multiplicand_banks():
             '(OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN - '
             'OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN) : 0))'
         )
+
+
+def test_mfma_acc_without_acc_cd_does_not_fold_multiplicand_banks():
+    for operand_name in ('src0', 'src1'):
+        expr = CodeGenerator._operand_encoding_value_expr(
+            _OperandCtx(
+                operand_name,
+                'ENC_VOP3P',
+                packed_16bit=False,
+                operand_type='OPR_SRC_VGPR_OR_ACCVGPR',
+                has_acc_field=True,
+                has_acc_cd_field=False,
+            )
+        )
+        assert expr == f'reinterpret_cast<const OpEncoding*>(inst)->{operand_name}'
