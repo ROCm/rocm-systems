@@ -1638,8 +1638,12 @@ class CodeGenerator:
               dsty_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
               srcx0_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
               srcy0_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-              srcx1_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-              srcy1_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+              srcx1_.set_vgpr_msb_role(opx_ == kVopdFmamkF32
+                                           ? amdgpu::VgprMsbRole::Src2
+                                           : amdgpu::VgprMsbRole::Src1);
+              srcy1_.set_vgpr_msb_role(opy_ == kVopdFmamkF32
+                                           ? amdgpu::VgprMsbRole::Src2
+                                           : amdgpu::VgprMsbRole::Src1);
               srcx2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
               srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
@@ -2343,6 +2347,48 @@ class CodeGenerator:
             and sem.semantic_class == 'buffer_store'
             and opnd.name == 'vdata'
         )
+
+    def _fixed_vgpr_msb_role(
+        self, enc_name: str, sem: InstructionSemantics | None, opnd: Operand
+    ) -> str | None:
+        """Return the MODE role fixed by an encoding's physical operand slot."""
+        enc_upper = enc_name.upper()
+        opnd_name = opnd.name
+
+        if enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOP3', 'ENC_VOP3P', 'ENC_VOPC'):
+            if (
+                enc_upper == 'ENC_VOP2'
+                and sem is not None
+                and sem.name.upper() in ('V_FMAMK_F16', 'V_FMAMK_F32', 'V_FMAMK_F64')
+                and opnd_name == 'vsrc1'
+            ):
+                return 'Src2'
+            return {
+                'src0': 'Src0',
+                'src1': 'Src1',
+                'vsrc1': 'Src1',
+                'src2': 'Src2',
+                'vsrc2': 'Src2',
+                'vdst': 'Dst',
+            }.get(opnd_name)
+
+        if enc_upper == 'ENC_VDS':
+            return {
+                'addr': 'Src0',
+                'data0': 'Src1',
+                'data1': 'Src2',
+                'vdst': 'Dst',
+            }.get(opnd_name)
+
+        if enc_upper in ('ENC_VFLAT', 'ENC_VGLOBAL'):
+            return {
+                'vaddr': 'Src0',
+                'vdata': 'Src1',
+                'vsrc': 'Src1',
+                'vdst': 'Dst',
+            }.get(opnd_name)
+
+        return None
 
     def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
         return (
@@ -3186,34 +3232,6 @@ class CodeGenerator:
                         lctx.true16_dst_select = f'{vop3_opsel} & 0x8u'
                     if inst.name in ('V_CVT_F16_FP8', 'V_CVT_F16_BF8'):
                         lctx.fp8_byte_select = f'({vop3_opsel} & 0x2u) >> 1'
-                elif (
-                    uses_true16_e32
-                    and inst.name == 'V_MOV_B16'
-                    and cls == 'vector_mov'
-                    and dtype in ('b16', 'u16')
-                ):
-                    enc_upper = enc_name.upper()
-                    if enc_upper == 'ENC_VOP1':
-                        lctx.true16_dst_select = 'inst_.vdst & 0x80u'
-                        lctx.true16_dst_reg = 'inst_.vdst & 0x7fu'
-                        lctx.true16_src_select = (
-                            '(inst_.src0 >= 256 && inst_.src0 <= 511) '
-                            '? ((inst_.src0 - 256) & 0x80u) : 0u'
-                        )
-                        lctx.true16_src_raw = (
-                            '((inst_.src0 >= 256 && inst_.src0 <= 511) '
-                            '? amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + '
-                            '((inst_.src0 - 256) & 0x7fu), lane) '
-                            ': amdgpu::RegisterAccess(wf).read_lane(src0, lane))'
-                        )
-                elif (
-                    uses_true16_e32
-                    and enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
-                    and has_true16_dst
-                    and cls != 'vector_swap'
-                ):
-                    lctx.true16_dst_select = 'inst_.vdst & 0x80u'
-                    lctx.true16_dst_reg = 'inst_.vdst & 0x7fu'
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
                     lctx.vcc_read = (
                         f'amdgpu::RegisterAccess(wf).read_scalar64({src_ops[2]})'
@@ -4107,27 +4125,9 @@ class CodeGenerator:
             fetch_invalid = 'BPERMUTE_FI' in sem.name.upper()
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
-            L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  uint32_t lane_group_width = wf.wf_size();')
-            L.append(
-                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
-            )
-            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
-            L.append(
-                f'  auto data_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
-            )
-            if is_bpermute:
-                L.append(
-                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
-                )
-            else:
-                L.append(
-                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, exec);'
-                )
-            L.append(
-                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
-            )
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(wf);')
             L.append(
                 f'  if (wf.wf_size() == 64 && (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||'
                 f' cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))'
@@ -4136,7 +4136,7 @@ class CodeGenerator:
             L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = data_region.lane(0, i);')
+            L.append(f'    src_data[i] = regs.read_lane(data0, i);')
             if is_bpermute:
                 # DS_BPERMUTE_B32 (ISA spec pseudocode, page 476):
                 #   tmp[i] = 0 for all lanes
@@ -4147,7 +4147,7 @@ class CodeGenerator:
                 #     if EXEC[i]: VGPR[i][VDST] = tmp[i]
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
-                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
+                L.append(f'    uint32_t addr_val = regs.read_lane(addr, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -4162,7 +4162,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
+                L.append(f'      regs.write_lane(vdst, i, tmp[i]);')
                 L.append(f'  }}')
             else:
                 # DS_PERMUTE_B32 (ISA spec pseudocode, page 475):
@@ -4176,7 +4176,7 @@ class CodeGenerator:
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (!(exec & (1ULL << i))) continue;')
-                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
+                L.append(f'    uint32_t addr_val = regs.read_lane(addr, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -4187,7 +4187,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
+                L.append(f'      regs.write_lane(vdst, i, tmp[i]);')
                 L.append(f'  }}')
             return '\n'.join(L)
 
@@ -4197,22 +4197,11 @@ class CodeGenerator:
             #   for each lane in quad: dst = src[packed_2bit_selector]
             # For BitMode (bit 15=0): swizzle within 32-lane rows via and/or/xor.
             src_field = 'addr'
-            L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
-            L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-            L.append(
-                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
-            )
-            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(cu);')
-            L.append(
-                f'  auto src_region = regs.read_vgpr_region(vb + inst_.{src_field}, 1, full_lane_mask);'
-            )
-            L.append(
-                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
-            )
+            L.append(f'  ::rocjitsu::amdgpu::RegisterAccess regs(wf);')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = src_region.lane(0, i);')
+            L.append(f'    src_data[i] = regs.read_lane({src_field}, i);')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
@@ -4234,7 +4223,7 @@ class CodeGenerator:
             )
             L.append(f'    }}')
             L.append(f'    if (src_lane < wf.wf_size())')
-            L.append(f'      dst_region.set_lane(0, lane, src_data[src_lane]);')
+            L.append(f'      regs.write_lane(vdst, lane, src_data[src_lane]);')
             L.append(f'  }}')
             return '\n'.join(L)
 
@@ -5395,12 +5384,11 @@ class CodeGenerator:
         esz = sem.elem_size if sem.elem_size is not None else default_esz
         ne = sem.num_elems if sem.num_elems is not None else default_ne
         tr_kind = getattr(sem, 'transpose_kind', 0) or default_tr_kind
-        acc = self._acc_vgpr_expr
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
+        L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
@@ -6068,20 +6056,24 @@ class CodeGenerator:
                         if self.isa_spec.profile.uses_vgpr_msb_indexing:
                             _role = None
                             if self._operand_can_use_vgpr_msb(opnd):
-                                if self._vbuffer_store_data_uses_dst_vgpr_msb_role(
+                                _role = self._fixed_vgpr_msb_role(
                                     enc.enc_name, inst_sem, opnd
-                                ):
-                                    _role = 'Dst'
-                                elif opnd.is_output:
-                                    _role = 'Dst'
-                                elif opnd.is_input:
-                                    if vgpr_msb_src_role_idx < len(
-                                        self._VGPR_MSB_SRC_ROLES
+                                )
+                                if _role is None:
+                                    if self._vbuffer_store_data_uses_dst_vgpr_msb_role(
+                                        enc.enc_name, inst_sem, opnd
                                     ):
-                                        _role = self._VGPR_MSB_SRC_ROLES[
-                                            vgpr_msb_src_role_idx
-                                        ]
-                                    vgpr_msb_src_role_idx += 1
+                                        _role = 'Dst'
+                                    elif opnd.is_output:
+                                        _role = 'Dst'
+                                    elif opnd.is_input:
+                                        if vgpr_msb_src_role_idx < len(
+                                            self._VGPR_MSB_SRC_ROLES
+                                        ):
+                                            _role = self._VGPR_MSB_SRC_ROLES[
+                                                vgpr_msb_src_role_idx
+                                            ]
+                                        vgpr_msb_src_role_idx += 1
                             if _role:
                                 vgpr_msb_role_body.append(
                                     f'{opnd.name}.set_vgpr_msb_role(amdgpu::VgprMsbRole::{_role});'
@@ -7811,7 +7803,7 @@ class CodeGenerator:
                     helper_arg_pattern, f'inst.{opnd.name}', prefixed_body
                 )
                 register_access_arg_pattern = (
-                    rf'((?:amdgpu::)?RegisterAccess\(wf\)\.'
+                    rf'((?:(?:amdgpu::)?RegisterAccess\(wf\)|regs)\.'
                     rf'(?:read|write)_(?:scalar64|scalar|lane64|lane|chunk)\()'
                     rf'{_re.escape(opnd.name)}(?=\s*[,)])'
                 )

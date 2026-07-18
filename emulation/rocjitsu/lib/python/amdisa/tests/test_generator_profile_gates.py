@@ -1093,6 +1093,29 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.smem_address_uses_access_size
 
 
+@pytest.mark.parametrize(
+    'enc_name,inst_name,operand_name,expected_role',
+    [
+        ('ENC_VOP2', 'V_FMAMK_F32', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_ADD_F32', 'vsrc1', 'Src1'),
+        ('ENC_VOP1', 'V_SWAP_B32', 'src0', 'Src0'),
+        ('ENC_VDS', 'DS_STORE_ADDTID_B32', 'data0', 'Src1'),
+        ('ENC_VDS', 'DS_LOAD_TR4_B64', 'vdst', 'Dst'),
+        ('ENC_VGLOBAL', 'GLOBAL_STORE_ADDTID_B32', 'vsrc', 'Src1'),
+        ('ENC_VGLOBAL', 'GLOBAL_LOAD_ASYNC_TO_LDS_B8', 'vdst', 'Dst'),
+        ('ENC_VGLOBAL', 'GLOBAL_LOAD_ASYNC_TO_LDS_B8', 'vaddr', 'Src0'),
+    ],
+)
+def test_gfx1250_vgpr_msb_roles_follow_physical_encoding_slots(
+    enc_name: str, inst_name: str, operand_name: str, expected_role: str
+):
+    codegen = object.__new__(CodeGenerator)
+    sem = SimpleNamespace(name=inst_name)
+    operand = SimpleNamespace(name=operand_name)
+
+    assert codegen._fixed_vgpr_msb_role(enc_name, sem, operand) == expected_role
+
+
 def test_rdna3_profile_enables_gfx11_vop3_true16_only():
     profile = Rdna3Profile()
 
@@ -1137,22 +1160,11 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
     vds_body = body_for('ENC_VDS')
     ds_body = body_for('ENC_DS')
 
-    assert (
-        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
-        in vds_body
-    )
-    assert (
-        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
-        not in vds_body
-    )
-    assert (
-        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
-        in ds_body
-    )
-    assert (
-        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
-        not in ds_body
-    )
+    assert 'src_data[i] = regs.read_lane(addr, i);' in vds_body
+    assert 'src_data[i] = regs.read_lane(data0, i);' not in vds_body
+    assert 'regs.write_lane(vdst, lane, src_data[src_lane]);' in vds_body
+    assert 'src_data[i] = regs.read_lane(addr, i);' in ds_body
+    assert 'src_data[i] = regs.read_lane(data0, i);' not in ds_body
     assert '2u * (lane & 0x3u)' in vds_body
     assert '2u * (lane & 0x3u)' in ds_body
 
@@ -1224,6 +1236,52 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
         'vdst(16,OperandType::OPR_VGPR,static_cast<unsignedshort>('
         'reinterpret_cast<constOpEncoding*>(inst)->vdst),true)' in compact_ctor
     )
+
+
+def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
+    gfx1250_generated_root: Path, execute_shared_path: Path
+):
+    vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    vop2 = (gfx1250_generated_root / 'vop2.cpp').read_text()
+    vds = (gfx1250_generated_root / 'vds.cpp').read_text()
+    vglobal = (gfx1250_generated_root / 'vglobal.cpp').read_text()
+    vopd = (gfx1250_generated_root / 'vopd.cpp').read_text()
+    shared = execute_shared_path.read_text()
+
+    mov_b16 = _generated_method_body(vop1, 'VMovB16Vop1', 'VMovB64Vop1')
+    assert 'read_lane(src0, lane)' in mov_b16
+    assert 'write_lane(\n        vdst, lane,' in mov_b16
+    assert 'wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu)' not in mov_b16
+
+    fmac_f16 = _generated_method_body(vop2, 'VFmacF16Vop2', 'VFmamkF16Vop2')
+    assert 'read_lane(vdst, lane)' in fmac_f16
+    assert 'write_lane(\n        vdst, lane,' in fmac_f16
+    assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
+
+    for name, next_name in (
+        ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
+        ('ds_permute_b32_vds', 'ds_swizzle_b32_ds'),
+        ('ds_swizzle_b32_vds', 'image_bvh_intersect_ray_mimg'),
+    ):
+        body = _shared_execute_body(shared, name, next_name)
+        assert 'regs.read_lane(inst.addr' in body
+        assert 'regs.write_lane(inst.vdst' in body
+        assert 'vb + inst.inst_' not in body
+
+    assert 'src_data[i] = regs.read_lane(inst.data0, i);' in shared
+    assert (
+        'd->dst_reg_base =\n      wf.vgpr_alloc().base +\n'
+        '      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
+        'vdst.vgpr_msb_role());' in vds
+    )
+    assert 'data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vds
+    assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
+    assert 'vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);' in vglobal
+    assert 'vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);' in vglobal
+    assert 'vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);' in vop2
+    assert 'src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);' in vop1
+    assert 'srcx1_.set_vgpr_msb_role(opx_ == kVopdFmamkF32' in vopd
+    assert 'srcy1_.set_vgpr_msb_role(opy_ == kVopdFmamkF32' in vopd
 
 
 def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
