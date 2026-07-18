@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -306,7 +307,7 @@ void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -346,7 +347,7 @@ void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -386,7 +387,7 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -426,9 +427,9 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -468,11 +469,11 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -512,13 +513,13 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -752,7 +753,7 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -793,7 +794,7 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -865,69 +866,69 @@ void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 128 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 128 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 128 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 128 + 12], &val3, 4);
-    uint32_t val4 = cu.read_vgpr(data_base + 4, lane);
+    uint32_t val4 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 4, lane);
     std::memcpy(&d->store_data[lane * 128 + 16], &val4, 4);
-    uint32_t val5 = cu.read_vgpr(data_base + 5, lane);
+    uint32_t val5 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 5, lane);
     std::memcpy(&d->store_data[lane * 128 + 20], &val5, 4);
-    uint32_t val6 = cu.read_vgpr(data_base + 6, lane);
+    uint32_t val6 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 6, lane);
     std::memcpy(&d->store_data[lane * 128 + 24], &val6, 4);
-    uint32_t val7 = cu.read_vgpr(data_base + 7, lane);
+    uint32_t val7 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 7, lane);
     std::memcpy(&d->store_data[lane * 128 + 28], &val7, 4);
-    uint32_t val8 = cu.read_vgpr(data_base + 8, lane);
+    uint32_t val8 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 8, lane);
     std::memcpy(&d->store_data[lane * 128 + 32], &val8, 4);
-    uint32_t val9 = cu.read_vgpr(data_base + 9, lane);
+    uint32_t val9 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 9, lane);
     std::memcpy(&d->store_data[lane * 128 + 36], &val9, 4);
-    uint32_t val10 = cu.read_vgpr(data_base + 10, lane);
+    uint32_t val10 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 10, lane);
     std::memcpy(&d->store_data[lane * 128 + 40], &val10, 4);
-    uint32_t val11 = cu.read_vgpr(data_base + 11, lane);
+    uint32_t val11 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 11, lane);
     std::memcpy(&d->store_data[lane * 128 + 44], &val11, 4);
-    uint32_t val12 = cu.read_vgpr(data_base + 12, lane);
+    uint32_t val12 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 12, lane);
     std::memcpy(&d->store_data[lane * 128 + 48], &val12, 4);
-    uint32_t val13 = cu.read_vgpr(data_base + 13, lane);
+    uint32_t val13 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 13, lane);
     std::memcpy(&d->store_data[lane * 128 + 52], &val13, 4);
-    uint32_t val14 = cu.read_vgpr(data_base + 14, lane);
+    uint32_t val14 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 14, lane);
     std::memcpy(&d->store_data[lane * 128 + 56], &val14, 4);
-    uint32_t val15 = cu.read_vgpr(data_base + 15, lane);
+    uint32_t val15 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 15, lane);
     std::memcpy(&d->store_data[lane * 128 + 60], &val15, 4);
-    uint32_t val16 = cu.read_vgpr(data_base + 16, lane);
+    uint32_t val16 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 16, lane);
     std::memcpy(&d->store_data[lane * 128 + 64], &val16, 4);
-    uint32_t val17 = cu.read_vgpr(data_base + 17, lane);
+    uint32_t val17 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 17, lane);
     std::memcpy(&d->store_data[lane * 128 + 68], &val17, 4);
-    uint32_t val18 = cu.read_vgpr(data_base + 18, lane);
+    uint32_t val18 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 18, lane);
     std::memcpy(&d->store_data[lane * 128 + 72], &val18, 4);
-    uint32_t val19 = cu.read_vgpr(data_base + 19, lane);
+    uint32_t val19 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 19, lane);
     std::memcpy(&d->store_data[lane * 128 + 76], &val19, 4);
-    uint32_t val20 = cu.read_vgpr(data_base + 20, lane);
+    uint32_t val20 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 20, lane);
     std::memcpy(&d->store_data[lane * 128 + 80], &val20, 4);
-    uint32_t val21 = cu.read_vgpr(data_base + 21, lane);
+    uint32_t val21 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 21, lane);
     std::memcpy(&d->store_data[lane * 128 + 84], &val21, 4);
-    uint32_t val22 = cu.read_vgpr(data_base + 22, lane);
+    uint32_t val22 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 22, lane);
     std::memcpy(&d->store_data[lane * 128 + 88], &val22, 4);
-    uint32_t val23 = cu.read_vgpr(data_base + 23, lane);
+    uint32_t val23 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 23, lane);
     std::memcpy(&d->store_data[lane * 128 + 92], &val23, 4);
-    uint32_t val24 = cu.read_vgpr(data_base + 24, lane);
+    uint32_t val24 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 24, lane);
     std::memcpy(&d->store_data[lane * 128 + 96], &val24, 4);
-    uint32_t val25 = cu.read_vgpr(data_base + 25, lane);
+    uint32_t val25 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 25, lane);
     std::memcpy(&d->store_data[lane * 128 + 100], &val25, 4);
-    uint32_t val26 = cu.read_vgpr(data_base + 26, lane);
+    uint32_t val26 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 26, lane);
     std::memcpy(&d->store_data[lane * 128 + 104], &val26, 4);
-    uint32_t val27 = cu.read_vgpr(data_base + 27, lane);
+    uint32_t val27 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 27, lane);
     std::memcpy(&d->store_data[lane * 128 + 108], &val27, 4);
-    uint32_t val28 = cu.read_vgpr(data_base + 28, lane);
+    uint32_t val28 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 28, lane);
     std::memcpy(&d->store_data[lane * 128 + 112], &val28, 4);
-    uint32_t val29 = cu.read_vgpr(data_base + 29, lane);
+    uint32_t val29 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 29, lane);
     std::memcpy(&d->store_data[lane * 128 + 116], &val29, 4);
-    uint32_t val30 = cu.read_vgpr(data_base + 30, lane);
+    uint32_t val30 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 30, lane);
     std::memcpy(&d->store_data[lane * 128 + 120], &val30, 4);
-    uint32_t val31 = cu.read_vgpr(data_base + 31, lane);
+    uint32_t val31 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 31, lane);
     std::memcpy(&d->store_data[lane * 128 + 124], &val31, 4);
   }
   set_data(std::move(d));

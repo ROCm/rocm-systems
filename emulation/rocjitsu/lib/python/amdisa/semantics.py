@@ -243,8 +243,13 @@ _SOP1_SCC_NONE_OPS = frozenset(
     {
         'bitset0',
         'bitset1',
-        # SOP1 scalar conversions preserve SCC; only count/bit-scan style
-        # scalar unary ops write SCC from the computed result.
+        # These SOP1 operations have no implicit SCC output in the MR ISA.
+        # Other bit/count unary operations, such as S_NOT and S_BCNT*, do.
+        'brev',
+        'ceil',
+        'clz',
+        'clz64',
+        'ctz',
         'cvt_f16_f32',
         'cvt_f32_f16',
         'cvt_f32_i32',
@@ -252,6 +257,14 @@ _SOP1_SCC_NONE_OPS = frozenset(
         'cvt_hi_f32_f16',
         'cvt_i32_f32',
         'cvt_u32_f32',
+        'ff0',
+        'ff1',
+        'flbit',
+        'flbit_i32',
+        'flbit_i32_i64',
+        'floor',
+        'rndne',
+        'trunc',
     }
 )
 
@@ -395,12 +408,12 @@ _SOP1_SPECIAL = {
     'S_BITREPLICATE': ('scalar_bitreplicate', None),
     'S_CBRANCH_JOIN': ('true_nop', None),
     'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
-    # RDNA4-exclusive SOP1 instructions:
+    # Newer SOP1 spellings shared by RDNA3+ and gfx1250 profiles:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
     'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
     'S_CLZ_I32_U64': ('scalar_unary', 'clz64', 'u64'),
-    'S_CLS_I32': ('scalar_unary', 'cls'),
-    'S_CLS_I32_I64': ('scalar_unary', 'cls64', 'i64'),
+    'S_CLS_I32': None,  # handled specially below
+    'S_CLS_I32_I64': None,
     'S_MOVRELSD2': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD2_B32': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
@@ -431,27 +444,35 @@ _SOP1_SPECIAL = {
 def _derive_sop1(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP1 (Scalar ALU One-operand) instruction."""
     # SAVEEXEC / WREXEC patterns (B64 on CDNA/Wave64, B32 on RDNA/Wave32)
-    m = re.match(r'S_(\w+)_SAVEEXEC_(B32|B64)', name)
+    m = re.fullmatch(r'S_(\w+)_SAVEEXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(
-            name, 'scalar_saveexec', operation=op, data_type=m.group(2).lower()
+            name,
+            'scalar_saveexec',
+            operation=op,
+            data_type=m.group(2).lower(),
+            sets_scc='nonzero',
         )
-    m = re.match(r'S_(\w+)_WREXEC_(B32|B64)', name)
+    m = re.fullmatch(r'S_(\w+)_WREXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(
-            name, 'scalar_wrexec', operation=op, data_type=m.group(2).lower()
+            name,
+            'scalar_wrexec',
+            operation=op,
+            data_type=m.group(2).lower(),
+            sets_scc='nonzero',
         )
 
-    # S_FLBIT_I32 (the one without further suffix) is a special case
-    if name == 'S_FLBIT_I32':
+    # S_CLS is the newer spelling of the signed S_FLBIT operation.
+    if name in ('S_FLBIT_I32', 'S_CLS_I32'):
         return InstructionSemantics(
             name,
             'scalar_unary',
             operation='flbit_i32',
             data_type='i32',
-            sets_scc='nonzero',
+            sets_scc='none',
         )
 
     # Sign-extend instructions
@@ -464,14 +485,14 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             name, 'scalar_unary', operation='sext16', data_type='i32', sets_scc='none'
         )
 
-    # S_FLBIT_I32_I64 - special: reads 64-bit, finds leading bit of signed
-    if name == 'S_FLBIT_I32_I64':
+    # The I64 forms read a full SGPR pair and return a 32-bit count.
+    if name in ('S_FLBIT_I32_I64', 'S_CLS_I32_I64'):
         return InstructionSemantics(
             name,
             'scalar_unary',
             operation='flbit_i32_i64',
             data_type='i64',
-            sets_scc='nonzero',
+            sets_scc='none',
         )
 
     # Try matching each known stem against the name. We prefer a
@@ -629,7 +650,11 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
     if m:
         _, dtype = _split_dtype('X_' + m.group(2))  # reuse dtype parser
         return InstructionSemantics(
-            name, 'scalar_bitcmp', operation='bitcmp' + m.group(1), data_type=dtype
+            name,
+            'scalar_bitcmp',
+            operation='bitcmp' + m.group(1),
+            data_type=dtype,
+            sets_scc='compare',
         )
 
     # S_CMP_<op>_<dtype>
@@ -639,7 +664,11 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
         op = _CMP_OP_MAP.get(cmp_name)
         if op is not None:
             return InstructionSemantics(
-                name, 'scalar_cmp', operation=op, data_type=_DTYPE_MAP[dt_raw]
+                name,
+                'scalar_cmp',
+                operation=op,
+                data_type=_DTYPE_MAP[dt_raw],
+                sets_scc='compare',
             )
     if name == 'S_SET_GPR_IDX_ON':
         return InstructionSemantics(name, 'gpr_idx', operation='on')
@@ -660,9 +689,9 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
     if name == 'S_CMOVK_I32':
         return InstructionSemantics(name, 'scalar_cmovk')
     if name == 'S_ADDK_I32':
-        return InstructionSemantics(name, 'scalar_addk')
+        return InstructionSemantics(name, 'scalar_addk', sets_scc='overflow')
     if name == 'S_ADDK_CO_I32':
-        return InstructionSemantics(name, 'scalar_addk')
+        return InstructionSemantics(name, 'scalar_addk', sets_scc='overflow')
     if name == 'S_MULK_I32':
         return InstructionSemantics(name, 'scalar_mulk')
     if name in ('S_CALL_B64', 'S_CALL_I64'):
@@ -675,7 +704,11 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
         op = _CMP_OP_MAP.get(cmp_name)
         if op is not None:
             return InstructionSemantics(
-                name, 'scalar_cmpk', operation=op, data_type=_DTYPE_MAP[dt_raw]
+                name,
+                'scalar_cmpk',
+                operation=op,
+                data_type=_DTYPE_MAP[dt_raw],
+                sets_scc='compare',
             )
 
     if name == 'S_GETREG_B32':
@@ -1534,7 +1567,7 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
     if name == 'V_PK_MOV_B32':
-        return InstructionSemantics(name, 'pk_mov_b32', accvgpr_srcs=True)
+        return InstructionSemantics(name, 'pk_mov_b32')
 
     # Packed min3/max3 (CDNA4 / RDNA4)
     if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):

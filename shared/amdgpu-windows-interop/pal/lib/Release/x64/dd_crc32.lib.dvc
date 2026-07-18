@@ -1,0 +1,5 @@
+outs:
+- md5: 066a9d36fa0378c538393eb0efc9dad6
+  size: 2362
+  hash: md5
+  path: dd_crc32.lib

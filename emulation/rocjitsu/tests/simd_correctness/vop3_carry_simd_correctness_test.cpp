@@ -9,12 +9,11 @@
 ///   src2-carry-in (RDNA3, sdst pre-bound to VCC by decoder):
 ///     v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32
 /// All six cin-form scalar bodies pull per-lane carry-in from
-/// `inst.src2.read_scalar64(wf)` (SGPR-pair) and write co into
-/// `inst.sdst.write_scalar64`, with inactive lanes zeroed in the
-/// incoming VCC. Each (case, vcc_in, cin) runs TWICE in the same process -- once
-/// forcing the scalar body, once the SIMD fast path, with identical inputs --
-/// and the scalar-vs-SIMD equivalence on BOTH the destination VGPR AND the full
-/// 64-bit SGPR-pair carry result is asserted with EXPECT_EQ
+/// `amdgpu::RegisterAccess(wf).read_scalar64(inst.src2)` (SGPR-pair) and write co
+/// into `inst.sdst.write_scalar64`, with inactive lanes zeroed in the incoming VCC. Each (case,
+/// vcc_in, cin) runs TWICE in the same process -- once forcing the scalar body, once the SIMD fast
+/// path, with identical inputs -- and the scalar-vs-SIMD equivalence on BOTH the destination VGPR
+/// AND the full 64-bit SGPR-pair carry result is asserted with EXPECT_EQ
 /// (util::set_force_scalar_for_testing flips the gate in-process), sweeping
 /// {full, partial} EXEC × {VCC seeds} × {cin patterns}. In-process inactive dst
 /// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
@@ -33,6 +32,7 @@
 
 #include "util/simd.h"
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>

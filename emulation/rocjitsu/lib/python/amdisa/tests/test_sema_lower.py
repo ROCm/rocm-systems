@@ -15,6 +15,8 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.codegen.execute.sema_lower import (
+    _INLINE_BINARY_OPS,
+    InlineBinaryOp,
     LoweringContext,
     OperandBinding,
     OperandMap,
@@ -25,6 +27,33 @@ from amdisa.codegen.execute.sema_lower import (
 _MRISA = os.environ.get('MRISA_PATH', os.path.expanduser('~/rocm-dev/mrisa'))
 SEMA_XML_PATH = os.path.join(_MRISA, 'amdgpu_isa_cdna4.semantics.xml')
 _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
+
+
+@pytest.mark.parametrize(
+    'name', ['addc', 'subb', 'lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add']
+)
+def test_scc_writing_inline_operations_declare_their_effect(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.writes_scc
+
+
+@pytest.mark.parametrize('name', ['addc', 'subb'])
+def test_scc_carry_inline_operations_declare_their_read(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.reads_scc
+
+
+@pytest.mark.parametrize('name', ['lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'])
+def test_scc_shift_add_inline_operations_do_not_read_scc(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert not inline_op.effects.reads_scc
+
+
+def test_non_scc_inline_operation_has_no_scc_effect():
+    assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
 
 
 def _src(idx: int) -> SemaNode:
@@ -136,8 +165,8 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'for (uint32_t lane = 0' in result
         assert 'wf.exec()' in result
-        assert 'read_lane(wf, lane)' in result
-        assert 'write_lane(wf, lane' in result
+        assert 'read_lane(inst.src0, lane)' in result
+        assert 'write_lane(inst.dst0, lane' in result
 
     def test_vector_fma(self):
         body = SemaNode(
@@ -193,8 +222,11 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert 'if (wf.wf_size() <= 32)' in result
-        assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in result
-        assert 'sdst.write_scalar64(wf, vcc)' in result
+        assert (
+            'amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(vcc))'
+            in result
+        )
+        assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, vcc)' in result
 
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
@@ -215,8 +247,8 @@ class TestLowerVectorAdd:
 
         assert 'if (exec != 0)' not in result
         assert 'for (uint32_t lane = 0' in result
-        assert 'src0.read_scalar(wf)' in result
-        assert 'vdst.write_scalar(wf' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(vdst,' in result
         assert 'vdst.write_lane' not in result
 
     def test_vector_sgpr_once_avoids_repeated_aliased_writes(self):
@@ -243,8 +275,8 @@ class TestLowerVectorAdd:
         assert 'uint64_t exec = wf.exec();' in result
         assert 'if (exec != 0)' in result
         assert 'for (uint32_t lane = 0' not in result
-        assert 'src0.read_scalar(wf)' in result
-        assert 'vdst.write_scalar(wf' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(vdst,' in result
 
     def test_less_greater_compare_reads_operands_once(self):
         s0 = _cast(_src(0), SemaType.F32)
@@ -282,8 +314,8 @@ class TestLowerVectorAdd:
         )
 
         assert 'return (a < b) || (a > b);' in result
-        assert result.count('src0.read_lane(wf, lane)') == 1
-        assert result.count('src1.read_lane(wf, lane)') == 1
+        assert result.count('amdgpu::RegisterAccess(wf).read_lane(src0, lane)') == 1
+        assert result.count('amdgpu::RegisterAccess(wf).read_lane(src1, lane)') == 1
 
     def test_zero_initialized_vcc_mask_omits_false_lane_clear(self):
         body = SemaNode(
@@ -349,11 +381,11 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert (
-            'wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
+            'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
             in result
         )
         assert (
-            'wf.cu().write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
+            'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
             in result
         )
         assert '0x0000ffffu' in result
@@ -385,7 +417,10 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert '(src0_raw >> 16)' in result
-        assert '(static_cast<uint16_t>(src0.read_lane(wf, lane)) >> 16)' not in result
+        assert (
+            '(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)) >> 16)'
+            not in result
+        )
 
     def test_true16_source_selects_are_per_operand(self):
         u16 = SemaType('U', 16)
@@ -470,12 +505,12 @@ class TestLowerVectorAdd:
                 1: 'inst_.opsel & 0x2u',
             },
             true16_vop3_opsel='inst_.opsel',
-            vcc_read='src2.read_scalar64(wf)',
+            vcc_read='amdgpu::RegisterAccess(wf).read_scalar64(src2)',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert 'src2.read_scalar64(wf)' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in result
         assert 'src2.read_lane' not in result
         assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
         assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
@@ -562,7 +597,7 @@ class TestLowerVectorAdd:
 
         assert (
             '((inst_.opsel & 0x8u) != 0 ? '
-            '(wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
+            '(amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
             in result
         )
 

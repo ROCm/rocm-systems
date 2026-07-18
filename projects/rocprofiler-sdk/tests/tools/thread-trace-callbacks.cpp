@@ -68,18 +68,8 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         data->memory_size));
 }
 
-typedef void (*rocprofiler_thread_trace_decoder_callback_t)(
-    rocprofiler_thread_trace_decoder_record_type_t record_type_id,
-    void*                                          trace_events,
-    uint64_t                                       trace_size,
-    void*                                          userdata);
-
 void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     void*  se_data,
-                     size_t data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
@@ -103,7 +93,8 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                 latency += wave->instructions_array[i].duration;
         }
     };
-    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, se_data, data_size, nullptr));
+    DECODER_CALL(
+        rocprofiler_trace_decode(decoder, parse, shader_data.data, shader_data.data_size, nullptr));
 }
 
 void

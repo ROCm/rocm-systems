@@ -46,9 +46,13 @@ constexpr uint16_t kVopdMulF64 = 34;
 constexpr uint16_t kVopdMaxNumF64 = 35;
 constexpr uint16_t kVopdMinNumF64 = 36;
 
-Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal, uint16_t encoded) {
-  if (use_literal && encoded == 255)
+Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, bool literal_uses_f64_high_bits,
+                  uint32_t literal, uint16_t encoded) {
+  if (use_literal && encoded == 255) {
+    if (literal_uses_f64_high_bits)
+      return Operand(bits, OperandType::OPR_SIMM32, (static_cast<uint64_t>(literal) << 32), true);
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+  }
   return Operand(bits, vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC, encoded);
 }
 
@@ -172,12 +176,15 @@ uint64_t Vopd::apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx) {
 }
 
 uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
-  uint64_t src0 = apply_neg64(slot.src0->read_lane64(wf, lane), slot.neg, 0);
-  uint64_t src1 = apply_neg64(slot.src1->read_lane64(wf, lane), slot.neg, 1);
+  uint64_t src0 =
+      apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src0, lane), slot.neg, 0);
+  uint64_t src1 =
+      apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src1, lane), slot.neg, 1);
 
   switch (slot.op) {
   case kVopdFmaF64: {
-    uint64_t src2 = apply_neg64(slot.src2->read_lane64(wf, lane), slot.neg, 2);
+    uint64_t src2 =
+        apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src2, lane), slot.neg, 2);
     double result = std::fma(std::bit_cast<double>(src0), std::bit_cast<double>(src1),
                              std::bit_cast<double>(src2));
     return std::bit_cast<uint64_t>(result);
@@ -204,9 +211,10 @@ uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t 
 }
 
 uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
-  uint32_t src0 = slot.src0->read_lane(wf, lane);
-  uint32_t src1 = slot.src1->read_lane(wf, lane);
-  uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane) : slot.src2_imm;
+  uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
+  uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
+  uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
+                                        : slot.src2_imm;
   if (uses_src_neg_modifier(slot.op)) {
     src0 = apply_neg(src0, slot.neg, 0);
     src1 = apply_neg(src1, slot.neg, 1);
@@ -215,8 +223,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 
   switch (slot.op) {
   case kVopdFmacF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                            std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
+    float result =
+        std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
+                 std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmaakF32: {
@@ -255,7 +264,8 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
+    uint64_t condition =
+        slot.uses_vcc ? wf.vcc() : amdgpu::RegisterAccess(wf).read_scalar64(*slot.src2);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
@@ -332,8 +342,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
-    srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
+    srcx0_ = make_src0(x_bits, true, false, false, 0, srcx0);
+    srcy0_ = make_src0(y_bits, true, false, false, 0, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
     srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
@@ -364,8 +374,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
-    srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+    srcx0_ = make_src0(x_bits, false, has_literal_, is_float64_op(opx_), literal_, srcx0);
+    srcy0_ = make_src0(y_bits, false, has_literal_, is_float64_op(opy_), literal_, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
   }
@@ -502,13 +512,13 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
     uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
     if (x64)
-      x_.dst->write_lane64(wf, lane, x_result64);
+      amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
     else
-      x_.dst->write_lane(wf, lane, x_result32);
+      amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result32);
     if (y64)
-      y_.dst->write_lane64(wf, lane, y_result64);
+      amdgpu::RegisterAccess(wf).write_lane64(*y_.dst, lane, y_result64);
     else
-      y_.dst->write_lane(wf, lane, y_result32);
+      amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result32);
   }
 }
 

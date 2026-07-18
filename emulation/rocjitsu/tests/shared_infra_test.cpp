@@ -73,6 +73,7 @@
 
 #include <gtest/gtest.h>
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -3170,7 +3171,7 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   gfx1250::Operand flat_scratch_base(
       64, gfx1250::OperandType::OPR_SRC,
       static_cast<int>(gfx1250::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
-  ASSERT_EQ(flat_scratch_base.read_scalar64(*wf), kScratchBase);
+  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kScratchBase);
 
   const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
   uint32_t vbase = wf->vgpr_alloc().base;
@@ -3370,6 +3371,87 @@ TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
   gfx1250::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.lane_mask, 1ULL);
   EXPECT_EQ(d.per_lane_addr[0], kBase);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_zero_records_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_zero_records_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_zero_records_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3ULL);
+
+  // A null optional pointer is represented by an all-zero descriptor. Its
+  // zero-sized range makes every access out of bounds, so loads return zero
+  // and stores are dropped without touching address zero.
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase + 4, 0, 0);
+  cu->write_vgpr(vbase + 4, 1, 0x1000);
+
+  gfx1250::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.offen = 1;
+  inst.idxen = 0;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.exec_mask, 0x3ULL);
+  EXPECT_EQ(d.lane_mask, 0ULL);
+  EXPECT_EQ(d.per_lane_addr[0], 0ULL);
+  EXPECT_EQ(d.per_lane_addr[1], 0ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_structured_stride_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_structured_stride_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_structured_stride_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  constexpr uint32_t kNumRecords = 2;
+  constexpr uint32_t kStride = 16;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_sgpr(sbase + 40, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 41, static_cast<uint32_t>(kBase >> 32) | (kNumRecords << 25));
+  cu->write_sgpr(sbase + 42, 0);
+  cu->write_sgpr(sbase + 43, kStride << 12);
+  cu->write_vgpr(vbase + 4, 0, kNumRecords - 1);
+  cu->write_vgpr(vbase + 4, 1, kNumRecords);
+
+  gfx1250::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.offen = 0;
+  inst.idxen = 1;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.exec_mask, 0x3ULL);
+  EXPECT_EQ(d.lane_mask, 0x1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase + (kNumRecords - 1) * kStride);
+  EXPECT_EQ(d.per_lane_addr[1], 0ULL);
 }
 
 void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {

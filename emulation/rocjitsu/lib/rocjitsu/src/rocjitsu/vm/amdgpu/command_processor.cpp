@@ -21,6 +21,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -1059,9 +1060,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   std::string kernel_sym;
   if (host_accessible && memory_) {
-    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object);
-    if (range_base != 0) {
-      auto *ko = reinterpret_cast<const uint8_t *>(pkt.kernel_object);
+    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    auto *mapped_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (range_base != 0 && mapped_page) {
+      auto *ko = mapped_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
       auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
       auto *elf = find_elf_base(ko, range_start);
       if (elf) {
@@ -1251,21 +1253,65 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       uint64_t sig = 0;
       sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-      DispatchEntry dp{};
-      dp.dispatch_id = next_dispatch_id_++;
-      dp.queue_id = queue.queue_id;
-      dp.process_id = queue.process_id;
-      dp.total_wgs = 0;
-      dp.completed_wgs = 0;
-      dp.dispatched_wgs = 0;
-      dp.completion_signal = sig;
-      dp.host_signal = false;
+      DispatchEntry dp{
+          .dispatch_id = next_dispatch_id_++,
+          .queue_id = queue.queue_id,
+          .process_id = queue.process_id,
+          .completion_signal = sig,
+          .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+      };
 
       qs.entries.push_back(std::move(dp));
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
       AmdExtKernelDispatchPacket ext{};
       std::memcpy(&ext, &pkt, sizeof(ext));
-      if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+      if (ext.amd_format == kHsaAmdPacketTypeBarrierValue) {
+        AmdBarrierValuePacket barrier{};
+        std::memcpy(&barrier, &pkt, sizeof(barrier));
+
+        bool condition_satisfied = true;
+        if (barrier.signal.handle != 0) {
+          constexpr uint32_t SIG_VAL_OFF = 8;
+          const auto signal_value = std::bit_cast<int64_t>(
+              read_gpu_u64(barrier.signal.handle + SIG_VAL_OFF, queue.process_id));
+          const auto masked_value = signal_value & barrier.mask;
+          switch (barrier.condition) {
+          case HSA_SIGNAL_CONDITION_EQ:
+            condition_satisfied = masked_value == barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_NE:
+            condition_satisfied = masked_value != barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_LT:
+            condition_satisfied = masked_value < barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_GTE:
+            condition_satisfied = masked_value >= barrier.value;
+            break;
+          default:
+            throw std::runtime_error("Unsupported AMD barrier-value condition: " +
+                                     std::to_string(barrier.condition));
+          }
+        }
+
+        if (!condition_satisfied) {
+          // The packet stalls this queue, but other queues (notably SDMA) must
+          // keep running so they can satisfy the dependency.
+          process_limit = read_idx;
+          engine()->schedule_event_now(&doorbell_event_);
+          break;
+        }
+
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = barrier.completion_signal.handle,
+            .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
+
+        qs.entries.push_back(std::move(dp));
+      } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
         if (ext.dep_signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
           auto v = static_cast<int64_t>(
@@ -1306,22 +1352,22 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
         process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
-      } else {
+      } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
         constexpr uint32_t SIG_OFF = 56;
-        uint64_t sig = 0;
-        sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
+        const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
-        DispatchEntry dp{};
-        dp.dispatch_id = next_dispatch_id_++;
-        dp.queue_id = queue.queue_id;
-        dp.process_id = queue.process_id;
-        dp.total_wgs = 0;
-        dp.completed_wgs = 0;
-        dp.dispatched_wgs = 0;
-        dp.completion_signal = sig;
-        dp.host_signal = false;
+        DispatchEntry dp{
+            .dispatch_id = next_dispatch_id_++,
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = sig,
+            .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
 
         qs.entries.push_back(std::move(dp));
+      } else {
+        throw std::runtime_error("Unsupported AMD vendor-specific AQL packet format: " +
+                                 std::to_string(ext.amd_format));
       }
     }
 
@@ -1463,6 +1509,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break;
       if (!entry.is_non_kernel())
         break;
       entry.completed_wgs = entry.total_wgs;

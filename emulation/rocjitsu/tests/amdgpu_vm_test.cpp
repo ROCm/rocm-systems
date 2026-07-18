@@ -184,6 +184,48 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x50000), 0u);
 }
 
+TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
+  amdgpu::GpuMemory mem("vmid_range_mem");
+  KfdProcess process(/*process_id=*/123);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x100000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), backing.size());
+
+  auto [host_base, size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
+  EXPECT_EQ(host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(size, backing.size());
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, FindHostRangeStopsAtNonContiguousVmidHostPages) {
+  amdgpu::GpuMemory mem("vmid_noncontiguous_range_mem");
+  KfdProcess process(/*process_id=*/124);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x200000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), amdgpu::GpuMemory::PAGE_SIZE);
+  process.map_pages(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE,
+                    backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE,
+                    amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [first_host_base, first_size] = mem.find_host_range(kGpuVa, process.process_id());
+  EXPECT_EQ(first_host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(first_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [second_host_base, second_size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE, process.process_id());
+  EXPECT_EQ(second_host_base,
+            reinterpret_cast<uint64_t>(backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE));
+  EXPECT_EQ(second_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  mem.unregister_process(process.process_id());
+}
+
 TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
   constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
@@ -682,6 +724,218 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemor
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
 }
 
+TEST_P(IsaTest, VendorSpecificBarrierValueConditionsWaitAndResume) {
+  struct ConditionCase {
+    uint32_t condition;
+    int64_t initial_signal_value;
+    int64_t ready_signal_value;
+    int64_t value;
+    int64_t mask;
+  };
+  constexpr std::array cases{
+      ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0x106, 0x105, 0x5, 0xff},
+      ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<int64_t>::min(),
+                    std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::min()},
+      ConditionCase{HSA_SIGNAL_CONDITION_NE, 4, 5, 4, std::numeric_limits<int64_t>::max()},
+      ConditionCase{HSA_SIGNAL_CONDITION_LT, 1, 0, 1, std::numeric_limits<int64_t>::max()},
+      ConditionCase{HSA_SIGNAL_CONDITION_GTE, 4, 5, 5, std::numeric_limits<int64_t>::max()},
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.condition);
+    VmFixture f(arch(), 1, 8);
+
+    constexpr uint64_t kDepSignal = 0x7000;
+    constexpr uint64_t kCompletionSignal = 0x7100;
+    constexpr uint32_t kSignalValueOffset = 8;
+    f.mem()->write64(kDepSignal + kSignalValueOffset, test_case.initial_signal_value);
+    f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+
+    amdgpu::AmdBarrierValuePacket barrier{};
+    barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+    barrier.signal.handle = kDepSignal;
+    barrier.value = test_case.value;
+    barrier.mask = test_case.mask;
+    barrier.condition = test_case.condition;
+    barrier.completion_signal.handle = kCompletionSignal;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(barrier);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+    EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 1u);
+
+    f.mem()->write64(kDepSignal + kSignalValueOffset, test_case.ready_signal_value);
+    f.engine->run();
+
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+    EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 0u);
+  }
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueAllowsNullSignals) {
+  VmFixture f(arch(), 1, 8);
+
+  constexpr uint64_t kCompletionSignal = 0x7100;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.condition = HSA_SIGNAL_CONDITION_EQ;
+  barrier.completion_signal.handle = kCompletionSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(barrier);
+  barrier.completion_signal.handle = 0;
+  queue.submit(barrier);
+  f.engine->run();
+
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
+  EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 0u);
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueRejectsInvalidCondition) {
+  VmFixture f(arch(), 1, 8);
+
+  constexpr uint64_t kDepSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.signal.handle = kDepSignal;
+  barrier.mask = std::numeric_limits<int64_t>::max();
+  barrier.condition = 99;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(barrier);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kBarrierCompletionSignal = 0x7000;
+  constexpr uint64_t kLaterCompletionSignal = 0x7100;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kBarrierCompletionSignal + kSignalValueOffset, 1);
+  f.mem()->write64(kLaterCompletionSignal + kSignalValueOffset, 1);
+
+  hsa_kernel_dispatch_packet_t dispatch{};
+  dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  dispatch.setup = 1;
+  dispatch.workgroup_size_x = 64;
+  dispatch.workgroup_size_y = 1;
+  dispatch.workgroup_size_z = 1;
+  dispatch.grid_size_x = 64;
+  dispatch.grid_size_y = 1;
+  dispatch.grid_size_z = 1;
+  dispatch.kernel_object = ko;
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.completion_signal.handle = kBarrierCompletionSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(dispatch);
+  queue.submit(barrier);
+  dispatch.completion_signal.handle = kLaterCompletionSignal;
+  queue.submit(dispatch);
+  (void)f.engine->step();
+
+  EXPECT_EQ(f.cu()->num_wfs(), 1u);
+  EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+  EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
+
+  f.engine->run();
+
+  EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
+  EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+}
+
+TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
+  constexpr std::array packet_types{
+      HSA_PACKET_TYPE_BARRIER_AND,
+      HSA_PACKET_TYPE_BARRIER_OR,
+      HSA_PACKET_TYPE_VENDOR_SPECIFIC,
+  };
+
+  for (const auto packet_type : packet_types) {
+    SCOPED_TRACE(packet_type);
+    VmFixture f(arch(), 1, 8);
+
+    const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    constexpr uint64_t kBarrierCompletionSignal = 0x7000;
+    constexpr uint64_t kLaterCompletionSignal = 0x7100;
+    constexpr uint32_t kSignalValueOffset = 8;
+    f.mem()->write64(kBarrierCompletionSignal + kSignalValueOffset, 1);
+    f.mem()->write64(kLaterCompletionSignal + kSignalValueOffset, 1);
+
+    hsa_kernel_dispatch_packet_t dispatch{};
+    dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    dispatch.setup = 1;
+    dispatch.workgroup_size_x = 64;
+    dispatch.workgroup_size_y = 1;
+    dispatch.workgroup_size_z = 1;
+    dispatch.grid_size_x = 64;
+    dispatch.grid_size_y = 1;
+    dispatch.grid_size_z = 1;
+    dispatch.kernel_object = ko;
+
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = packet_type | (1 << HSA_PACKET_HEADER_BARRIER);
+    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+      barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
+    barrier.completion_signal.handle = kBarrierCompletionSignal;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(dispatch);
+    queue.submit(barrier);
+    dispatch.completion_signal.handle = kLaterCompletionSignal;
+    queue.submit(dispatch);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.cu()->num_wfs(), 1u);
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
+
+    f.engine->run();
+
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+  }
+}
+
+TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
+  constexpr std::array<uint8_t, 2> unsupported_formats{0, 200};
+
+  for (const auto amd_format : unsupported_formats) {
+    SCOPED_TRACE(static_cast<unsigned>(amd_format));
+    VmFixture f(arch(), 1, 8);
+
+    amdgpu::AmdExtKernelDispatchPacket packet{};
+    packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    packet.amd_format = amd_format;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(packet);
+
+    EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  }
+}
+
 TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
   VmFixture f("gfx1250", 1, 1);
 
@@ -998,19 +1252,22 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   ASSERT_NO_THROW(f.engine->run());
 
   amdgpu::Wavefront *wf = nullptr;
+  amdgpu::ComputeUnitCore *active_cu = nullptr;
   for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
     auto *cu = f.cu(cu_idx);
     for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
       if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+        active_cu = cu;
         wf = cu->wf(wf_idx);
         break;
       }
     }
   }
   ASSERT_NE(wf, nullptr);
+  ASSERT_NE(active_cu, nullptr);
   ASSERT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
   EXPECT_EQ(wf->lds().read32(kAddress), kValue);
-  EXPECT_EQ(wf->cu().read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
+  EXPECT_EQ(active_cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
 }
 
 struct ExecFixture {

@@ -37,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -3635,7 +3636,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args[2]);
 }
 
-TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
+TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -3643,7 +3644,8 @@ TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
   constexpr uint32_t kExpected = 0x12345678u;
 
   std::vector<uint32_t> code;
-  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 1));
+  // s_load_b32 s4, s[0:1], 0x4 scale_offset
+  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 4));
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, S_ENDPGM_GFX12);
 
@@ -3994,11 +3996,11 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   dst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
 
-  EXPECT_EQ(src0.read_lane(*wf, kLane), 0x11111111u);
-  EXPECT_EQ(src1.read_lane(*wf, kLane), 0x22222222u);
-  EXPECT_EQ(src2.read_lane(*wf, kLane), 0x33333333u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src0, kLane), 0x11111111u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src1, kLane), 0x22222222u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src2, kLane), 0x33333333u);
 
-  dst.write_lane(*wf, kLane, 0x44444444u);
+  amdgpu::RegisterAccess(*wf).write_lane(dst, kLane, 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 2 * 256 + 5, kLane), 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 5, kLane), 0xDEADBEEFu);
 }
@@ -4022,8 +4024,8 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
 
   gfx1250::Operand lo(16, gfx1250::OperandType::OPR_VGPR, 2, true);
   gfx1250::Operand hi(16, gfx1250::OperandType::OPR_VGPR, 128 + 2, true);
-  EXPECT_EQ(lo.read_lane(*wf, kLane), 0x2222u);
-  EXPECT_EQ(hi.read_lane(*wf, kLane), 0xBBBBu);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x2222u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xBBBBu);
 }
 
 TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {
