@@ -837,6 +837,15 @@ contract:
   Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRejected:
     <<: *level_0
     tags: [graphics_interop]
+  Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
+  Contract_GraphicsInterop_GLRegisterImage_NoGLContext_IsRejected:
+    <<: *level_0
+    tags: [graphics_interop]
   Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue:
     <<: *level_0
     tags: [graph_batch_mem_op]

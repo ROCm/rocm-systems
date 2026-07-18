@@ -5,9 +5,23 @@
  */
 
 #include <cstddef>
+#include <iterator>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+
+// BACKEND-DIFF: the OpenGL-specific interop entry points (hipGLGetDevices,
+// hipGraphicsGLRegisterBuffer/Image) live in hip/hip_gl_interop.h. On AMD that
+// header is self-contained. On NVIDIA it includes <cuda_gl_interop.h>, which
+// includes <GL/gl.h> and so requires OpenGL development headers to be present.
+// A headless CUDA node need not have them (the H100 CI node does not), so
+// including this header on NVIDIA breaks the translation-unit compile outright.
+// The five portable hipGraphics* rejection contracts in this file only need
+// hip_runtime_api.h and stay backend-neutral; the three GL-specific contracts
+// below are gated to AMD so NVIDIA never pulls in the GL header chain.
+#if HT_AMD
+#include <hip/hip_gl_interop.h>
+#endif
 
 // The graphics interop APIs register and map resources owned by a graphics API
 // (OpenGL, Vulkan, D3D). A device-only contract harness cannot create a valid
@@ -68,3 +82,46 @@ HIP_TEST_CASE(Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRe
   hipArray_t array = nullptr;
   RequireRejected(hipGraphicsSubResourceGetMappedArray(&array, nullptr, 0, 0));
 }
+
+// The OpenGL-specific interop entry points below live in hip_gl_interop.h. Their
+// success paths require a current OpenGL context and real GL buffer/image object
+// names, which a device-only contract harness never establishes. Each function
+// checks for a current GL context first, so with no context bound they must
+// report a defined error rather than crashing or silently succeeding. The exact
+// code is backend- and platform-specific (the AMD runtime returns
+// hipErrorInvalidValue for "no GL context is current"), so only a non-success
+// status is required.
+//
+// BACKEND-DIFF: AMD-only. These are gated with the same #if HT_AMD as the GL
+// header include above, because the NVIDIA hip_gl_interop.h pulls in
+// <GL/gl.h> (via <cuda_gl_interop.h>), which a headless CUDA node lacks.
+#if HT_AMD
+HIP_TEST_CASE(Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected) {
+  // Querying the HIP devices for the current GL context with no GL context bound
+  // must be rejected. A positive device-count buffer size is passed so the query
+  // reaches the no-context check rather than short-circuiting on a zero size.
+  unsigned int device_count = 0;
+  int devices[8] = {};
+  RequireRejected(hipGLGetDevices(&device_count, devices,
+                                  static_cast<unsigned int>(std::size(devices)),
+                                  hipGLDeviceListAll));
+}
+
+HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected) {
+  // Registering a GL buffer with no current GL context must be rejected. The
+  // buffer name is a bogus non-zero GLuint; the no-context check fires before the
+  // name is ever dereferenced against GL, so no real GL object is needed.
+  hipGraphicsResource* resource = nullptr;
+  RequireRejected(hipGraphicsGLRegisterBuffer(&resource, 1u, hipGraphicsRegisterFlagsNone));
+}
+
+HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterImage_NoGLContext_IsRejected) {
+  // Registering a GL image with no current GL context must be rejected. As above,
+  // the image name and target are bogus but never reach GL because the no-context
+  // check rejects first. GL_TEXTURE_2D is 0x0DE1.
+  constexpr unsigned int kGlTexture2D = 0x0DE1;
+  hipGraphicsResource* resource = nullptr;
+  RequireRejected(hipGraphicsGLRegisterImage(&resource, 1u, kGlTexture2D,
+                                             hipGraphicsRegisterFlagsNone));
+}
+#endif  // HT_AMD

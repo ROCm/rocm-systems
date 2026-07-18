@@ -41,7 +41,7 @@ The first domains are:
 - `multi_device_launch`: discrete-GPU-gated cooperative, extended, and module-based multi-device kernel launch contracts
 - `driver_launch_ex`: discrete-GPU-gated driver-style extended kernel launch and SM-resource group-split contracts
 - `kernel_name_ref`: AMD kernel-name reflection contracts by function handle and host function pointer
-- `graphics_interop`: graphics-interop resource map, unmap, unregister, and mapped-pointer/array query invalid-input rejection contracts
+- `graphics_interop`: graphics-interop resource map, unmap, unregister, and mapped-pointer/array query invalid-input rejection contracts, plus AMD-gated headless-rejection contracts for the OpenGL entry points (`hipGLGetDevices`, `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`)
 - `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
@@ -166,8 +166,8 @@ and the `hipDeviceptr_t` pointer/integer type-conversion helpers.
 | Domains | 118 | 118 |
 | Domains compiled (non-empty) | 118 | 109 |
 | Domains compile-gated (empty) | 0 | 9 |
-| Registered test cases (ctest) | 587 | 522 |
-| Passed | 587 | 501 |
+| Registered test cases (ctest) | 590 | 522 |
+| Passed | 590 | 501 |
 | Failed | 0 | 0 |
 | Skipped | 0 | 21 |
 
