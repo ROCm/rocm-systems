@@ -155,6 +155,8 @@ The percentages below are approximate API-name coverage against declarations par
 | Extension / proc address | 11 | 13 | 84.6% |
 | IPC | 5 | 5 | 100.0% |
 
+These category buckets overlap (some APIs count under more than one category), so the "Total parsed" column sums to more than the 494-name denominator and the "Covered" column is **not** expected to equal the Snapshot's directly-exercised total. The authoritative covered count is the Snapshot figure, cross-checked against the "Covered APIs" code blocks below; this table is a per-category approximation only. In particular, `Texture / surface` is 51/54, not 54/54: the three uncovered texture APIs are `hipTexRefSetBorderColor`/`hipTexRefGetBorderColor` (the runtime `assert(false)`s, aborting the binary) and `hipBindTextureToMipmappedArray` (Windows-only positive path).
+
 ## Covered APIs
 
 ### Memory / copy / memset
