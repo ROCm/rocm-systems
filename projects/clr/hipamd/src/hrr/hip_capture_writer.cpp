@@ -860,8 +860,12 @@ void emergency_finalize(bool clean_shutdown) {
   p += u64_to_dec(g_event_count.load(), buf + p);
   p = append_lit(buf, p, ",\n  \"blob_count\": ");
   p += u64_to_dec(g_blob_count.load(), buf + p);
-  if (g_metadata_json_len > 0) {
-    p = append_lit(buf, p, ",\n  \"metadata\": ");
+  // g_metadata_json is written once during HRR init before event capture starts.
+  // The crash path reads it lock-free to avoid taking g_file_mu from an exception callback.
+  static constexpr const char* kMetadataFieldPrefix = ",\n  \"metadata\": ";
+  if (g_metadata_json_len > 0 &&
+      p + strlen(kMetadataFieldPrefix) + g_metadata_json_len + sizeof("\n}\n") < sizeof(buf)) {
+    p = append_lit(buf, p, kMetadataFieldPrefix);
     memcpy(buf + p, g_metadata_json, g_metadata_json_len);
     p += g_metadata_json_len;
   }

@@ -35,6 +35,7 @@
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -93,31 +94,52 @@ static std::string read_text_file(const fs::path& path) {
   return ss.str();
 }
 
-static bool json_has_key(const std::string& json, const std::string& key) {
-  return json.find("\"" + key + "\"") != std::string::npos;
+static size_t find_string_end(const std::string& json, size_t quote_pos) {
+  bool escape = false;
+  for (size_t i = quote_pos + 1; i < json.size(); ++i) {
+    const char c = json[i];
+    if (escape) {
+      escape = false;
+    } else if (c == '\\') {
+      escape = true;
+    } else if (c == '"') {
+      return i;
+    }
+  }
+  return std::string::npos;
+}
+
+static size_t find_key_value(const std::string& json, const std::string& key) {
+  size_t pos = 0;
+  while ((pos = json.find('"', pos)) != std::string::npos) {
+    const size_t end = find_string_end(json, pos);
+    if (end == std::string::npos) return std::string::npos;
+    if (json.compare(pos + 1, end - pos - 1, key) == 0) {
+      size_t colon = end + 1;
+      while (colon < json.size() && std::isspace(static_cast<unsigned char>(json[colon]))) ++colon;
+      if (colon < json.size() && json[colon] == ':') {
+        size_t value = colon + 1;
+        while (value < json.size() && std::isspace(static_cast<unsigned char>(json[value]))) ++value;
+        return value;
+      }
+    }
+    pos = end + 1;
+  }
+  return std::string::npos;
 }
 
 static std::string json_string_value(const std::string& json, const std::string& key) {
-  const std::string needle = "\"" + key + "\"";
-  size_t pos = json.find(needle);
-  if (pos == std::string::npos) return {};
-  pos = json.find(':', pos + needle.size());
-  if (pos == std::string::npos) return {};
-  pos = json.find('"', pos + 1);
-  if (pos == std::string::npos) return {};
-  size_t end = json.find('"', pos + 1);
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '"') return {};
+  size_t end = find_string_end(json, pos);
   if (end == std::string::npos) return {};
   return json.substr(pos + 1, end - pos - 1);
 }
 
 static long long json_integer_value(const std::string& json, const std::string& key,
                                     long long missing = -1) {
-  const std::string needle = "\"" + key + "\"";
-  size_t pos = json.find(needle);
+  size_t pos = find_key_value(json, key);
   if (pos == std::string::npos) return missing;
-  pos = json.find(':', pos + needle.size());
-  if (pos == std::string::npos) return missing;
-  ++pos;
   while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
   char* end = nullptr;
   long long value = std::strtoll(json.c_str() + pos, &end, 10);
@@ -125,13 +147,8 @@ static long long json_integer_value(const std::string& json, const std::string& 
 }
 
 static std::string json_object_value(const std::string& json, const std::string& key) {
-  const std::string needle = "\"" + key + "\"";
-  size_t pos = json.find(needle);
-  if (pos == std::string::npos) return {};
-  pos = json.find(':', pos + needle.size());
-  if (pos == std::string::npos) return {};
-  pos = json.find('{', pos + 1);
-  if (pos == std::string::npos) return {};
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '{') return {};
 
   int depth = 0;
   bool in_string = false;
@@ -158,6 +175,11 @@ static std::string json_object_value(const std::string& json, const std::string&
     }
   }
   return {};
+}
+
+static bool json_array_exists(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  return pos != std::string::npos && pos < json.size() && json[pos] == '[';
 }
 
 // ---------------------------------------------------------------------------
@@ -785,24 +807,38 @@ HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
   INFO("comgr_version=" << comgr_version);
   CHECK_FALSE(runtime_version.empty());
   CHECK_FALSE(comgr_version.empty());
-  CHECK(json_has_key(metadata, "device_count"));
-  CHECK(json_has_key(metadata, "captured_device_count"));
+  CHECK(std::count(runtime_version.begin(), runtime_version.end(), '.') == 2);
+  CHECK(std::count(comgr_version.begin(), comgr_version.end(), '.') == 1);
+
   const long long device_count = json_integer_value(metadata, "device_count");
   const long long captured_device_count = json_integer_value(metadata, "captured_device_count");
   CHECK(device_count >= 1);
   CHECK(captured_device_count >= 1);
   CHECK(captured_device_count <= device_count);
-  CHECK(json_has_key(metadata, "devices"));
-  CHECK(json_has_key(metadata, "ordinal"));
-  CHECK(json_has_key(metadata, "properties"));
-  CHECK(json_has_key(metadata, "name"));
-  CHECK(json_has_key(metadata, "gcn_arch_name"));
-  CHECK(json_has_key(metadata, "total_global_mem"));
-  CHECK(json_has_key(metadata, "multi_processor_count"));
-  CHECK(json_has_key(metadata, "compute_mode"));
-  CHECK(json_has_key(metadata, "compute_capability"));
-  CHECK(json_has_key(metadata, "pci"));
-  CHECK(json_has_key(metadata, "uuid"));
+  CHECK(json_array_exists(metadata, "devices"));
+
+  const long long ordinal = json_integer_value(metadata, "ordinal");
+  const long long total_global_mem = json_integer_value(metadata, "total_global_mem");
+  const long long multi_processor_count = json_integer_value(metadata, "multi_processor_count");
+  const long long compute_mode = json_integer_value(metadata, "compute_mode");
+  const std::string name = json_string_value(metadata, "name");
+  const std::string gcn_arch_name = json_string_value(metadata, "gcn_arch_name");
+  const std::string compute_capability = json_string_value(metadata, "compute_capability");
+  const std::string pci = json_string_value(metadata, "pci");
+  const std::string uuid = json_string_value(metadata, "uuid");
+
+  CHECK(ordinal >= 0);
+  CHECK_FALSE(json_object_value(metadata, "properties").empty());
+  CHECK_FALSE(name.empty());
+  CHECK_FALSE(gcn_arch_name.empty());
+  CHECK(total_global_mem > 0);
+  CHECK(multi_processor_count > 0);
+  CHECK(compute_mode >= 0);
+  CHECK_FALSE(compute_capability.empty());
+  CHECK(std::count(compute_capability.begin(), compute_capability.end(), '.') == 1);
+  CHECK_FALSE(pci.empty());
+  CHECK(std::count(pci.begin(), pci.end(), ':') == 2);
+  CHECK_FALSE(uuid.empty());
 }
 
 HIP_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {

@@ -10,6 +10,7 @@
 #include "hip/hip_runtime_api.h"
 
 #include <cstdio>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -27,7 +28,9 @@ namespace {
 std::string json_escape(const char* s) {
   std::string out;
   if (!s) return out;
-  for (const unsigned char c : std::string(s)) {
+  out.reserve(strlen(s));
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s); *p != '\0'; ++p) {
+    const unsigned char c = *p;
     switch (c) {
       case '\\': out += "\\\\"; break;
       case '"':  out += "\\\""; break;
@@ -53,6 +56,16 @@ std::string json_escape(const char* s) {
 std::string json_escape(const std::string& s) { return json_escape(s.c_str()); }
 
 std::string quote(const std::string& s) { return "\"" + json_escape(s) + "\""; }
+
+size_t bounded_strlen(const char* s, size_t max_len) {
+  size_t n = 0;
+  while (n < max_len && s[n] != '\0') ++n;
+  return n;
+}
+
+std::string bounded_string(const char* s, size_t max_len) {
+  return std::string(s, bounded_strlen(s, max_len));
+}
 
 std::string version_string_from_int(int version) {
   if (version <= 0) return "";
@@ -81,8 +94,9 @@ std::string uuid_to_hex(const hipUUID& uuid) {
 
 void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
   os << "      \"properties\": {\n"
-     << "        \"name\": " << quote(prop.name) << ",\n"
-     << "        \"gcn_arch_name\": " << quote(prop.gcnArchName) << ",\n"
+     << "        \"name\": " << quote(bounded_string(prop.name, sizeof(prop.name))) << ",\n"
+     << "        \"gcn_arch_name\": "
+     << quote(bounded_string(prop.gcnArchName, sizeof(prop.gcnArchName))) << ",\n"
      << "        \"total_global_mem\": " << static_cast<unsigned long long>(prop.totalGlobalMem) << ",\n"
      << "        \"multi_processor_count\": " << prop.multiProcessorCount << ",\n"
      << "        \"warp_size\": " << prop.warpSize << ",\n"
@@ -114,15 +128,13 @@ std::string collect_comgr_version() {
          std::to_string(static_cast<unsigned long long>(minor));
 }
 
-std::string collect_runtime_json() {
-  std::ostringstream os;
+void append_runtime_json(std::ostringstream& os) {
   os << "{\n";
 
   const int hip_version = HIP_VERSION;
   os << "    \"hip_runtime_version\": " << quote(version_string_from_int(hip_version)) << ",\n"
      << "    \"comgr_version\": " << quote(collect_comgr_version()) << "\n"
      << "  }";
-  return os.str();
 }
 
 struct DeviceMetadata {
@@ -130,11 +142,10 @@ struct DeviceMetadata {
   int captured_count = 0;
 };
 
-DeviceMetadata collect_device_metadata() {
+DeviceMetadata collect_device_metadata(int device_count) {
   std::ostringstream devices;
   devices << "[";
 
-  const int device_count = static_cast<int>(hip::g_devices.size());
   bool first_device = true;
   int captured_count = 0;
 
@@ -161,24 +172,21 @@ DeviceMetadata collect_device_metadata() {
 
 }  // namespace
 
-std::string Metadata::collect_json() const {
+std::string collect_json() {
   std::ostringstream os;
   os << "{\n"
      << "  \"schema_version\": 1,\n"
-     << "  \"runtime\": " << collect_runtime_json() << ",\n";
+     << "  \"runtime\": ";
+  append_runtime_json(os);
+  os << ",\n";
 
-  int count = 0;
-  count = static_cast<int>(hip::g_devices.size());
-  DeviceMetadata device_metadata = collect_device_metadata();
+  const int count = static_cast<int>(hip::g_devices.size());
+  DeviceMetadata device_metadata = collect_device_metadata(count);
   os << "  \"device_count\": " << count << ",\n";
   os << "  \"captured_device_count\": " << device_metadata.captured_count << ",\n";
   os << "  \"devices\": " << device_metadata.devices_json << "\n"
      << "}";
   return os.str();
-}
-
-std::string collect_json() {
-  return Metadata().collect_json();
 }
 
 }  // namespace metadata

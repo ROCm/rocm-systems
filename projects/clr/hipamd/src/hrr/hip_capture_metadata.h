@@ -14,12 +14,6 @@ namespace metadata {
 // The collector is safe to call from hip_capture_init(): it reads HIP runtime
 // constants and initialized internal device state rather than calling public HIP
 // APIs that would re-enter hip::init().
-class Metadata {
- public:
-  // Returns a JSON object string containing capture environment metadata.
-  std::string collect_json() const;
-};
-
 std::string collect_json();
 
 }  // namespace metadata
