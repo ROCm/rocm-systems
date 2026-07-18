@@ -90,6 +90,7 @@ The first domains are:
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `vmm_handle`: VMM allocation-handle retain, property query, and dma-buf address-range export contracts
+- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) invalid-input rejection contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
 - `driver_copy3d`: driver-style 3D copy contracts

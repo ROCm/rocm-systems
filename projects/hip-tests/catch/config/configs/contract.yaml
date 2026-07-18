@@ -1239,6 +1239,12 @@ contract:
   Contract_VmmHandle_ExportImportShareableHandle_RoundTrips:
     <<: *level_0
     tags: [vmm_handle]
+  Contract_MemMapArray_NullMapList_IsRejected:
+    <<: *level_0
+    tags: [mem_map_array]
+  Contract_MemMapArray_ZeroCount_IsRejected:
+    <<: *level_0
+    tags: [mem_map_array]
   Contract_Copy3D_Malloc3D_ReturnsPitchedPtr:
     <<: *level_0
     tags: [copy3d]
