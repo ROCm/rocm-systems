@@ -104,6 +104,7 @@ The first domains are:
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
 - `device_lifecycle`: device flag, shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
+- `device_reset`: `hipDeviceReset` state-discard and device-still-usable contract (a single isolated test case, since the reset is process-global)
 - `green_context`: device/stream SM resource query, SM split, and green execution context creation, stream, and event contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts

@@ -1464,6 +1464,9 @@ contract:
   Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable:
     <<: *level_0
     tags: [device_lifecycle]
+  Contract_DeviceReset_DiscardsStateAndLeavesDeviceUsable:
+    <<: *level_0
+    tags: [device_reset]
   Contract_GreenContext_GetDevResource_ReportsSmCount:
     <<: *level_0
     tags: [green_context]
