@@ -105,7 +105,13 @@ def _operand_signature(
 ) -> tuple[tuple[str, str, int, bool, bool], ...]:
     """Return a canonical tuple of operand (name, type, size, is_input, is_output).
 
-    TODO: Add fieldless operands.
+    Fieldless operands are excluded because (while inert) they don't affect the
+    generated body, so adding one on a single ISA must not fragment a shared
+    body. As operands are promoted to participate in execute this exclusion
+    must narrow to match ``_execute_operand_participates``: an operand
+    that changes the body has to be in the signature, or differing bodies
+    collide (caught by the body-equality assert in the generator). ``simm32``
+    already participates and is the boundary case.
     """
     return tuple(
         (op.name, op.operand_type, op.size, op.is_input, op.is_output)

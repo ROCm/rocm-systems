@@ -4034,8 +4034,6 @@ TEST(HwregTest, Gfx1250SetregImm32WritesStatus) {
   cu->execute_instruction(inst.get(), *wf);
   EXPECT_EQ(wf->status_raw(), kImm32Value)
       << "gfx1250 s_setreg_imm32_b32 wrote a zero (unpatched) immediate to STATUS";
-
-  cu->reset_all_wf();
 }
 
 } // namespace

@@ -7044,7 +7044,7 @@ class CodeGenerator:
                         # (OPR_SIMM32). _literal_operand_from_expr_stmt returns
                         # None for any non-literal operand (e.g. the OPR_HWREG
                         # selector), so it is safe to offer it every operand.
-                        # Fieldless operands still receive there capability
+                        # Fieldless operands still receive their capability
                         # policy from the apply_fieldless_caps pass above; a
                         # field-bearing literal keeps its default (readable)
                         # caps.
@@ -7774,6 +7774,32 @@ class CodeGenerator:
                         elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
+                            # Tripwire for the hard-coded inline-literal operand
+                            # name in the shared SIMD ternary table. If this ISA
+                            # reaches the shared SIMD path for an inline-literal
+                            # FMA, its instruction must carry the operand the
+                            # template reads `k` from (today `simm32`). gfx1250
+                            # names its literal `literal` and is kept out of this
+                            # path by the sharing preflight; if that ever changes
+                            # this fails loudly at generation instead of emitting
+                            # `inst.simm32` into a C++ file that will not compile.
+                            from amdisa.codegen.execute.simd_codegen import (
+                                simd_ternary_literal_operand_name,
+                            )
+
+                            _lit_name = simd_ternary_literal_operand_name(tmpl_name)
+                            if _lit_name is not None:
+                                assert any(
+                                    o.name == _lit_name for o in inst.operands
+                                ), (
+                                    f'{inst.name}: shared SIMD ternary template '
+                                    f'{tmpl_name!r} reads its inline literal from '
+                                    f'operand {_lit_name!r}, but this instruction '
+                                    f'has no such operand (operands: '
+                                    f'{[o.name for o in inst.operands]}). An ISA '
+                                    f'whose literal is named differently must stay '
+                                    f'out of this shared SIMD path.'
+                                )
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'

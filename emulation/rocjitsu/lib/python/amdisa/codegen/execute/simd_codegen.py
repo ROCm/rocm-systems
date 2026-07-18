@@ -847,6 +847,11 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 #   dst-accumulate (fmac/mac):     fma(s0, s1, dvst)        -- ignores k
 #   literal addend (fmaak/madak):  fma(s0, s1, k)           -- ignores dvst
 #   literal mult  (fmamk/madmk):   fma(s0, k, s1)           -- ignores dvst
+# The inline-literal entries hard-code the literal operand name via
+# `inst.simm32.encoding_value_`. Correct for every ISA shared here (rdna*/cdna*
+# name it `simm32`); gfx1250 names its field-bearing literal `literal` and is
+# kept out of this path by the sharing preflight. `simd_ternary_literal_operand_name()`
+# below exposes this assumption so the generator can assert it per ISA.
 # f16 forms (lane type uint32_t) convert each operand via f16_to_f32_simd and
 # round the result with f32_to_f16_simd (single final round, matching scalar).
 # util::stdx::fma is bit-identical to std::fma for all finite/Inf inputs
@@ -895,6 +900,27 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # Same f16 FMA functor as v_madak_f16.
     'v_fmaak_f16_vop2': ('uint32_t', 'inst.simm32.encoding_value_', _FMA_ADDK_F16),
 }
+
+
+def simd_ternary_literal_operand_name(template_name: str) -> str | None:
+    """Return the C++ operand name a shared SIMD ternary template reads its
+    inline literal from, or None if it has none.
+
+    Inline-literal FMA entries render ``k`` from ``inst.<name>.encoding_value_``,
+    hard-coding ``<name>`` (today always ``simm32``). The generator asserts the
+    instruction carries that operand, so an ISA whose literal is named
+    differently fails at generation instead of emitting non-compiling C++.
+    Dst-accumulate forms (``k`` == ``"0u"``) return None.
+    """
+    spec = SIMD_VOP2_TERNARY.get(template_name)
+    if spec is None:
+        return None
+    k_expr = spec[1]
+    prefix, suffix = 'inst.', '.encoding_value_'
+    if k_expr.startswith(prefix) and k_expr.endswith(suffix):
+        return k_expr[len(prefix) : -len(suffix)]
+    return None
+
 
 SIMD_VOP2_TERNARY_ACCUMULATE = {
     'v_fmac_f16_vop2',

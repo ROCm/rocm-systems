@@ -129,6 +129,11 @@ public:
   /// policy. Emitted by generated constructors in place of a bare fieldless
   /// marker; the (reads_value, writable, is_vgpr) triple comes from the shared
   /// fieldless operand policy table.
+  ///
+  /// @warning Construction-only. Call exactly once, from a constructor,
+  /// before the operand is observable by any reader. The capability flags are
+  /// read locklessly on the CU thread and are assumed immutable after
+  /// construction; mutating them on a live operand is a data race.
   void apply_fieldless_caps(bool reads_value, bool writable, bool is_vgpr) {
     fieldless_ = true;
     reads_value_ = reads_value;
@@ -263,16 +268,23 @@ private:
 public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
+  amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
+
+protected:
+  /// @brief Capability/role flags, set once at construction and never
+  /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
+  /// operands get their (reads_value, writable, is_vgpr) triple from
+  /// apply_fieldless_caps(). Kept out of the public interface so only
+  /// construction can flip them: readers do lockless bool loads on the CU
+  /// thread and rely on the flags being immutable post-construction. Query
+  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless().
+  ///
+  /// Defaults describe a normal field-bearing operand (readable, writable,
+  /// not fieldless).
   bool is_vgpr_ = false;
-  /// @brief Capability flags (see reads_value() / is_writable()). Default to a
-  /// normal field-bearing operand: readable and writable. Fieldless operands
-  /// override these via apply_fieldless_caps().
   bool reads_value_ = true;
   bool writable_ = true;
-  /// @brief True if this operand has no MR ISA encoding field (see
-  /// is_fieldless()). Suppressed from disassembly.
   bool fieldless_ = false;
-  amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.

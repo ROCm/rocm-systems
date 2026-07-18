@@ -436,3 +436,66 @@ def test_fieldless_caps_stmt_emits_policy_caps():
         CodeGenerator._fieldless_caps_stmt('vcc', 'OPR_VCC')
         == 'vcc.apply_fieldless_caps(false, false, false);'
     )
+
+
+# ---------------------------------------------------------------------------
+# FieldlessCaps.__post_init__ enforces the cross-language contract: writable or
+# is_vgpr each imply reads_value. This mirrors the !reads_value() gate on the
+# SIMD write helpers in isa_operand_simd_inl.h, so pin it directly rather than
+# only through full-regen exercise.
+# ---------------------------------------------------------------------------
+def test_fieldless_caps_rejects_writable_without_reads_value():
+    with pytest.raises(ValueError, match='writable/is_vgpr implies reads_value'):
+        FieldlessCaps(reads_value=False, writable=True, is_vgpr=False)
+
+
+def test_fieldless_caps_rejects_vgpr_without_reads_value():
+    with pytest.raises(ValueError, match='writable/is_vgpr implies reads_value'):
+        FieldlessCaps(reads_value=False, writable=False, is_vgpr=True)
+
+
+def test_fieldless_caps_accepts_invariant_respecting_combos():
+    # Fully inert, value-reading-only, and fully-capable are all valid.
+    FieldlessCaps(reads_value=False, writable=False, is_vgpr=False)
+    FieldlessCaps(reads_value=True, writable=False, is_vgpr=False)
+    FieldlessCaps(reads_value=True, writable=True, is_vgpr=True)
+
+
+# ---------------------------------------------------------------------------
+# An interior fieldless operand (the FMAMK/MADMK inline literal) means the
+# field-bearing sources are NOT at their positional src indices. This is the
+# invariant the generator's DPP/SDWA permute path relies on when it addresses
+# permuted sources by name (and asserts they are field-bearing) instead of by
+# src_operands_[] index.
+# ---------------------------------------------------------------------------
+def _v_fmamk_f32():
+    """VOP2 FMAMK layout: vdst, src0, fieldless simm32, vsrc1."""
+    ops = [
+        Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 1),
+        Operand('src0', 32, 'OPR_SRC', True, False, False, False, 2),
+        Operand(
+            'simm32', 32, 'OPR_SIMM32', True, False, False, False, 3, fieldless=True
+        ),
+        Operand('vsrc1', 32, 'OPR_VGPR', True, False, False, False, 4),
+    ]
+    _uniquify_fieldless_names(ops)
+    return Instruction('V_FMAMK_F32', 'ENC_VOP2', 0, ops)
+
+
+def test_interior_fieldless_shifts_positional_source_index():
+    inst = _v_fmamk_f32()
+    # The literal sits between the two field-bearing sources, so a by-index read
+    # of src_operands_[1] would grab the fieldless literal, not vsrc1.
+    assert [op.name for op in inst.src_operands] == ['src0', 'simm32', 'vsrc1']
+    assert inst.src_operands[1].name == 'simm32'
+    assert inst.src_operands[1].fieldless
+
+    # The generator selects DPP/SDWA permute sources by filtering out fieldless
+    # operands, then addresses them by name. That selection yields the real
+    # field-bearing sources in order, and both are field-bearing (matching the
+    # tripwire assert in the permute path).
+    field_bearing_inputs = [
+        op for op in inst.operands if op.is_input and not op.fieldless
+    ]
+    assert [op.name for op in field_bearing_inputs] == ['src0', 'vsrc1']
+    assert all(not op.fieldless for op in field_bearing_inputs[:2])

@@ -24,8 +24,10 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
    instead of a single ``op`` field; skipped via profile skip_encodings.
 6. **V_SWAP_B32 (CDNA4)** - operands marked output-only even though the
    instruction reads both registers; compensated in codegen execute().
-7. **V_FMAMK/V_FMAAK (CDNA4)** - missing ``simm32`` operand; codegen
-   falls back to ``inst_.simm32`` directly.
+7. **V_FMAMK/V_FMAAK (CDNA4)** - the ``simm32`` literal has no
+   ``<FieldName>`` in the MR ISA. It is now carried as a fieldless
+   ``OPR_SIMM32`` operand so codegen reads the literal through the normal
+   operand accessor rather than falling back to ``inst_.simm32`` directly.
 8. **Operand direction bug** - some read-modify-write destinations are
    marked output-only instead of input+output; codegen detects these
    by checking instruction semantics that require the old value.
