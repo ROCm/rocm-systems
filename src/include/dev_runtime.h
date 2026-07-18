@@ -47,6 +47,10 @@ struct ncclDevrCommCreateTask {
   uint32_t deviceCodeVersion;
 };
 
+struct ncclDevrStateCftUc {
+  ncclCftLeId baseId;
+};
+
 struct ncclDevrState {
   // Like localRank/localRanks except "lsa" ranks must be consecutive in the world
   // and all lsa subsets have the same number of ranks. If any condition is
@@ -55,6 +59,12 @@ struct ncclDevrState {
   int lsaSize;
   int* lsaRankList;
   int nLsaTeams;
+
+  int cftSelf;
+  int cftSize;
+  int cftMcSelf;
+  int cftMcSize;
+  struct ncclDevrStateCftUc le;
 
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
@@ -87,6 +97,9 @@ bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
 // Check if there is only one LSA team. This function uses the cached value of comm or computes the
 // value from the comm topology.
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm);
+
+// Returns the CUDA version supported by CFT on this GPU, or 0 when CFT is unsupported.
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport);
 
 // We assume ncclComm has a `ncclDevrState symState` member.
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);

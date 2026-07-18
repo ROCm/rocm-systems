@@ -50,6 +50,7 @@ struct ncclPeerInfo {
   cudaUUID_t gpuUuid;
   struct ncclComm* comm;
   int cudaCompCap;
+  int gpuCftSupport;
   size_t totalGlobalMem;
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;

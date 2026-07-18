@@ -7,6 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE__FUNCS_H_
 #define _NCCL_DEVICE_CORE__FUNCS_H_
+#include "cft__types.h"
 #include "core__types.h"
 #include "comm__types.h"
 #include "ptr__types.h"
@@ -26,6 +27,34 @@ NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const& comm) {
   ncclTeam ans;
   ans.nRanks = comm.lsaSize;
   ans.rank = comm.lsaRank;
+  ans.stride = 1;
+  return ans;
+}
+#endif
+
+#if __cplusplus
+NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const& comm, ncclCftTeamMode_t mode) {
+  ncclTeam flat = comm.cftTeam;
+  if (mode == NCCL_CFT_TEAM_FLAT) {
+    return flat;
+  } else if (mode == NCCL_CFT_TEAM_HIER_MULTIMEM) {
+    flat.nRanks = nccl::utility::idivFast32(flat.nRanks, comm.cftMultimemTeam.nRanks, comm.cftMultimemSize_rcp32);
+    flat.rank = nccl::utility::idivFast32(flat.rank, comm.cftMultimemTeam.nRanks, comm.cftMultimemSize_rcp32);
+    flat.stride *= comm.cftMultimemTeam.nRanks;
+    return flat;
+  } else if (mode == NCCL_CFT_TEAM_HIER_LSA) {
+    flat.nRanks = nccl::utility::idivFast32(flat.nRanks, comm.lsaSize, comm.lsaSize_rcp32);
+    flat.rank = nccl::utility::idivFast32(flat.rank, comm.lsaSize, comm.lsaSize_rcp32);
+    flat.stride *= comm.lsaSize;
+    return flat;
+  }
+  return ncclTeam{};
+}
+
+NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const& comm) {
+  ncclTeam ans;
+  ans.nRanks = comm.cftMultimemTeam.nRanks;
+  ans.rank = comm.cftMultimemTeam.rank;
   ans.stride = 1;
   return ans;
 }
@@ -155,6 +184,34 @@ NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset
 #endif
 
 #ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetCftLeInfo(ncclWindow_t w, size_t offset, int peerCft, ncclTeam cftTeam,
+                                         ncclDevComm const& comm, ncclCftLeId* leId, size_t* leOffset) {
+  ncclTeam flatTeam = nccl::utility::loadConst(&comm.cftTeam);
+  *leId = nccl::utility::loadConst(&comm.ucLeId) + flatTeam.rank + (peerCft - cftTeam.rank) * cftTeam.stride;
+  *leOffset = (size_t(w->mcOffset4K) << 12) + offset;
+}
+#endif
+
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetPeerLeInfo(ncclWindow_t w, size_t offset, int peerWorld, ncclDevComm const& comm,
+                                          ncclCftLeId* leId, size_t* leOffset) {
+  int worldRank = nccl::utility::loadConst(&w->worldRank);
+  ncclTeam cftTeam = nccl::utility::loadConst(&comm.cftTeam);
+  int i = cftTeam.rank * cftTeam.stride + (peerWorld - worldRank);
+  *leId = nccl::utility::loadConst(&comm.ucLeId) + i;
+  *leOffset = (size_t(w->mcOffset4K) << 12) + offset;
+}
+#endif
+
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetMultimemLeInfo(ncclWindow_t w, size_t offset, ncclDevComm const& comm, ncclCftLeId* leId,
+                                              size_t* leOffset) {
+  *leId = nccl::utility::loadConst(&comm.mcLeId);
+  *leOffset = (size_t(w->mcOffset4K) << 12) + offset;
+}
+#endif
+
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclWindow_t ncclFindWindow(Coop coop, ncclDevComm const& comm, void const* ptr) {
   using nccl::utility::loadConst;
@@ -233,6 +290,31 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const&
 #ifdef __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   return ncclGetResourceBufferMultimemPointer(comm, h, comm.lsaMultimem);
+}
+#endif
+
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetResourceBufferCftLeInfo(ncclDevComm const& comm, ncclDevResourceHandle h, int peerCft,
+                                                       ncclCftLeId* leId, size_t* leOffset) {
+  *leId = comm.ucLeId + peerCft * comm.cftTeam.stride;
+  *leOffset = (size_t(comm.resourceWindow_inlined.mcOffset4K) << 12) + size_t(h) * 128;
+}
+#endif
+
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetResourceBufferPeerLeInfo(ncclDevComm const& comm, ncclDevResourceHandle h, int peerWorld,
+                                                        ncclCftLeId* leId, size_t* leOffset) {
+  int i = comm.cftTeam.rank * comm.cftTeam.stride + (peerWorld - comm.rank);
+  *leId = comm.ucLeId + i;
+  *leOffset = (size_t(comm.resourceWindow_inlined.mcOffset4K) << 12) + size_t(h) * 128;
+}
+#endif
+
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE void ncclGetResourceBufferMultimemLeInfo(ncclDevComm const& comm, ncclDevResourceHandle h,
+                                                            ncclCftLeId* leId, size_t* leOffset) {
+  *leId = comm.mcLeId;
+  *leOffset = (size_t(comm.resourceWindow_inlined.mcOffset4K) << 12) + size_t(h) * 128;
 }
 #endif
 

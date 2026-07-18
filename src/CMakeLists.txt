@@ -19,6 +19,7 @@ set(LIBSRCFILES
     allocator.cc
     sym_kernels.cc
     dev_runtime.cc
+    cft_dev_runtime.cc
     dev_runtime_segments.cc
     mem_manager.cc
 )

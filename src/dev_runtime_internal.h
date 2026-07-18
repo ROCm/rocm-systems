@@ -17,6 +17,34 @@ struct ncclComm;
 struct ncclSegmentWindow;
 struct ncclWindow_vidmem;
 
+// Complete type for dev_runtime.h's forward declaration.
+struct ncclDevrTeam {
+  struct ncclDevrTeam* next;
+  struct ncclTeam team;
+  CUmemGenericAllocationHandle mcHandle;
+  void* mcBasePtr;
+  ncclCftLeId ucLeId;
+  ncclCftLeId mcLeId;
+  int worldRankList[];
+};
+
+// Non-static functions in dev_runtime.cc also called from cft_dev_runtime.cc:
+int computeLsaSize(struct ncclComm* comm);
+ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, bool multimem, bool wantsLeUc, bool wantsLeMc,
+                           struct ncclDevrTeam** outTeam, bool* needBarrier);
+ncclResult_t findCommAndHostWindowFromDeviceWindow(ncclWindow_t devWindow, ncclComm_t* foundComm,
+                                                   struct ncclDevrWindow** hostWindow);
+
+// Functions in cft_dev_runtime.cc called from dev_runtime.cc:
+int computeCftSize(struct ncclComm* comm);
+int computeCftMcSize(struct ncclComm* comm);
+ncclResult_t symBindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le);
+ncclResult_t symUnbindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le);
+ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
+                               bool* needBarrier);
+ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
+                               bool* needBarrier);
+
 struct ncclDevrGinSegmentInfo {
   void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
   ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];

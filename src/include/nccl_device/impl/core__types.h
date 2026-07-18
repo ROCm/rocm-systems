@@ -17,6 +17,9 @@ typedef void* ncclGinWindow_t;
 #include "nccl_device/gin/gin_device_host_common.h"
 #endif
 
+// CFT Logical Endpoint ID
+#define NCCL_LE_ID_INVALID ((ncclCftLeId_t) - 1)
+
 struct ncclSegmentWindow {
   ncclGinWindow_t ginWins[NCCL_GIN_MAX_CONNECTIONS];
   size_t segmentSize;
@@ -35,6 +38,7 @@ struct ncclWindow_vidmem {
   ncclGinWindow_t ginWinsDefaultBackend[NCCL_GIN_MAX_CONNECTIONS];
   struct ncclSegmentWindow* ginMultiSegmentWins; // multi-segment: pointer to accommodate variable num segments
   int numSegments;
+  int cftFlatRank;
 };
 
 // Inlined resource-window. A subset of ncclWindow_vidmem with only the fields used

@@ -803,6 +803,7 @@ struct ncclComm {
   bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
   int symmetricSupport;
+  int gpuCftSupport;
   bool useNetPXN;
   bool useGdr;
   bool hasMloPart; // if mlopart is used

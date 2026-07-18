@@ -12,6 +12,7 @@
 #include "ll_a2a__types.h"
 #include "lsa_barrier__types.h"
 #include "gin_barrier__types.h"
+#include "cft_barrier__types.h"
 
 #if __cplusplus
 struct ncclDevCommWindowTable {
@@ -65,6 +66,15 @@ struct ncclDevComm {
 
   ncclGinBarrierHandle_t worldGinBarrier;
   uint32_t ginConnectionStride_rcp32;
+
+  // CFT
+  ncclTeam_t cftTeam;
+  ncclTeam_t cftMultimemTeam;
+  uint32_t cftMultimemSize_rcp32;
+  ncclCftLeId ucLeId;
+  ncclCftLeId mcLeId;
+  ncclCftBarrierHandle_t cftBarrier;
+  ncclCftBarrierHandle_t cftMultimemBarrier;
 };
 
 #endif // _NCCL_DEVICE_COMM__TYPES_H_
