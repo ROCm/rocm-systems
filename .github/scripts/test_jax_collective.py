@@ -37,17 +37,22 @@ log = logging.getLogger(__name__)
 JAX_REPO = "https://github.com/ROCm/jax.git"
 JAX_REF = "66918cf7a6adef25e8f71dbebb954e6dd5393109"  # jax-v0.10.2-testing
 
-SMOKE_TESTS = [
-    "tests/pmap_test.py::PythonPmapTest::testBasic",
-    "tests/pmap_test.py::PythonPmapTest::testGather",
-    "tests/pmap_test.py::PythonPmapTest::testReduceScatter",
-    "tests/pmap_test.py::PythonPmapTest::testCollectivePermute",
-    "tests/pmap_test.py::PythonPmapTest::testAllToAll0",
-    "tests/shard_map_test.py::ShardMapTest::test_all_gather",
-    "tests/shard_map_test.py::ShardMapTest::test_matmul_reduce_scatter",
-    "tests/shard_map_test.py::ShardMapTest::test_collective_permute",
-    "tests/shard_map_test.py::ShardMapTest::test_axis_index",
-    "tests/shard_map_test.py::ShardMapTest::test_all_to_all_multiple_axis_names",
+SMOKE_TEST_FILES = [
+    "tests/pmap_test.py",
+    "tests/shard_map_test.py",
+]
+
+SMOKE_TEST_KEYWORDS = [
+    "PythonPmapTest and testBasic",
+    "PythonPmapTest and testGather and not testGatherBool and not testGatherNeg and not testGatherTiled and not testGatherReplica",
+    "PythonPmapTest and testReduceScatter and not Tiled and not Replica",
+    "PythonPmapTest and testCollectivePermute and not Grad and not Cyclic",
+    "PythonPmapTest and testAllToAll and not Replica and not Vmap and not Grad",
+    "ShardMapTest and test_all_gather and not invariant and not axis_index",
+    "ShardMapTest and test_matmul_reduce_scatter",
+    "ShardMapTest and test_collective_permute and not multiple",
+    "ShardMapTest and test_axis_index and not basic and not twoaxes and not eager",
+    "ShardMapTest and test_all_to_all and not axis_index and not grad",
 ]
 
 XLA_ENV = {
@@ -197,13 +202,15 @@ def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
     """Run pytest on the 10 collective smoke tests and return (exit_code, summary)."""
     junit_xml = results_log.parent / "jax_collective_results.xml"
 
+    k_expr = " or ".join(f"({kw})" for kw in SMOKE_TEST_KEYWORDS)
     cmd = [
         sys.executable, "-m", "pytest",
         "-sv",
         "--timeout=120",
         "--tb=short",
         f"--junitxml={junit_xml}",
-    ] + SMOKE_TESTS
+        "-k", k_expr,
+    ] + SMOKE_TEST_FILES
 
     log.info("Running: %s", " ".join(cmd))
 
@@ -251,11 +258,11 @@ def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
     else:
         log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
 
-    if tests_run < len(SMOKE_TESTS):
+    if tests_run < len(SMOKE_TEST_KEYWORDS):
         log.error(
-            "Expected %d smoke tests but only %d were collected — "
+            "Expected at least %d smoke tests but only %d were collected — "
             "tests may have been skipped or deselected",
-            len(SMOKE_TESTS),
+            len(SMOKE_TEST_KEYWORDS),
             tests_run,
         )
         exit_code = 1
@@ -266,7 +273,7 @@ def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
         "failed": failed_tests,
         "summary_line": summary_line,
         "tests_run": tests_run,
-        "expected_tests": len(SMOKE_TESTS),
+        "expected_tests": len(SMOKE_TEST_KEYWORDS),
     }
     return exit_code, summary
 
