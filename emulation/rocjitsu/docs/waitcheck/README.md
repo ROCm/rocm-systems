@@ -17,18 +17,137 @@ The LLVM parity map is used as a regression checklist for known wait patterns,
 not as a requirement that kernels came from LLVM. See
 [`../waitcheck-llvm-parity.md`](../waitcheck-llvm-parity.md).
 
-## Build
+## Build from Source
 
-From the RocJITsu workspace:
+With Git, `uv`, CMake, Ninja, and the zlib/zstd development packages installed,
+clone this branch and install the latest gfx1250 TheRock nightly SDK in a local
+virtual environment:
 
 ```sh
+git clone --branch users/kuhar/waitcheck --single-branch \
+  https://github.com/ROCm/rocm-systems.git
+cd rocm-systems/emulation/rocjitsu
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+uv pip install --prerelease allow \
+  --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+  "rocm[libraries,devel,device-gfx1250]"
+rocm-sdk init
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DROCM_PATH="$(rocm-sdk path --root)" \
+  -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)"
 cmake --build build --target rj_waitcheck rocjitsu_waitcheck_hooks
 ```
 
-The expected build products are:
+This produces `build/tools/rj_waitcheck` and
+`build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`. See
+[`../building.md`](../building.md) for prerequisites and other build options.
 
-- `build/tools/rj_waitcheck`
-- `build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so`
+## Quick Start: gfx1250
+
+Waitcheck finds missing AMDGPU wait synchronization in final kernel ISA. It is
+not a general shared-memory data-race detector. Offline checking does not need a
+GPU; dispatch-lazy checking requires a gfx1250 system on which the application
+can run.
+
+Run these commands from the `emulation/rocjitsu` directory used above with its
+`.venv` still active, then name the two build products for the examples:
+
+```sh
+WAITCHECK="$PWD/build/tools/rj_waitcheck"
+WAITCHECK_HOOK="$PWD/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so"
+```
+
+### HIP C++
+
+This deliberately malformed kernel loads an SGPR and consumes it without the
+required wait. The inline assembly keeps LLVM from repairing the hazard:
+
+```cpp
+#include <hip/hip_runtime.h>
+
+__global__ void missing_wait() {
+  asm volatile("s_load_dword s4, s[0:1], 0\n\t"
+               // Deliberately missing: "s_wait_kmcnt 0\n\t"
+               "s_mov_b32 s5, s4" ::: "s4", "s5", "memory");
+}
+
+int main() {
+  missing_wait<<<1, 1>>>();
+  return hipDeviceSynchronize();
+}
+```
+
+Save it as `missing_wait.hip`, compile it for gfx1250, and check the embedded
+device code offline:
+
+```sh
+amdclang++ -O2 -x hip --offload-arch=gfx1250 missing_wait.hip -o missing_wait
+"$WAITCHECK" ./missing_wait --target gfx1250
+```
+
+To check only kernels that the program actually dispatches, run the same binary
+with the HSA tool loaded. Each kernel is checked immediately before its first
+dispatch and then cached:
+
+```sh
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB="$WAITCHECK_HOOK" \
+ROCJITSU_WAITCHECK_MODE=dispatch \
+ROCJITSU_WAITCHECK_FAIL=1 \
+ROCJITSU_WAITCHECK_SUMMARY=1 \
+  ./missing_wait
+```
+
+### PyTorch
+
+Install the gfx1250 nightly wheel in a virtual environment:
+
+```sh
+uv venv --python 3.12 .venv-gfx1250
+source .venv-gfx1250/bin/activate
+uv pip install --prerelease allow \
+  --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+  amd-torch-device-gfx1250 numpy
+```
+
+For an offline check of every gfx1250 kernel shipped in the installation:
+
+```sh
+TORCH_DIR=$(python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent)')
+"$WAITCHECK" "$TORCH_DIR" --exhaustive --target gfx1250 \
+  -j12 --progress --max-diagnostics 32
+```
+
+For a fast, dispatch-lazy check of only the PyTorch operations in one workload:
+
+```sh
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB="$WAITCHECK_HOOK" \
+ROCJITSU_WAITCHECK_MODE=dispatch \
+ROCJITSU_WAITCHECK_FAIL=1 \
+ROCJITSU_WAITCHECK_SUMMARY=1 \
+  python -c 'import torch; x=torch.randn(1024, device="cuda"); print(torch.sin(x).sum().item())'
+```
+
+Exit status `0` means no hazards were found. Offline status `4` means at least
+one hazard was found. With `ROCJITSU_WAITCHECK_FAIL=1`, lazy mode stops before
+dispatching a kernel with a reported hazard; use `0` to report and continue.
+
+### Reading a Diagnostic
+
+A diagnostic names the required wait, the register being reused, and the
+producer and consumer instructions. Offline output looks like:
+
+```text
+missing_wait:gfx1250[0]:.text+0x10: missing s_wait_kmcnt <= 0 before use of s4
+  producer .text+0x8: s_load_b32 s4, s[0:1], 0x0
+  consumer .text+0x10: s_mov_b32 s5, s4
+```
+
+The HSA tool reports the same information with a `rocjitsu-waitcheck:` prefix
+and includes the dispatched kernel name. The `.text` offsets can be passed to
+`rj_co --disassemble-window` when a larger ISA window is needed.
 
 ## Offline CLI
 
@@ -64,15 +183,15 @@ tree or another release corpus:
 
 ```sh
 build/tools/rj_waitcheck /path/to/site-packages/torch \
-  --exhaustive --target gfx950 --summary-only -j16 --slowest-kernels 10
+  --exhaustive --target gfx1250 --summary-only -j16 --slowest-kernels 10
 ```
 
 Preserve every diagnostic from an exhaustive sweep as machine-readable JSONL:
 
 ```sh
 build/tools/rj_waitcheck /path/to/site-packages/torch \
-  --exhaustive --target gfx942 --summary-only --no-fail -j12 \
-  --diagnostics-jsonl gfx942-diagnostics.raw.jsonl
+  --exhaustive --target gfx1250 --summary-only --no-fail -j12 \
+  --diagnostics-jsonl gfx1250-diagnostics.raw.jsonl
 ```
 
 `--diagnostics-jsonl` schedules one kernel per work item so each record carries
