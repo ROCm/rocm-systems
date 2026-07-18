@@ -242,8 +242,8 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         total_count=int(row.count),
         issue_count=None if pd.isna(row.count_issued) else int(row.count_issued),
         stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
-        stall_reasons=row.stall_reason if isinstance(row.stall_reason, dict) else {},
-        inst_types=row.inst_type if isinstance(row.inst_type, dict) else {},
+        stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
+        inst_types={} if pd.isna(row.inst_type) else row.inst_type,
     )
 
 
