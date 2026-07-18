@@ -319,6 +319,60 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInval
   (void)hipGetLastError();
 }
 
+// The mipmap-parameter setters write their value into the textureReference and
+// report success on an image-capable device. Unlike the bind/array entry points,
+// these operate on a bare stack reference (no registered device symbol needed):
+// the runtime writes the field directly (clr/hipamd/src/hip_texture.cpp) after
+// the image-support gate. The value is observable through the matching getter's
+// out-parameter, which the runtime populates before returning its documented
+// hipErrorInvalidValue sentinel, so the set value round-trips even though the
+// getter's return code is the stub error. A null reference is rejected with
+// hipErrorInvalidValue before the image gate, so that check is backend-neutral.
+HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterSetters_WriteAndReject) {
+  // Null-reference rejection is checked first because it does not depend on image
+  // support (the runtime null-checks before the device image-capability gate).
+  REQUIRE(hipTexRefSetMipmapFilterMode(nullptr, hipFilterModeLinear) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  REQUIRE(hipTexRefSetMipmapLevelBias(nullptr, 1.0f) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  REQUIRE(hipTexRefSetMipmapLevelClamp(nullptr, 0.0f, 1.0f) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference reference{};
+
+  const hipError_t filter_set = hipTexRefSetMipmapFilterMode(&reference, hipFilterModeLinear);
+  if (IsUnsupported(filter_set)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetMipmapFilterMode is not supported by this runtime path.");
+  }
+  REQUIRE(filter_set == hipSuccess);
+  // The getter writes the stored value into the out-parameter before returning
+  // its documented hipErrorInvalidValue, so the set value is observable here.
+  hipTextureFilterMode read_filter = hipFilterModePoint;
+  (void)hipTexRefGetMipmapFilterMode(&read_filter, &reference);
+  (void)hipGetLastError();
+  REQUIRE(read_filter == hipFilterModeLinear);
+
+  constexpr float kBias = 2.5f;
+  REQUIRE(hipTexRefSetMipmapLevelBias(&reference, kBias) == hipSuccess);
+  float read_bias = -1.0f;
+  (void)hipTexRefGetMipmapLevelBias(&read_bias, &reference);
+  (void)hipGetLastError();
+  REQUIRE(read_bias == kBias);
+
+  constexpr float kMinClamp = 1.0f;
+  constexpr float kMaxClamp = 7.0f;
+  REQUIRE(hipTexRefSetMipmapLevelClamp(&reference, kMinClamp, kMaxClamp) == hipSuccess);
+  float read_min = -1.0f;
+  float read_max = -1.0f;
+  (void)hipTexRefGetMipmapLevelClamp(&read_min, &read_max, &reference);
+  (void)hipGetLastError();
+  REQUIRE(read_min == kMinClamp);
+  REQUIRE(read_max == kMaxClamp);
+}
+
 // ---------------------------------------------------------------------------
 // Mipmapped-array texref contracts: a module-backed reference round-trips a
 // mipmapped array handle through the deprecated set/get entry points, and the

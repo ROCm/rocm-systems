@@ -98,7 +98,7 @@ The first domains are:
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `driver_texture_object`: driver-style texture object creation and descriptor-introspection contracts
 - `texture_reference`: image-gated deprecated texture-reference scalar set/get contracts (address mode, filter mode, flags, format, max anisotropy)
-- `texture_reference_symbol`: image-gated symbol-backed texture-reference bind, module-texref address/array round-trip, and deprecated-stub mipmap contracts
+- `texture_reference_symbol`: image-gated symbol-backed texture-reference bind, module-texref address/array round-trip, and deprecated mipmap-parameter setter/getter contracts
 - `context`: driver-style device and context query contracts
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
@@ -166,8 +166,8 @@ and the `hipDeviceptr_t` pointer/integer type-conversion helpers.
 | Domains | 118 | 118 |
 | Domains compiled (non-empty) | 118 | 109 |
 | Domains compile-gated (empty) | 0 | 9 |
-| Registered test cases (ctest) | 590 | 522 |
-| Passed | 590 | 501 |
+| Registered test cases (ctest) | 591 | 522 |
+| Passed | 591 | 501 |
 | Failed | 0 | 0 |
 | Skipped | 0 | 21 |
 
