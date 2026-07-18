@@ -10,6 +10,16 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA backend it only
+// wraps cuStreamGetCaptureInfo_v2, which CUDA provides in 11.3-12.x and removed
+// in CUDA 13 (superseded by v3). Gate the test that calls it so it compiles on
+// AMD and on pre-13 CUDA, and is absent on CUDA 13+ where the entry point is gone.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
+#define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 1
+#else
+#define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 0
+#endif
+
 namespace {
 constexpr int kExpectedValue = 0x1234;
 
@@ -85,6 +95,7 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpected
   REQUIRE(result == kExpectedValue);
 }
 
+#if HIP_CONTRACT_HAS_CAPTURE_INFO_V2
 HIP_TEST_CASE(Contract_CaptureToGraph_UpdateCaptureDependencies_AddsToDependencySet) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -132,3 +143,4 @@ HIP_TEST_CASE(Contract_CaptureToGraph_UpdateCaptureDependencies_AddsToDependency
   HIP_CHECK(hipGraphGetNodes(graph, nullptr, &node_count));
   REQUIRE(node_count >= 2);
 }
+#endif  // HIP_CONTRACT_HAS_CAPTURE_INFO_V2

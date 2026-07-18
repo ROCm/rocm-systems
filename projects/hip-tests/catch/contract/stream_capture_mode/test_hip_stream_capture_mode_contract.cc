@@ -11,6 +11,16 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA backend it only
+// wraps cuStreamGetCaptureInfo_v2, which CUDA provides in 11.3-12.x and removed
+// in CUDA 13 (superseded by v3). Gate the tests that call it so they compile on
+// AMD and on pre-13 CUDA, and skip on CUDA 13+ where the entry point is absent.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
+#define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 1
+#else
+#define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 0
+#endif
+
 namespace {
 constexpr size_t kByteCount = 64;
 
@@ -41,6 +51,7 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_NullMode_IsRejected) {
 }
 #endif
 
+#if HIP_CONTRACT_HAS_CAPTURE_INFO_V2
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCapture) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -108,3 +119,4 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_NullStatus_IsRejected)
   REQUIRE(hipStreamGetCaptureInfo_v2(stream, nullptr, &capture_id, nullptr, nullptr, nullptr) !=
           hipSuccess);
 }
+#endif  // HIP_CONTRACT_HAS_CAPTURE_INFO_V2

@@ -10,6 +10,17 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// The batch discard entry points (hipMemDiscardBatchAsync and friends) exist on
+// AMD, but on the NVIDIA backend they wrap cudaMemDiscardBatchAsync, which CUDA
+// added only in 13.2. Gate the discard tests so they compile on AMD and on
+// CUDA >= 13.2, and are absent on earlier CUDA. The batch-prefetch test below is
+// not gated: hipMemPrefetchBatchAsync is available from CUDA 13.0.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 13020)
+#define HIP_CONTRACT_HAS_MEM_DISCARD_BATCH 1
+#else
+#define HIP_CONTRACT_HAS_MEM_DISCARD_BATCH 0
+#endif
+
 namespace {
 constexpr size_t kRangeBytes = 4096;
 
@@ -85,6 +96,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 }
 }  // namespace
 
+#if HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
 HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -195,6 +207,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
 }
+#endif  // HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
 
 HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
