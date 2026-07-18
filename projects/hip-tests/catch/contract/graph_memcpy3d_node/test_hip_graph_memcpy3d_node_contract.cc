@@ -189,9 +189,15 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-point the instantiated node at the second buffer through the executable
-  // setter. The next launch must copy the second buffer without re-instantiate.
+  // setter.
   hipMemcpy3DParms updated = MakeH2DParams(second.data(), device);
-  HIP_CHECK(hipGraphExecMemcpyNodeSetParams(exec, node, &updated));
+  const hipError_t update_status = hipGraphExecMemcpyNodeSetParams(exec, node, &updated);
+
+#if HT_AMD
+  // On AMD the executable setter accepts re-pointing the copy at a different host
+  // source allocation after instantiation, and the next launch copies the second
+  // buffer without a re-instantiate.
+  HIP_CHECK(update_status);
 
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
@@ -200,4 +206,26 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
 
   ReadBack(&dst, device);
   REQUIRE(dst == second);
+#else
+  // On NVIDIA hipGraphExecMemcpyNodeSetParams maps to
+  // cudaGraphExecMemcpyNodeSetParams, which does NOT allow changing the memory
+  // operands of an instantiated node to a different allocation: re-pointing the
+  // source to a separate host buffer is rejected with hipErrorInvalidValue
+  // (probe-confirmed: an identical-params update and the non-exec
+  // hipGraphMemcpyNodeSetParams both succeed; only the exec-time retarget to a
+  // different allocation is refused). Assert the documented rejection, then prove
+  // the executable is still usable by launching the originally instantiated copy
+  // (the first buffer) so the node/exec remain valid. If CUDA relaxes this
+  // restriction, this branch is where the expectation changes to match AMD.
+  REQUIRE(update_status == hipErrorInvalidValue);
+  (void)hipGetLastError();
+
+  HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  ReadBack(&dst, device);
+  REQUIRE(dst == first);
+#endif
 }
