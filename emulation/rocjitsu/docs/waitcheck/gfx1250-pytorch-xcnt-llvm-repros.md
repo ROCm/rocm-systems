@@ -1,26 +1,38 @@
-# gfx1250 XCNT hazards in LLVM-generated PyTorch kernels
+# gfx1250 XCNT hazards in PyTorch kernels
 
 ## Summary
 
-We found five gfx1250 XCNT diagnostics while checking the PyTorch
-`2.11.0+rocm7.15.0a20260717` wheel. Source rebuilds and LLVM pass dumps reduce
-them to two LLVM code-generation patterns:
+We investigated 15 distinct gfx1250 kernel entries sampled from 18,772 XCNT
+diagnostics in the PyTorch `2.11.0+rocm7.15.0a20260717` wheel. Exact source
+rebuilds, physical-MIR controls, and LLVM pass dumps reduce the confirmed
+reports to four root-cause patterns:
 
 1. `SIInsertWaitcnts` relies on a branch to drain XCNT, then
    `SIPreEmitPeephole` removes the branch without preserving the drain. This
-   accounts for four of the five sampled kernels.
+   accounts for 11 sampled kernel entries.
 2. XCNT scoring includes liveness-only implicit super-register operands on
    spill pseudos. This accounts for the `warpMergeSortTopK<double>` kernel.
+3. rocPRIM's RDNA4 `atomic_store(__uint128_t)` inline assembly waits for
+   STORE_CNT but omits the independent XCNT source-register wait. LLVM cannot
+   repair the opaque assembly.
+4. `SIPreEmitPeephole::removeExeczBranch()` removes a different branch used by
+   `SIInsertWaitcnts` as an XCNT drain. This is independently reproducible with
+   a normal `GLOBAL_STORE_DWORDX4` physical instruction.
 
-We believe both are real wait hazards according to LLVM's own gfx1250 XCNT
-model. The reduced testcases make the final ISA issue reproducible, but we have
-not demonstrated runtime corruption. We would like AMDGPU codegen maintainers
-to confirm the hardware requirement before bugs are filed more broadly.
+All four are real wait hazards according to LLVM's own gfx1250 XCNT model. The
+reduced testcases make the final ISA issues reproducible, but we have not
+demonstrated runtime corruption. One additional true16 case, `bd-3ay6.34`,
+also agrees with LLVM's regunit model, but its first unsafe pass is not yet
+pinned down; it remains a minimization task rather than a separately
+attributed bug report.
 
-The attached IR files are compiler-only reproducers and must not be executed:
+The attached files are compiler-only reproducers. Their generated kernels and
+code objects must not be executed:
 
 - [`repro-gfx1250-xcnt-branch-delete.ll`](repro-gfx1250-xcnt-branch-delete.ll)
 - [`repro-gfx1250-xcnt-spill.ll`](repro-gfx1250-xcnt-spill.ll)
+- [`repro-gfx1250-xcnt-rocprim-inline-asm.hip`](repro-gfx1250-xcnt-rocprim-inline-asm.hip)
+- [`repro-gfx1250-xcnt-remove-execz.mir`](repro-gfx1250-xcnt-remove-execz.mir)
 
 ## Toolchain snapshot
 
@@ -29,14 +41,16 @@ The attached IR files are compiler-only reproducers and must not be executed:
   `723bffa5dfbf92e452b0d4a0df674bdd849fcf12`
 - PyTorch wheel: `2.11.0+rocm7.15.0a20260717`
 - PyTorch source: `6f6864920e0c21f7a59eb6ba2186d08ce0ec6d49`
-- Waitcheck source: `users/kuhar/waitcheck` at
-  `73cc0e0353aae4cc02af5016ee27a8a057681cd7`
+- Waitcheck source: `users/kuhar/waitcheck`; the initial sweep used
+  `73cc0e0353aae4cc02af5016ee27a8a057681cd7`, and the explicit-EXEC reporting
+  correction described below is `e6b3756631`
 
 The commands below use the compiler from that wheel environment. A compiler
 built from the named ROCm LLVM commit can be substituted.
 
 ```sh
 AMDCLANG=/path/to/amdclang++
+LLC=/path/to/llc
 WAITCHECK=/path/to/rj_waitcheck
 ```
 
@@ -133,7 +147,7 @@ without preserving its synchronization effect.
 ### Original kernels with this pattern
 
 We observed the same `SIInsertWaitcnts` then `SIPreEmitPeephole` transition in
-four independently sampled kernels:
+11 independently sampled kernel entries:
 
 | PyTorch object and kernel | Source provenance | Representative final hazard |
 | --- | --- | --- |
@@ -141,10 +155,17 @@ four independently sampled kernels:
 | `torch.120.co`, `binary_cross_entropy_out_cuda<double>`, entry `0x113f00` | `aten/src/ATen/native/cuda/Loss.cu:71-102` | `global_store_b8 v[18:19], v0` at `0x1221e8`, then definition of data `v0` at `0x1221f4`; requires `s_wait_xcnt 0` |
 | `torch.58.co`, `div_trunc_kernel_cuda<short>`, entry `0x1c4400` | `aten/src/ATen/native/cuda/BinaryDivTruncKernel.cu:18-48` | `global_store_d16_hi_b8 v[8:9], v1` at `0x1cae2c`, then definition of `v1` at `0x1cae38`; requires `s_wait_xcnt 0` |
 | `torch.165.co`, rocPRIM `reduce_by_key<unsigned char, long>`, entry `0xbdd00` | Triggered by `aten/src/ATen/native/cuda/TensorModeKernel.cu:23-81` | `s_load_b64 s[34:35], s[0:1]` at `0xbdfc0`, then definition of address `s0` at `0xbdfcc`; requires `s_wait_xcnt 0` |
+| `torch.161.co`, `heaviside<BFloat16>`, entry `0x516b00` | `aten/src/ATen/native/cuda/StepKernel.cu:22` | `global_load_u16 v3, v[0:1]` at `0x51e100`, then definition of `EXEC_LO` at `0x51e13c`; requires `s_wait_xcnt 0` |
+| `torch.73.co`, `copysign<float>`, entry `0x92600` | `aten/src/ATen/native/cuda/CopysignKernel.cu:23` | `global_store_b8 v[0:1], v2` at `0x93648`, then definition of `EXEC_LO` at `0x9366c`; requires `s_wait_xcnt 0` |
+| `torch.165.co`, rocPRIM `merge_sort_block_merge<long, long>`, entry `0x170f00` | Triggered by `aten/src/ATen/native/cuda/TensorModeKernel.cu` | `s_load_b64 s[2:3], s[0:1]` at `0x171278`, then definition of address `s0` at `0x171290`; requires `s_wait_xcnt 0` |
+| `torch.58.co`, `div_trunc_kernel_cuda<short>`, entry `0x1cca00` | `aten/src/ATen/native/cuda/BinaryDivTruncKernel.cu:18` | `global_store_d16_hi_b8 v[6:7], v3` at `0x1d4aa4`, then definitions of payload `v3` and address `v6`; requires `s_wait_xcnt 0` |
+| `torch.133.co`, `addcmul<uint8_t>`, entry `0x4a000` | `aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:24` | `global_load_u8 v4, v[12:13]` at `0x5483c`, then definitions of both address halves at `0x54850` and `0x54858`; requires `s_wait_xcnt 0` |
+| `torch.161.co`, `nextafter<double>`, entry `0x74e00` | `aten/src/ATen/native/cuda/StepKernel.cu:14` | Two unrolled `global_store_b8` producers are each followed by payload and address definitions; 18 reports share two producer bugs |
+| `torch.120.co`, `binary_cross_entropy_out_cuda<float>`, entry `0x1cc300` | `aten/src/ATen/native/cuda/Loss.cu:71` | `global_store_b8 v[2:3], v1` at `0x1d8cf4`, then payload and address definitions, including a later packed-dual definition of `v3` |
 
-The first three originate in HIP/CUDA source compiled by clang. The fourth is
-a rocPRIM template instantiated by PyTorch's mode implementation. The common
-failure is in late machine-code transformation, not in the source operation.
+These are ordinary HIP/CUDA or rocPRIM template instantiations compiled by
+clang, not handwritten memory instructions. The common failure is in late
+machine-code transformation, not in the source operation.
 
 ## Reproducer 2: spill-pseudo implicit operands corrupt XCNT scoring
 
@@ -236,15 +257,177 @@ scratch_store_b128 v0, v[10:13] -> v_mov_b64 v[10:11] requires xcnt <= 7
 scratch_store_b128 v0, v[10:13] -> v_mov_b64 v[12:13] requires xcnt <= 7
 ```
 
+## Reproducer 3: rocPRIM RDNA4 uint128 store waits the wrong domain
+
+This is a **rocPRIM library bug**, not an LLVM pass bug. rocPRIM emits the
+memory instruction as opaque inline assembly, so LLVM cannot discover its
+VMEM/XCNT event. The inline assembly waits for store completion but releases
+its input registers without waiting for their XCNT source lock.
+
+[`repro-gfx1250-xcnt-rocprim-inline-asm.hip`](repro-gfx1250-xcnt-rocprim-inline-asm.hip)
+contains an unsafe kernel and a fixed control. They are code-generation tests
+only; do not execute them because they use address zero.
+
+Compile and check the two kernel entries with the compiler from the gfx1250
+wheel:
+
+```sh
+$AMDCLANG -x hip --offload-arch=gfx1250 --offload-device-only \
+  --no-gpu-bundle-output -O3 -c \
+  repro-gfx1250-xcnt-rocprim-inline-asm.hip \
+  -o repro-gfx1250-xcnt-rocprim-inline-asm.co
+
+$WAITCHECK repro-gfx1250-xcnt-rocprim-inline-asm.co \
+  --target gfx1250 --kernel-entry 0x0 --no-fail
+$WAITCHECK repro-gfx1250-xcnt-rocprim-inline-asm.co \
+  --target gfx1250 --kernel-entry 0x100 --no-fail
+```
+
+The unsafe kernel reports:
+
+```text
+.text+0x2c: missing s_wait_xcnt 0 before def of v2
+  producer .text+0x1c: global_store_b128 v[0:1], v[2:5], NULL
+  consumer .text+0x2c: v_mov_b32_e32 v2, 1
+```
+
+The fixed kernel reports `diagnostics=0`. Its only material difference is the
+XCNT wait:
+
+```asm
+global_store_b128 v[0:1], v[2:5], off scope:SCOPE_DEV
+s_wait_storecnt 0x0
+s_wait_xcnt 0x0
+v_mov_b32_e32 v2, 1
+```
+
+### Root cause
+
+The shipped rocPRIM implementation is
+`rocprim/intrinsics/atomic.hpp:284-305`: the inline-assembly macro is defined
+at lines 289-290, and its RDNA4 global form at lines 304-305 emits
+`global_store_b128` followed only by `s_wait_storecnt 0`. LLVM keeps STORE_CNT
+and X_CNT separate in `SIInsertWaitcnts.cpp:1815-1835`; it scores all source
+registers for XCNT at lines 1212-1223, requires waits before physical
+definitions at lines 2740-2741, and explicitly does not simplify XCNT through
+a pending store at lines 1537-1543. Because the producer is hidden inside an
+`INLINEASM` instruction, none of those normal MachineInstr rules can repair
+the library's incomplete assembly contract.
+
+The original reports were the rocPRIM scan kernels in `torch.29.co`, entry
+`0x35700` (payload reuse, `bd-3ay6.29`), and `torch.189.co`, entry `0x1ca00`
+(address and EXEC reuse, `bd-3ay6.30`). PyTorch reaches the operation through
+its normal scan use; the handwritten ISA belongs to rocPRIM.
+
+## Reproducer 4: `removeExeczBranch` deletes an XCNT drain
+
+This is a separate **LLVM backend bug**. The direct reproducer is physical MIR
+because the defect is a relation between two late machine passes; MIR keeps
+the reproducer small and deterministic instead of retaining the 1.9 MiB
+source-derived IR needed to preserve this exact EXECZ route.
+
+Run the two passes independently on
+[`repro-gfx1250-xcnt-remove-execz.mir`](repro-gfx1250-xcnt-remove-execz.mir):
+
+```sh
+$LLC -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1250 \
+  -run-pass=si-insert-waitcnts repro-gfx1250-xcnt-remove-execz.mir \
+  -o remove-execz.after-wait.mir
+
+$LLC -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1250 \
+  -run-pass=si-pre-emit-peephole remove-execz.after-wait.mir \
+  -o remove-execz.after-preemit.mir
+```
+
+After `SIInsertWaitcnts`, the region is unchanged and internally safe:
+
+```text
+GLOBAL_STORE_DWORDX4 ... $vgpr2_vgpr3, $vgpr18_vgpr19_vgpr20_vgpr21 ...
+S_WAIT_STORECNT 0
+S_CBRANCH_EXECZ %bb.2, implicit $exec
+...
+$vgpr2 = V_MOV_B32_e32 0, implicit $exec
+```
+
+No explicit XCNT wait is needed at this point because the branch is itself an
+XCNT drain. After `SIPreEmitPeephole`, the branch is gone:
+
+```text
+GLOBAL_STORE_DWORDX4 ... $vgpr2_vgpr3, $vgpr18_vgpr19_vgpr20_vgpr21 ...
+S_WAIT_STORECNT 0
+...
+$vgpr2 = V_MOV_B32_e32 0, implicit $exec
+```
+
+Produce a final code object for waitcheck with:
+
+```sh
+$LLC -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1250 \
+  -start-after=si-pre-emit-peephole -filetype=obj \
+  remove-execz.after-preemit.mir -o remove-execz.o
+
+$AMDCLANG --target=amdgcn-amd-amdhsa -mcpu=gfx1250 \
+  -nostdlib -shared remove-execz.o -o remove-execz.hsaco
+
+$WAITCHECK remove-execz.hsaco --target gfx1250 --no-fail
+```
+
+The final object is four instructions and reports:
+
+```text
+.text+0x10: missing s_wait_xcnt 0 before def of v2
+  producer .text+0x0: global_store_b128 v[2:3], v[18:21], NULL
+  consumer .text+0x10: v_mov_b32_e32 v2, 0
+```
+
+### Root cause
+
+LLVM explicitly classifies every branch as an XCNT drain in
+`SIInstrInfo.cpp:3539-3542`; `SIInsertWaitcnts` applies `X_CNT=0` to its state
+for such instructions in `SIInsertWaitcnts.cpp:3070-3073`. Later,
+`SIPreEmitPeephole::removeExeczBranch()` erases a legal forward
+`S_CBRANCH_EXECZ` without preserving that synchronization effect
+(`SIPreEmitPeephole.cpp:487-512`, dispatched at lines 790-802). Wait insertion
+does not run again.
+
+The original `torch.189.co` kernel exhibits this exact before/after
+transition. Its earlier EXEC overwrites are independently unsafe because of
+the rocPRIM inline-assembly defect above; the deleted branch specifically
+creates the later explicit-address `v2` hazard. The native-MIR producer proves
+that the compiler defect is not limited to opaque inline assembly.
+
+## Waitcheck correction found during the audit
+
+The two implicit-EXEC samples initially named a later `_saveexec_` consumer
+instead of the first `s_or_b32 EXEC_LO` overwrite. gfx1250 operand display
+names use uppercase `EXEC_LO`, while waitcheck compared only lowercase names.
+Commit `e6b3756631` makes the comparison case-insensitive and adds load/store
+regressions. All 285 `WaitcheckTest` tests pass, and the exact `torch.161.co`
+and `torch.73.co` replays now report the earlier consumers. This was a
+waitcheck false negative in diagnostic coverage, not a false positive in the
+underlying LLVM hazards.
+
+## Unattributed true16 follow-up
+
+`torch.117.co`, entry `0x33c000` (`addr<BFloat16>`), contains
+`global_store_b8 v[6:7], v1` followed by `v_mov_b16 v1.l, v24.h` without an X
+wait. Equivalent physical MIR makes `SIInsertWaitcnts` insert
+`S_WAIT_XCNT 0` before both low- and high-half definitions: the full `v1`
+store source and its subregister definitions share LLVM regunits. This rules
+out a waitcheck true16 false positive, but the exact first unsafe pass in the
+source-derived build is not yet stable enough to name. Keep `bd-3ay6.34` open
+for minimization rather than attributing it speculatively.
+
 ## Confidence and remaining question
 
 The evidence is stronger than a final-ISA pattern match alone:
 
-- Both reduced files start from optimized LLVM IR produced from the named
-  PyTorch HIP translation units.
-- Both compile with the same LLVM revision used for the nightly wheel.
-- The reduced final objects preserve the same hazard families as the wheel
-  objects.
+- The two IR reproducers start from optimized LLVM IR produced from the named
+  PyTorch HIP translation units; the inline-assembly HIP and physical-MIR
+  reproducers directly isolate their respective source and pass contracts.
+- All four reproducers were validated with the LLVM revision used for the
+  nightly wheel.
+- Their final objects preserve the same hazard families as the wheel objects.
 - Machine pass dumps identify the exact point where LLVM's internal XCNT model
   loses the required dependency.
 - The branch case directly contradicts the earlier pass's own implicit-drain
@@ -253,9 +436,9 @@ The evidence is stronger than a final-ISA pattern match alone:
 
 What remains to confirm is the gfx1250 hardware contract: do the producer
 operands remain locked until the indicated XCNT threshold, as modeled by
-LLVM's XCNT implementation? If yes, these are compiler correctness bugs and
-the reduced `.ll` files can be converted into LLVM regression tests after the
-fixes are chosen.
+LLVM's XCNT implementation? If yes, the compiler cases can become LLVM
+regression tests after fixes are chosen, and the rocPRIM assembly must include
+the missing XCNT wait.
 
 Relevant implementation history includes Christudasan Devadasan's initial
 gfx1250 `S_WAIT_XCNT` insertion change (`08b8d467d425`) and Prasoon Mishra's
