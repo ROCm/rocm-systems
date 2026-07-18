@@ -20,6 +20,7 @@ set(CLI_FILES
     amdsmi_cli_exceptions.py
     amdsmi_rocm_smi_compat.py
     BDF.py
+    fwupd_bios.py
     README.md
     Release_Notes.md
 )
