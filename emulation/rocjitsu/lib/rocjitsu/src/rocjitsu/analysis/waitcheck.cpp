@@ -195,6 +195,52 @@ struct LegacyWaitcnt {
   return len > 3 && std::string_view(name + len - 3, 3) == ".kd";
 }
 
+[[nodiscard]] std::map<uint64_t, uint64_t>
+find_waitcheck_function_sizes(const CodeObject &code_object) {
+  if (code_object.text_sections().size() != 1)
+    return {};
+
+  const Section &text = *code_object.text_sections().front();
+  const auto *image = reinterpret_cast<const uint8_t *>(code_object.image_data());
+  const size_t image_size = code_object.image_size();
+  if (image == nullptr || image_size < sizeof(Elf64_Ehdr))
+    return {};
+
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image);
+  if (std::memcmp(ehdr->e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
+      ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_shentsize != sizeof(Elf64_Shdr) ||
+      !fits_in_image(ehdr->e_shoff, static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr),
+                     image_size)) {
+    return {};
+  }
+
+  const auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(image + ehdr->e_shoff);
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+  std::map<uint64_t, uint64_t> function_sizes;
+  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+    const Elf64_Shdr &symtab_shdr = shdrs[i];
+    if ((symtab_shdr.sh_type != SHT_SYMTAB && symtab_shdr.sh_type != SHT_DYNSYM) ||
+        symtab_shdr.sh_entsize != sizeof(Elf64_Sym) ||
+        !fits_in_image(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_size)) {
+      continue;
+    }
+
+    const auto *syms = reinterpret_cast<const Elf64_Sym *>(image + symtab_shdr.sh_offset);
+    const size_t symbol_count = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
+    for (size_t sym_index = 0; sym_index < symbol_count; ++sym_index) {
+      const Elf64_Sym &sym = syms[sym_index];
+      if (elf_symbol_type(sym.st_info) != kElfSymbolTypeFunc || sym.st_size == 0 ||
+          sym.st_shndx >= ehdr->e_shnum || (shdrs[sym.st_shndx].sh_flags & SHF_EXECINSTR) == 0 ||
+          sym.st_value < text_vaddr || sym.st_value >= text_vaddr + text_size) {
+        continue;
+      }
+      function_sizes.insert_or_assign(sym.st_value - text_vaddr, sym.st_size);
+    }
+  }
+  return function_sizes;
+}
+
 [[nodiscard]] std::vector<WaitcheckKernelInfo>
 find_waitcheck_kernels(const CodeObject &code_object) {
   if (code_object.text_sections().size() != 1)
@@ -221,6 +267,7 @@ find_waitcheck_kernels(const CodeObject &code_object) {
     return {};
 
   std::vector<WaitcheckKernelInfo> kernels;
+  const auto function_sizes = find_waitcheck_function_sizes(code_object);
   std::set<uint64_t> seen_descriptors;
   for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
     const Elf64_Shdr &symtab_shdr = shdrs[i];
@@ -275,8 +322,11 @@ find_waitcheck_kernels(const CodeObject &code_object) {
            rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0
               ? 32
               : 64;
-      kernels.push_back({std::string(symbol_name, symbol_name_size - 3), sym.st_value,
-                         entry_vaddr - text_vaddr, wavefront_size});
+      const uint64_t entry_offset = entry_vaddr - text_vaddr;
+      const auto function_it = function_sizes.find(entry_offset);
+      const uint64_t code_size = function_it == function_sizes.end() ? 0 : function_it->second;
+      kernels.push_back({std::string(symbol_name, symbol_name_size - 3), sym.st_value, entry_offset,
+                         code_size, wavefront_size});
     }
   }
 
@@ -285,48 +335,14 @@ find_waitcheck_kernels(const CodeObject &code_object) {
 }
 
 [[nodiscard]] std::vector<uint64_t> find_waitcheck_function_entries(const CodeObject &code_object) {
-  if (code_object.text_sections().size() != 1)
-    return {};
-
-  const Section &text = *code_object.text_sections().front();
-  const auto *image = reinterpret_cast<const uint8_t *>(code_object.image_data());
-  const size_t image_size = code_object.image_size();
-  if (image == nullptr || image_size < sizeof(Elf64_Ehdr))
-    return {};
-
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image);
-  if (std::memcmp(ehdr->e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
-      ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_shentsize != sizeof(Elf64_Shdr))
-    return {};
-  if (!fits_in_image(ehdr->e_shoff, static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr),
-                     image_size))
-    return {};
-
-  const auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(image + ehdr->e_shoff);
-  const uint64_t text_vaddr = text.vaddr();
-  const uint64_t text_size = text.size();
-  std::set<uint64_t> entry_offsets;
-  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
-    const Elf64_Shdr &symtab_shdr = shdrs[i];
-    if (symtab_shdr.sh_type != SHT_SYMTAB && symtab_shdr.sh_type != SHT_DYNSYM)
-      continue;
-    if (symtab_shdr.sh_entsize != sizeof(Elf64_Sym) ||
-        !fits_in_image(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_size))
-      continue;
-
-    const auto *syms = reinterpret_cast<const Elf64_Sym *>(image + symtab_shdr.sh_offset);
-    const size_t symbol_count = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
-    for (size_t sym_index = 0; sym_index < symbol_count; ++sym_index) {
-      const Elf64_Sym &sym = syms[sym_index];
-      if (elf_symbol_type(sym.st_info) != kElfSymbolTypeFunc || sym.st_size == 0 ||
-          sym.st_shndx >= ehdr->e_shnum || (shdrs[sym.st_shndx].sh_flags & SHF_EXECINSTR) == 0)
-        continue;
-      if (sym.st_value < text_vaddr || sym.st_value >= text_vaddr + text_size)
-        continue;
-      entry_offsets.insert(sym.st_value - text_vaddr);
-    }
+  const auto function_sizes = find_waitcheck_function_sizes(code_object);
+  std::vector<uint64_t> entries;
+  entries.reserve(function_sizes.size());
+  for (const auto &[entry, size] : function_sizes) {
+    (void)size;
+    entries.push_back(entry);
   }
-  return {entry_offsets.begin(), entry_offsets.end()};
+  return entries;
 }
 
 enum class WaitEventKind {
@@ -675,7 +691,8 @@ struct Analyzer {
 
       const Instruction *term = block.terminator();
       if (!node_key.second.empty() && term != nullptr &&
-          term->size() == static_cast<int>(sizeof(uint32_t)) && term->mnemonic() == "s_setpc_b64" &&
+          term->size() == static_cast<int>(sizeof(uint32_t)) &&
+          (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
           term->raw_encoding() != nullptr &&
           static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) == node_key.second.back().second) {
         std::vector<CallFrame> caller_stack = node_key.second;
@@ -831,6 +848,44 @@ struct Analyzer {
 private:
   [[nodiscard]] static size_t counter_index(WaitCounterKind counter) {
     return static_cast<size_t>(counter);
+  }
+
+  [[nodiscard]] static uint32_t maximum_dependency_wait(rj_code_arch_t arch,
+                                                        WaitCounterKind counter) {
+    // LLVM caps a dependency score at the largest non-sentinel wait value.
+    // The all-ones encoding means "no wait", so the largest useful value is
+    // one less than the hardware counter mask.
+    switch (counter) {
+    case WaitCounterKind::Load:
+    case WaitCounterKind::Store:
+      return 62;
+    case WaitCounterKind::Ds:
+      return uses_legacy_waitcnt(arch) && arch != ROCJITSU_CODE_ARCH_RDNA3 ? 14 : 62;
+    case WaitCounterKind::Km:
+      return 30;
+    case WaitCounterKind::Sample:
+      return 62;
+    case WaitCounterKind::Bvh:
+    case WaitCounterKind::Exp:
+    case WaitCounterKind::VmVsrc:
+      return 6;
+    case WaitCounterKind::VaVdst:
+      return 14;
+    case WaitCounterKind::Depctr:
+    case WaitCounterKind::Count:
+      return std::numeric_limits<uint32_t>::max();
+    }
+    return std::numeric_limits<uint32_t>::max();
+  }
+
+  [[nodiscard]] static bool is_counter_token_only(const PendingEvent &event) {
+    // Events without a dependency payload exist only to advance the age of
+    // older events on the same hardware counter. Once those ages have been
+    // advanced, retaining one static PendingEvent per token adds no
+    // information and makes large store-heavy CFGs quadratic in memory.
+    return event.regs.size() == 0 && event.old_value_regs.size() == 0 && !event.special_reg &&
+           !event.barrier_id && !event.produces_regs && !event.check_uses && !event.check_defs &&
+           !event.check_exec_defs && !event.check_memory_order && !event.check_program_end;
   }
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
@@ -1432,11 +1487,11 @@ private:
     } else if (mnemonic == "s_wait_xcnt") {
       apply_xcnt_wait(state, value);
     } else if (mnemonic == "s_wait_loadcnt_dscnt") {
-      apply_memory_wait(state, WaitCounterKind::Load, (value >> 4) & 0xFu);
-      apply_memory_wait(state, WaitCounterKind::Ds, value & 0xFu);
+      apply_memory_wait(state, WaitCounterKind::Load, (value >> 8) & 0x3Fu);
+      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu);
     } else if (mnemonic == "s_wait_storecnt_dscnt") {
-      apply_memory_wait(state, WaitCounterKind::Store, (value >> 4) & 0xFu);
-      apply_memory_wait(state, WaitCounterKind::Ds, value & 0xFu);
+      apply_memory_wait(state, WaitCounterKind::Store, (value >> 8) & 0x3Fu);
+      apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu);
     }
   }
 
@@ -1529,6 +1584,18 @@ private:
                                                          const VgprMsbState &state,
                                                          rj_code_arch_t arch,
                                                          uint32_t wavefront_size) {
+    // LLVM models VOPC's i1 destination as SReg_1, whose physical width is
+    // selected by wave mode: one SGPR for Wave32 and an SGPR pair for Wave64.
+    // Generated operands may retain either a fixed target width or the maximum
+    // encoding width, so normalize the physical def to the kernel's wave mode.
+    if (operand_index == 0 && starts_with(inst.mnemonic(), "v_cmp")) {
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
+        ref->width = wavefront_size == 32 ? 1 : 2;
+        add_def(du, *ref, op, state, arch);
+        return true;
+      }
+    }
+
     // V_DIV_SCALE's scalar destination is a wave mask. The encoded/disassembled
     // operand is an SGPR pair, but Wave32 kernels only define its low half.
     if (wavefront_size != 32 || operand_index != 1 || !starts_with(inst.mnemonic(), "v_div_scale_"))
@@ -1558,9 +1625,24 @@ private:
 
   [[nodiscard]] static bool add_adjusted_source_use(InstDefUse &du, const Instruction &inst,
                                                     const Operand &op, int operand_index,
-                                                    const VgprMsbState &state,
-                                                    rj_code_arch_t arch) {
+                                                    const VgprMsbState &state, rj_code_arch_t arch,
+                                                    uint32_t wavefront_size) {
     const std::string_view mnemonic = inst.mnemonic();
+    const bool is_vop3_mask =
+        (starts_with(mnemonic, "v_cndmask_b32") || starts_with(mnemonic, "v_cndmask_b16")) &&
+        operand_index == 2;
+    const bool is_vopd_mask = mnemonic.find("v_dual_cndmask_b32") != std::string_view::npos &&
+                              op.vgpr_msb_role() == amdgpu::VgprMsbRole::Src2;
+    if (is_vop3_mask || is_vopd_mask) {
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
+        // LLVM's BoolRC predicate is one physical SGPR in Wave32 and a pair in
+        // Wave64. VOP3/VOPD keep the maximum-width encoded operand in the
+        // generated decoder, just like VOPC destinations above.
+        ref->width = wavefront_size == 32 ? 1 : 2;
+        du.uses.expand(*ref);
+        return true;
+      }
+    }
     if (operand_index == 0 && starts_with(mnemonic, "scratch_") && op.encoding_value() == 0)
       return true;
 
@@ -1619,7 +1701,7 @@ private:
       const Operand *op = inst.src_operand(i);
       if (op == nullptr)
         continue;
-      if (add_adjusted_source_use(du, inst, *op, i, state, arch))
+      if (add_adjusted_source_use(du, inst, *op, i, state, arch, wavefront_size))
         continue;
       if (auto ref = op->to_register_ref())
         expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
@@ -1744,6 +1826,15 @@ private:
            starts_with(mnemonic, "ds_cmpstore") || starts_with(mnemonic, "ds_mskor");
   }
 
+  [[nodiscard]] static bool uses_ds_wait_counter(std::string_view mnemonic) {
+    // Match LLVM's TII.isDS && TII.usesLGKM_CNT classification. All VDS
+    // instructions use DS_CNT except the gfx1250 async-barrier arrive, which
+    // uses ASYNC_CNT instead. LDS-direct instructions have separate EXP_CNT
+    // semantics below.
+    return starts_with(mnemonic, "ds_") && !is_dsdir(mnemonic) &&
+           mnemonic != "ds_atomic_async_barrier_arrive_b64";
+  }
+
   [[nodiscard]] static bool is_memory_ordering_consumer(std::string_view mnemonic) {
     return starts_with(mnemonic, "global_") || starts_with(mnemonic, "flat_") ||
            starts_with(mnemonic, "scratch_") || starts_with(mnemonic, "buffer_") ||
@@ -1842,9 +1933,7 @@ private:
       return events;
     }
 
-    if (starts_with(mnemonic, "ds_load") || is_ds_store(mnemonic) ||
-        starts_with(mnemonic, "ds_read") || starts_with(mnemonic, "ds_bpermute") ||
-        starts_with(mnemonic, "ds_permute")) {
+    if (uses_ds_wait_counter(mnemonic)) {
       events.push_back({WaitCounterKind::Ds, WaitEventKind::Ds});
       if (expert)
         events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
@@ -2958,10 +3047,15 @@ private:
     event.check_memory_order = classification.check_memory_order;
     event.check_program_end = classification.check_program_end;
     const size_t idx = counter_index(classification.counter);
+    const uint32_t max_wait = maximum_dependency_wait(arch, classification.counter);
     for (PendingEvent &pending_event : state.pending[idx]) {
-      if (pending_event.min_younger != std::numeric_limits<uint32_t>::max())
+      if (pending_event.min_younger < max_wait)
         ++pending_event.min_younger;
     }
+    if (record_stats)
+      ++report_.memory_events_tracked;
+    if (is_counter_token_only(event))
+      return;
     auto position = std::ranges::lower_bound(state.pending[idx], event, event_identity_less);
     if (position != state.pending[idx].end() && same_event_identity(*position, event)) {
       position->min_younger = 0;
@@ -2969,8 +3063,6 @@ private:
     } else {
       state.pending[idx].insert(position, std::move(event));
     }
-    if (record_stats)
-      ++report_.memory_events_tracked;
   }
 
   void analyze_instruction(PendingState &state, RegisterSet &local_ready_regs,
@@ -3219,9 +3311,10 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         return report;
       }
       const std::array<uint64_t, 1> entry{*selected_kernel_entry};
+      const std::array<uint64_t, 1> entry_size{is_kernel ? kernel_it->code_size : 0};
       const auto start = std::chrono::steady_clock::now();
       std::vector<std::unique_ptr<BasicBlock>> blocks =
-          BasicBlock::build_reachable(code_object, *decoder, arch, entry);
+          BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
       const uint32_t wavefront_size =
           is_kernel ? kernel_it->wavefront_size : default_wavefront_size(arch);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
@@ -3245,9 +3338,10 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       const auto analyze_entry = [&](uint64_t entry_offset, const WaitcheckKernelInfo *kernel,
                                      uint32_t wavefront_size) {
         const std::array<uint64_t, 1> entry{entry_offset};
+        const std::array<uint64_t, 1> entry_size{kernel ? kernel->code_size : 0};
         const auto start = std::chrono::steady_clock::now();
         std::vector<std::unique_ptr<BasicBlock>> blocks =
-            BasicBlock::build_reachable(code_object, *decoder, arch, entry);
+            BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
         if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;

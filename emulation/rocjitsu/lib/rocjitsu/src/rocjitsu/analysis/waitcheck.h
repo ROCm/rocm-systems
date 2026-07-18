@@ -99,6 +99,8 @@ struct WaitcheckKernelInfo {
   uint64_t descriptor_vaddr = 0;
   /// @brief Byte offset of the kernel entry point within the `.text` section.
   uint64_t entry_offset = 0;
+  /// @brief Size of the kernel's ELF function symbol, or zero when unavailable.
+  uint64_t code_size = 0;
   /// @brief Wavefront size selected by the AMDHSA kernel descriptor.
   uint32_t wavefront_size = 64;
 };

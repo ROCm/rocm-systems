@@ -47,7 +47,8 @@ uint32_t first_word(const Instruction &inst) {
 }
 
 bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  if (inst.size() != sizeof(uint32_t) || inst.mnemonic() != "s_setpc_b64")
+  if (inst.size() != sizeof(uint32_t) ||
+      (inst.mnemonic() != "s_setpc_b64" && inst.mnemonic() != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
@@ -381,10 +382,13 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 
 std::vector<std::unique_ptr<BasicBlock>>
 BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                            std::span<const uint64_t> entry_offsets) {
+                            std::span<const uint64_t> entry_offsets,
+                            std::span<const uint64_t> entry_sizes) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   if (entry_offsets.empty())
     return blocks;
+  if (!entry_sizes.empty() && entry_sizes.size() != entry_offsets.size())
+    throw util::InvalidInst("entry size count does not match entry count", "Invalid CFG: ");
 
   for (const auto *sec : co.text_sections()) {
     const auto text =
@@ -392,6 +396,22 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
     const uint64_t section_end = text.size();
     if (section_end == 0)
       continue;
+
+    std::vector<std::pair<uint64_t, uint64_t>> entry_ranges;
+    for (size_t i = 0; i < entry_sizes.size(); ++i) {
+      if (entry_sizes[i] == 0 || entry_offsets[i] >= section_end)
+        continue;
+      const uint64_t available = section_end - entry_offsets[i];
+      entry_ranges.emplace_back(entry_offsets[i],
+                                entry_offsets[i] + std::min(entry_sizes[i], available));
+    }
+    const auto reachable_end = [&](uint64_t offset) {
+      for (const auto &[begin, end] : entry_ranges) {
+        if (offset >= begin && offset < end)
+          return end;
+      }
+      return section_end;
+    };
 
     std::map<uint64_t, std::unique_ptr<Instruction>> decoded;
     std::set<uint64_t> leaders;
@@ -416,7 +436,8 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
     while (true) {
       while (work_index < worklist.size()) {
         uint64_t offset = worklist[work_index++];
-        while (offset < section_end) {
+        const uint64_t decode_end = reachable_end(offset);
+        while (offset < decode_end) {
           if (offset % sizeof(uint32_t) != 0)
             throw util::InvalidInst("unaligned instruction offset", "Invalid CFG: ");
 
@@ -428,12 +449,12 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
             // contract at the end of a section.
             std::array<uint32_t, 3> window{};
             const size_t available =
-                static_cast<size_t>(std::min<uint64_t>(sizeof(window), section_end - offset));
+                static_cast<size_t>(std::min<uint64_t>(sizeof(window), decode_end - offset));
             std::memcpy(window.data(), text.data() + offset, available);
             std::unique_ptr<Instruction> inst(decoder.decode(window.data(), offset));
             if (!inst || inst->size() <= 0)
               throw util::InvalidInst("zero-sized instruction", "Invalid CFG: ");
-            if (offset + static_cast<uint64_t>(inst->size()) > section_end)
+            if (offset + static_cast<uint64_t>(inst->size()) > decode_end)
               throw util::InvalidInst("truncated instruction", "Invalid CFG: ");
             decoded_it = decoded.emplace(offset, std::move(inst)).first;
           }
@@ -453,11 +474,11 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
 
           if (is_block_terminator(inst)) {
             if (!has_no_static_successor(inst) && !is_unconditional_branch(inst) &&
-                next_offset < section_end)
+                next_offset < decode_end)
               enqueue(next_offset);
             break;
           }
-          if (next_offset >= section_end)
+          if (next_offset >= decode_end)
             break;
           if (leaders.contains(next_offset)) {
             enqueue(next_offset);
