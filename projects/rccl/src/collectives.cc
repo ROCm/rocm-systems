@@ -125,7 +125,7 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 }
 
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));  // 128 MiB
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
 //   size <= DdaLLThreshold     -> LL    one-shot (16B lines)
@@ -134,10 +134,14 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 // Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
 // enable to 0 (or a threshold to 0) disables that tier and falls through to the
 // next, so each protocol can be A/B'd in isolation at runtime.
+// Defaults tuned on 4x gfx1250 AllReduce (bf16): LL wins <=32KiB (grid hardcoded
+// to 24 blocks in the LL launcher for low latency), LL128 wins up to ~32MiB, and
+// Simple wins beyond (both use DDA_FABRIC_MAXBLOCKS=256). See the LL/LL128/Simple
+// x MAXBLOCKS sweep.
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(131072));
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(524288));
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -569,7 +573,12 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.ceArGraphAllowed = ceArGraphAllowed;
   info.ceGraphDecisionValid = true;
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&  msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) {
+  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and
+  // the per-tier thresholds, so it may claim the full range; the CE min-size cap
+  // only applies to the other arches' DDA paths.
+  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
+      (ddaFabricArch1250 || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() &&
