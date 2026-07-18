@@ -268,10 +268,24 @@ __DEVICE__ unsigned int __hip_get_grid_dim_z() { return __ockl_get_num_groups(2)
   __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
   __DEVICE__ unsigned int __get_##DIMENSION(void) { return FUNCTION; }
 
+// Give the (block-size bounded) built-in index accessors internal linkage so
+// that IPSCCP can attach the range() return attribute inferred from the
+// underlying __ockl_get_local_* / workgroup-size builtins. As linkonce_odr the
+// accessors are not exact definitions, so IPSCCP refuses to track their return
+// values; under full device LTO the missing range lets strided GEPs lose
+// inbounds, which blocks offset folding (extra v_lshl_add_u64, higher VGPR
+// pressure, lower occupancy). Only dimensions bounded by the block size
+// (threadIdx, blockDim) use this variant.
+#define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION)                                         \
+  __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
+  __attribute__((internal_linkage)) __DEVICE__ unsigned int __get_##DIMENSION(void) {              \
+    return FUNCTION;                                                                               \
+  }
+
 struct __hip_builtin_threadIdx_t {
-  __HIP_DEVICE_BUILTIN(x, __hip_get_thread_idx_x());
-  __HIP_DEVICE_BUILTIN(y, __hip_get_thread_idx_y());
-  __HIP_DEVICE_BUILTIN(z, __hip_get_thread_idx_z());
+  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_thread_idx_x());
+  __HIP_DEVICE_BUILTIN_INTERNAL(y, __hip_get_thread_idx_y());
+  __HIP_DEVICE_BUILTIN_INTERNAL(z, __hip_get_thread_idx_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
@@ -287,9 +301,9 @@ struct __hip_builtin_blockIdx_t {
 };
 
 struct __hip_builtin_blockDim_t {
-  __HIP_DEVICE_BUILTIN(x, __hip_get_block_dim_x());
-  __HIP_DEVICE_BUILTIN(y, __hip_get_block_dim_y());
-  __HIP_DEVICE_BUILTIN(z, __hip_get_block_dim_z());
+  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_block_dim_x());
+  __HIP_DEVICE_BUILTIN_INTERNAL(y, __hip_get_block_dim_y());
+  __HIP_DEVICE_BUILTIN_INTERNAL(z, __hip_get_block_dim_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
@@ -305,6 +319,7 @@ struct __hip_builtin_gridDim_t {
 };
 
 #undef __HIP_DEVICE_BUILTIN
+#undef __HIP_DEVICE_BUILTIN_INTERNAL
 #pragma pop_macro("__DEVICE__")
 
 extern const __device__ __attribute__((weak)) __hip_builtin_threadIdx_t threadIdx;
