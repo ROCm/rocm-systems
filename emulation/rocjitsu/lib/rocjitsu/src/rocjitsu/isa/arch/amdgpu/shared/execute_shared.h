@@ -60,24 +60,19 @@ inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   uint32_t lane_group_width = wf.wf_size();
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto data_region = regs.read_vgpr_region(vb + inst.inst_.data0, 1, full_lane_mask);
-  auto addr_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, full_lane_mask);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   if (wf.wf_size() == 64 &&
       (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
     lane_group_width = 32;
   // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = data_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.data0, i);
   uint32_t tmp[64] = {};
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = addr_region.lane(0, i);
+    uint32_t addr_val = regs.read_lane(inst.addr, i);
     uint32_t group_base = (i / lane_group_width) * lane_group_width;
     uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
     if (exec & (1ULL << src_lane))
@@ -85,7 +80,7 @@ inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
   }
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (exec & (1ULL << i))
-      dst_region.set_lane(0, i, tmp[i]);
+      regs.write_lane(inst.vdst, i, tmp[i]);
   }
 }
 
@@ -94,24 +89,19 @@ inline void execute_ds_bpermute_b32_vds([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   uint32_t lane_group_width = wf.wf_size();
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto data_region = regs.read_vgpr_region(vb + inst.inst_.data0, 1, full_lane_mask);
-  auto addr_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, full_lane_mask);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   if (wf.wf_size() == 64 &&
       (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
     lane_group_width = 32;
   // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = data_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.data0, i);
   uint32_t tmp[64] = {};
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = addr_region.lane(0, i);
+    uint32_t addr_val = regs.read_lane(inst.addr, i);
     uint32_t group_base = (i / lane_group_width) * lane_group_width;
     uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
     if (exec & (1ULL << src_lane))
@@ -119,7 +109,7 @@ inline void execute_ds_bpermute_b32_vds([[maybe_unused]] Inst &inst,
   }
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (exec & (1ULL << i))
-      dst_region.set_lane(0, i, tmp[i]);
+      regs.write_lane(inst.vdst, i, tmp[i]);
   }
 }
 
@@ -128,31 +118,26 @@ inline void execute_ds_bpermute_fi_b32_vds([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   uint32_t lane_group_width = wf.wf_size();
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto data_region = regs.read_vgpr_region(vb + inst.inst_.data0, 1, full_lane_mask);
-  auto addr_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, full_lane_mask);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   if (wf.wf_size() == 64 &&
       (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
     lane_group_width = 32;
   // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = data_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.data0, i);
   uint32_t tmp[64] = {};
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = addr_region.lane(0, i);
+    uint32_t addr_val = regs.read_lane(inst.addr, i);
     uint32_t group_base = (i / lane_group_width) * lane_group_width;
     uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
     tmp[i] = src_data[src_lane];
   }
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (exec & (1ULL << i))
-      dst_region.set_lane(0, i, tmp[i]);
+      regs.write_lane(inst.vdst, i, tmp[i]);
   }
 }
 
@@ -196,33 +181,28 @@ template <typename Inst>
 inline void execute_ds_permute_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   uint32_t lane_group_width = wf.wf_size();
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto data_region = regs.read_vgpr_region(vb + inst.inst_.data0, 1, full_lane_mask);
-  auto addr_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, exec);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   if (wf.wf_size() == 64 &&
       (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
     lane_group_width = 32;
   // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = data_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.data0, i);
   uint32_t tmp[64] = {};
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (!(exec & (1ULL << i)))
       continue;
-    uint32_t addr_val = addr_region.lane(0, i);
+    uint32_t addr_val = regs.read_lane(inst.addr, i);
     uint32_t group_base = (i / lane_group_width) * lane_group_width;
     uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
     tmp[dst_lane] = src_data[i];
   }
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (exec & (1ULL << i))
-      dst_region.set_lane(0, i, tmp[i]);
+      regs.write_lane(inst.vdst, i, tmp[i]);
   }
 }
 
@@ -231,48 +211,38 @@ inline void execute_ds_permute_b32_vds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   uint32_t lane_group_width = wf.wf_size();
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto data_region = regs.read_vgpr_region(vb + inst.inst_.data0, 1, full_lane_mask);
-  auto addr_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, exec);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   if (wf.wf_size() == 64 &&
       (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
     lane_group_width = 32;
   // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = data_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.data0, i);
   uint32_t tmp[64] = {};
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (!(exec & (1ULL << i)))
       continue;
-    uint32_t addr_val = addr_region.lane(0, i);
+    uint32_t addr_val = regs.read_lane(inst.addr, i);
     uint32_t group_base = (i / lane_group_width) * lane_group_width;
     uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
     tmp[dst_lane] = src_data[i];
   }
   for (uint32_t i = 0; i < wf.wf_size(); ++i) {
     if (exec & (1ULL << i))
-      dst_region.set_lane(0, i, tmp[i]);
+      regs.write_lane(inst.vdst, i, tmp[i]);
   }
 }
 
 template <typename Inst>
 inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto src_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, full_lane_mask);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = src_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.addr, i);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -291,23 +261,18 @@ inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unuse
       src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);
     }
     if (src_lane < wf.wf_size())
-      dst_region.set_lane(0, lane, src_data[src_lane]);
+      regs.write_lane(inst.vdst, lane, src_data[src_lane]);
   }
 }
 
 template <typename Inst>
 inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf.wf_size()) - 1);
-  ::rocjitsu::amdgpu::RegisterAccess regs(cu);
-  auto src_region = regs.read_vgpr_region(vb + inst.inst_.addr, 1, full_lane_mask);
-  auto dst_region = regs.write_vgpr_region(vb + inst.inst_.vdst, 1, exec);
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = src_region.lane(0, i);
+    src_data[i] = regs.read_lane(inst.addr, i);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -326,7 +291,7 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
       src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);
     }
     if (src_lane < wf.wf_size())
-      dst_region.set_lane(0, lane, src_data[src_lane]);
+      regs.write_lane(inst.vdst, lane, src_data[src_lane]);
   }
 }
 
