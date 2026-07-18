@@ -84,18 +84,27 @@ HIP_TEST_CASE(Contract_MemoryPool_GetSetReleaseThreshold_RoundTripsValue) {
 
 HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
-  hip::contract::ContractCleanup cleanup;
+  // ptr and stream are declared BEFORE the cleanup guard so they outlive it: the
+  // guard action below deliberately captures ptr by reference to observe it being
+  // nulled after the explicit free, and reference-capturing a local declared
+  // after the guard would read it past its lifetime during ~ContractCleanup.
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
+  hip::contract::ContractCleanup cleanup;
 
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, 128, stream));
   // Register the free immediately so a failing REQUIRE or a throwing hipFreeAsync
   // below cannot leak the allocation. The guard frees only if the explicit free
-  // has not already run (tracked by nulling ptr), avoiding a double free.
+  // has not already run (tracked by nulling ptr), avoiding a double free, and
+  // drains the stream so the enqueued free completes before the stream-destroy
+  // action (registered earlier, so it runs after this one) tears the stream down.
   cleanup.Add([&] {
-    if (ptr != nullptr) (void)hipFreeAsync(ptr, stream);
+    if (ptr != nullptr) {
+      (void)hipFreeAsync(ptr, stream);
+      (void)hipStreamSynchronize(stream);
+    }
   });
   REQUIRE(ptr != nullptr);
   HIP_CHECK(hipFreeAsync(ptr, stream));

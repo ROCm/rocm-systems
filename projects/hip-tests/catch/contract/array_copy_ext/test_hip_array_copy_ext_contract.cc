@@ -196,7 +196,12 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected)
   HIP_CHECK(hipGetLastError());
 }
 
-#if !HT_NVIDIA
+// BACKEND-DIFF: the host-to-array / array-to-host async round-trip
+// (hipMemcpyHtoAAsync + hipMemcpyAtoHAsync) is exercised only on AMD; the
+// positive visible round-trip is not asserted on the NVIDIA backend. Gated with
+// HT_AMD (equivalent to the prior !HT_NVIDIA while there are two backends) for
+// consistency with the rest of the suite's positive backend gates.
+#if HT_AMD
 HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSync) {
   CHECK_IMAGE_SUPPORT;
 
@@ -218,4 +223,4 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSyn
 
   REQUIRE(dst == src);
 }
-#endif
+#endif  // HT_AMD
