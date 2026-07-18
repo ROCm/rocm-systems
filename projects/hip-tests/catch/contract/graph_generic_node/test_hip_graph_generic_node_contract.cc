@@ -30,7 +30,18 @@ hipMemsetParams MakeByteMemsetParams(void* device_ptr, unsigned int value) {
 hipGraphNodeParams MakeMemsetNodeParams(void* device_ptr, unsigned int value) {
   hipGraphNodeParams params{};
   params.type = hipGraphNodeTypeMemset;
-  params.memset = MakeByteMemsetParams(device_ptr, value);
+  // hipGraphNodeParams::memset is hipMemsetParams on AMD, but on the NVIDIA
+  // backend it maps to cudaMemsetParamsV2 while hipMemsetParams maps to the V1
+  // struct - two distinct types, so a whole-struct assignment does not compile
+  // there. Copy the shared fields individually, which is portable on both
+  // backends; V2's extra ctx field stays zero-initialized (current context).
+  const hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, value);
+  params.memset.dst = memset_params.dst;
+  params.memset.pitch = memset_params.pitch;
+  params.memset.value = memset_params.value;
+  params.memset.elementSize = memset_params.elementSize;
+  params.memset.width = memset_params.width;
+  params.memset.height = memset_params.height;
   return params;
 }
 
