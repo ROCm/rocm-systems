@@ -30,14 +30,21 @@ RCCL_PARAM(DdaLL128ArThreads, "DDA_LL128_AR_THREADS", 1024);
 namespace {
 
 using meta::comms::kDdaLL128ArMaxBytes;
-using meta::comms::kDdaLL128ArSlotStrideLines;
 using meta::comms::kDdaLL128DataElems;
 using meta::comms::kDdaLL128Lanes;
 using meta::comms::LLLine128;
 
-// LL128 scratch: 2 banks * nRanks slots * kDdaLL128ArSlotStrideLines * 128B.
-static inline size_t ddaLL128ArScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLL128ArSlotStrideLines * sizeof(LLLine128);
+// Per-call slot stride in 128B lines for a message of `numLines` lines. The
+// stride matches the message exactly (compact layout) so small all-reduces keep
+// their scratch slots close together for good L2/TLB locality.
+static inline size_t ddaLL128ArSlotLines(size_t numLines) {
+  return numLines;
+}
+
+// LL128 scratch for this call: 2 banks * nRanks slots * slotLines * 128B.
+static inline size_t ddaLL128ArScratchSize(int nRanks, size_t numLines) {
+  return (size_t)2 * (size_t)nRanks * ddaLL128ArSlotLines(numLines) *
+         sizeof(LLLine128);
 }
 
 // Validated block size from the runtime flag; falls back to `dflt` if the
@@ -62,6 +69,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
   const size_t nWords = bytes >> 3;
   const size_t numLines =
       (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const size_t slotStrideLines = ddaLL128ArSlotLines(numLines);
 
   // 1D grid over line-groups; each block has threads/16 groups.
   const unsigned threads = ddaLL128ArThreads(1024); // multiple of 16 (lanes/line)
@@ -97,17 +105,17 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(
   case 4:
     meta::comms::ddaAllReduceFlatLL128<T, 4><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   case 8:
     meta::comms::ddaAllReduceFlatLL128<T, 8><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   default:
     meta::comms::ddaAllReduceFlatLL128<T, 0><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        count, comm->rank, nRanks, epochDev, epochLen);
+        count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   }
 
@@ -156,7 +164,12 @@ bool ncclAllReduceDdaFabricLL128Eligible(
   if (bytes > kDdaLL128ArMaxBytes) {
     return false;
   }
-  if (ddaLL128ArScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // Scratch is sized from the actual message (compact per-call slot stride), so
+  // eligibility is bounded by the runtime scratch capacity for this size.
+  const size_t nWords = bytes >> 3;
+  const size_t numLines =
+      (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  if (ddaLL128ArScratchSize(comm->nRanks, numLines) > comm->ddaScratchBytes) {
     return false;
   }
 

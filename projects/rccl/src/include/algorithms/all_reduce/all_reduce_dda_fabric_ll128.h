@@ -30,14 +30,12 @@
 
 namespace meta::comms {
 
-// Full-message hard cap for the LL128 all-reduce slot and the resulting fixed
-// slot stride in 128B lines (compile-time, so the double-buffered layout is
-// identical on every rank and call). The effective size gate is the runtime
-// LL128 threshold (see collectives.cc); this cap bounds the scratch footprint.
-constexpr size_t kDdaLL128ArMaxBytes = 524288;                       // 512 KiB
-constexpr size_t kDdaLL128ArSlotStrideLines =
-    (kDdaLL128ArMaxBytes / 8 + (size_t)kDdaLL128DataElems - 1) /
-    (size_t)kDdaLL128DataElems;                                      // ceil(nWords/15)
+// Reach cap for the LL128 all-reduce (max message this path will accept). The
+// per-call slot stride is derived from the actual message size (see the host
+// launcher), NOT from this cap, so small messages keep a compact scratch layout
+// with good L2/TLB locality while large ones still fit. Actual eligibility is
+// bounded by both this cap and the runtime scratch capacity (ddaScratchBytes).
+constexpr size_t kDdaLL128ArMaxBytes = 1073741824;                   // 1 GiB
 
 // LL128 flat all-reduce kernel. 1D grid over 128B lines; within a block the
 // threads split into 16-lane groups, each owning one line at a time.
@@ -60,13 +58,14 @@ __global__ void ddaAllReduceFlatLL128(
     int selfRank,
     int nRanksRt,
     uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-    int epochLen) {                        // number of cells in epochDev
+    int epochLen,                          // number of cells in epochDev
+    size_t slotStrideLines) {              // per-call lines/slot (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nWords = bytes >> 3;                        // 8B payload words
   const size_t numLines = ddaLL128NumLines(nWords);        // 128B lines this size
-  const size_t slot = kDdaLL128ArSlotStrideLines;          // lines per slot
+  const size_t slot = slotStrideLines;                     // lines per slot (per-call)
 
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
