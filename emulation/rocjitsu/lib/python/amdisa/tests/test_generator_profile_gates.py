@@ -1591,6 +1591,29 @@ def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
     )
 
 
+def test_generated_64bit_dpp_cleanup_preserves_both_physical_dwords(
+    amdgpu_generated_root: Path,
+):
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        vop1 = (amdgpu_generated_root / arch / 'vop1.cpp').read_text()
+        cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
+
+        assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64, arch
+        assert 'read_vgpr64(vb + inst_.vdst, ln)' in cvt_f64, arch
+        assert 'write_vgpr64(vb + inst_.vdst, ln,' in cvt_f64, arch
+        assert 'read_lane64(vdst, ln)' not in cvt_f64, arch
+
+
 def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
     amdgpu_generated_root: Path,
 ):

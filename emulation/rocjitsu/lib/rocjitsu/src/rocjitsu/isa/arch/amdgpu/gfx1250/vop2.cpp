@@ -208,7 +208,7 @@ void VAddF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -790,7 +790,7 @@ void VMulF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1759,7 +1759,7 @@ void VMinNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1906,7 +1906,7 @@ void VMaxNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2876,7 +2876,7 @@ void VFmacF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3951,7 +3951,7 @@ void VLshlrevB64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -4988,7 +4988,7 @@ void VAddNcU64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -5129,7 +5129,7 @@ void VSubNcU64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -5270,7 +5270,7 @@ void VMulU64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       if (ex & (1ULL << ln))
         sdwa_old_dst_[ln] = inst_.src0 == amdgpu::SRC_DPP
                                 ? amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)
-                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + inst_.vdst, ln);
+                                : amdgpu::RegisterAccess(wf.cu()).read_vgpr64(vb + inst_.vdst, ln);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
