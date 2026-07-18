@@ -120,6 +120,7 @@ public:
 
   bool TrampolineEnabled() const { return trampoline_enabled_; }
   bool TrampolineNoWaEnabled() const { return trampoline_no_wa_enabled_; }
+  bool TrampolineScopeSeEnabled() const { return trampoline_scope_se_enabled_; }
 
   bool ParseOptions(const std::string& options);
   void Reset();
@@ -142,6 +143,7 @@ private:
   amd::options::OptionParser option_parser;
   bool trampoline_enabled_ = false;
   bool trampoline_no_wa_enabled_ = false;
+  bool trampoline_scope_se_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -173,6 +175,13 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   const char* enable_trampoline_no_wa = getenv("LOADER_ENABLE_TRAMPOLINE_NO_WA");
   if (enable_trampoline_no_wa && std::strcmp(enable_trampoline_no_wa, "1") == 0) {
     trampoline_no_wa_enabled_ = true;
+  }
+  // LOADER_ENABLE_TRAMPOLINE_PREFETCH_B8=1: trampolines whose leading workaround
+  // instruction is a global_prefetch_b8 (scope:SCOPE_SE, th:TH_LOAD_RT) instead
+  // of global_wb (scope:SCOPE_CU).
+  const char* enable_trampoline_scope_se = getenv("LOADER_ENABLE_TRAMPOLINE_PREFETCH_B8");
+  if (enable_trampoline_scope_se && std::strcmp(enable_trampoline_scope_se, "1") == 0) {
+    trampoline_scope_se_enabled_ = true;
   }
 }
 
@@ -271,6 +280,34 @@ static void BuildTrampolineGfx1250NoWa(uint8_t* buf, uint64_t target) {
   w[3] = static_cast<uint32_t>(target >> 32);
   w[4] = 0xBE804864;  // s_set_pc_i64 s[100:101]
   for (size_t i = 5; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
+    w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
+}
+
+// Alternate leading workaround instruction (LOADER_ENABLE_TRAMPOLINE_PREFETCH_B8):
+//   global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT
+// gfx1250 encoding (llvm-mc --mcpu=gfx1250 --show-encoding), 3 dwords. TH_LOAD_RT
+// is the default TH (0); SCOPE_SE sets bit 0x04 in the third encoding byte.
+static constexpr uint32_t kGfx1250ScopeSePrefetch[3] = {
+    0xEE174000,  // global_prefetch_b8 v0, s[0:1] ...
+    0x00040000,  // ... scope:SCOPE_SE th:TH_LOAD_RT
+    0x00000000,  // :
+};
+
+// Like BuildTrampolineGfx1250 but leads with global_prefetch_b8 (scope:SCOPE_SE)
+// in place of global_wb (scope:SCOPE_CU); the v_nop and jump are unchanged.
+static void BuildTrampolineGfx1250ScopeSe(uint8_t* buf, uint64_t target) {
+  auto* w = reinterpret_cast<uint32_t*>(buf);
+
+  w[0] = kGfx1250ScopeSePrefetch[0];  // global_prefetch_b8 v0, s[0:1]
+  w[1] = kGfx1250ScopeSePrefetch[1];  //   scope:SCOPE_SE th:TH_LOAD_RT
+  w[2] = kGfx1250ScopeSePrefetch[2];  // :
+  w[3] = 0x7E000000;  // v_nop (padding)
+  w[4] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
+  w[5] = static_cast<uint32_t>(target);
+  w[6] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
+  w[7] = static_cast<uint32_t>(target >> 32);
+  w[8] = 0xBE804864;  // s_set_pc_i64 s[100:101]
+  for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
 }
 
@@ -1393,12 +1430,26 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
 
   // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
-  // Set LOADER_ENABLE_TRAMPOLINE=1 or LOADER_ENABLE_TRAMPOLINE_NO_WA=1 to enable
-  // (for testing only). NO_WA selects the minimal stub without global_wb.
+  // Set LOADER_ENABLE_TRAMPOLINE=1, LOADER_ENABLE_TRAMPOLINE_NO_WA=1, or
+  // LOADER_ENABLE_TRAMPOLINE_PREFETCH_B8=1 to enable (for testing only). NO_WA selects
+  // the minimal stub without global_wb; PREFETCH_B8 leads with global_prefetch_b8
+  // (scope:SCOPE_SE) instead of global_wb. Precedence: PREFETCH_B8 > NO_WA > full.
   trampoline_no_wa_gfx125x_ = loaderOptions.TrampolineNoWaEnabled();
+  trampoline_scope_se_gfx125x_ = loaderOptions.TrampolineScopeSeEnabled();
   trampoline_enabled_gfx125x_ =
-      (loaderOptions.TrampolineEnabled() || trampoline_no_wa_gfx125x_) &&
+      (loaderOptions.TrampolineEnabled() || trampoline_no_wa_gfx125x_ ||
+       trampoline_scope_se_gfx125x_) &&
       CodeObjectIsaIsGfx125Family(codeIsa);
+  if (trampoline_no_wa_gfx125x_) {
+    // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
+    logger_ << "Loader: LOADER_ENABLE_TRAMPOLINE_NO_WA=1 -- gfx125x entry trampolines "
+               "use the minimal stub without the global_wb/v_nop workaround\n";
+  }
+  if (trampoline_scope_se_gfx125x_) {
+    // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
+    logger_ << "Loader: LOADER_ENABLE_TRAMPOLINE_PREFETCH_B8=1 -- gfx125x entry trampolines "
+               "lead with global_prefetch_b8 (scope:SCOPE_SE) instead of global_wb\n";
+  }
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1687,7 +1738,9 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
     uint8_t blob[kTrampolineStubStride];
-    if (trampoline_no_wa_gfx125x_) {
+    if (trampoline_scope_se_gfx125x_) {
+      BuildTrampolineGfx1250ScopeSe(blob, entry_dev);
+    } else if (trampoline_no_wa_gfx125x_) {
       BuildTrampolineGfx1250NoWa(blob, entry_dev);
     } else {
       BuildTrampolineGfx1250(blob, entry_dev);
@@ -1695,7 +1748,9 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
 
     // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
-    logger_ << "Loader: injecting gfx125x entry trampoline for kernel " << f.name << "\n";
+    logger_ << "Loader: injecting gfx125x entry trampoline for kernel " << f.name
+            << (trampoline_scope_se_gfx125x_ ? " (global_prefetch_b8 scope:SCOPE_SE)" : "")
+            << "\n";
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
     int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
