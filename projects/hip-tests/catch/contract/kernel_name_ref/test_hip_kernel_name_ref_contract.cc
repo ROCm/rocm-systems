@@ -10,6 +10,11 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
+// hipKernelNameRef and hipKernelNameRefByPtr are AMD-only name-reflection entry
+// points with no NVIDIA-backend equivalent, so this whole translation unit
+// builds only on AMD.
+#if HT_AMD
+
 // Kernel-name reflection contracts for the AMD name-lookup entry points
 // hipKernelNameRef (by function handle) and hipKernelNameRefByPtr (by host
 // function pointer). Both return a C string naming the kernel, or nullptr when
@@ -53,3 +58,4 @@ HIP_TEST_CASE(Contract_KernelNameRef_ByFunction_NamesResolvedKernel) {
   const char* name = hipKernelNameRef(function);
   RequireNamesKernel(name);
 }
+#endif  // HT_AMD

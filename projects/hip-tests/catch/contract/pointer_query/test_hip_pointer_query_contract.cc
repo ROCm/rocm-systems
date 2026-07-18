@@ -17,6 +17,7 @@ bool IsDeviceMemoryType(unsigned int type) {
   return type == hipMemoryTypeDevice || type == hipMemoryTypeUnified;
 }
 
+#if HT_AMD
 bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute, hipDeviceptr_t ptr) {
   const hipError_t status = hipPointerSetAttribute(value, attribute, ptr);
   if (status == hipErrorNotSupported) {
@@ -25,6 +26,7 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
   HIP_CHECK(status);
   return true;
 }
+#endif  // HT_AMD
 }  // namespace
 
 HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTypeAndOrdinal) {
@@ -87,6 +89,10 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
                                      reinterpret_cast<hipDeviceptr_t>(data)) != hipSuccess);
 }
 
+// hipMemPtrGetInfo and hipPointerSetAttribute are AMD-only entry points with no
+// NVIDIA-backend equivalent, so these three contracts build only on AMD. The
+// hipDrvPointerGetAttributes contracts above are portable.
+#if HT_AMD
 HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
@@ -126,3 +132,4 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
   REQUIRE(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS, nullptr) !=
           hipSuccess);
 }
+#endif  // HT_AMD

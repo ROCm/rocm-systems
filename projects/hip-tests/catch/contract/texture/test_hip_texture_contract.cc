@@ -97,6 +97,11 @@ HIP_TEST_CASE(Contract_Texture_GetResourceDesc_RoundTripsLinearResource) {
   REQUIRE(returned.res.linear.sizeInBytes == kLinearBytes);
 }
 
+// hipGetTextureObjectTextureDesc has no wrapper in the NVIDIA backend headers
+// (only hipGetTextureObjectResourceDesc is provided), even though CUDA itself
+// exposes cudaGetTextureObjectTextureDesc. Exercise the texture-desc round-trip
+// only on AMD, where the entry point exists.
+#if HT_AMD
 HIP_TEST_CASE(Contract_Texture_GetTextureDesc_RoundTripsReadMode) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -122,6 +127,7 @@ HIP_TEST_CASE(Contract_Texture_GetTextureDesc_RoundTripsReadMode) {
   REQUIRE(returned.readMode == hipReadModeElementType);
   REQUIRE(returned.normalizedCoords == 0);
 }
+#endif  // HT_AMD
 
 HIP_TEST_CASE(Contract_Texture_CreateAndDestroy_ArrayResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
@@ -218,6 +224,9 @@ HIP_TEST_CASE(Contract_Surface_GetChannelDesc_RoundTripsArrayResource) {
   REQUIRE(returned.f == channel.f);
 }
 
+// hipGetTextureObjectResourceViewDesc likewise has no NVIDIA-backend wrapper,
+// so the resource-view round-trip runs only on AMD.
+#if HT_AMD
 HIP_TEST_CASE(Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -272,3 +281,4 @@ HIP_TEST_CASE(Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource) {
   REQUIRE(returned.firstLayer == view.firstLayer);
   REQUIRE(returned.lastLayer == view.lastLayer);
 }
+#endif  // HT_AMD

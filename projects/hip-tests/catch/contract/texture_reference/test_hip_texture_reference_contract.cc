@@ -26,6 +26,14 @@
 // are intentionally not covered here. Each test also treats hipErrorNotSupported
 // at its key call as a graceful skip.
 
+// The deprecated hipTexRef* texture-reference API is AMD-only on this HIP
+// release. On the NVIDIA backend these map to the CUDA driver texref entry
+// points, which the CUDA 12+ headers removed or retyped (e.g. hipTexRefGetFilterMode
+// is undefined and the address/filter-mode getters expect CUaddress_mode/
+// CUfilter_mode rather than the cuda* runtime enums), so this whole translation
+// unit builds only on AMD.
+#if HT_AMD
+
 namespace {
 // True when the runtime reports the specific hipTexRef* entry point is not
 // implemented on this backend (as opposed to a genuine contract violation).
@@ -156,3 +164,4 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips) {
 
   REQUIRE(returned == static_cast<int>(max_aniso));
 }
+#endif  // HT_AMD

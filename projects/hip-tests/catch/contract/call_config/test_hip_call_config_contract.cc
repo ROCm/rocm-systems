@@ -10,6 +10,11 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// The legacy call-configuration launch path (hipConfigureCall, hipSetupArgument,
+// hipLaunchByPtr) is AMD-only; the NVIDIA backend does not expose these entry
+// points, so this whole translation unit builds only on AMD.
+#if HT_AMD
+
 namespace {
 constexpr int kExpectedValue = 0x1234;
 
@@ -80,3 +85,4 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndepend
   REQUIRE(ReadDeviceInt(first) == first_value);
   REQUIRE(ReadDeviceInt(second) == second_value);
 }
+#endif  // HT_AMD

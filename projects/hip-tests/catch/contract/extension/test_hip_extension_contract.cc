@@ -62,7 +62,14 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
   const int hip_version = RuntimeQueryVersion();
 
   void* pfn = nullptr;
-  hipDriverProcAddressQueryResult symbol_status = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+  // The HIP_GET_PROC_ADDRESS_* status macros expand to plain HIP enumerators on
+  // AMD but to CUDA CUdriverProcAddressQueryResult enumerators on the NVIDIA
+  // backend, which cannot initialize a hipDriverProcAddressQueryResult variable
+  // directly. static_cast bridges both (an identity conversion on AMD).
+  hipDriverProcAddressQueryResult symbol_status =
+      static_cast<hipDriverProcAddressQueryResult>(HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND);
+#if HT_AMD
+  // On AMD hipGetProcAddress resolves runtime-level hip* symbols by name.
   HIP_CHECK(hipGetProcAddress("hipGetDevice", &pfn, hip_version,
                               HIP_GET_PROC_ADDRESS_DEFAULT, &symbol_status));
 
@@ -80,6 +87,26 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
   int direct_device = -1;
   HIP_CHECK(hipGetDevice(&direct_device));
   REQUIRE(resolved_device == direct_device);
+#else
+  // On the NVIDIA backend hipGetProcAddress forwards to cuGetProcAddress, which
+  // resolves driver-level cu* symbols by name (a runtime "hipGetDevice" name
+  // returns a null pfn). Query the driver entry point instead and assert only
+  // the resolution contract; the resolved pointer is a driver function with a
+  // different signature, so it is not invoked through a hip* prototype here.
+  //
+  // cuGetProcAddress version-gates each symbol against the CUDA version it was
+  // introduced in, so it must be passed the real CUDA_VERSION. The AMD-style
+  // 100*major+minor form that RuntimeQueryVersion() derives collapses to 0 for a
+  // CUDA runtime version (e.g. 13010), which cuGetProcAddress rejects as
+  // version-not-sufficient and returns a null pfn.
+  static_cast<void>(hip_version);
+  HIP_CHECK(hipGetProcAddress("cuCtxGetDevice", &pfn, CUDA_VERSION,
+                              HIP_GET_PROC_ADDRESS_DEFAULT, &symbol_status));
+
+  REQUIRE(pfn != nullptr);
+  REQUIRE(symbol_status ==
+          static_cast<hipDriverProcAddressQueryResult>(HIP_GET_PROC_ADDRESS_SUCCESS));
+#endif
 }
 
 HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
@@ -88,7 +115,8 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
   const int hip_version = RuntimeQueryVersion();
 
   void* pfn = nullptr;
-  hipDriverProcAddressQueryResult symbol_status = HIP_GET_PROC_ADDRESS_SUCCESS;
+  hipDriverProcAddressQueryResult symbol_status =
+      static_cast<hipDriverProcAddressQueryResult>(HIP_GET_PROC_ADDRESS_SUCCESS);
   const hipError_t error =
       hipGetProcAddress("hipThisSymbolDoesNotExist", &pfn, hip_version,
                         HIP_GET_PROC_ADDRESS_DEFAULT, &symbol_status);
@@ -115,6 +143,12 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
 
   const int hip_version = RuntimeQueryVersion();
 
+  // The null-argument rejection contract is only exercised on AMD. On the NVIDIA
+  // backend hipGetProcAddress forwards to cuGetProcAddress, which does not
+  // validate its arguments and dereferences a null symbol name / output pointer,
+  // faulting (SIGSEGV) instead of returning hipErrorInvalidValue, so the
+  // rejection cannot be evaluated safely there.
+#if HT_AMD
   // A null symbol name is invalid input.
   void* pfn = nullptr;
   HIP_CHECK_ERROR(hipGetProcAddress(nullptr, &pfn, hip_version,
@@ -125,6 +159,11 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
   HIP_CHECK_ERROR(hipGetProcAddress("hipRuntimeGetVersion", nullptr, hip_version,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, nullptr),
                   hipErrorInvalidValue);
+#else
+  HIP_SKIP_TEST("hipGetProcAddress forwards to cuGetProcAddress, which does not validate "
+                "null arguments on the NVIDIA backend; the rejection contract cannot be "
+                "exercised safely.");
+#endif
 }
 
 #if HT_AMD
@@ -156,8 +195,12 @@ HIP_TEST_CASE(Contract_Extension_GetStreamDeviceId_MatchesCurrentDevice) {
 HIP_TEST_CASE(Contract_Extension_ExtGetLastError_TracksErrorState) {
   RequireDevice();
 
-  // Clear any residual error from prior runtime calls in this thread.
-  HIP_CHECK(hipGetLastError());
+  // Clear any residual error from prior runtime calls in this thread. This must
+  // discard, not assert on, the residual: a sibling test running earlier in the
+  // process can leave a sticky thread-local error (the tests share one thread),
+  // and clearing it is the whole point here, so HIP_CHECK would wrongly fail on
+  // that leaked state instead of resetting it.
+  (void)hipGetLastError();
 
   // Provoke a deterministic error through a public API.
   const hipError_t error = hipMalloc(nullptr, 1);

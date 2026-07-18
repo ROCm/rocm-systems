@@ -9,6 +9,14 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
+// The whole hipOccupancyMaxPotentialBlockSize* family this file exercises is
+// unavailable on the NVIDIA backend: hipOccupancyMaxPotentialBlockSizeVariableSMem
+// and its with-flags sibling have no NVIDIA equivalent, and the plain/with-flags
+// templated wrappers resolve to cudaOccupancyMaxPotentialBlockSize with a
+// mismatched parameter list under CUDA 13.1, so the whole translation unit builds
+// only on AMD.
+#if HT_AMD
+
 namespace {
 __global__ void OccupancyVariableKernel(int* output) {
   if (threadIdx.x == 0 && blockIdx.x == 0 && output != nullptr) {
@@ -83,3 +91,4 @@ HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValu
   REQUIRE(min_grid_size >= 0);
   REQUIRE(block_size > 0);
 }
+#endif  // HT_AMD
