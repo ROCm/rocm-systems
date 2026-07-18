@@ -1,0 +1,30 @@
+--- |
+  target triple = "amdgpu12.50-amd-amdhsa"
+
+  define amdgpu_kernel void @remove_execz_branch_xcnt() #0 {
+  entry:
+    unreachable
+  }
+
+  attributes #0 = { "target-cpu"="gfx1250" "target-features"="+wavefrontsize32,-wavefrontsize64" }
+...
+---
+name:            remove_execz_branch_xcnt
+tracksRegLiveness: true
+machineFunctionInfo:
+  isEntryFunction: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $vgpr2, $vgpr3, $vgpr18, $vgpr19, $vgpr20, $vgpr21
+    GLOBAL_STORE_DWORDX4 killed $vgpr2_vgpr3, killed $vgpr18_vgpr19_vgpr20_vgpr21, 0, 0, implicit $exec
+    S_WAIT_STORECNT 0
+    S_CBRANCH_EXECZ %bb.2, implicit $exec
+
+  bb.1:
+    successors: %bb.2
+    $vgpr2 = V_MOV_B32_e32 0, implicit $exec
+
+  bb.2:
+    S_ENDPGM 0
+...
