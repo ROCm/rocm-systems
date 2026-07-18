@@ -1091,8 +1091,20 @@ public:
     std::lock_guard lock(init_mutex_);
     if (active_driver_.load(std::memory_order_acquire) == nullptr) {
       in_construction = true;
+      // Config-path discovery mirrors the DBT-guest reader precedence: the
+      // per-invocation directory first (the launcher writes config_path there and
+      // exports $ROCJITSU_INVOCATION_DIR), then the well-known
+      // $ROCJITSU_RUNTIME_DIR/config_path for a bare LD_PRELOAD client that sets no
+      // invocation dir (e.g. a standalone HSA program that writes the handoff to the
+      // documented well-known location). Without the fallback such a client's
+      // config is never found and hsa_init fails with OUT_OF_RESOURCES.
       std::optional<std::string> cfg_path =
           child_config_path(invocation_runtime_dir() + "/config_path");
+      if (!cfg_path) {
+        const std::string well_known = rocjitsu::rpc_default_config_file_path();
+        if (well_known != invocation_runtime_dir() + "/config_path")
+          cfg_path = child_config_path(well_known);
+      }
       if (!cfg_path) {
         util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
