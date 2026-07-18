@@ -191,7 +191,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
   // unknown-attribute sub-check additionally uses hipLaunchAttributeMax, a
   // sentinel defined only on AMD. Parity would require matching null-argument
   // validation and a portable unknown-attribute sentinel.
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
@@ -216,5 +216,5 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
 #else
   HIP_SKIP_TEST("hipStreamGetAttribute does not validate the value-out pointer on the NVIDIA "
                 "backend; the invalid-input rejection contract cannot be exercised safely.");
-#endif  // __HIP_PLATFORM_AMD__
+#endif  // HT_AMD
 }

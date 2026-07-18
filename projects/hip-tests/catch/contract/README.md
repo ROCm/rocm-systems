@@ -196,7 +196,10 @@ Notes:
 ### Domains compile-gated out on NVIDIA (empty binary)
 
 These 9 domains are AMD-only (or use APIs removed from recent CUDA) and are
-wrapped in a whole-file `#if HT_AMD`, so they register no test cases on NVIDIA:
+wrapped in a whole-file guard, so they register no test cases on NVIDIA. Most use
+`#if HT_AMD`; `texture_reference_symbol` uses
+`#if HT_AMD || (HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < CUDA_12000)`
+because the legacy texref API it exercises existed on NVIDIA only through CUDA 11:
 
 | Domain | Reason absent on NVIDIA |
 |---|---|

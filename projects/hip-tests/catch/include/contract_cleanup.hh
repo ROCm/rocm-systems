@@ -28,8 +28,19 @@ namespace contract {
 //   ContractCleanup cleanup;
 //   int* ptr = nullptr;
 //   HIP_CHECK(hipMalloc(&ptr, bytes));
-//   cleanup.Add([&] { (void)hipFree(ptr); });
+//   cleanup.Add([ptr] { (void)hipFree(ptr); });
 //   ...assertions that may throw...
+//
+// Capture the handle BY VALUE, not by reference. The guard is declared before
+// the resources it releases, so locals are destroyed in reverse declaration
+// order: a resource declared after `cleanup` ends its lifetime before
+// ~ContractCleanup runs. A by-reference capture ([&]) would then read a
+// dangling local; capturing the handle's value at registration is
+// order-independent and equivalent to correct RAII. For a handle stored in a
+// struct field, snapshot it with an init-capture: [p = obj.handle] { ... }.
+// A cleanup that must observe state mutated AFTER registration (e.g. a pointer
+// nulled once an explicit free runs) is the exception and captures by reference
+// deliberately.
 //
 // Cleanup callables must not throw; wrap HIP calls so their result is ignored
 // (the process is already unwinding on the failure path and a second fault in a

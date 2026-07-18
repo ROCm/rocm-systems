@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
   // safely there. (The matching wait API does validate its handle, so
   // WaitSemaphore_NullHandle stays cross-backend.) Parity would require matching
   // null-handle validation on the signal path.
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
 #else
   HIP_SKIP_TEST("hipSignalExternalSemaphoresAsync does not validate the semaphore handle on the "
                 "NVIDIA backend; the null-handle rejection contract cannot be exercised safely.");
-#endif  // __HIP_PLATFORM_AMD__
+#endif  // HT_AMD
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {

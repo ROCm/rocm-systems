@@ -46,7 +46,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_load_ex_contract.cu", 0, nullptr,
                                    nullptr));
 
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDeviceProperties(&properties, 0));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;

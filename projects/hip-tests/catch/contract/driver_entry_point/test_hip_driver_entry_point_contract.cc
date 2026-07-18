@@ -23,7 +23,7 @@ void RequireDevice() {
 // equivalent of the hipGetDeviceCount entry point resolved on AMD, and has the
 // same int* signature. Parity would require the NVIDIA HIP layer to resolve hip*
 // runtime names rather than cu* driver names.
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
 constexpr char const kKnownSymbol[] = "hipGetDeviceCount";
 #else
 constexpr char const kKnownSymbol[] = "cuDeviceGetCount";
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
   // dereferences it, faulting instead of returning a defined error, so the
   // contract cannot be safely evaluated there. Parity would require matching
   // null-output validation.
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hipDriverEntryPointQueryResult query_status = hipDriverEntryPointSuccess;
   HIP_CHECK_ERROR(hipGetDriverEntryPoint(kKnownSymbol, nullptr, hipEnableDefault, &query_status),
                   hipErrorInvalidValue);

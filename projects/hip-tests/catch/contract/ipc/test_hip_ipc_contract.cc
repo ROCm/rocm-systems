@@ -164,7 +164,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   // faults instead of returning a defined error - so the contract cannot be
   // evaluated safely there. Parity would require matching null-argument
   // validation.
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
@@ -186,7 +186,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
 #else
   HIP_SKIP_TEST("hipIpcGetMemHandle does not validate its arguments on the NVIDIA backend; the "
                 "null-argument rejection contract cannot be exercised safely.");
-#endif  // __HIP_PLATFORM_AMD__
+#endif  // HT_AMD
 }
 
 HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {

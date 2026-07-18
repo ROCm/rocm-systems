@@ -32,8 +32,10 @@
 // The legacy `texture<>` template and the tex-ref bind/query entry points were
 // removed in CUDA 12, so this whole domain is gated to the AMD backend (or a
 // CUDA runtime older than 12), matching the guard used by the unit texture-
-// reference tests. On CUDA 12+/NVIDIA the translation unit compiles empty.
-#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
+// reference tests. On CUDA 12+/NVIDIA the translation unit compiles empty. The
+// backend portion uses HT_AMD/HT_NVIDIA for consistency with the rest of the
+// suite; the CUDA-version dependency is guarded behind defined(CUDA_VERSION).
+#if HT_AMD || (HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < CUDA_12000)
 
 // File-scope device texture globals with EXTERNAL linkage. The compiler emits
 // __hipRegisterTexture for these, so the runtime can register and resolve the
@@ -73,7 +75,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource,
                                    "texture_reference_symbol_contract.cu", 0, nullptr, nullptr));
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
@@ -300,4 +302,4 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInval
   (void)hipGetLastError();
 }
 
-#endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000
+#endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION < CUDA_12000)

@@ -224,7 +224,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "multi_device_launch_contract.cu", 0,
                                    nullptr, nullptr));
 
-#ifdef __HIP_PLATFORM_AMD__
+#if HT_AMD
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
   hipDeviceProp_t properties{};
