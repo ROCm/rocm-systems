@@ -47,6 +47,12 @@ AINIC_SETTINGS = [
     "ROCPROFSYS_SAMPLING_AINICS",
 ]
 
+# Targets whose --help=sampling output should advertise the AI NIC flags.
+TARGETS = [
+    pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
+    pytest.param("rocprof-sys-sample", marks=pytest.mark.sampling, id="sample"),
+]
+
 # Substrings used to match the 10 Perfetto counter track names via LIKE.
 # Full name format: "NIC [<device_id>] <METRIC> (S)"
 AINIC_PERFETTO_COUNTER_NAMES = [
@@ -141,6 +147,25 @@ class TestAINIC(RocprofsysTest):
             "were the binaries built with ROCPROFSYS_BUILD_AINIC=OFF?\n"
             f"Missing: {missing}"
         )
+
+    # No NIC hardware required; the module-level amdsmi_min_version("26.3") gate
+    # skips this on builds where AI NIC support is not compiled in.
+    @pytest.mark.parametrize("target", TARGETS)
+    @pytest.mark.timeout(30)
+    def test_sampling_ainics_help(self, target):
+        """--sampling-ainics must appear in the sampling help output.
+
+        The flag is only registered (and therefore only shown by
+        ``--help=sampling``) when the binary was built with
+        ROCPROFSYS_BUILD_AINIC=ON.
+        """
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--help=sampling"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"--sampling-ainics"])
 
     @pytest.mark.ainic_required
     @pytest.mark.network
