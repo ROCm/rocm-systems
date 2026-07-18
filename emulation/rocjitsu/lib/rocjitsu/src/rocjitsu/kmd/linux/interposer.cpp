@@ -127,6 +127,11 @@ int connect_to_daemon(const std::string &runtime_dir) {
   int sock = try_connect(runtime_dir + "/daemon.sock");
   if (sock >= 0)
     return sock;
+  // Preserve the per-PID connect() failure reason across the access() probe below:
+  // access() overwrites errno on error and leaves it unspecified on success
+  // (POSIX), so without saving it a caller that reaches the final `return -1`
+  // would see an unrelated errno instead of the real connect failure.
+  const int connect_errno = errno;
 
   // Fall back to the well-known socket only for invocations that never created a
   // per-PID directory (attach / daemon-only). access() goes through the real libc
@@ -139,6 +144,7 @@ int connect_to_daemon(const std::string &runtime_dir) {
                           (errno == ENOENT || errno == ENOTDIR);
   if (dir_absent)
     return try_connect(rocjitsu::rpc_default_socket_path());
+  errno = connect_errno;
   return -1;
 }
 
@@ -234,7 +240,13 @@ public:
     // attach mode, where no launcher set the variable.
     // Assigned before resolve() (which flips real().ready() true, the gate every
     // interposed entry point checks) so no reader can observe an empty value.
-    if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv))
+    // Treat an unset OR empty $ROCJITSU_INVOCATION_DIR as "no launcher dir": an
+    // empty value would otherwise leave invocation_runtime_dir_ empty, so
+    // connect_to_daemon() would target "/daemon.sock" and access("") would probe
+    // the CWD — either mis-gating the fallback or connecting to an unintended
+    // socket. Fall back to this process's PID-scoped default in that case.
+    const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv);
+    if (dir && *dir)
       ctx.invocation_runtime_dir_ = dir;
     else
       ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
