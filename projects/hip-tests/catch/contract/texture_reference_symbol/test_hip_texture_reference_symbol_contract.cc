@@ -71,10 +71,17 @@ constexpr char const kModuleSource[] =
     "texture<float, 1, hipReadModeElementType> tex;\n"
     "extern \"C\" __global__ void touch() {}\n";
 
-bool CompileModuleSource(std::vector<char>& code) {
+// A 2D module texture named "tex" for the mipmapped-array round-trip: mipmapped
+// arrays are 2D fixtures, and the deprecated set/get pair requires a 2D-typed
+// reference (a 1D reference is rejected with hipErrorInvalidTexture).
+constexpr char const kModuleSource2D[] =
+    "texture<float, 2, hipReadModeElementType> tex;\n"
+    "extern \"C\" __global__ void touch() {}\n";
+
+bool CompileModuleSourceText(const char* source, std::vector<char>& code) {
   hiprtcProgram program{};
-  HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource,
-                                   "texture_reference_symbol_contract.cu", 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, source, "texture_reference_symbol_contract.cu", 0,
+                                   nullptr, nullptr));
 #if HT_AMD
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
@@ -105,6 +112,16 @@ bool CompileModuleSource(std::vector<char>& code) {
   HIPRTC_CHECK(hiprtcGetCode(program, code.data()));
   HIPRTC_CHECK(hiprtcDestroyProgram(&program));
   return true;
+}
+
+// Compiles the default 1D-texture module used by the address/array round-trip.
+bool CompileModuleSource(std::vector<char>& code) {
+  return CompileModuleSourceText(kModuleSource, code);
+}
+
+// Compiles the 2D-texture module used by the mipmapped-array round-trip.
+bool CompileModuleSource2D(std::vector<char>& code) {
+  return CompileModuleSourceText(kModuleSource2D, code);
 }
 }  // namespace
 
@@ -301,5 +318,84 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInval
   REQUIRE(clamp_status == hipErrorInvalidValue);
   (void)hipGetLastError();
 }
+
+// ---------------------------------------------------------------------------
+// Mipmapped-array texref contracts: a module-backed reference round-trips a
+// mipmapped array handle through the deprecated set/get entry points, and the
+// runtime bind entry point accepts a mipmapped array bound to a static symbol.
+// ---------------------------------------------------------------------------
+
+// The deprecated set/get mipmapped-array pair must round-trip on a module-backed
+// reference: after hipTexRefSetMipmappedArray binds the array,
+// hipTexRefGetMipMappedArray must return the same handle. A stack reference is
+// rejected with hipErrorInvalidSymbol, so the module route (which yields a
+// registered reference) is used, matching the address/array round-trip above.
+HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTrip) {
+  CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
+
+  std::vector<char> code;
+  if (!CompileModuleSource2D(code)) {
+    HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
+  }
+
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  REQUIRE(module != nullptr);
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
+
+  textureReference* reference = nullptr;
+  const hipError_t ref_status = hipModuleGetTexRef(&reference, module, "tex");
+  if (IsUnsupported(ref_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipModuleGetTexRef is not supported by this runtime path.");
+  }
+  HIP_CHECK(ref_status);
+  REQUIRE(reference != nullptr);
+
+  // Create a small float mipmapped array; where the device/runtime path does not
+  // implement mipmapped arrays this reports unsupported and skips. numLevels
+  // follows the in-tree unit-test fixture (2*mipmap_level with mipmap_level=2).
+  const hipChannelFormatDesc channel = FloatChannel();
+  const hipExtent extent = make_hipExtent(256, 256, 0);
+  hipMipmappedArray_t mipmap = nullptr;
+  const hipError_t alloc_status =
+      hipMallocMipmappedArray(&mipmap, &channel, extent, 4, hipArrayDefault);
+  if (IsUnsupported(alloc_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
+  }
+  HIP_CHECK(alloc_status);
+  cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
+
+  // Normalized coordinates are required before a mipmapped array is bound to the
+  // reference (the runtime rejects the bind as an invalid texture otherwise).
+  HIP_CHECK(hipTexRefSetFlags(reference, HIP_TRSF_NORMALIZED_COORDINATES));
+
+  // Bind the mipmapped array to the reference, then read the bound handle back.
+  const hipError_t set_status =
+      hipTexRefSetMipmappedArray(reference, mipmap, HIP_TRSA_OVERRIDE_FORMAT);
+  if (IsUnsupported(set_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetMipmappedArray is not supported by this runtime path.");
+  }
+  HIP_CHECK(set_status);
+
+  hipMipmappedArray_t bound = nullptr;
+  const hipError_t get_status = hipTexRefGetMipMappedArray(&bound, reference);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetMipMappedArray is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+  REQUIRE(bound == mipmap);
+}
+
+// hipBindTextureToMipmappedArray is intentionally NOT covered here: on the AMD
+// Linux runtime it rejects a mipmapped array bound to a texture reference with
+// hipErrorInvalidTexture (the runtime's positive bind path is Windows-only, as
+// the in-tree unit test hipBindTextureToMipmappedArray.cc guards it behind
+// #if defined(_WIN32)). There is no device-side positive bind contract to assert
+// on this platform, so only the deprecated set/get round-trip above is exercised.
 
 #endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION < CUDA_12000)
