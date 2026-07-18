@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -803,4 +805,60 @@ TEST(CacheVmidTest, InvalidatePerVmidLeavesOtherVmidIntact) {
   EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
   EXPECT_TRUE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
   EXPECT_EQ(read_line_word(cache, kAddr, /*vmid=*/2), 0x22222222u);
+}
+
+TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
+  TestCache cache;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  constexpr uint64_t kAddrA = 0x1000;
+  constexpr uint64_t kAddrB = kAddrA + kSetStride;
+  constexpr uint64_t kAddrC = kAddrB + kSetStride;
+
+  auto first = cache.allocate_with_data(kAddrA, /*vmid=*/7);
+  ASSERT_NE(first.tag, nullptr);
+  ASSERT_NE(first.data, nullptr);
+  first.tag->dirty = true;
+  std::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
+  cache.allocate(kAddrB, /*vmid=*/8);
+
+  CacheTag evicted;
+  std::array<uint8_t, TestCache::LINE_SIZE> evicted_data{};
+  auto replacement = cache.allocate_with_data(kAddrC, /*vmid=*/9, &evicted, evicted_data.data());
+
+  ASSERT_NE(replacement.tag, nullptr);
+  ASSERT_NE(replacement.data, nullptr);
+  EXPECT_TRUE(evicted.valid);
+  EXPECT_TRUE(evicted.dirty);
+  EXPECT_EQ(evicted.vmid, 7u);
+  EXPECT_TRUE(std::all_of(evicted_data.begin(), evicted_data.end(),
+                          [](uint8_t byte) { return byte == 0xA5; }));
+}
+
+TEST(CacheVmidTest, InvalidateAllVmidsRemovesEveryAliasedLine) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0xC000;
+
+  fill_line_word(cache, kAddr, /*vmid=*/1, 0x11111111u);
+  fill_line_word(cache, kAddr, /*vmid=*/2, 0x22222222u);
+
+  cache.invalidate_all_vmids(kAddr);
+
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
+}
+
+TEST(CacheVmidTest, LineDataForReadReturnsMatchingVmidData) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x10000;
+
+  auto allocation = cache.allocate_with_data(kAddr, /*vmid=*/4);
+  ASSERT_NE(allocation.data, nullptr);
+  for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+    allocation.data[i] = static_cast<uint8_t>(i ^ 0x5A);
+
+  const uint8_t *line = cache.line_data_for_read(kAddr, /*vmid=*/4);
+  ASSERT_NE(line, nullptr);
+  for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+    EXPECT_EQ(line[i], static_cast<uint8_t>(i ^ 0x5A));
+  EXPECT_EQ(cache.line_data_for_read(kAddr, /*vmid=*/5), nullptr);
 }

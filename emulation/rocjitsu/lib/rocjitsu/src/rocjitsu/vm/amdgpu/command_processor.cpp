@@ -1060,9 +1060,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   std::string kernel_sym;
   if (host_accessible && memory_) {
-    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object);
-    if (range_base != 0) {
-      auto *ko = reinterpret_cast<const uint8_t *>(pkt.kernel_object);
+    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    auto *mapped_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (range_base != 0 && mapped_page) {
+      auto *ko = mapped_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
       auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
       auto *elf = find_elf_base(ko, range_start);
       if (elf) {
