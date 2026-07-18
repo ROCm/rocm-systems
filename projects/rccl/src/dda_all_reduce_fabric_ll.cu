@@ -12,6 +12,7 @@
 #include "algorithms/all_reduce/all_reduce_dda_ll.h"
 #include "checks.h"
 #include "comm.h"
+#include "dda_init_detail.h" // nccl_dda_detail::kDdaFabricLLArMaxBlocks
 #include "debug.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 
@@ -44,7 +45,11 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet
 
   const unsigned threads = 256;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  // LL only serves tiny messages (<= DDA_LL_THRESHOLD, 32 KiB) where latency,
+  // not occupancy, dominates; cap the grid low so we avoid the launch/sync
+  // overhead of a wide grid (LL128/Simple use the full comm->ddaFabricMaxBlocks).
+  int nBlocksMax =
+      std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
@@ -57,8 +62,11 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
   dim3 grid(blocks);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
-  uint32_t* epochDev = comm->ddaLLEpochDev;
-  const int epochLen = comm->ddaLLEpochLen;
+  // Dedicated small, high-namespace epoch array for the LL AR tier (see
+  // kDdaFabricLLArMaxBlocks / kDdaLLArEpochSeed) so the per-launch epoch reset
+  // stays cheap and cannot false-match LL128 flags on the shared scratch.
+  uint32_t* epochDev = comm->ddaLLArEpochDev;
+  const int epochLen = comm->ddaLLArEpochLen;
 
   INFO(
       NCCL_COLL,
