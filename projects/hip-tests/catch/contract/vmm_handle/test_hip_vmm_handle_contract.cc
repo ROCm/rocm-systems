@@ -76,7 +76,10 @@ void SkipIfShareableHandleUnavailable() {
 hipMemAllocationProp PosixFdAllocationProp() {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  // Use the plural `requestedHandleTypes` field: AMD's hipMemAllocationProp has
+  // both the singular and plural members, but the NVIDIA struct only defines the
+  // plural one, so the plural spelling compiles on both backends.
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = CurrentDevice();
   return prop;

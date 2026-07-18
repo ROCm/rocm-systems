@@ -66,7 +66,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_DriverCreateGetLevelDestroy) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
-  hipMipmappedArray_t mipmap = nullptr;
+  // The driver-style mipmapped-array APIs take the driver handle type
+  // `hipmipmappedArray`. On AMD it aliases hipMipmappedArray_t; on NVIDIA it is
+  // the distinct CUmipmappedArray (the runtime hipMipmappedArray_t maps to the
+  // separate cudaMipmappedArray_t there). Use the driver type so the create/
+  // get-level/destroy calls compile on both backends.
+  hipmipmappedArray mipmap = nullptr;
   auto desc = MipArray3DDesc();
 
   const hipError_t status = hipMipmappedArrayCreate(&mipmap, &desc, kNumLevels);
@@ -129,10 +134,24 @@ HIP_TEST_CASE(Contract_MipmappedArray_GetMemoryRequirements_IsQueryable) {
   hipArrayMemoryRequirements req{};
   const hipError_t req_status =
       hipMipmappedArrayGetMemoryRequirements(&req, mipmap, device);
+#if HT_AMD
   // Some runtime paths do not implement this query; accept unsupported.
   if (req_status != hipErrorNotSupported) {
     HIP_CHECK(req_status);
   } else {
     (void)hipGetLastError();
   }
+#else
+  // On NVIDIA hipMipmappedArrayGetMemoryRequirements maps to
+  // cuMipmappedArrayGetMemoryRequirements, which rejects a query against a
+  // runtime-created mipmapped array with hipErrorInvalidValue rather than
+  // reporting the query itself unsupported. Accept both the unsupported and the
+  // invalid-value outcomes as "not queryable on this path"; a success is also
+  // contract-compliant.
+  if (req_status != hipErrorNotSupported && req_status != hipErrorInvalidValue) {
+    HIP_CHECK(req_status);
+  } else {
+    (void)hipGetLastError();
+  }
+#endif
 }

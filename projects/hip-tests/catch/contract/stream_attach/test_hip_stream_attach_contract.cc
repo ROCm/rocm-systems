@@ -30,6 +30,16 @@ void SkipIfManagedMemoryUnsupported() {
     HIP_SKIP_TEST("hipMallocManaged is not supported by this device/runtime path.");
   }
 }
+
+// hipStreamAttachMemAsync takes a `void*` device pointer on AMD but a
+// `hipDeviceptr_t*` on the NVIDIA backend (the shim forwards to
+// cuStreamAttachMemAsync, whose pointer parameter is CUdeviceptr*). Convert the
+// managed allocation to the argument type each backend's signature expects.
+#if HT_AMD
+void* AttachPtr(void* p) { return p; }
+#else
+hipDeviceptr_t* AttachPtr(void* p) { return reinterpret_cast<hipDeviceptr_t*>(p); }
+#endif
 }  // namespace
 
 HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
@@ -44,7 +54,7 @@ HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream, data, 0, hipMemAttachSingle));
+  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), 0, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
@@ -57,7 +67,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
   cleanup.Add([&] { (void)hipFree(data); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(nullptr, data, 0, hipMemAttachGlobal));
+  HIP_CHECK(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachGlobal));
   HIP_CHECK(hipStreamSynchronize(nullptr));
 }
 
@@ -73,7 +83,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream, data, kAttachBytes, hipMemAttachSingle));
+  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), kAttachBytes, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
@@ -95,5 +105,5 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStreamAttachSingle_IsRejected) {
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
   cleanup.Add([&] { (void)hipFree(data); });
 
-  REQUIRE(hipStreamAttachMemAsync(nullptr, data, 0, hipMemAttachSingle) != hipSuccess);
+  REQUIRE(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachSingle) != hipSuccess);
 }

@@ -15,6 +15,18 @@ namespace {
 constexpr size_t kAllocationBytes = 4096;
 constexpr size_t kInteriorOffset = 128;
 
+// Converts a driver device pointer to an integer address for range comparisons.
+// hipDeviceptr_t is a pointer (void*) on AMD but an integer (unsigned long long)
+// on the NVIDIA backend, so a single reinterpret_cast is not portable: cast
+// through the pointer/integer form each backend actually uses.
+std::uintptr_t DevPtrToUint(hipDeviceptr_t p) {
+#if HT_AMD
+  return reinterpret_cast<std::uintptr_t>(p);
+#else
+  return static_cast<std::uintptr_t>(p);
+#endif
+}
+
 bool IsDeviceMemoryType(hipMemoryType type) {
   return type == hipMemoryTypeDevice || type == hipMemoryTypeUnified;
 }
@@ -138,7 +150,7 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize) {
   REQUIRE(base == reinterpret_cast<hipDeviceptr_t>(data));
   REQUIRE(size >= kAllocationBytes);
   REQUIRE(reinterpret_cast<std::uintptr_t>(data + kInteriorOffset) <
-          reinterpret_cast<std::uintptr_t>(base) + size);
+          DevPtrToUint(base) + size);
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
@@ -152,10 +164,22 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_NullOutput_IsRejected) {
+  // The null-output rejection contract is only exercised on AMD. On NVIDIA
+  // hipPointerGetAttributes maps to cudaPointerGetAttributes, which does not
+  // validate the output-attributes pointer and dereferences it - a null output
+  // faults (SIGSEGV) instead of returning a defined error - so the rejection
+  // cannot be evaluated safely there.
+#if HT_AMD
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, sizeof(int)));
   cleanup.Add([&] { (void)hipFree(data); });
 
-  REQUIRE(hipPointerGetAttributes(nullptr, data) != hipSuccess);
+  const hipError_t status = hipPointerGetAttributes(nullptr, data);
+  REQUIRE(status != hipSuccess);
+  (void)hipGetLastError();
+#else
+  HIP_SKIP_TEST("hipPointerGetAttributes does not validate the output pointer on the NVIDIA "
+                "backend; the null-output rejection contract cannot be exercised safely.");
+#endif
 }

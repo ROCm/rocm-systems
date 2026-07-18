@@ -22,6 +22,12 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
   }
   return pattern;
 }
+
+// hipMemcpyHtoD/HtoDAsync take a const source on AMD but a non-const `void*`
+// source on the NVIDIA backend (the shim forwards to cuMemcpyHtoD, whose source
+// is non-const). Provide a mutable void* view of the host source so the call
+// compiles on both; the copy never writes through it.
+void* HtoDSrc(const void* host) { return const_cast<void*>(host); }
 }  // namespace
 
 HIP_TEST_CASE(Contract_DriverMemcpy_HtoDtoH_RoundTripsBytes) {
@@ -33,7 +39,8 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HtoDtoH_RoundTripsBytes) {
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
   cleanup.Add([&] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), src.data(), src.size()));
+  HIP_CHECK(
+      hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
   HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()));
 
   REQUIRE(dst == src);
@@ -51,7 +58,8 @@ HIP_TEST_CASE(Contract_DriverMemcpy_DtoD_SingleDevice_CopiesBytes) {
   HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
   cleanup.Add([&] { (void)hipFree(dst_device_ptr); });
 
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), src.data(), src.size()));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), HtoDSrc(src.data()),
+                          src.size()));
   HIP_CHECK(hipMemcpyDtoD(reinterpret_cast<hipDeviceptr_t>(dst_device_ptr),
                           reinterpret_cast<hipDeviceptr_t>(src_device_ptr), src.size()));
   HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(dst_device_ptr),
@@ -95,7 +103,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_Async_OnStream_RoundTripsBytes) {
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), src.data(),
+  HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), HtoDSrc(src.data()),
                                src.size(), stream));
   HIP_CHECK(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst_device_ptr),
                                reinterpret_cast<hipDeviceptr_t>(src_device_ptr), src.size(), stream));
