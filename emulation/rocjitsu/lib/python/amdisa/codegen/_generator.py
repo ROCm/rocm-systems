@@ -98,6 +98,7 @@ _LITERAL_ENCODING_OPERANDS = {
     'ENC_SOPC': ('SopcInstLiteralMachineInst', ('ssrc0', 'ssrc1')),
     'ENC_VOP1': ('Vop1InstLiteralMachineInst', ('src0',)),
     'ENC_VOP2': ('Vop2InstLiteralMachineInst', ('src0',)),
+    'VOP2_INST_LITERAL64': ('Vop2InstLiteral64MachineInst', ('src0',)),
     'ENC_VOPC': ('VopcInstLiteralMachineInst', ('src0',)),
     'ENC_VOP3': ('Vop3InstLiteralMachineInst', ('src0', 'src1', 'src2')),
     'ENC_VOP3P': ('Vop3pInstLiteralMachineInst', ('src0', 'src1', 'src2')),
@@ -610,7 +611,15 @@ class CodeGenerator:
     ) -> tuple[str, tuple[str, ...]] | None:
         # Implied-literal instructions are parsed from an alternate XML
         # encoding but generated in the parent encoding class.
-        lit_enc = enc if inst.is_implied_literal_enc else (inst_enc_obj or enc)
+        # The 64-bit literal form has a distinct three-DWORD MachineInst whose
+        # literal operand must be read in full, rather than through the normal
+        # one-DWORD literal extension used by the parent encoding.
+        if inst.is_implied_literal_enc and inst.enc_name.upper().endswith(
+            '_INST_LITERAL64'
+        ):
+            lit_enc = inst_enc_obj or enc
+        else:
+            lit_enc = enc if inst.is_implied_literal_enc else (inst_enc_obj or enc)
         return _LITERAL_ENCODING_OPERANDS.get(lit_enc.enc_name.upper())
 
     @staticmethod
@@ -623,6 +632,13 @@ class CodeGenerator:
         dynamic_true16_opsel_bit: int | None = None,
     ) -> str | None:
         operand_type = literal_operand_type or opnd.operand_type
+        if operand_type == 'OPR_SIMM64':
+            return (
+                f'{opnd.name} = Operand({size_expr or opnd.size}, '
+                f'OperandType::OPR_SIMM64, '
+                '(static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) '
+                '<< 32) | reinterpret_cast<const uint32_t *>(inst)[1], true);'
+            )
         if operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
         literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
@@ -1905,6 +1921,14 @@ class CodeGenerator:
             literal64_conds = [
                 name for name, _ in inst_enc.enc_conds if name.startswith('has_lit64')
             ]
+            implied_literal64_ops = [
+                str(inst.opcode)
+                for inst in inst_enc.insts
+                if inst.is_implied_literal_enc
+                and inst.enc_name.upper().endswith('_INST_LITERAL64')
+            ]
+            if implied_literal64_ops:
+                literal64_conds.append('hasImpliedLiteral64')
             literal64_condition = ' || '.join(f'{name}()' for name in literal64_conds)
             literal32_conds = [
                 name
@@ -2035,6 +2059,26 @@ class CodeGenerator:
                         [],
                     ),
                     cgen.Block([cgen.Statement(f'return {implied_literal_cond}')]),
+                )
+                public_members.append(func_decl)
+                class_func_impls.append(func_body)
+
+            if implied_literal64_ops:
+                func_decl = cgen.FunctionDeclaration(
+                    cgen.Value('bool', 'hasImpliedLiteral64'), []
+                )
+                implied_literal64_cond = ' || '.join(
+                    f'inst_.op == {op}' for op in implied_literal64_ops
+                )
+                func_body = cgen.FunctionBody(
+                    cgen.FunctionDeclaration(
+                        cgen.Value(
+                            'bool',
+                            f'{fmt_enc_name}::hasImpliedLiteral64',
+                        ),
+                        [],
+                    ),
+                    cgen.Block([cgen.Statement(f'return {implied_literal64_cond}')]),
                 )
                 public_members.append(func_decl)
                 class_func_impls.append(func_body)
@@ -2332,6 +2376,17 @@ class CodeGenerator:
             return opnd.operand_type in ('OPR_SRC', 'OPR_SRC_VGPR', 'OPR_VGPR')
         return False
 
+    def _operand_uses_packed_16bit_dst(self, enc_name: str, opnd: Operand) -> bool:
+        """Return True for E32 16-bit destinations with packed-half selectors."""
+        profile = self.isa_spec.profile
+        return (
+            profile.uses_packed_16bit_e32_source_selectors
+            and enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
+            and opnd.size == 16
+            and opnd.is_output
+            and opnd.operand_type == 'OPR_VGPR'
+        )
+
     def _vbuffer_store_data_uses_dst_vgpr_msb_role(
         self, enc_name: str, sem: InstructionSemantics | None, opnd: Operand
     ) -> bool:
@@ -2419,6 +2474,20 @@ class CodeGenerator:
         return 'buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
 
     @staticmethod
+    def _vflat_vaddr_operand_size_expr(enc_name: str, opnd_name: str) -> str | None:
+        """Return the semantic VADDR width for GFX12 flat/global encodings.
+
+        LLVM's FLAT pseudos use a 64-bit VGPR address for the vector-only form,
+        but a 32-bit VGPR offset when SADDR supplies the scalar base. The ISA
+        XML describes both variants with the same encoding and operand, so the
+        generated decoder must derive the width from the encoded SADDR value.
+        VSCRATCH has its own fixed-width operand and does not use this rule.
+        """
+        if enc_name.upper() not in ('ENC_VFLAT', 'ENC_VGLOBAL') or opnd_name != 'vaddr':
+            return None
+        return 'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+
+    @staticmethod
     def _emit_buffer_vaddr_helpers(
         helper_name: str, machine_inst_type: str, *, templated: bool
     ) -> str:
@@ -2435,6 +2504,17 @@ class CodeGenerator:
               return 0;
             }}
             }} // namespace''')
+
+    @staticmethod
+    def _emit_vflat_helpers() -> str:
+        return textwrap.dedent('''\
+            namespace {
+            template <typename VmemMachineInst>
+            uint32_t vflat_vaddr_bits(const VmemMachineInst *inst) {
+              // SADDR == NULL selects a 64-bit vector address; otherwise VADDR is a 32-bit offset.
+              return inst->saddr == 0x7Fu ? 64 : 32;
+            }
+            } // namespace''')
 
     @staticmethod
     def _emit_mfma_operand_helpers() -> str:
@@ -6039,6 +6119,10 @@ class CodeGenerator:
                                 enc.enc_name, opnd.name
                             )
                         if opnd_size_expr is None:
+                            opnd_size_expr = self._vflat_vaddr_operand_size_expr(
+                                enc.enc_name, opnd.name
+                            )
+                        if opnd_size_expr is None:
                             opnd_size_expr = str(opnd.size)
                         operand_size_exprs[opnd.name] = opnd_size_expr
                         if opnd.is_input:
@@ -6095,18 +6179,28 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = self._constructor_operand_type(inst_sem, opnd)
-                            packed_16bit_source_arg = (
-                                ', true'
-                                if self._operand_uses_packed_16bit_source(
+                            packed_16bit_source = (
+                                self._operand_uses_packed_16bit_source(
                                     enc.enc_name, opnd, reads_dst=reads_dst
                                 )
-                                else ''
                             )
+                            packed_16bit_dst = self._operand_uses_packed_16bit_dst(
+                                enc.enc_name, opnd
+                            )
+                            packed_16bit_args = ''
+                            if packed_16bit_dst:
+                                packed_16bit_args = (
+                                    f', {str(packed_16bit_source).lower()}, true'
+                                )
+                            elif packed_16bit_source:
+                                packed_16bit_args = ', true'
                             operand_value = self._operand_encoding_value_expr(
                                 _OperandCtx(
                                     opnd_name=opnd.name,
                                     enc_name=enc.enc_name,
-                                    packed_16bit=bool(packed_16bit_source_arg),
+                                    packed_16bit=(
+                                        packed_16bit_source or packed_16bit_dst
+                                    ),
                                     operand_type=opr_type,
                                     has_acc_field='acc' in inst_field_names,
                                     has_acc_cd_field='acc_cd' in inst_field_names,
@@ -6115,7 +6209,7 @@ class CodeGenerator:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
                                 f'OperandType::{opr_type}, '
-                                f'{operand_value}{packed_16bit_source_arg})'
+                                f'{operand_value}{packed_16bit_args})'
                             )
                         else:
                             opnd_ctor_init.append(
@@ -6286,6 +6380,16 @@ class CodeGenerator:
                     _supports_simm64_literals = self._supports_simm64_literal_operands()
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
                         _lit_struct, _lit_fields = _lit_info
+                        _lit32_struct = _lit_struct
+                        if (
+                            inst.is_implied_literal_enc
+                            and inst.enc_name.upper().endswith('_INST_LITERAL64')
+                        ):
+                            _lit32_info = _LITERAL_ENCODING_OPERANDS.get(
+                                enc.enc_name.upper()
+                            )
+                            if _lit32_info:
+                                _lit32_struct = _lit32_info[0]
                         for opnd in inst.operands:
                             if (
                                 opnd.name in _lit_fields
@@ -6293,7 +6397,7 @@ class CodeGenerator:
                             ):
                                 fixup = self._literal_operand_fixup_stmt(
                                     opnd,
-                                    _lit_struct,
+                                    _lit32_struct,
                                     operand_size_exprs[opnd.name],
                                     inst_sem,
                                     'OPR_SIMM32',
@@ -7344,6 +7448,8 @@ class CodeGenerator:
                             )
                         ),
                     )
+                elif enc.enc_name.upper() in ('ENC_VFLAT', 'ENC_VGLOBAL'):
+                    class_func_impls.insert(0, cgen.Line(self._emit_vflat_helpers()))
 
                 if (
                     self.isa_spec.arch_name.lower() in {'cdna2', 'cdna3', 'cdna4'}
@@ -8476,7 +8582,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             packed_16bit_name_check = (
                 'if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))\n'
                 '  return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");\n'
-                'if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))\n'
+                'if (auto packed = packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))\n'
                 '  return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");\n'
             )
         name_impl = (
@@ -8499,7 +8605,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             packed_16bit_ref_check = (
                 'if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))\n'
                 '  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};\n'
-                'if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))\n'
+                'if (auto packed = packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))\n'
                 '  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};\n'
             )
         ref_impl = (
@@ -8520,9 +8626,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         operand_ctor_decl = (
             '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
-            '          bool packed_16bit_source = false);\n'
+            '          bool packed_16bit_source = false, bool packed_16bit_dst = false);\n'
             '  Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,\n'
-            '          bool packed_16bit_source);\n'
+            '          bool packed_16bit_source, bool packed_16bit_dst = false);\n'
             if uses_packed_16bit_sources
             else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
         )
@@ -8538,7 +8644,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,\n'
                 '                        const uint32_t *vals, uint64_t mask) const override;\n'
             )
-            packed_16bit_field = '  bool packed_16bit_source_ = false;\n'
+            packed_16bit_field = (
+                '  bool packed_16bit_source_ = false;\n'
+                '  bool packed_16bit_dst_ = false;\n'
+            )
 
         class_def = [
             cgen.Line(
@@ -8573,12 +8682,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ]
 
         operand_ctor_args = (
-            'int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source'
+            'int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source, '
+            'bool packed_16bit_dst'
             if uses_packed_16bit_sources
             else 'int size_bits, OperandType opr_type, int encoding_value'
         )
         operand_ctor_init = (
-            ',\n' '      packed_16bit_source_(packed_16bit_source)'
+            ',\n'
+            '      packed_16bit_source_(packed_16bit_source),\n'
+            '      packed_16bit_dst_(packed_16bit_dst)'
             if uses_packed_16bit_sources
             else ''
         )
@@ -8587,9 +8699,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             packed_16bit_ctor_impl.append(
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,\n'
-                    '                 bool packed_16bit_source)\n'
+                    '                 bool packed_16bit_source, bool packed_16bit_dst)\n'
                     '    : Operand(size_bits, opr_type, static_cast<int>(encoding_value),\n'
-                    '              packed_16bit_source) {\n'
+                    '              packed_16bit_source, packed_16bit_dst) {\n'
                     '}'
                 )
             )
@@ -8655,9 +8767,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  return std::nullopt;\n'
                 '}\n'
                 '\n'
-                'std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(int size_bits, OperandType opr_type,\n'
-                '                                                        int ev) {\n'
-                '  if (size_bits != 16 || opr_type != OperandType::OPR_VGPR)\n'
+                'std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,\n'
+                '                                                        OperandType opr_type, int ev) {\n'
+                '  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)\n'
                 '    return std::nullopt;\n'
                 '  if (ev >= 0 && ev <= 127)\n'
                 '    return Packed16VgprSource{static_cast<uint32_t>(ev), 0};\n'
@@ -8883,7 +8995,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     return delegate()->simd_capable();
                   if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
                     return false;
-                  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+                  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
                     return false;
                   return AmdgpuIsaOperand<Isa>::simd_capable();
                 }
@@ -8908,7 +9020,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     amdgpu::RegisterAccess(wf).write_chunk(*delegate(), lane_base, count, vals, mask);
                     return;
                   }
-                  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+                  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
                     for (uint32_t i = 0; i < count; ++i)
                       if (mask & (1ULL << i))
                         write_lane(wf, lane_base + i, vals[i]);
@@ -8922,7 +9034,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         packed_16bit_write_lane_prefix = ''
         if uses_packed_16bit_sources:
             packed_16bit_write_lane_prefix = textwrap.dedent('''\
-                  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+                  if (auto packed = packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
                     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
                     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
                     uint32_t idx = wf.vgpr_alloc().base + voff;

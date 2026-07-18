@@ -1057,7 +1057,9 @@ void VCvtI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f16_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtF16F32Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -3232,7 +3234,9 @@ void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
 VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
     : Vop1("v_mov_b16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VMovB16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7022,7 +7026,9 @@ void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f16_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtF16U16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7164,7 +7170,9 @@ void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f16_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtF16I16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7306,7 +7314,9 @@ void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_u16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtU16F16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7454,7 +7464,9 @@ void VCvtU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtI16F16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7604,7 +7616,9 @@ void VCvtI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     : Vop1("v_rcp_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VRcpF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7759,7 +7773,9 @@ void VRcpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     : Vop1("v_sqrt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VSqrtF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -7914,7 +7930,9 @@ void VSqrtF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     : Vop1("v_rsq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VRsqF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8069,7 +8087,9 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     : Vop1("v_log_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VLogF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8224,7 +8244,9 @@ void VLogF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     : Vop1("v_exp_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VExpF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8379,7 +8401,9 @@ void VExpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     : Vop1("v_frexp_mant_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VFrexpMantF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8537,7 +8561,9 @@ void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     : Vop1("v_frexp_exp_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VFrexpExpI16F16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8697,7 +8723,9 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     : Vop1("v_floor_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VFloorF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -8852,7 +8880,9 @@ void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     : Vop1("v_ceil_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCeilF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9007,7 +9037,9 @@ void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     : Vop1("v_trunc_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VTruncF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9162,7 +9194,9 @@ void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     : Vop1("v_rndne_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VRndneF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9317,7 +9351,9 @@ void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     : Vop1("v_fract_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VFractF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9474,7 +9510,9 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     : Vop1("v_sin_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VSinF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9629,7 +9667,9 @@ void VSinF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     : Vop1("v_cos_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCosF16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9784,7 +9824,9 @@ void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     : Vop1("v_sat_pk_u8_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VSatPkU8I16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -9827,7 +9869,9 @@ void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_norm_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtNormI16F16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -9987,7 +10031,9 @@ void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_norm_u16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCvtNormU16F16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
@@ -10278,7 +10324,8 @@ VSwapB16Vop1::VSwapB16Vop1(const MachineInst *inst)
     : Vop1("v_swap_b16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VSwapB16Vop1>()),
       vdst(16, OperandType::OPR_VGPR,
-           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), true),
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), true,
+           true),
       src0(16, OperandType::OPR_SRC_VGPR,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   src_operands_[0] = &vdst;
@@ -10588,7 +10635,9 @@ void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
 VNotB16Vop1::VNotB16Vop1(const MachineInst *inst)
     : Vop1("v_not_b16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VNotB16Vop1>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
   dst_operands_[0] = &vdst;
