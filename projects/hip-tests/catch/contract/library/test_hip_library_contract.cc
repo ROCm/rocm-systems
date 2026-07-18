@@ -335,6 +335,12 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   // must resolve the same global to structurally equivalent results: both a
   // non-null/non-zero device pointer and an identical reported size. Pointer
   // identity across two independent loads is not part of the contract.
+  //
+  // Prime a primary context first: hipModuleLoadData forwards to cuModuleLoadData
+  // on NVIDIA, which needs an initialized context, and this can be the first HIP
+  // call in the process under ctest isolation. hipFree(0) is a harmless no-op on
+  // AMD.
+  HIP_CHECK(hipFree(0));
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   cleanup.Add([&] { (void)hipModuleUnload(module); });

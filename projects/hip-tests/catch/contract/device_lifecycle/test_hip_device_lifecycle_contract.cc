@@ -24,6 +24,13 @@ void RequireAcceptedOrBenign(hipError_t status) {
 }
 
 hipDevice_t DeviceForOrdinalZero() {
+  // Prime a primary context before the driver-API query. On the NVIDIA backend
+  // hipDeviceGet forwards to cuDeviceGet, which needs an initialized context;
+  // when this is the first HIP call in the process (e.g. run in isolation under
+  // ctest) no context exists yet and the call fails with an initialization/
+  // invalid-context error. hipFree(0) is the canonical no-op that establishes
+  // it. On AMD this is a harmless success.
+  HIP_CHECK(hipFree(0));
   hipDevice_t device = 0;
   HIP_CHECK(hipDeviceGet(&device, 0));
   return device;

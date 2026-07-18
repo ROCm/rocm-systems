@@ -66,6 +66,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_DriverCreateGetLevelDestroy) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
+  // hipMipmappedArrayCreate is a driver-API entry point (cuMipmappedArrayCreate
+  // on NVIDIA) and needs an initialized primary context; prime one so the test
+  // passes even as the first HIP call in the process (e.g. under ctest
+  // isolation). Harmless success on AMD.
+  HIP_CHECK(hipFree(0));
+
   // The driver-style mipmapped-array APIs take the driver handle type
   // `hipmipmappedArray`. On AMD it aliases hipMipmappedArray_t; on NVIDIA it is
   // the distinct CUmipmappedArray (the runtime hipMipmappedArray_t maps to the

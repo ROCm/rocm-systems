@@ -63,6 +63,11 @@ HIP_TEST_CASE(Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer) {
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x56);
 
+  // hipMemAllocHost is the driver-API alias (cuMemAllocHost on NVIDIA) and needs
+  // an initialized primary context; prime one so the test passes even when it is
+  // the first HIP call in the process (e.g. run in isolation under ctest). The
+  // runtime-API siblings above auto-initialize, so only this variant needs it.
+  HIP_CHECK(hipFree(0));
   HIP_CHECK(hipMemAllocHost(&host_ptr, kElementCount));
   cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
 

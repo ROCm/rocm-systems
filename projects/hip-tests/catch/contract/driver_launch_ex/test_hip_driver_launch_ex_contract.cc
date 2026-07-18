@@ -214,6 +214,12 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
 
+  // Prime a primary context before the driver-API module load. On NVIDIA
+  // hipModuleLoadData forwards to cuModuleLoadData, which needs an initialized
+  // context; when this is the first HIP call in the process (e.g. under ctest
+  // isolation) none exists yet and the load fails with invalid-device-context.
+  // hipFree(0) is the canonical no-op prime; harmless success on AMD.
+  HIP_CHECK(hipFree(0));
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   REQUIRE(module != nullptr);
