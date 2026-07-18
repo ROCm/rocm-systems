@@ -35,7 +35,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 JAX_REPO = "https://github.com/ROCm/jax.git"
-JAX_REF = "66918cf7a6adef25e8f71dbebb954e6dd5393109"  # jax-v0.10.2-testing
 
 SMOKE_TEST_FILES = [
     "tests/pmap_test.py",
@@ -133,33 +132,42 @@ def setup_xla_environment() -> None:
 
 
 def clone_jax_test_sources(jax_src: Path) -> None:
-    """Sparse-clone ROCm/jax at a pinned commit to get test sources."""
+    """Sparse-clone ROCm/jax to get test sources matching the installed version.
+
+    Tries to find a tag matching the installed JAX version (e.g. jax-v0.5.3).
+    Falls back to the default branch HEAD for nightly/dev builds.
+    """
     if jax_src.exists() and (jax_src / "tests" / "pmap_test.py").exists():
         log.info("JAX test sources already present at %s, skipping clone", jax_src)
         return
 
-    log.info("Cloning ROCm/jax (commit=%s, sparse) into %s", JAX_REF[:12], jax_src)
-    subprocess.run(
-        [
-            "git", "clone",
-            "--depth=1",
-            "--filter=blob:none",
-            "--sparse",
-            JAX_REPO,
-            str(jax_src),
-        ],
-        check=True,
+    import jax
+    jax_version = jax.__version__
+    base_version = jax_version.split(".dev")[0].split("+")[0]
+    git_ref = f"jax-v{base_version}"
+    log.info("JAX version: %s, trying tag: %s", jax_version, git_ref)
+
+    result = subprocess.run(
+        ["git", "ls-remote", "--tags", JAX_REPO, git_ref],
+        capture_output=True, text=True,
     )
-    subprocess.run(
-        ["git", "fetch", "--depth=1", "origin", JAX_REF],
-        cwd=jax_src,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "checkout", JAX_REF],
-        cwd=jax_src,
-        check=True,
-    )
+    if not result.stdout.strip():
+        log.info("Tag %s not found, using default branch HEAD", git_ref)
+        git_ref = None
+
+    clone_cmd = [
+        "git", "clone",
+        "--depth=1",
+        "--filter=blob:none",
+        "--sparse",
+        JAX_REPO,
+        str(jax_src),
+    ]
+    if git_ref:
+        clone_cmd.insert(-1, f"--branch={git_ref}")
+
+    log.info("Cloning ROCm/jax (ref=%s, sparse) into %s", git_ref or "HEAD", jax_src)
+    subprocess.run(clone_cmd, check=True)
     subprocess.run(
         ["git", "sparse-checkout", "set", "tests/", "build/", "jax/"],
         cwd=jax_src,
