@@ -1501,6 +1501,38 @@ def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(
     assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
 
 
+def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
+    gfx1250_generated_root: Path,
+):
+    vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    vop2 = (gfx1250_generated_root / 'vop2.cpp').read_text()
+    vop3 = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
+    vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    bodies = (
+        _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1'),
+        _generated_method_body(vop2, 'VAddNcU32Vop2', 'VSubNcU32Vop2'),
+        _generated_method_body(vop3, 'VAddF32Vop3', 'VSubF32Vop3'),
+        _generated_method_body(vop3p, 'VPkMadI16Vop3p', 'VPkMulLoU16Vop3p'),
+    )
+
+    for body in bodies:
+        assert 'amdgpu::RegisterAccess(wf).read_lane(vdst, ln)' in body
+        assert (
+            'amdgpu::RegisterAccess(wf).write_lane(vdst, ln, sdwa_old_dst_[ln]);'
+            in body
+        )
+        assert 'write_vgpr(vb + inst_.vdst, ln, sdwa_old_dst_[ln])' not in body
+
+    cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
+    assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64
+    assert 'amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)' in cvt_f64
+    assert (
+        'amdgpu::RegisterAccess(wf).write_lane64(vdst, ln, sdwa_old_dst_[ln]);'
+        in cvt_f64
+    )
+
+
 def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
     amdgpu_generated_root: Path,
 ):
