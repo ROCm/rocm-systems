@@ -137,7 +137,7 @@ ctest --test-dir <build-dir> -L contract --output-on-failure
 ## Backend coverage
 
 The contract suite is portable across the AMD (ROCm/HIP) backend and the NVIDIA
-HIP-over-CUDA backend (`HIP_PLATFORM=nvidia`). All 115 domains compile on both
+HIP-over-CUDA backend (`HIP_PLATFORM=nvidia`). All 118 domains compile on both
 backends. Domains that exercise AMD-only or CUDA-removed entry points are gated
 with `#if HT_AMD`, so on NVIDIA they compile to an empty binary (no registered
 test cases) rather than failing to build.
@@ -163,11 +163,11 @@ and the `hipDeviceptr_t` pointer/integer type-conversion helpers.
 
 | | AMD (gfx908, ROCm 7.15) | NVIDIA (H100, CUDA 13.1) |
 |---|---|---|
-| Domains | 115 | 115 |
-| Domains compiled (non-empty) | 115 | 106 |
+| Domains | 118 | 118 |
+| Domains compiled (non-empty) | 118 | 109 |
 | Domains compile-gated (empty) | 0 | 9 |
-| Registered test cases (ctest) | 578 | 515 |
-| Passed | 578 | 494 |
+| Registered test cases (ctest) | 587 | 522 |
+| Passed | 587 | 501 |
 | Failed | 0 | 0 |
 | Skipped | 0 | 21 |
 

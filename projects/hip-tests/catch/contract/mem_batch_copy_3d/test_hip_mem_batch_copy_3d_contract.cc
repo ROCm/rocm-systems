@@ -136,14 +136,25 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_NullOpList_IsRejected) {
 
 HIP_TEST_CASE(Contract_MemBatchCopy3D_NonZeroFlags_IsRejected) {
   hip::contract::ContractCleanup cleanup;
+  const auto src = MakePattern(0x42);
+
+  void* dev_ptr = nullptr;
   hipStream_t stream = nullptr;
+  HIP_CHECK(hipMalloc(&dev_ptr, kBytes));
+  cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  // The flags parameter is reserved and must be zero. A non-zero value is invalid
-  // input and must be rejected rather than accepted.
+  // The flags parameter is reserved and must be zero. The op list itself is a
+  // valid host-to-device copy (the same operand the positive test issues), so a
+  // rejection here isolates the reserved-flag contract rather than conflating it
+  // with an invalid operation.
   HIP_CHECK(hipGetLastError());
-  hipMemcpy3DBatchOp ops[1] = {};
+  const hipExtent extent = make_hipExtent(kBytes, 1, 1);
+  hipMemcpy3DBatchOp ops[1] = {
+      PointerCopyOp(dev_ptr, hipMemLocationTypeDevice, const_cast<uint8_t*>(src.data()),
+                    hipMemLocationTypeHost, extent),
+  };
   size_t fail_index = 0;
   const hipError_t status = hipMemcpy3DBatchAsync(1, ops, &fail_index, 0x1, stream);
   if (status == hipErrorNotSupported) {
