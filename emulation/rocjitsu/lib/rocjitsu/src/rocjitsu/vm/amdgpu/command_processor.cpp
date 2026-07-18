@@ -389,7 +389,6 @@ void CommandProcessor::register_queue(HwQueue queue) {
                       reinterpret_cast<uintptr_t>(queue.doorbell_base));
   });
   bool start_poll = queue.host_accessible;
-  bool host_accessible = queue.host_accessible;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     HwQueueState qs{};
@@ -397,10 +396,20 @@ void CommandProcessor::register_queue(HwQueue queue) {
     hw_queues_.push_back(std::move(queue));
     new_queue_states_.push_back(std::move(qs));
     // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
-    // queues need the CP to own the primary lifecycle.
-    if (!is_primary_ && engine() && !host_accessible) {
+    // queues (no host-accessible queue anywhere on this CP) need the CP to own the
+    // primary lifecycle. Gate on the same aggregate predicate as the teardown
+    // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
+    // new queue — so a CP can never register a primary it will never release.
+    if (!is_primary_ && engine() && !has_kfd_queues()) {
       engine()->register_as_primary();
       is_primary_ = true;
+    } else if (is_primary_ && engine() && has_kfd_queues()) {
+      // A KFD queue joined a CP that had registered a test-owned primary; the
+      // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
+      // primary to keep register/release symmetric (the teardown path only
+      // releases when !has_kfd_queues()).
+      engine()->primary_release();
+      is_primary_ = false;
     }
   }
   // Only start the doorbell poll thread for KFD (host-accessible) queues.

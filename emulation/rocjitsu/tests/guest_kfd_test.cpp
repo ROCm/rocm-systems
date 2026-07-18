@@ -45,18 +45,27 @@ constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
 
-// Resolve the directory holding the config-path handoff file, mirroring the
-// precedence in load_dbt_guest_config_from_runtime_config(): the launcher exports
-// $ROCJITSU_INVOCATION_DIR (its per-PID directory) and the DBT guest hook reads
-// config_path from there first. Tests that install a config the hook must observe
-// have to write to the same directory; falling back to $ROCJITSU_RUNTIME_DIR keeps
-// the standalone (no-launcher) case working.
+// Resolve the directory holding the config-path handoff file, mirroring the exact
+// precedence in load_dbt_guest_config_from_runtime_config() so a config the test
+// installs is the one the in-process DBT guest hook actually reads:
+//   1. $ROCJITSU_INVOCATION_DIR (the launcher's per-invocation dir), then
+//   2. <$ROCJITSU_RUNTIME_DIR>/<pid>/ (the per-PID tier the reader probes next;
+//      the test and the hook share this process, so getpid() matches), then
+//   3. <$ROCJITSU_RUNTIME_DIR>/ (the well-known location for the no-launcher case).
+// Return the first tier whose config_path handoff exists, else the highest-priority
+// writable tier so install_inline_dbt_config() writes where the reader will look.
 std::optional<std::filesystem::path> config_handoff_dir() {
   if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
     return std::filesystem::path(inv);
-  if (const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR"); runtime_dir && *runtime_dir)
-    return std::filesystem::path(runtime_dir);
-  return std::nullopt;
+  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
+  if (!runtime_dir || !*runtime_dir)
+    return std::nullopt;
+  const std::filesystem::path per_pid =
+      std::filesystem::path(runtime_dir) / std::to_string(getpid());
+  std::error_code ec;
+  if (std::filesystem::exists(per_pid / "config_path", ec))
+    return per_pid;
+  return std::filesystem::path(runtime_dir);
 }
 
 std::optional<std::string> read_active_config_json() {

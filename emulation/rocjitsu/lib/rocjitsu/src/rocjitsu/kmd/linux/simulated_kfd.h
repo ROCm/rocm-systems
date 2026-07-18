@@ -160,11 +160,16 @@ public:
   /// @brief Install a host range into the local process's GPU page table.
   /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
   /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
-  /// @p alloc_flags. No-op if the local process is gone.
-  void gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+  /// @p alloc_flags.
+  /// @retval true the range was installed.
+  /// @retval false the local process is gone, so nothing was mapped (the caller
+  ///         must surface an error rather than report a phantom success).
+  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
 
   /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
-  void gem_va_unmap(uint64_t gpu_va, size_t size);
+  /// @retval true the range was unmapped.
+  /// @retval false the local process is gone, so nothing was unmapped.
+  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;

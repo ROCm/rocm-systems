@@ -662,6 +662,13 @@ public:
     // nudge can arrive a tick after the last wavefront has halted and freed itself.
     // Waking the CU then would run an empty tick with no wave to issue — pure waste.
     // Work is scheduled only when there is work to do.
+    //
+    // ENGINE-THREAD ONLY: executing_ and tick_event_ are touched without
+    // synchronization, and schedule_event() pushes to the partition's event queue
+    // non-thread-safely. All callers (dispatch_wf(), the cpl_ port handler, and the
+    // CP on the same partition) run on this CU's owning partition engine thread. A
+    // cross-partition schedule_work() would be an executing_ data race plus an
+    // unsynchronized event-queue push.
     if (executing_ || !this->engine() || !this->has_active_wfs())
       return;
     executing_ = true;
@@ -670,11 +677,14 @@ public:
   }
 
 private:
-  // Advance time by the work actually executed, not the full quantum: a wavefront
-  // that requests a yield after k<kFunctionalQuantum instructions (e.g. s_sleep,
-  // vendor-dep retry) must resume at now+k so a peer component's published state is
-  // observed promptly, rather than leaping a full quantum ahead. max(1,...) keeps
-  // the event strictly in the future so re-entries never collapse onto one tick.
+  // Reschedule by the number of quantum loop iterations taken, not a fixed
+  // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
+  // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
+  // component's published state is observed promptly rather than leaping a full
+  // quantum ahead. Note this counts loop iterations, not instructions issued —
+  // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
+  // stalled CU still advances by the full quantum. max(1,...) keeps the event
+  // strictly in the future so re-entries never collapse onto one tick.
   simdojo::Event tick_event_{
       this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
         if (execute_quantum())

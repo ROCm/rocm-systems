@@ -901,6 +901,52 @@ TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalVgprBlockSize) {
   EXPECT_EQ(it->sgpr_count, f.cu()->config().sgprs_per_wf);
 }
 
+// The immediate-halt branch frees a wave's registers the instant s_endpgm
+// executes, so instruction hooks must not read the slot afterward. Concretely:
+// the terminator must fire BEFORE_INSTRUCTION (it is fetched and decoded) but NOT
+// AFTER_INSTRUCTION (there is no live slot to observe once it halts+frees), while
+// every non-terminator retains a matched BEFORE/AFTER pair. This pins the guard
+// that prevents hooks/logging from touching a freed register slot.
+TEST(HookOrderingTest, TerminatorEmitsBeforeButNotAfterInstruction) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *p = f.attach_ordering_plugin();
+  // Two non-terminators then the terminator, so the sequence exercises matched
+  // BEFORE/AFTER pairs and the terminator's asymmetry in one run.
+  const uint32_t code[] = {S_NOP, S_NOP, S_ENDPGM};
+  f.run_kernel(code, 3);
+  f.shutdown();
+
+  // Collect the BEFORE/AFTER instruction hooks in order.
+  size_t before_endpgm = 0, after_endpgm = 0;
+  size_t before_nop = 0, after_nop = 0;
+  for (const auto &e : p->events) {
+    if (e.kind == HookEvent::BEFORE_INSTRUCTION) {
+      if (e.mnemonic == "s_endpgm")
+        ++before_endpgm;
+      else if (e.mnemonic == "s_nop")
+        ++before_nop;
+    } else if (e.kind == HookEvent::AFTER_INSTRUCTION) {
+      if (e.mnemonic == "s_endpgm")
+        ++after_endpgm;
+      else if (e.mnemonic == "s_nop")
+        ++after_nop;
+    }
+  }
+
+  // The terminator is observed before execution but frees the wave on execution,
+  // so it must not emit an AFTER hook.
+  EXPECT_EQ(before_endpgm, 1u) << "s_endpgm must fire BEFORE_INSTRUCTION";
+  EXPECT_EQ(after_endpgm, 0u) << "s_endpgm must NOT fire AFTER_INSTRUCTION (slot freed at halt)";
+
+  // Non-terminators keep matched BEFORE/AFTER pairs.
+  EXPECT_EQ(before_nop, 2u);
+  EXPECT_EQ(after_nop, 2u);
+
+  // Exactly one wave, and it halted.
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WAVEFRONT_HALTED), 1u);
+}
+
 TEST(HookOrderingTest, FiveDispatchLifecycle) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *p = f.attach_ordering_plugin();

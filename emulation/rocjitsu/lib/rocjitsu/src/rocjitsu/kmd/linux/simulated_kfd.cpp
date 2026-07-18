@@ -63,18 +63,20 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
-void SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
+bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
   auto proc = find_process(local_process_id_);
   if (!proc)
-    return;
+    return false;
   map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags));
+  return true;
 }
 
-void SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
+bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
   auto proc = find_process(local_process_id_);
   if (!proc)
-    return;
+    return false;
   unmap_from_gpu(*proc, gpu_va, size);
+  return true;
 }
 
 namespace {

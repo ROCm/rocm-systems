@@ -90,8 +90,14 @@ void reap_stale_sysfs_dirs() {
     auto [ptr, perr] = std::from_chars(pid_str.data(), pid_str.data() + pid_str.size(), pid);
     if (perr != std::errc{} || ptr != pid_str.data() + pid_str.size() || pid <= 0)
       continue;
-    if (kill(pid, 0) == -1 && errno == ESRCH)
-      fs::remove_all(entry.path(), ec);
+    if (kill(pid, 0) == -1 && errno == ESRCH) {
+      // Use a dedicated error_code for the removal: reusing the loop-control `ec`
+      // would let one un-removable orphan (e.g. EACCES on another user's tree)
+      // set `ec` and terminate the whole sweep, skipping every remaining stale
+      // dir for the life of the process (this runs under std::call_once).
+      std::error_code rm_ec;
+      fs::remove_all(entry.path(), rm_ec);
+    }
   }
 }
 

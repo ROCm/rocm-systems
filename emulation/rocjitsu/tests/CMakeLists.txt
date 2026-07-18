@@ -866,6 +866,32 @@ foreach(
     )
 endforeach()
 
+foreach(
+    _interposer_gem_test
+    IN
+    ITEMS ReusedDmabufFdMintsDistinctHandles UnmapWithWrongHandleFails
+)
+    rj_add_test(
+        NAME "InterposerGemTest.${_interposer_gem_test}"
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+    )
+endforeach()
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
 
