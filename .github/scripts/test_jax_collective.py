@@ -63,22 +63,54 @@ XLA_ENV = {
 }
 
 
-def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
-    """Find the dist/rocm/lib directory in artifacts."""
-    for d in artifact_dir.rglob("dist/rocm/lib"):
-        if d.is_dir():
-            log.info("Found ROCm lib dir: %s", d)
-            return d
-    return None
+def find_lib_dirs(artifact_dir: Path) -> list[Path]:
+    """Find all directories containing .so files in the artifact tree."""
+    lib_dirs: set[Path] = set()
+    for so_file in artifact_dir.rglob("*.so"):
+        lib_dirs.add(so_file.parent.resolve())
+    for so_file in artifact_dir.rglob("*.so.*"):
+        lib_dirs.add(so_file.parent.resolve())
+    sorted_dirs = sorted(lib_dirs)
+    for d in sorted_dirs:
+        count = sum(1 for f in d.iterdir() if ".so" in f.name)
+        log.info("Found lib dir: %s (%d libs)", d, count)
+    return sorted_dirs
 
 
-def setup_ld_library_path(
-    rccl_lib_dir: Path, rocm_lib_dir: Path | None
-) -> str:
-    """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
-    parts = [str(rccl_lib_dir.resolve())]
-    if rocm_lib_dir:
-        parts.append(str(rocm_lib_dir.resolve()))
+def populate_rocm_lib_dir(lib_dirs: list[Path]) -> None:
+    """Populate /opt/rocm/lib with symlinks to artifact libraries.
+
+    JAX's xla_rocm_plugin.so has RUNPATH including /opt/rocm/lib. With ELF
+    RUNPATH semantics, transitive dependencies are resolved via RUNPATH
+    rather than LD_LIBRARY_PATH. In a container with no system ROCm, we
+    populate /opt/rocm/lib so the loader can find them.
+    """
+    rocm_lib = Path("/opt/rocm/lib")
+    try:
+        rocm_lib.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        log.warning("Cannot create %s — not running as root", rocm_lib)
+        return
+
+    count = 0
+    for d in lib_dirs:
+        for so_file in d.iterdir():
+            if ".so" not in so_file.name:
+                continue
+            target = rocm_lib / so_file.name
+            if target.exists() or target.is_symlink():
+                continue
+            target.symlink_to(so_file.resolve())
+            count += 1
+    log.info("Created %d symlinks in %s", count, rocm_lib)
+
+
+def setup_ld_library_path(lib_dirs: list[Path]) -> str:
+    """Prepend all artifact lib dirs to LD_LIBRARY_PATH."""
+    parts = [str(d) for d in lib_dirs]
+    rocm_lib = Path("/opt/rocm/lib")
+    if rocm_lib.is_dir():
+        parts.insert(0, str(rocm_lib))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -319,20 +351,19 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Step 1: Discover RCCL library path
+    # Step 1: Discover RCCL library and all lib dirs in artifacts
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
-    rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
+    lib_dirs = find_lib_dirs(args.artifact_dir)
 
     set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
-    if rocm_lib_dir:
-        set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
 
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
-    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    # Step 2: Set up library paths and verify override
+    populate_rocm_lib_dir(lib_dirs)
+    setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Set XLA environment variables
