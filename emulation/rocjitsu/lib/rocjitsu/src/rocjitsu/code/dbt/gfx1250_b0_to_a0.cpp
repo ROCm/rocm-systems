@@ -616,14 +616,15 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   if (replacement_opcode == 0)
     return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
   // The first K64 instruction writes the intermediate through VDST. The
-  // second reads that same encoded register through SRC2, so its physical bank
-  // is preserved only when the two role fields agree at this program point.
+  // second reads that same encoded register through SRC2. When those roles use
+  // different banks in the B0 instruction, temporarily select VDST's bank for
+  // SRC2 around only the second K64 instruction.
   const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
   const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  if (!dst_bank || !src2_bank || *dst_bank != *src2_bank) {
+  if (!dst_bank || !src2_bank) {
     return ExpandResult::failed(
-        "gfx1250 K=128 WMMA split cannot prove compatible VDST and SRC2 VGPR-MSB banks",
-        {"Make the VGPR-MSB fields agree on every CFG path reaching this instruction."});
+        "gfx1250 K=128 WMMA split cannot prove VDST and SRC2 VGPR-MSB banks",
+        {"Make the VGPR-MSB fields known on every CFG path reaching this instruction."});
   }
   if (offset > source_text.size() ||
       static_cast<size_t>(inst.size()) > source_text.size() - offset ||
@@ -661,15 +662,16 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   // A gfx1250 tuple may naturally cross v255/v256, so a K=128 input starting
   // at (for example) v250 is legal. Its second K64 half starts at physical
   // v258, which must be encoded as low byte 2 under the next SRC bank. Build a
-  // temporary mode only when one of the two input bases wraps.
+  // temporary mode when an input base wraps or when the intermediate must be
+  // read through a different SRC2 bank than the original accumulator.
   std::optional<uint8_t> original_mode;
   std::optional<uint8_t> second_mode;
-  if (src0_crosses_bank || src1_crosses_bank) {
+  if (src0_crosses_bank || src1_crosses_bank || *src2_bank != *dst_bank) {
     const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
     const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
     if (!src0_bank || !src1_bank || !dst_bank || !src2_bank) {
       return ExpandResult::failed(
-          "gfx1250 K=128 WMMA split cannot prove VGPR-MSB state for a bank-crossing input");
+          "gfx1250 K=128 WMMA split cannot prove VGPR-MSB state for its temporary mode");
     }
     if ((src0_crosses_bank && *src0_bank == 3) || (src1_crosses_bank && *src1_bank == 3)) {
       return ExpandResult::failed(
@@ -680,7 +682,7 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
         static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
     second_mode = static_cast<uint8_t>((*src0_bank + (src0_crosses_bank ? 1u : 0u)) |
                                        ((*src1_bank + (src1_crosses_bank ? 1u : 0u)) << 2) |
-                                       (*src2_bank << 4) | (*dst_bank << 6));
+                                       (*dst_bank << 4) | (*dst_bank << 6));
   }
 
   set_word_field(second[1], kVgprOperandEncoding + ((src0_low + kHalfInputDwords) & 0xffu), 0, 9);

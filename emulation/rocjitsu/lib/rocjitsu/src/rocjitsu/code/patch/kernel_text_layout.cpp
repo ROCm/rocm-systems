@@ -23,14 +23,6 @@ namespace {
 constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint64_t kDirectBranchIslandSpacingBytes = 64 * 1024;
 constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
-/// @brief TrapID used when a loadable skipped-kernel stub is actually dispatched.
-///
-/// @details AMDGPU `s_trap` exposes only the low 8 bits of SIMM16 as TrapID and
-/// does not carry a printable message. Keep the human-readable reason in the
-/// load-time `KernelSkipped` diagnostic and use this nonzero marker only to
-/// distinguish rocjitsu skipped-kernel traps from guest code traps if tooling
-/// surfaces the immediate.
-constexpr uint16_t kSkippedKernelTrapId = 0x52;
 /// @brief Source-distance cutoff for reserving a long direct-branch window.
 ///
 /// @details The largest current gfx1250 semantic replacement grows a 16-byte
@@ -215,16 +207,14 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
 
   // Keep skipped symbols loadable without placing guest ISA bytes in the
   // target ELF. HIP and ROCR may cache or query every descriptor in a module
-  // even when the application dispatches only a subset of kernels. Trap first
-  // so dispatching the skipped kernel fails instead of silently doing no work;
-  // keep a defensive endpgm after the trap in case a trap handler resumes.
-  const uint32_t trap = build_s_trap(arch, kSkippedKernelTrapId);
+  // even when the application dispatches only a subset of kernels. End the
+  // wave immediately if one is dispatched: a trap can abort or wedge its HSA
+  // queue, while the mandatory load-time diagnostic loudly reports that this
+  // no-op body cannot produce valid kernel outputs.
   const uint32_t endpgm = build_s_endpgm(arch);
-  append_words(text, std::span<const uint32_t>(&trap, 1));
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
   if (plan.has_kernarg_preload_firmware_skip) {
-    append_nop_padding(text, kKernargPreloadSkipBytes - 2 * sizeof(uint32_t), arch);
-    append_words(text, std::span<const uint32_t>(&trap, 1));
+    append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch);
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
   }
 

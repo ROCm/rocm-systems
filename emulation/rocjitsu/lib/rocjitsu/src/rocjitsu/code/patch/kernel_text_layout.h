@@ -205,7 +205,7 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
 /// final hardware entry location is known.
 void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 
-/// @brief Append a target-ISA trap body for a skipped kernel.
+/// @brief Append a target-ISA `s_endpgm` body for a skipped kernel.
 ///
 /// @details The neutral plan contains only placement facts needed by the patch
 /// layer. DBT and DBI retain ownership of descriptor policy and diagnostics.

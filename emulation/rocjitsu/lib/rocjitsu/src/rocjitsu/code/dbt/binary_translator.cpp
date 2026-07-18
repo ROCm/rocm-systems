@@ -1133,8 +1133,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       translation.configure_skipped_stub();
     }
 
-    std::string message = "skipped kernel " + kernel_label(*scope.translation) +
-                          " after translation error: " + std::move(failure.message);
+    std::string message =
+        "*** SKIPPED KERNEL " + kernel_label(*scope.translation) +
+        " REPLACED WITH S_ENDPGM; DISPATCHING IT WILL SILENTLY PRODUCE INVALID OUTPUTS *** "
+        "Translation error: " +
+        std::move(failure.message);
     append_warning(result.diagnostics, DiagnosticKind::KernelSkipped, std::move(message),
                    failure.guest_offset ? failure.guest_offset
                                         : std::optional<uint64_t>(source_entry),

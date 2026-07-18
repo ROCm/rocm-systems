@@ -159,7 +159,6 @@ constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
 constexpr size_t kKernelDescriptorEntryOffset =
     offsetof(TestKernelDescriptor, kernel_code_entry_byte_offset);
 constexpr uint64_t kKernargPreloadSkipBytes = 256;
-constexpr uint16_t kSkippedKernelTrapId = 0x52;
 
 void write_kernel_descriptor_entry_offset(void *descriptor, int64_t entry_offset) {
   auto *bytes = static_cast<uint8_t *>(descriptor);
@@ -3573,11 +3572,10 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto *translated_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(translated_words[0],
-            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId))
-      << "the failed kernel body traps if it is dispatched";
-  EXPECT_EQ(translated_words[1], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
-      << "the skipped-kernel stub keeps a defensive endpgm after the trap";
+  EXPECT_EQ(translated_words[0], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
+      << "the failed kernel body exits safely if it is dispatched";
+  EXPECT_NE(skipped->message.find("S_ENDPGM"), std::string::npos);
+  EXPECT_NE(skipped->message.find("INVALID OUTPUTS"), std::string::npos);
 
   rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA3);
   const auto infos = parser.translate_image(
@@ -3590,7 +3588,8 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
   std::ranges::sort(entries);
   ASSERT_EQ(entries.size(), 2u);
   EXPECT_EQ(entries[0], 0u);
-  ASSERT_GT(entries[1], sizeof(uint32_t));
+  EXPECT_EQ(entries[1], sizeof(uint32_t))
+      << "the independent kernel follows the one-instruction skipped body";
   ASSERT_EQ(entries[1] % sizeof(uint32_t), 0u);
   ASSERT_LT(entries[1], translated.text_sections()[0]->size());
   EXPECT_EQ(translated_words[entries[1] / sizeof(uint32_t)],
@@ -5945,10 +5944,6 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
   // translated hardware-LDS body, not at the skipped-kernel stub appended for
   // the sidecar variant.
   EXPECT_EQ(*normal_entry_file_offset, translated_text->sectionOffset());
-  const auto *entry_words =
-      reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
-  EXPECT_NE(entry_words[0],
-            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
   EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
 }
 
@@ -7458,10 +7453,11 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitClearsReuseAndSecondAccumulatorNeg
   EXPECT_EQ((target_words[3] >> 29) & 0x7, 0x3u);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitFailsForMismatchedVgprMsbBanks) {
-  // SRC2 selects bank 1 while VDST remains in bank 0. The second K64
-  // instruction would therefore read a different physical register than the
-  // first instruction wrote.
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitTemporarilyMatchesMismatchedVgprMsbBanks) {
+  // SRC2 selects bank 1 while VDST remains in bank 0. The first K64 must read
+  // the original accumulator from SRC2 bank 1; the second temporarily selects
+  // bank 0 so it reads the intermediate written through VDST, then restores
+  // the original mode.
   constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x10});
   constexpr auto source_wmma = gfx1250::build_vop3p(
       gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = 32, .src0 = 256, .src1 = 272, .src2 = 128});
@@ -7475,12 +7471,17 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitFailsForMismatchedVgprMsbBanks) {
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   auto result = translator.translate(source);
-  EXPECT_FALSE(result.ok());
-  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
-    return item.kind == rocjitsu::DiagnosticKind::ExpandFailed;
-  });
-  ASSERT_NE(diagnostic, result.diagnostics.end());
-  EXPECT_NE(diagnostic->message.find("VGPR-MSB"), std::string::npos);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto select_vdst_bank_for_src2 =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+
+  EXPECT_EQ(target_words[3], select_vdst_bank_for_src2[0]);
+  EXPECT_EQ(target_words[6], set_vgpr_msb[0]);
+  EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAllowsMatchingNonzeroVgprMsbBanks) {
@@ -7552,6 +7553,39 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitAdjustsModeForBankCrossingInput) {
   EXPECT_EQ(target_words[2], set_src0_bank_one[0]);
   EXPECT_EQ(target_words[4] & 0x1ffu, 256u + 2u);
   EXPECT_EQ(target_words[5], restore_mode[0]);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaSplitCombinesInputCrossingAndAccumulatorBankMode) {
+  // SRC0's high half crosses into bank 1, while the original accumulator uses
+  // SRC2 bank 1 and VDST uses bank 0. The second K64 needs both adjustments in
+  // one temporary mode, followed by restoration of the original mode.
+  constexpr auto original_mode =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x10});
+  constexpr auto source_wmma =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                           {.vdst = 32, .src0 = 256 + 250, .src1 = 256 + 114, .src2 = 128});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {original_mode[0], source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto second_mode =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
+
+  EXPECT_EQ(target_words[3], second_mode[0]);
+  EXPECT_EQ(target_words[5] & 0x1ffu, 256u + 2u);
+  EXPECT_EQ(target_words[6], original_mode[0]);
+  EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250TensorLoadMasksAndRestoresGroupDescriptorForA0) {

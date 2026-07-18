@@ -1696,7 +1696,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       continue;
     }
 
-    if (facts.swappc_ssrc && *facts.swappc_ssrc + 1 < read_halves.size()) {
+    if (facts.swappc_ssrc &&
+        static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
       const uint16_t pair_lo = *facts.swappc_ssrc;
       const auto &lo = read_halves[pair_lo];
       const auto &hi = read_halves[pair_lo + 1];
