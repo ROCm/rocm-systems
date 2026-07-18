@@ -130,3 +130,100 @@ Run the layer with:
 cmake --build <build-dir> --target contract_tests
 ctest --test-dir <build-dir> -L contract --output-on-failure
 ```
+
+## Backend coverage
+
+The contract suite is portable across the AMD (ROCm/HIP) backend and the NVIDIA
+HIP-over-CUDA backend (`HIP_PLATFORM=nvidia`). All 115 domains compile on both
+backends. Domains that exercise AMD-only or CUDA-removed entry points are gated
+with `#if HT_AMD`, so on NVIDIA they compile to an empty binary (no registered
+test cases) rather than failing to build.
+
+| | AMD (gfx908, ROCm 7.15) | NVIDIA (H100, CUDA 13.1) |
+|---|---|---|
+| Domains | 115 | 115 |
+| Domains compiled (non-empty) | 115 | 106 |
+| Domains compile-gated (empty) | 0 | 9 |
+| Registered test cases (ctest) | 578 | 515 |
+| Passed | 578 | 494 |
+| Failed | 0 | 0 |
+| Skipped | 0 | 21 |
+
+Counts are from `ctest -L contract` (one registered test per `HIP_TEST_CASE`).
+The AMD figures are for a single-GPU MI100; on AMD, capability-gated cases that
+have nothing to exercise (for example single-GPU peer access) resolve as passing
+skips rather than being reported separately by ctest.
+
+### Compilation and execution time
+
+Representative wall-clock timings for a full clean build and a full serial
+`ctest -L contract` run. Both were measured on 16-core allocations.
+
+| Stage | AMD (MI100 host, gfx908) | NVIDIA (H100 host, sm_90) |
+|---|---|---|
+| Clean compile (`contract_tests`, `-j16`) | ~466 s | ~282 s |
+| Execution (`ctest -L contract`, serial) | ~65 s | ~225 s |
+
+Notes:
+- The AMD build here is a multi-architecture fat binary
+  (gfx906/gfx908/gfx90a/gfx942/gfx950/gfx1100/gfx1201), which dominates its
+  longer compile time; a single-architecture AMD build compiles substantially
+  faster. The NVIDIA build targets a single architecture (`sm_90`).
+- NVIDIA execution is slower largely because several driver-API-first tests run
+  under one-process-per-test isolation and pay CUDA primary-context
+  initialization on each launch; the AMD runtime auto-initializes and the local
+  datacenter GPU has lower per-launch overhead.
+
+### Domains compile-gated out on NVIDIA (empty binary)
+
+These 9 domains are AMD-only (or use APIs removed from recent CUDA) and are
+wrapped in a whole-file `#if HT_AMD`, so they register no test cases on NVIDIA:
+
+| Domain | Reason absent on NVIDIA |
+|---|---|
+| `call_config` | `hipConfigureCall`/`hipSetupArgument`/`hipLaunchByPtr` legacy launch — AMD only |
+| `kernel_name_ref` | `hipKernelNameRef`/`hipKernelNameRefByPtr` name reflection — AMD only |
+| `texture_reference` | deprecated `hipTexRef*` driver texref API — removed in CUDA 12+ |
+| `texture_reference_symbol` | symbol-backed `hipTexRef*` module texref API — removed in CUDA 12+ |
+| `multi_device_launch` | `hipExtLaunchMultiKernelMultiDevice` + incomplete `cudaLaunchParams` |
+| `occupancy_variable` | `hipOccupancyMaxPotentialBlockSizeVariableSMem` family — AMD only |
+| `stream_cu_mask` | AMD stream CU-mask API — AMD only |
+| `jit_link` | `hipLink*` / `hipJitInputSpirv` JIT linker — AMD only |
+| `logging` | AMD extended logging control API — AMD only |
+
+In addition, several domains that do compile on NVIDIA gate only their AMD-only
+tests behind `#if HT_AMD` (for example `library`, `kernel_object_attributes`,
+`library_file`, `driver_graph_node`, `host_alloc_aliases`, `pointer_query`,
+`device_config`, `occupancy_ext`, `driver_texture_object`, `texture`), so their
+portable subset still runs on NVIDIA.
+
+### Tests skipped at execution on NVIDIA
+
+The 21 runtime skips fall into two groups.
+
+NVIDIA-backend-specific safety gates — the AMD backend validates the argument and
+returns an error, but the CUDA entry point these map to dereferences the bad
+argument and would fault (SIGSEGV), so the negative/rejection contract is only
+exercised on AMD:
+
+| Test | API | Reason |
+|---|---|---|
+| `Contract_Extension_GetProcAddress_NullArgs_AreRejected` | `hipGetProcAddress`→`cuGetProcAddress` | null args not validated (fault) |
+| `Contract_DriverEntryPoint_NullFuncPtr_IsRejected` | `hipGetDriverEntryPoint` | null output not validated |
+| `Contract_PointerInfo_GetAttributes_NullOutput_IsRejected` | `hipPointerGetAttributes`→`cudaPointerGetAttributes` | null output not validated (fault) |
+| `Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs` | `hipStreamGetAttribute`→`cudaStreamGetAttribute` | null value-out not validated (fault) |
+| `Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected` | `hipSignalExternalSemaphoresAsync` | null handle not validated (fault) |
+| `Contract_Ipc_GetMemHandle_NullArgs_AreRejected` | `hipIpcGetMemHandle`→`cudaIpcGetMemHandle` | null args not validated (fault) |
+| `Contract_Ipc_MemHandle_SameProcessRoundTrip` | `hipIpcOpenMemHandle` | same-process IPC open unsupported on NVIDIA |
+| `Contract_Ipc_EventHandle_SameProcessRoundTrip` | `hipIpcOpenEventHandle` | same-process IPC open unsupported on NVIDIA |
+
+Universal capability skips — these depend on device/runtime capability and skip
+on any host lacking it (they also skip on a single-GPU or non-XNACK AMD host):
+
+| Test(s) | Capability required |
+|---|---|
+| `Contract_PeerAccess_EnableTwice_ThenDisable_RoundTripsWhenAvailable` | two or more GPUs |
+| `Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup` | SM resource splitting |
+| `Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported` | dma-buf handle export |
+| `Contract_StreamMemoryOps_*` (6: WriteValue32/64, WaitValueGte, WaitValue64Gte, BatchMemOp, RejectsInvalidInputs) | stream wait/write value ops |
+| `Contract_GraphBatchMemOp_*` (4: AddNode, SetParams, ExecSetParams, GetParams) | stream wait/write value ops in graph nodes |
