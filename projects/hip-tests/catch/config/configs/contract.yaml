@@ -336,6 +336,18 @@ contract:
   Contract_MemBatchCopy_NullDestination_IsRejected:
     <<: *level_0
     tags: [mem_batch_copy]
+  Contract_MemBatchCopy3D_HostDeviceHostRoundTrip_IsVisibleAfterSync:
+    <<: *level_0
+    tags: [mem_batch_copy_3d]
+  Contract_MemBatchCopy3D_ZeroOps_IsRejected:
+    <<: *level_0
+    tags: [mem_batch_copy_3d]
+  Contract_MemBatchCopy3D_NullOpList_IsRejected:
+    <<: *level_0
+    tags: [mem_batch_copy_3d]
+  Contract_MemBatchCopy3D_NonZeroFlags_IsRejected:
+    <<: *level_0
+    tags: [mem_batch_copy_3d]
   Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported:
     <<: *level_0
     tags: [mem_batch_discard]
