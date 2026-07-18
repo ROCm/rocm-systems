@@ -14,10 +14,8 @@
 
 // The driver-style graph node entry points (hipDrvGraphAddMemcpyNode,
 // hipDrvGraphAddMemsetNode, and their get/set/exec-set params) take a driver
-// HIP_MEMCPY3D / hipMemsetParams plus a hipCtx_t and are AMD-side in this tree,
-// so the whole domain is gated like the other driver-context contracts.
-#if HT_AMD
-
+// HIP_MEMCPY3D / hipMemsetParams plus a hipCtx_t. They are exercised on both
+// backends: on NVIDIA they map to the CUDA driver cuGraph* entry points.
 namespace {
 constexpr size_t kWidth = 7;
 constexpr size_t kHeight = 5;
@@ -183,18 +181,40 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
   cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
 
   // Re-point the instantiated driver node at the second host buffer through the
-  // executable setter. The next launch must copy the second buffer without a
-  // re-instantiation.
+  // executable setter.
   HIP_MEMCPY3D updated = HostToDeviceCopy(device, second.data());
-  HIP_CHECK(hipDrvGraphExecMemcpyNodeSetParams(exec, node, &updated, ctx));
+  const hipError_t update_status = hipDrvGraphExecMemcpyNodeSetParams(exec, node, &updated, ctx);
 
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+
+#if HT_AMD
+  // On AMD the executable setter accepts re-pointing the copy at a different host
+  // source allocation after instantiation, and the next launch copies the second
+  // buffer without a re-instantiation.
+  HIP_CHECK(update_status);
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   ReadBack(&dst, device);
   REQUIRE(dst == second);
+#else
+  // On NVIDIA hipDrvGraphExecMemcpyNodeSetParams maps to
+  // cuGraphExecMemcpyNodeSetParams, which does not allow changing the memory
+  // operands of an instantiated node to a different allocation: re-pointing the
+  // source to a separate host buffer is rejected with hipErrorInvalidValue (same
+  // restriction as the runtime hipGraphExecMemcpyNodeSetParams path). Assert the
+  // documented rejection, then launch the originally instantiated copy (the first
+  // buffer) to prove the executable is still usable. If CUDA relaxes this
+  // restriction, this branch is where the expectation changes to match AMD.
+  REQUIRE(update_status == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  ReadBack(&dst, device);
+  REQUIRE(dst == first);
+#endif
 }
 
 HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
@@ -277,5 +297,3 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfter
   ReadBack(&dst, device);
   REQUIRE(dst[0] == 0x22);
 }
-
-#endif  // HT_AMD

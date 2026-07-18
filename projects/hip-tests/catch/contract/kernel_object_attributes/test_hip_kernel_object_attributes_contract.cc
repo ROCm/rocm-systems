@@ -12,10 +12,9 @@
 #include <vector>
 
 // The hipKernel_t object accessors (hipKernelGetAttribute, hipKernelSetAttribute,
-// hipKernelGetParamInfo) are AMD-side in this tree, so the whole domain is gated
-// like the library and extension contracts.
-#if HT_AMD
-
+// hipKernelGetParamInfo) and the hipLibrary* loader used to obtain a kernel are
+// exercised on both backends: on NVIDIA they map to the CUDA driver cuKernel*/
+// cuLibrary* entry points.
 namespace {
 constexpr char const kWriteKernelName[] = "write_value";
 
@@ -38,12 +37,19 @@ bool CompileKernelSource(std::vector<char>& code) {
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kKernelSource, "kernel_object_attributes_contract.cu",
                                    0, nullptr, nullptr));
 
+#ifdef __HIP_PLATFORM_AMD__
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDeviceProperties(&properties, 0));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
+  const int num_options = 1;
+#else
+  const std::string fmad = "--fmad=false";
+  const char* options[] = {fmad.c_str()};
+  const int num_options = 1;
+#endif
 
-  const hiprtcResult compile_result = hiprtcCompileProgram(program, 1, options);
+  const hiprtcResult compile_result = hiprtcCompileProgram(program, num_options, options);
   if (compile_result != HIPRTC_SUCCESS) {
     size_t log_size = 0;
     HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
@@ -69,6 +75,11 @@ bool CompileKernelSource(std::vector<char>& code) {
 // kernel into `kernel`. Skips when HIPRTC is unavailable. `code` must stay alive
 // only until the library is loaded; callers keep it for simplicity.
 void LoadContractKernel(std::vector<char>& code, hipLibrary_t& library, hipKernel_t& kernel) {
+  // Establish a device context before the driver-style library/kernel entry
+  // points run. On NVIDIA these map to the CUDA driver API (cuLibrary*/cuKernel*),
+  // which requires a bound primary context; hipFree(0) is the canonical no-op
+  // that forces primary-context initialization and is a harmless success on AMD.
+  HIP_CHECK(hipFree(0));
   if (!CompileKernelSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
@@ -144,5 +155,3 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_GetParamInfo_ReturnsFirstParamLayo
 
   HIP_CHECK(hipLibraryUnload(library));
 }
-
-#endif  // HT_AMD

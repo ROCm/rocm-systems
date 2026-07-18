@@ -14,10 +14,8 @@
 #include <vector>
 
 // The library-from-file and managed-symbol APIs (hipLibraryLoadFromFile,
-// hipLibraryGetManaged) are AMD-side in this tree, so the whole domain is gated
-// like the library and kernel-object contracts.
-#if HT_AMD
-
+// hipLibraryGetManaged) are exercised on both backends: on NVIDIA they map to
+// the CUDA driver cuLibrary* entry points.
 namespace {
 constexpr char const kWriteKernelName[] = "write_value";
 
@@ -36,12 +34,19 @@ bool CompileLibrarySource(std::vector<char>& code) {
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kLibrarySource, "library_file_contract.cu", 0, nullptr,
                                    nullptr));
 
+#ifdef __HIP_PLATFORM_AMD__
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDeviceProperties(&properties, 0));
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
+  const int num_options = 1;
+#else
+  const std::string fmad = "--fmad=false";
+  const char* options[] = {fmad.c_str()};
+  const int num_options = 1;
+#endif
 
-  const hiprtcResult compile_result = hiprtcCompileProgram(program, 1, options);
+  const hiprtcResult compile_result = hiprtcCompileProgram(program, num_options, options);
   if (compile_result != HIPRTC_SUCCESS) {
     size_t log_size = 0;
     HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
@@ -128,5 +133,3 @@ HIP_TEST_CASE(Contract_LibraryFile_GetManaged_UnknownSymbol_IsRejected) {
   HIP_CHECK(hipLibraryUnload(library));
   std::remove(path.c_str());
 }
-
-#endif  // HT_AMD
