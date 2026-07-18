@@ -95,7 +95,7 @@ jobs:
         run: |
           AMDGPU_LOWER=$(echo "${{ inputs.amdgpu_families }}" | tr '[:upper:]' '[:lower:]')
           uv pip install --prerelease=allow \
-            rocm-sdk-core "rocm-sdk-libraries-${AMDGPU_LOWER}" \
+            "rocm-sdk-core>=7.0" "rocm-sdk-libraries-${AMDGPU_LOWER}>=7.0" \
             --index-url "https://rocm.nightlies.amd.com/v2/${{ inputs.amdgpu_families }}/" \
             --extra-index-url https://pypi.org/simple/
           uv pip install --prerelease=allow \
