@@ -26,6 +26,8 @@ import sys
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
 
+import fwupd_bios
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
 
@@ -1832,78 +1834,7 @@ class SetValueCommands:
             return
 
         if args.mem_carveout is not None:
-            # Validate single GPU (VRAM is per-GPU)
-            if isinstance(args.gpu, list) and len(args.gpu) > 1:
-                raise ValueError(
-                    "VRAM carveout can only be set for a single GPU. Please specify --gpu <id>"
-                )
-
-            try:
-                uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
-                options = uma_info.get("options", [])
-                current_index = uma_info.get("current_index", -1)
-
-                # Validate index
-                if args.mem_carveout >= len(options):
-                    self.logger.store_output(
-                        args.gpu,
-                        "mem_carveout",
-                        f"Invalid index {args.mem_carveout}. Valid range: 0-{len(options) - 1}",
-                    )
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
-
-                # Check if already set
-                if args.mem_carveout == current_index:
-                    description = options[args.mem_carveout].get("description", "N/A")
-                    self.logger.store_output(
-                        args.gpu,
-                        "mem_carveout",
-                        f"VRAM carveout is already set to [{args.mem_carveout}] {description}",
-                    )
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
-
-                # Set the value
-                amdsmi_interface.amdsmi_set_gpu_uma_carveout(args.gpu, args.mem_carveout)
-                description = options[args.mem_carveout].get("description", "N/A")
-                self.logger.store_output(
-                    args.gpu,
-                    "mem_carveout",
-                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
-                    "Takes effect after the next reboot — "
-                    "current VRAM size still reflects the previous boot.",
-                )
-                self.logger.print_output()
-                self.helpers.prompt_reboot()
-
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
-                if (
-                    e.get_error_code()
-                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-                ):
-                    # Surface an actionable message instead of a raw error code.
-                    # Avoid naming specific products here so the message does not
-                    # age as new ASICs add or drop UMA carveout support.
-                    self.logger.store_output(
-                        args.gpu,
-                        "mem_carveout",
-                        "Not supported: UMA carveout is only available on APUs whose"
-                        ' VBIOS exposes the ATCS "Set UMA Allocation Size" function.',
-                    )
-                else:
-                    self.logger.store_output(
-                        args.gpu,
-                        "mem_carveout",
-                        f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
-                    )
-                self.logger.print_output()
-
-            self.logger.clear_multiple_devices_output()
+            self._set_mem_carveout(args)
             return
 
         if getattr(args, "compute_partition_mem_alloc_mode", None):
@@ -1939,6 +1870,147 @@ class SetValueCommands:
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
+
+    def _set_mem_carveout(self, args):
+        """Set the VRAM carveout, falling back to fwupd on UEFI-HII platforms.
+
+        The amdgpu sysfs node backs the C setter; when it is absent
+        (NOT_SUPPORTED) the platform BIOS may still expose the knob through
+        fwupd (HP UEFI-HII), so route the write there instead of refusing.
+        """
+        # Validate single GPU (VRAM is per-GPU)
+        if isinstance(args.gpu, list) and len(args.gpu) > 1:
+            raise ValueError(
+                "VRAM carveout can only be set for a single GPU. Please specify --gpu <id>"
+            )
+
+        try:
+            uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
+            options = uma_info.get("options", [])
+            current_index = uma_info.get("current_index", -1)
+
+            # Validate index
+            if args.mem_carveout >= len(options):
+                self.logger.store_output(
+                    args.gpu,
+                    "mem_carveout",
+                    f"Invalid index {args.mem_carveout}. Valid range: 0-{len(options) - 1}",
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            # Check if already set
+            if args.mem_carveout == current_index:
+                description = options[args.mem_carveout].get("description", "N/A")
+                self.logger.store_output(
+                    args.gpu,
+                    "mem_carveout",
+                    f"VRAM carveout is already set to [{args.mem_carveout}] {description}",
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            # Set the value
+            amdsmi_interface.amdsmi_set_gpu_uma_carveout(args.gpu, args.mem_carveout)
+            description = options[args.mem_carveout].get("description", "N/A")
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
+                "Takes effect after the next reboot — "
+                "current VRAM size still reflects the previous boot.",
+            )
+            self.logger.print_output()
+            self.helpers.prompt_reboot()
+
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                # The kernel node is absent; the knob may still be exposed by the
+                # platform BIOS through fwupd (HP UEFI-HII).
+                self._set_mem_carveout_fwupd(args)
+            else:
+                self.logger.store_output(
+                    args.gpu,
+                    "mem_carveout",
+                    f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
+                )
+                self.logger.print_output()
+
+        self.logger.clear_multiple_devices_output()
+
+    def _set_mem_carveout_fwupd(self, args):
+        """Drive the carveout write through fwupd when the amdgpu node is absent.
+
+        fwupd/polkit handles privilege, so root is not pre-required here.
+        """
+        fwupd_setting = fwupd_bios.get_carveout_setting()
+        if fwupd_setting is None:
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                "Not supported: no UMA carveout interface (neither the amdgpu "
+                "sysfs node nor a fwupd BIOS setting is present).",
+            )
+            self.logger.print_output()
+            return
+
+        options = fwupd_setting["options"]
+        current_index = fwupd_setting["current_index"]
+
+        if args.mem_carveout >= len(options):
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                f"Invalid index {args.mem_carveout}. Valid range: 0-{len(options) - 1}",
+            )
+            self.logger.print_output()
+            return
+
+        if args.mem_carveout == current_index:
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                f"VRAM carveout is already set to [{args.mem_carveout}] "
+                f"{options[args.mem_carveout]}",
+            )
+            self.logger.print_output()
+            return
+
+        if not fwupd_bios.fwupd_available(require_write=True):
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                "Reading the BIOS carveout works, but changing it requires "
+                "fwupd >= 2.1.1 (Ubuntu 26.04+). Upgrade fwupd to set the carveout.",
+            )
+            self.logger.print_output()
+            return
+
+        try:
+            fwupd_bios.set_carveout_setting(args.mem_carveout)
+        except (ValueError, RuntimeError) as e:
+            self.logger.store_output(
+                args.gpu,
+                "mem_carveout",
+                f"Unable to set VRAM carveout to index {args.mem_carveout}: {e}",
+            )
+            self.logger.print_output()
+            return
+
+        self.logger.store_output(
+            args.gpu,
+            "mem_carveout",
+            f"Successfully set VRAM carveout to [{args.mem_carveout}] "
+            f"{options[args.mem_carveout]}. "
+            "Takes effect after the next reboot — "
+            "current VRAM size still reflects the previous boot.",
+        )
+        self.logger.print_output()
+        self.helpers.prompt_reboot()
 
     def set_value(
         self,

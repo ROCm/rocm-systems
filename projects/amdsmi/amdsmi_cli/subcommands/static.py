@@ -26,8 +26,9 @@ import os
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
 from amdsmi_helpers import AMDSMIHelpers
 
-from amdsmi import amdsmi_exception, amdsmi_interface
+import fwupd_bios
 
+from amdsmi import amdsmi_exception, amdsmi_interface
 
 # Canonical human-readable AMD vendor string, matching `lspci` / pci.ids (vendor 0x1002).
 # The board manufacturer name is reported as the raw AMD PCI vendor ID ("0x1002") when
@@ -1159,58 +1160,7 @@ class StaticCommands:
             static_dict["cache_info"] = cache_info_list
 
         if args.mem_carveout:
-            try:
-                uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
-                logging.debug(f"UMA carveout info: {uma_info}")
-
-                if self.logger.is_json_format():
-                    # JSON: show all options with current index
-                    carveout_dict = {
-                        "options": uma_info.get("options", []),
-                        "current_index": uma_info.get("current_index", -1),
-                    }
-                    static_dict["mem_carveout"] = carveout_dict
-                elif self.logger.is_csv_format():
-                    # CSV: show only current index
-                    static_dict["mem_carveout_index"] = uma_info.get("current_index", -1)
-                else:
-                    # Human readable: show all options with current marked
-                    options = uma_info.get("options", [])
-                    current_index = uma_info.get("current_index", -1)
-                    if options:
-                        formatted_options = []
-                        for idx, option in enumerate(options):
-                            marker = "*" if idx == current_index else " "
-                            description = option.get("description", "N/A")
-                            # Align indices: *[0] vs  [1]
-                            formatted_options.append(f"    {marker}[{idx}] {description}")
-                        static_dict["mem_carveout"] = "\n" + "\n".join(formatted_options)
-                    else:
-                        static_dict["mem_carveout"] = "N/A"
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                # UMA carveout is only exposed by APU VBIOSes that support
-                # ATCS function 0xA. On dGPUs and Instinct parts (including
-                # MI300A) the sysfs attribute does not exist and the library
-                # returns NOT_SUPPORTED; surface a clearer reason than bare N/A.
-                not_supported = (
-                    e.get_error_code()
-                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-                )
-                if not_supported and not (
-                    self.logger.is_json_format() or self.logger.is_csv_format()
-                ):
-                    # Human-readable: give a descriptive reason. JSON/CSV
-                    # consumers keep the legacy bare "N/A" for back-compat.
-                    static_dict["mem_carveout"] = (
-                        "N/A (UMA carveout is not supported on this ASIC/VBIOS)"
-                    )
-                elif self.logger.is_csv_format():
-                    static_dict["mem_carveout_index"] = "N/A"
-                else:
-                    static_dict["mem_carveout"] = "N/A"
-                logging.debug(
-                    "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
-                )
+            self._store_mem_carveout(args, static_dict, gpu_id)
 
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if "clock" in current_platform_args and (
@@ -1399,6 +1349,74 @@ class StaticCommands:
             return  # Skip printing when there are multiple devices
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+
+    def _render_mem_carveout(self, static_dict, options, current_index, source=None):
+        """Write carveout options into ``static_dict`` in the human/JSON/CSV shape.
+
+        ``options`` is a list of dicts each carrying a ``description``;
+        ``current_index`` is the 0-based selected entry. ``source``, when set, is
+        tagged into the JSON output.
+        """
+        if self.logger.is_json_format():
+            carveout_dict = {"options": options, "current_index": current_index}
+            if source is not None:
+                carveout_dict["source"] = source
+            static_dict["mem_carveout"] = carveout_dict
+        elif self.logger.is_csv_format():
+            static_dict["mem_carveout_index"] = current_index
+        else:
+            if options:
+                formatted_options = []
+                for idx, option in enumerate(options):
+                    marker = "*" if idx == current_index else " "
+                    description = option.get("description", "N/A")
+                    # Align indices: *[0] vs  [1]
+                    formatted_options.append(f"    {marker}[{idx}] {description}")
+                static_dict["mem_carveout"] = "\n" + "\n".join(formatted_options)
+            else:
+                static_dict["mem_carveout"] = "N/A"
+
+    def _store_mem_carveout(self, args, static_dict, gpu_id):
+        """Populate the mem-carveout fields, falling back to fwupd when needed.
+
+        The amdgpu ``.../device/uma/carveout`` sysfs node backs the C getter.
+        When it is absent (NOT_SUPPORTED) the same knob may be exposed by the
+        platform BIOS through fwupd (HP UEFI-HII); try that before reporting N/A.
+        """
+        try:
+            uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
+            logging.debug(f"UMA carveout info: {uma_info}")
+            self._render_mem_carveout(
+                static_dict, uma_info.get("options", []), uma_info.get("current_index", -1)
+            )
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            not_supported = (
+                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            )
+            fwupd_setting = fwupd_bios.get_carveout_setting() if not_supported else None
+            if fwupd_setting is not None:
+                # UEFI-HII platform: the BIOS exposes the carveout through fwupd.
+                options = [
+                    {"index": idx, "description": value}
+                    for idx, value in enumerate(fwupd_setting["options"])
+                ]
+                self._render_mem_carveout(
+                    static_dict, options, fwupd_setting["current_index"], source="fwupd"
+                )
+            elif not_supported and not (
+                self.logger.is_json_format() or self.logger.is_csv_format()
+            ):
+                static_dict["mem_carveout"] = (
+                    "N/A (no UMA carveout interface: neither the amdgpu sysfs "
+                    "node nor a fwupd BIOS setting is present)"
+                )
+            elif self.logger.is_csv_format():
+                static_dict["mem_carveout_index"] = "N/A"
+            else:
+                static_dict["mem_carveout"] = "N/A"
+            logging.debug(
+                "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
+            )
 
     def _filter_nics_from_args(subcommand):
         @functools.wraps(subcommand)
