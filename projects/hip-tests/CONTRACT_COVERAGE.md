@@ -145,12 +145,12 @@ The percentages below are approximate API-name coverage against declarations par
 | Occupancy | 13 | 13 | 100.0% |
 | Graph / capture | 100 | 100 | 100.0% |
 | Stream | 23 | 23 | 100.0% |
-| Runtime / device | 39 | 45 | 86.7% |
+| Runtime / device | 40 | 45 | 88.9% |
 | Kernel launch / function attrs | 19 | 19 | 100.0% |
-| Memory / copy / memset | 133 | 137 | 97.1% |
-| Other runtime APIs | 32 | 56 | 57.1% |
+| Memory / copy / memset | 134 | 137 | 97.8% |
+| Other runtime APIs | 33 | 56 | 58.9% |
 | Module / library loading | 29 | 29 | 100.0% |
-| Texture / surface | 45 | 54 | 83.3% |
+| Texture / surface | 48 | 54 | 88.9% |
 | Context / driver | 16 | 16 | 100.0% |
 | Extension / proc address | 11 | 13 | 84.6% |
 | IPC | 5 | 5 | 100.0% |
