@@ -127,6 +127,11 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return result;
 }
 
+[[nodiscard]] WaitcheckReport analyze_gfx1250_normal(const std::vector<uint32_t> &program) {
+  TestCodeObject code_object(program);
+  return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+}
+
 [[nodiscard]] rdna4::Vop1MachineInst v_mov_b32(uint32_t vdst, uint32_t src_vgpr) {
   rdna4::Vop1MachineInst inst{};
   inst.encoding = 0x3F;
@@ -325,13 +330,14 @@ void append_buffer_load_b128_v32_v7_s4_offen(std::vector<uint32_t> &program) {
   program.push_back(0x00000007u);
 }
 
-[[nodiscard]] rdna4::VglobalMachineInst global_load_b32(uint32_t vdst) {
+[[nodiscard]] rdna4::VglobalMachineInst global_load_b32(uint32_t vdst, uint32_t vaddr = 8,
+                                                        uint32_t saddr = 0) {
   rdna4::VglobalMachineInst inst{};
   inst.encoding = 0xEE;
   inst.op = 20;
   inst.vdst = vdst;
-  inst.vaddr = 8;
-  inst.saddr = 0;
+  inst.vaddr = vaddr;
+  inst.saddr = saddr;
   return inst;
 }
 
@@ -374,13 +380,28 @@ void append_global_loads(std::vector<uint32_t> &program, uint32_t count, uint32_
   return inst;
 }
 
-[[nodiscard]] rdna4::VglobalMachineInst global_store_b32(uint32_t vsrc) {
+[[nodiscard]] rdna4::VglobalMachineInst global_store_b32(uint32_t vsrc, uint32_t vaddr = 8,
+                                                         uint32_t saddr = 0) {
   auto inst = std::bit_cast<rdna4::VglobalMachineInst>(std::array<uint32_t, 3>{0xEE068000U, 0, 0});
   inst.vsrc = vsrc;
-  inst.vaddr = 8;
-  inst.saddr = 0;
+  inst.vaddr = vaddr;
+  inst.saddr = saddr;
   return inst;
 }
+
+[[nodiscard]] rdna4::VglobalMachineInst global_atomic_add_u32(uint32_t vsrc, uint32_t vaddr = 8,
+                                                              uint32_t saddr = 124,
+                                                              bool returns_value = false) {
+  auto inst = std::bit_cast<rdna4::VglobalMachineInst>(std::array<uint32_t, 3>{0xEE0D4000U, 0, 0});
+  inst.vdst = vsrc;
+  inst.vsrc = vsrc;
+  inst.vaddr = vaddr;
+  inst.saddr = saddr;
+  inst.th = returns_value ? 1 : 0;
+  return inst;
+}
+
+[[nodiscard]] std::array<uint32_t, 2> s_prefetch_data() { return {0xF404C000U, 0}; }
 
 void append_global_stores(std::vector<uint32_t> &program, uint32_t count, uint32_t first_vsrc) {
   for (uint32_t i = 0; i < count; ++i)
@@ -436,6 +457,30 @@ void append_ds_loads(std::vector<uint32_t> &program, uint32_t count, uint32_t ad
 [[nodiscard]] rdna4::VdsMachineInst ds_nop() {
   return std::bit_cast<rdna4::VdsMachineInst>(std::array<uint32_t, 2>{0xD8500000U, 0});
 }
+
+void append_global_load_async_to_lds_b32(std::vector<uint32_t> &program) {
+  program.insert(program.end(), {0xEE180000u, 0x00000000u, 0x00000800u});
+}
+
+void append_global_store_async_from_lds_b32(std::vector<uint32_t> &program) {
+  program.insert(program.end(), {0xEE190000u, 0x00000000u, 0x00000800u});
+}
+
+void append_ds_atomic_async_barrier_arrive_b64(std::vector<uint32_t> &program) {
+  program.insert(program.end(), {0xD9580000u, 0x00000000u});
+}
+
+void append_tensor_load_to_lds(std::vector<uint32_t> &program) {
+  program.insert(program.end(), {0xD0710001u, 0x7C000000u, 0x7C7C0C00u});
+}
+
+void append_tensor_store_from_lds(std::vector<uint32_t> &program) {
+  program.insert(program.end(), {0xD0714001u, 0x7C000000u, 0x7C7C0C08u});
+}
+
+[[nodiscard]] rdna4::SoppMachineInst s_wait_asynccnt(uint32_t count) { return sopp(74, count); }
+
+[[nodiscard]] rdna4::SoppMachineInst s_wait_tensorcnt(uint32_t count) { return sopp(75, count); }
 
 [[nodiscard]] rdna4::VdsdirMachineInst ds_param_load(uint32_t vdst) {
   auto inst = std::bit_cast<rdna4::VdsdirMachineInst>(0xCE000000U);
@@ -565,7 +610,9 @@ void append_image_bvhs(std::vector<uint32_t> &program, uint32_t count, uint32_t 
 
 [[nodiscard]] rdna4::SoppMachineInst s_delay_alu(uint32_t simm16) { return sopp(7, simm16); }
 
-[[nodiscard]] rdna4::SoppMachineInst s_wait_xcnt_0() { return sopp(69, 0); }
+[[nodiscard]] rdna4::SoppMachineInst s_wait_xcnt(uint32_t count) { return sopp(69, count); }
+
+[[nodiscard]] rdna4::SoppMachineInst s_wait_xcnt_0() { return s_wait_xcnt(0); }
 
 void append_gfx950_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8C0F70u);
@@ -1518,19 +1565,491 @@ TEST(WaitcheckTest, AcceptsWaitXcntZeroBeforeVmemSourceOverwriteOnGfx1250) {
   append_inst(program, s_wait_xcnt_0());
   append_inst(program, v_mov_b32(8, 10));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_gfx1250_normal(program);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx1250CodeObjectDoesNotTrackVmVsrcInNormalMode) {
+TEST(WaitcheckTest, Gfx1250CodeObjectTracksXcntInNormalMode) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(0));
   append_inst(program, v_mov_b32(8, 10));
 
-  TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 8, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeSmemBaseOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250AcceptsXcntZeroBeforeSmemBaseOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, s_wait_xcnt(0));
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250PartialXcntRetiresOldestVmemTranslation) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, global_load_b32(1, 10));
+  append_inst(program, s_wait_xcnt(1));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250PartialXcntKeepsYoungestVmemTranslation) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, global_load_b32(1, 10));
+  append_inst(program, s_wait_xcnt(1));
+  append_inst(program, v_mov_b32(10, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 10, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250NonzeroXcntCannotRetireSmemTranslation) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, s_load_b32(5, 4));
+  append_inst(program, s_wait_xcnt(1));
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250SmemAfterVmemImplicitlyDrainsVmemXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250VmemAfterSmemImplicitlyDrainsSmemXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(12, 0));
+  append_inst(program, global_load_b32(0, 8, 4));
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250LoadcntWaitAlsoRetiresVmemLoadXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250LoadcntWaitDoesNotRetireVmemStoreXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_store_b32(4, 8));
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+}
+
+TEST(WaitcheckTest, Gfx1250KmcntZeroAlsoRetiresSmemXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, sopp(71, 0)); // s_wait_kmcnt 0
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250SetVgprMsbImplicitlyDrainsXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, s_set_vgpr_msb(0));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250ModeSetregUpdatesVgprMsbAndDropsImmediateSetVgprMsb) {
+  constexpr uint32_t kHwRegMode = 1;
+  // MODE stores dst/src0/src1/src2, so 0x04 corresponds to the
+  // S_SET_VGPR_MSB layout src0=1, src1=src2=dst=0.
+  constexpr uint32_t kModeSrc0V256 = 0x04u << 12u;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegMode, 0, 16), kModeSrc0V256));
+  append_inst(program, s_set_vgpr_msb(0)); // Dropped by the gfx1250 hazard.
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250NopMakesSetVgprMsbAfterModeSetregEffective) {
+  constexpr uint32_t kHwRegMode = 1;
+  constexpr uint32_t kModeSrc0V256 = 0x04u << 12u;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegMode, 0, 16), kModeSrc0V256));
+  append_inst(program, sopp(0, 0)); // s_nop 0
+  append_inst(program, s_set_vgpr_msb(0));
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 8, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250SetregImplicitlyDrainsXcnt) {
+  constexpr uint32_t kHwRegStatus = 2;
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegStatus, 0, 1), 0));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250ConditionalBranchImplicitlyDrainsXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, sopp(33, 0)); // s_cbranch_scc0 to the fallthrough.
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeVmemStoreDataOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_store_b32(4, 8));
+  append_inst(program, v_mov_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeVmemAtomicDataOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_atomic_add_u32(4));
+  append_inst(program, v_mov_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250LoadcntRetiresReturningVmemAtomicXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_atomic_add_u32(4, 8, 124, true));
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeScalarPrefetchBaseOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_prefetch_data());
+  append_inst(program, s_mov_b32(0, 128));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 0, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250VmemTranslationOrderingHandlesVmemDestinationOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_store_b32(4, 8));
+  append_inst(program, global_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250NullSaddrGlobalTracksBothVaddrRegisters) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(4, 2, 124));
+  append_inst(program, v_mov_b32(3, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 3, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250VmemOrderingHandlesNullSaddrVaddrHighOverwrite) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(4, 2, 124));
+  append_inst(program, global_load_b32(3, 10, 124));
+  append_inst(program, v_mov_b32(2, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250PartialXcntAcrossFallthroughJoinRetiresOldestTranslation) {
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(33, 6)); // s_cbranch_scc0 over both VMEM operations.
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, global_load_b32(1, 10));
+  append_inst(program, s_wait_xcnt(1));
+  append_inst(program, v_mov_b32(8, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250PartialXcntAcrossFallthroughJoinKeepsYoungestTranslation) {
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(33, 6)); // s_cbranch_scc0 over both VMEM operations.
+  append_inst(program, global_load_b32(0, 8));
+  append_inst(program, global_load_b32(1, 10));
+  append_inst(program, s_wait_xcnt(1));
+  append_inst(program, v_mov_b32(10, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 10, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsAsynccntBeforeLdsUse) {
+  std::vector<uint32_t> program;
+  append_global_load_async_to_lds_b32(program);
+  append_inst(program, ds_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Async);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250AcceptsAsynccntBeforeLdsUse) {
+  std::vector<uint32_t> program;
+  append_global_load_async_to_lds_b32(program);
+  append_inst(program, s_wait_asynccnt(0));
+  append_inst(program, ds_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250PartialAsynccntKeepsYoungestOperation) {
+  std::vector<uint32_t> program;
+  append_global_load_async_to_lds_b32(program);
+  append_global_store_async_from_lds_b32(program);
+  append_inst(program, s_wait_asynccnt(1));
+  append_inst(program, ds_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Async);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250AsyncLoadAdvancesLoadcntAge) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(20, 16));
+  append_global_load_async_to_lds_b32(program);
+  append_inst(program, sopp(64, 1)); // s_wait_loadcnt 1
+  append_inst(program, v_mov_b32(4, 20));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250DoesNotInventAsynccntBeforeProgramEnd) {
+  std::vector<uint32_t> program;
+  append_global_store_async_from_lds_b32(program);
+  append_inst(program, s_endpgm());
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250AsyncBarrierArriveRequiresWaitBeforeBarrierWait) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_ds_atomic_async_barrier_arrive_b64(program);
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_inst(program, sopp(20, 0)); // s_barrier_wait 0
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Async);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsMissingVmVsrcWaitBeforeAsyncBarrierArrive) {
+  std::vector<uint32_t> program;
+  append_ds_atomic_async_barrier_arrive_b64(program);
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_inst(program, s_wait_asynccnt(0));
+  append_inst(program, s_endpgm());
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_NE(report.diagnostics[0].message.find("immediately before"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsMissingVmVsrcWaitAfterAsyncBarrierArrive) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_ds_atomic_async_barrier_arrive_b64(program);
+  append_inst(program, s_wait_asynccnt(0));
+  append_inst(program, s_endpgm());
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_NE(report.diagnostics[0].message.find("immediately after"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsTensorcntBeforeLdsUse) {
+  std::vector<uint32_t> program;
+  append_tensor_load_to_lds(program);
+  append_inst(program, ds_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Tensor);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+}
+
+TEST(WaitcheckTest, Gfx1250AcceptsTensorcntBeforeLdsUse) {
+  std::vector<uint32_t> program;
+  append_tensor_load_to_lds(program);
+  append_inst(program, s_wait_tensorcnt(0));
+  append_inst(program, ds_load_b32(4, 12));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250DoesNotInventTensorcntBeforeProgramEnd) {
+  std::vector<uint32_t> program;
+  append_tensor_store_from_lds(program);
+  append_inst(program, s_endpgm());
+
+  auto report = analyze_gfx1250_normal(program);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -1576,11 +2095,12 @@ TEST(WaitcheckTest, Gfx1250CodeObjectTracksVmVsrcInExpertMode) {
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
-  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
-  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
-  EXPECT_EQ(report.diagnostics[0].reg.index, 8u);
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[1].reg.index, 8u);
 }
 
 TEST(WaitcheckTest, Gfx1250WaitIdlePreservesExpertSchedulingMode) {
@@ -1595,11 +2115,12 @@ TEST(WaitcheckTest, Gfx1250WaitIdlePreservesExpertSchedulingMode) {
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
-  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
-  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
-  EXPECT_EQ(report.diagnostics[0].reg.index, 8u);
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[1].reg.index, 8u);
 }
 
 TEST(WaitcheckTest, ScratchOffDoesNotReadVaddrZero) {
