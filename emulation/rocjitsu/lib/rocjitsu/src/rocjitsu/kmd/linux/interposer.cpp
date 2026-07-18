@@ -44,6 +44,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -299,6 +300,11 @@ public:
     // it needs are re-created via EXPORT/PRIME/GEM_VA. (Deliberate, like the remote_
     // and mutex handling above — not an oversight.)
     gem_entries_.clear();
+    // Also drop the transient EXPORT_DMABUF fd->flags handoffs: they key on the
+    // parent's dmabuf fd numbers, so a child that reuses one of those fd numbers
+    // before a fresh EXPORT could otherwise fold a stale parent MTYPE hint into its
+    // own PRIME import.
+    pending_gem_flags_.clear();
     in_construction = false;
   }
 
@@ -916,14 +922,24 @@ public:
   /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
   /// @details The flags determine the GPU PTE MTYPE when the fd is later mapped via
   /// GEM_VA and must be captured at export time because the underlying allocation
-  /// may be freed before the map. This is only a TRANSIENT fd→flags association: it
-  /// is consumed by the next PRIME_FD_TO_HANDLE on the same fd, which folds the
-  /// flags into a stable-handle GemEntry. Keying this transient map by fd is safe
-  /// (unlike keying the durable BO state by fd) because it is short-lived and
-  /// overwritten by the next EXPORT on a reused fd.
+  /// may be freed before the map. This is only a TRANSIENT fd→flags association,
+  /// consumed by the next PRIME_FD_TO_HANDLE on the same fd (which folds the flags
+  /// into a stable-handle GemEntry). To keep the fd key from going stale — a dmabuf
+  /// fd closed without a PRIME, then recycled by the kernel for an unrelated file —
+  /// drop_pending_gem_flags(fd) clears the record at close(fd), so a reused fd
+  /// number can never inherit a previous export's MTYPE.
   void track_gem_flags(int dmabuf_fd, uint32_t alloc_flags) {
     std::lock_guard lock(fd_mutex_);
     pending_gem_flags_[dmabuf_fd] = alloc_flags;
+  }
+
+  /// @brief Drop any transient EXPORT_DMABUF flags recorded for @p fd (at close(fd)).
+  /// @details Called from the close() hook for every fd. Cheap no-op when @p fd is
+  /// not a pending dmabuf export. Prevents a closed-without-PRIME export fd from
+  /// leaving a stale flag that a later PRIME on the recycled fd number would apply.
+  void drop_pending_gem_flags(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    pending_gem_flags_.erase(fd);
   }
 
   /// @brief Mint a stable GEM handle for a prime-imported dmabuf (PRIME_FD_TO_HANDLE).
@@ -940,7 +956,12 @@ public:
       alloc_flags = it->second;
       pending_gem_flags_.erase(it);
     }
+    // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
+    // uint32 wrap after a very long-lived process cannot silently overwrite an
+    // in-use entry (which would detach its PTEs from a future GEM_CLOSE).
     uint32_t handle = next_gem_handle_++;
+    while (handle == 0 || gem_entries_.count(handle) != 0)
+      handle = next_gem_handle_++;
     GemEntry &gem = gem_entries_[handle];
     gem = {};
     gem.dmabuf_fd = dmabuf_fd;
@@ -1549,6 +1570,11 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     return 0;
   }
   InterposerContext::ctx.untrack_sysfs(fd);
+  // Drop any transient EXPORT_DMABUF flags for this fd: a dmabuf export fd closed
+  // before a PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a
+  // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
+  // No-op for non-dmabuf fds.
+  InterposerContext::ctx.drop_pending_gem_flags(fd);
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
   // returns, while the GPU mapping must stay live for the caller. GEM state is keyed

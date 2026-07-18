@@ -361,6 +361,17 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 }
 
 void CommandProcessor::startup() {
+  // INVARIANT: this CP and every CU it dispatches to share one partition (engine
+  // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
+  // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
+  // the partition event queue without synchronization — safe only same-partition. The
+  // recursive-bisection partitioner (topology.partition(), run in the engine's
+  // create() before startup) could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any such
+  // split fails loudly rather than silently racing.
+  for ([[maybe_unused]] const auto *cu : cus_)
+    assert(cu->partition_id() == partition_id() &&
+           "CommandProcessor and its compute units must share one partition");
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
   completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
@@ -411,15 +422,18 @@ void CommandProcessor::register_queue(HwQueue queue) {
       engine()->primary_release();
       is_primary_ = false;
     }
-  }
-  // Only start the doorbell poll thread for KFD (host-accessible) queues.
-  // Internal test queues inject doorbell events directly via schedule_event_now().
-  // NOTE: the joinable() check is intentionally outside hw_queue_mutex_ — this
-  // is safe because ROCR always creates queues from a single thread (the HSA
-  // queue-creation path is not re-entrant), so there is no concurrent caller.
-  if (start_poll && !doorbell_thread_.joinable()) {
-    util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
-    doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
+    // Start the doorbell poll thread for KFD (host-accessible) queues under the
+    // same lock that guards doorbell_thread_'s companion state. Internal test
+    // queues inject doorbell events directly via schedule_event_now(). Starting the
+    // jthread while holding hw_queue_mutex_ is safe: the new thread's first action
+    // (scan_doorbells) takes hw_queue_mutex_, so it simply blocks until this scope
+    // releases. Holding the lock also removes a data race on doorbell_thread_ if a
+    // second register_queue ever runs concurrently.
+    if (start_poll && !doorbell_thread_.joinable()) {
+      util::Logger::cp(
+          [&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
+      doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
+    }
   }
 }
 

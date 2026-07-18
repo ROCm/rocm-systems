@@ -107,9 +107,14 @@ public:
   ///          or insufficient register space.
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
-  /// @brief Execute one instruction on the next active wavefront.
-  /// @retval true An instruction was executed.
-  /// @retval false No active wavefronts remain.
+  /// @brief Advance every RUNNING wavefront by one instruction, then report
+  /// residency.
+  /// @details Issues one instruction to each wavefront currently in the RUNNING
+  /// state (waves stalled on WAITCNT/BARRIER, or halted, issue nothing this tick).
+  /// @retval true At least one wavefront is still resident (active), regardless of
+  ///         whether any instruction issued this call — so a fully WAITCNT/BARRIER-
+  ///         stalled CU still returns true.
+  /// @retval false No wavefronts remain resident (the CU is idle).
   bool step() override;
 
   /// @brief Free a halted wavefront's register allocations and reset its slot.

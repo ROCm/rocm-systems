@@ -318,6 +318,15 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   }
   ::close(listen_fd);
   unlink(sock_path.c_str());
+  // In daemon-with-app mode (a per-PID socket_path was supplied) the socket lives in
+  // this invocation's own <runtime>/<pid>/ directory; remove it now that the socket is
+  // gone so a normal shutdown does not leave an empty dir for a later run to reap.
+  // The default (daemon-only) socket sits directly in the shared runtime root, whose
+  // parent must never be removed — hence the socket_path.empty() guard.
+  if (!socket_path.empty()) {
+    std::error_code rm_ec;
+    std::filesystem::remove(std::filesystem::path(sock_path).parent_path(), rm_ec);
+  }
 
   rj_vm_request_exit(vm, "daemon shutdown");
   engine_thread.join();

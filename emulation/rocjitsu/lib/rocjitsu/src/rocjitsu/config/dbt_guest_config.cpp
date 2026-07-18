@@ -144,7 +144,10 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   // PID-scoped path (execvp preserves the launcher's PID for the direct child),
   // then to the well-known location for attach / daemon-only scenarios.
   std::string handoff;
-  if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv))
+  // Treat an empty $ROCJITSU_INVOCATION_DIR as unset (dir && *dir), matching the
+  // interposer's init() so the two config readers resolve the handoff identically;
+  // an empty value would otherwise build "/config_path".
+  if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv); dir && *dir)
     handoff = std::string(dir) + "/config_path";
   else
     handoff = rocjitsu::rpc_invocation_config_file_path(getpid());

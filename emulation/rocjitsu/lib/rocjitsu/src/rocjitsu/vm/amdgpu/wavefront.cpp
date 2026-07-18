@@ -22,8 +22,8 @@ void Wavefront::halt() {
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
-  uint32_t dispatch_id = dispatch_id_;
-  uint32_t wg_id = wg_id_;
+  const uint32_t dispatch_id = dispatch_id_;
+  const uint32_t wg_id = wg_id_;
   cu_.free_wavefront_resources(*this);
   cu_.release_wf(dispatch_id, wg_id);
 }
