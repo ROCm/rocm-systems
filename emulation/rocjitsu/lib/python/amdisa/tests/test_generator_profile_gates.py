@@ -109,6 +109,12 @@ def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> s
     return cpp[start:end]
 
 
+def _generated_constructor_body(cpp: str, class_name: str) -> str:
+    start = cpp.index(f'{class_name}::{class_name}(')
+    end = cpp.index(f'\nvoid {class_name}::execute_impl', start)
+    return cpp[start:end]
+
+
 def _parse_cdna_specs(*names: str):
     specs = []
     for name in names:
@@ -1096,10 +1102,13 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
 @pytest.mark.parametrize(
     'enc_name,inst_name,operand_name,expected_role',
     [
+        ('ENC_VOP2', 'V_FMAMK_F16', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_FMAMK_F32', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_FMAMK_F64', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_ADD_F32', 'vsrc1', 'Src1'),
         ('ENC_VOP1', 'V_SWAP_B32', 'src0', 'Src0'),
         ('ENC_VDS', 'DS_STORE_ADDTID_B32', 'data0', 'Src1'),
+        ('ENC_VDS', 'DS_STORE_2ADDR_B32', 'data1', 'Src2'),
         ('ENC_VDS', 'DS_LOAD_TR4_B64', 'vdst', 'Dst'),
         ('ENC_VGLOBAL', 'GLOBAL_STORE_ADDTID_B32', 'vsrc', 'Src1'),
         ('ENC_VGLOBAL', 'GLOBAL_LOAD_ASYNC_TO_LDS_B8', 'vdst', 'Dst'),
@@ -1110,10 +1119,9 @@ def test_gfx1250_vgpr_msb_roles_follow_physical_encoding_slots(
     enc_name: str, inst_name: str, operand_name: str, expected_role: str
 ):
     codegen = object.__new__(CodeGenerator)
-    sem = SimpleNamespace(name=inst_name)
     operand = SimpleNamespace(name=operand_name)
 
-    assert codegen._fixed_vgpr_msb_role(enc_name, sem, operand) == expected_role
+    assert codegen._fixed_vgpr_msb_role(enc_name, inst_name, operand) == expected_role
 
 
 def test_rdna3_profile_enables_gfx11_vop3_true16_only():
@@ -1278,7 +1286,9 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
     assert 'vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);' in vglobal
     assert 'vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);' in vglobal
-    assert 'vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);' in vop2
+    for class_name in ('VFmamkF16Vop2', 'VFmamkF32Vop2', 'VFmamkF64Vop2'):
+        constructor = _generated_constructor_body(vop2, class_name)
+        assert 'vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);' in constructor
     assert 'src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);' in vop1
     assert 'srcx1_.set_vgpr_msb_role(opx_ == kVopdFmamkF32' in vopd
     assert 'srcy1_.set_vgpr_msb_role(opy_ == kVopdFmamkF32' in vopd

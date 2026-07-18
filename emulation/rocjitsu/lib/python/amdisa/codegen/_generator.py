@@ -2349,17 +2349,17 @@ class CodeGenerator:
         )
 
     def _fixed_vgpr_msb_role(
-        self, enc_name: str, sem: InstructionSemantics | None, opnd: Operand
+        self, enc_name: str, inst_name: str, opnd: Operand
     ) -> str | None:
         """Return the MODE role fixed by an encoding's physical operand slot."""
         enc_upper = enc_name.upper()
+        inst_upper = inst_name.upper()
         opnd_name = opnd.name
 
         if enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOP3', 'ENC_VOP3P', 'ENC_VOPC'):
             if (
                 enc_upper == 'ENC_VOP2'
-                and sem is not None
-                and sem.name.upper() in ('V_FMAMK_F16', 'V_FMAMK_F32', 'V_FMAMK_F64')
+                and inst_upper in ('V_FMAMK_F16', 'V_FMAMK_F32', 'V_FMAMK_F64')
                 and opnd_name == 'vsrc1'
             ):
                 return 'Src2'
@@ -6057,7 +6057,7 @@ class CodeGenerator:
                             _role = None
                             if self._operand_can_use_vgpr_msb(opnd):
                                 _role = self._fixed_vgpr_msb_role(
-                                    enc.enc_name, inst_sem, opnd
+                                    enc.enc_name, inst.name, opnd
                                 )
                                 if _role is None:
                                     if self._vbuffer_store_data_uses_dst_vgpr_msb_role(

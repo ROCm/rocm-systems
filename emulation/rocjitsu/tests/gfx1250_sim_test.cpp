@@ -4423,6 +4423,56 @@ TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
   }
 }
 
+TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData0 = 2;
+  constexpr uint32_t kData1 = 3;
+  constexpr uint32_t kSrc0Bank = 1;
+  constexpr uint32_t kSrc1Bank = 2;
+  constexpr uint32_t kSrc2Bank = 3;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kExpected0 = 0x12345678u;
+  constexpr uint32_t kExpected1 = 0x9ABCDEF0u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(kSrc0Bank | (kSrc1Bank << 2) | (kSrc2Bank << 4));
+  cu.write_vgpr(vb + kSrc0Bank * kBankStride + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kSrc1Bank * kBankStride + kData0, 0, kExpected0);
+  cu.write_vgpr(vb + kSrc2Bank * kBankStride + kData1, 0, kExpected1);
+  cu.write_vgpr(vb + kAddr, 0, 0x100u);
+  cu.write_vgpr(vb + kData0, 0, 0xDEADBEEFu);
+  cu.write_vgpr(vb + kData1, 0, 0xDEADBEEFu);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData0;
+  raw.data1 = kData1;
+  raw.offset0 = 1;
+  raw.offset1 = 2;
+  gfx1250::DsStore2addrB32Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  auto *state = inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->per_lane_addr[0], wf->lds_base() + kAddress + 4);
+  EXPECT_EQ(state->ds2_per_lane_addr[0], wf->lds_base() + kAddress + 8);
+  uint32_t actual0 = 0;
+  uint32_t actual1 = 0;
+  std::memcpy(&actual0, state->store_data.data(), sizeof(actual0));
+  std::memcpy(&actual1, state->ds2_store_data.data(), sizeof(actual1));
+  EXPECT_EQ(actual0, kExpected0);
+  EXPECT_EQ(actual1, kExpected1);
+}
+
 TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};

@@ -4475,7 +4475,7 @@ VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 void VFmamkF64Vop2::execute_impl(amdgpu::Wavefront &wf) {

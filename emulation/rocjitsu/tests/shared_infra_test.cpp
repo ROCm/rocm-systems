@@ -1792,9 +1792,12 @@ struct Cdna3DppTraits {
 struct Cdna4DppTraits {
   static constexpr const char *name = "cdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna4::MachineInst;
   using Vop1VopDppMachineInst = cdna4::Vop1VopDppMachineInst;
+  using Vop1F64DppMachineInst = cdna4::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna4::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna4::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = cdna4::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = cdna4::VCmpxEqU32Vopc;
 };
@@ -1826,10 +1829,12 @@ struct Rdna2DppTraits {
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  static constexpr uint32_t wf_size = 32;
   using MachineInst = rdna4::MachineInst;
   using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna4::Vop1VopDpp8MachineInst;
+  using Vop1F64DppMachineInst = rdna4::Vop1VopDpp16MachineInst;
   using VopcVopDpp16MachineInst = rdna4::VopcVopDpp16MachineInst;
   using VMovB32Vop1 = rdna4::VMovB32Vop1;
   using VCvtF64I32Vop1 = rdna4::VCvtF64I32Vop1;
@@ -1866,12 +1871,15 @@ struct Rdna3_5DppTraits {
 struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
+  static constexpr uint32_t wf_size = 32;
   using MachineInst = gfx1250::MachineInst;
   using VopcMachineInst = gfx1250::VopcMachineInst;
   using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = gfx1250::Vop1VopDpp8MachineInst;
+  using Vop1F64DppMachineInst = gfx1250::Vop1VopDpp16MachineInst;
   using VopcVopDpp16MachineInst = gfx1250::VopcVopDpp16MachineInst;
   using VMovB32Vop1 = gfx1250::VMovB32Vop1;
+  using VCvtF64I32Vop1 = gfx1250::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = gfx1250::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = gfx1250::VCmpxEqU32Vopc;
 };
@@ -2148,7 +2156,7 @@ template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_boun
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, lane), 0x100Fu);
 }
 
-template <typename Traits> void wave32_generated_vop1_dpp64_preserves_masked_destination() {
+template <typename Traits> void generated_vop1_dpp64_preserves_masked_destination() {
   SCOPED_TRACE(Traits::name);
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vop1_f64_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vop1_f64_mask_l2");
@@ -2166,8 +2174,8 @@ template <typename Traits> void wave32_generated_vop1_dpp64_preserves_masked_des
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
-  wf->set_exec(0xFFFFFFFFULL);
+  ASSERT_EQ(wf->wf_size(), Traits::wf_size);
+  wf->set_exec(Traits::wf_size == 64 ? ~0ULL : 0xFFFFFFFFULL);
 
   constexpr uint32_t kSrc = 4;
   constexpr uint32_t kDst = 8;
@@ -2180,7 +2188,7 @@ template <typename Traits> void wave32_generated_vop1_dpp64_preserves_masked_des
     cu->write_vgpr(vbase + kDst + 1, lane, static_cast<uint32_t>(old_dst >> 32));
   }
 
-  typename Traits::Vop1VopDpp16MachineInst raw{};
+  typename Traits::Vop1F64DppMachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -2689,11 +2697,19 @@ TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
 }
 
 TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
-  wave32_generated_vop1_dpp64_preserves_masked_destination<Rdna4DppTraits>();
+  generated_vop1_dpp64_preserves_masked_destination<Rdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
+  generated_vop1_dpp64_preserves_masked_destination<Cdna4DppTraits>();
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
+}
+
+TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp64PreservesMaskedDestination) {
+  generated_vop1_dpp64_preserves_masked_destination<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {
