@@ -3186,6 +3186,44 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   cu->reset_all_wf();
 }
 
+TEST(Gfx1250CvtFp8Test, E4M3OverflowProducesNaN) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_fp8_overflow_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_fp8_overflow_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb + 5, std::bit_cast<uint32_t>(768.0f));
+  cu->write_sgpr(sb + 6, std::bit_cast<uint32_t>(-768.0f));
+  cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
+
+  // v_cvt_pk_fp8_f32 v2.l, s5, s6
+  const uint32_t words[] = {0xD7690002U, 0x02000C05U};
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
+
+  cu->reset_all_wf();
+}
+
 TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_fp8_e5m3_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_e5m3_l2");
