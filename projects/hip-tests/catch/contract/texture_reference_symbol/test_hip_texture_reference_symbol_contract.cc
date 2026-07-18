@@ -398,4 +398,70 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTr
 // #if defined(_WIN32)). There is no device-side positive bind contract to assert
 // on this platform, so only the deprecated set/get round-trip above is exercised.
 
+// hipTexRefSetAddress2D binds a pitched 2D device allocation to a module-backed
+// reference through a HIP_ARRAY_DESCRIPTOR. There is no hipTexRefGetAddress2D
+// getter, so the contract is that the bind is accepted; the base device pointer
+// it records is cross-checked through hipTexRefGetAddress (which returns the
+// bound linear address). A 2D-typed reference is required (a 1D reference is
+// rejected), matching the mipmapped-array round-trip above.
+HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_SetAddress2D_IsAccepted) {
+  CHECK_IMAGE_SUPPORT;
+  hip::contract::ContractCleanup cleanup;
+
+  std::vector<char> code;
+  if (!CompileModuleSource2D(code)) {
+    HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
+  }
+
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  REQUIRE(module != nullptr);
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
+
+  textureReference* reference = nullptr;
+  const hipError_t ref_status = hipModuleGetTexRef(&reference, module, "tex");
+  if (IsUnsupported(ref_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipModuleGetTexRef is not supported by this runtime path.");
+  }
+  HIP_CHECK(ref_status);
+  REQUIRE(reference != nullptr);
+
+  // A pitched 2D float allocation is the operand for the 2D address bind.
+  constexpr size_t kWidth = 256;
+  constexpr size_t kHeight = 256;
+  void* device_ptr = nullptr;
+  size_t pitch = 0;
+  HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight));
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
+
+  HIP_CHECK(hipTexRefSetFormat(reference, HIP_AD_FORMAT_FLOAT, 1));
+
+  HIP_ARRAY_DESCRIPTOR descriptor{};
+  descriptor.Width = kWidth;
+  descriptor.Height = kHeight;
+  descriptor.Format = HIP_AD_FORMAT_FLOAT;
+  descriptor.NumChannels = 1;
+
+  const hipError_t set_status = hipTexRefSetAddress2D(
+      reference, &descriptor, reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch);
+  if (IsUnsupported(set_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetAddress2D is not supported by this runtime path.");
+  }
+  HIP_CHECK(set_status);
+
+  // No 2D getter exists; cross-check the recorded base address through the linear
+  // getter. Where that getter is not implemented for a 2D binding it reports
+  // unsupported, which is a capability skip rather than a contract failure.
+  hipDeviceptr_t bound = 0;
+  const hipError_t get_status = hipTexRefGetAddress(&bound, reference);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetAddress is not supported for a 2D binding on this runtime path.");
+  }
+  HIP_CHECK(get_status);
+  REQUIRE(bound == reinterpret_cast<hipDeviceptr_t>(device_ptr));
+}
+
 #endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION < CUDA_12000)

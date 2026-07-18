@@ -1371,6 +1371,9 @@ contract:
   Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTrip:
     <<: *level_0
     tags: [texture_reference_symbol]
+  Contract_TextureReferenceSymbol_ModuleTexRef_SetAddress2D_IsAccepted:
+    <<: *level_0
+    tags: [texture_reference_symbol]
   Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero:
     <<: *level_0
     tags: [context]
