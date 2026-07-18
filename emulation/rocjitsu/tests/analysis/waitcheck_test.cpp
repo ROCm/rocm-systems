@@ -188,6 +188,16 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return inst;
 }
 
+[[nodiscard]] cdna4::Sop2MachineInst s_or_b32_exec_lo(uint32_t ssrc1) {
+  cdna4::Sop2MachineInst inst{};
+  inst.encoding = 2;
+  inst.op = 14;
+  inst.sdst = 126;  // EXEC_LO
+  inst.ssrc0 = 126; // EXEC_LO
+  inst.ssrc1 = ssrc1;
+  return inst;
+}
+
 [[nodiscard]] rdna4::Sop1MachineInst s_barrier_signal_isfirst(uint32_t barrier_id) {
   auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE804F00U);
   inst.ssrc0 = barrier_id;
@@ -1583,6 +1593,36 @@ TEST(WaitcheckTest, Gfx1250CodeObjectTracksXcntInNormalMode) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 8, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeExecOverwriteAfterVmemLoad) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, s_or_b32_exec_lo(18));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::EXEC, 0, 1}));
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250ReportsXcntBeforeExecOverwriteAfterVmemStore) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_store_b32(4));
+  append_inst(program, s_or_b32_exec_lo(29));
+
+  auto report = analyze_gfx1250_normal(program);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::X);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::EXEC, 0, 1}));
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
 }
 
