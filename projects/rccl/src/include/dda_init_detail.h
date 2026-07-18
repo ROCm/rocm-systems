@@ -11,6 +11,7 @@
 #include "ipc_gpu_barrier.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <new>
@@ -18,8 +19,8 @@
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 268435456
 
-#define DDA_FABRIC_MAXBLOCKS 24
-#define DDA_FABRIC_BUFFER_SIZE 268435456
+#define DDA_FABRIC_MAXBLOCKS 256
+#define DDA_FABRIC_BUFFER_SIZE 10737418240ULL
 
 namespace nccl_dda_detail {
 
@@ -62,6 +63,14 @@ inline int ddaFabricMaxNBlocksForScratch() {
 }
 
 constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
+
+// The LL AllReduce tier is intentionally narrow (tiny messages, latency-bound),
+// so it uses its own small epoch array instead of the shared 256-wide one. This
+// keeps its per-launch epoch reset cheap (see ddaLLEpochEnd). Because it shares
+// scratch bytes with the LL128 tier, its flags live in a disjoint high namespace
+// (seeded below) so a leftover LL128 flag can never false-match an LL flag.
+constexpr int      kDdaFabricLLArMaxBlocks = 24;
+constexpr uint32_t kDdaLLArEpochSeed       = 0x40000000u; // first LL flag = seed+1
 
 // Number of device epoch cells for the LL collectives. it is sized for the larger of the two
 // max(AG total blocks, AR total blocks).
