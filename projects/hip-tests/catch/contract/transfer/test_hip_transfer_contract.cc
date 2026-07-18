@@ -31,7 +31,7 @@ HIP_TEST_CASE(Contract_Transfer_HostToDeviceToHost_RoundTripsBytes) {
   void* device_ptr = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemcpy(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
@@ -47,9 +47,9 @@ HIP_TEST_CASE(Contract_Transfer_DeviceToDevice_CopiesBytes) {
   void* dst_device_ptr = nullptr;
 
   HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(src_device_ptr); });
+  cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
   HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
-  cleanup.Add([&] { (void)hipFree(dst_device_ptr); });
+  cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
   HIP_CHECK(hipMemcpy(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dst_device_ptr, src_device_ptr, src.size(), hipMemcpyDeviceToDevice));
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_Transfer_InvalidDirection_ReturnsInvalidMemcpyDirection) 
   void* device_ptr = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK_ERROR(hipMemcpy(device_ptr, src.data(), src.size(), static_cast<hipMemcpyKind>(-1)),
                   hipErrorInvalidMemcpyDirection);
 }

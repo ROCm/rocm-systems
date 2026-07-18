@@ -31,7 +31,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithDefaultFlags_ReportsDefaultFlags) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   unsigned int flags = 0xFFFFFFFFu;
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithNonBlockingFlags_RoundTripsFlags) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   unsigned int flags = 0;
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithPriority_ClampsWithinRange) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, greatest_priority));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   int priority = 0;
@@ -93,7 +93,7 @@ HIP_TEST_CASE(Contract_StreamProps_GetDevice_MatchesCurrentDevice) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipDevice_t stream_device = hipDevice_t{};
   const hipError_t status = hipStreamGetDevice(stream, &stream_device);
@@ -116,9 +116,9 @@ HIP_TEST_CASE(Contract_StreamProps_GetId_DistinctStreamsDifferAndNullStreamQuery
   hipStream_t first_stream = nullptr;
   hipStream_t second_stream = nullptr;
   HIP_CHECK(hipStreamCreate(&first_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(first_stream); });
+  cleanup.Add([first_stream] { (void)hipStreamDestroy(first_stream); });
   HIP_CHECK(hipStreamCreate(&second_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(second_stream); });
+  cleanup.Add([second_stream] { (void)hipStreamDestroy(second_stream); });
 
   unsigned long long first_id = 0;
   const hipError_t first_status = hipStreamGetId(first_stream, &first_id);
@@ -151,13 +151,13 @@ HIP_TEST_CASE(Contract_StreamProps_EventElapsedTime_NonNegativeForOrderedEvents)
   void* device_ptr = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&start_event));
-  cleanup.Add([&] { (void)hipEventDestroy(start_event); });
+  cleanup.Add([start_event] { (void)hipEventDestroy(start_event); });
   HIP_CHECK(hipEventCreate(&stop_event));
-  cleanup.Add([&] { (void)hipEventDestroy(stop_event); });
+  cleanup.Add([stop_event] { (void)hipEventDestroy(stop_event); });
   HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipEventRecord(start_event, stream));
   HIP_CHECK(hipMemsetAsync(device_ptr, 0, kBufferBytes, stream));
@@ -183,13 +183,13 @@ HIP_TEST_CASE(Contract_StreamProps_EventRecordWithFlags_RecordsAndTimes) {
   void* device_ptr = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&start_event));
-  cleanup.Add([&] { (void)hipEventDestroy(start_event); });
+  cleanup.Add([start_event] { (void)hipEventDestroy(start_event); });
   HIP_CHECK(hipEventCreate(&stop_event));
-  cleanup.Add([&] { (void)hipEventDestroy(stop_event); });
+  cleanup.Add([stop_event] { (void)hipEventDestroy(stop_event); });
   HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipError_t start_status =
       hipEventRecordWithFlags(start_event, stream, hipEventRecordDefault);

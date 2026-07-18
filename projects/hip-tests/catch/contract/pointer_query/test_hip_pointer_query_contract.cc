@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTyp
 
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   unsigned int memory_type = 0;
   int device_ordinal = -1;
@@ -57,7 +57,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   void* batch_device_pointer = nullptr;
   void* results[] = {&batch_device_pointer};
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   unsigned int memory_type = 0;
   void* results[] = {&memory_type};
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   size_t size = 0;
   HIP_CHECK(hipMemPtrGetInfo(data, &size));
@@ -112,7 +112,7 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupporte
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   int value = 1;
   if (!PointerSetAttributeOrSkip(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS,
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   int value = 0;
   REQUIRE(hipPointerSetAttribute(nullptr, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS,

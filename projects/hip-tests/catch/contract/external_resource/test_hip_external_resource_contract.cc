@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Signalling a batch that contains a null external-semaphore handle must be
   // rejected rather than enqueuing an operation on an invalid object.
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Waiting on a batch that contains a null external-semaphore handle must be
   // rejected rather than enqueuing an operation on an invalid object.

@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpyToArray(array, 0, 0, src.data(), src.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpyFromArray(dst.data(), array, 0, 0, dst.size(), hipMemcpyDeviceToHost));
 
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpyHtoA(array, 0, src.data(), src.size()));
   HIP_CHECK(hipMemcpyAtoH(dst.data(), array, 0, dst.size()));
 
@@ -73,9 +73,9 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpy2DToArrayAsync(array, 0, 0, src.data(), kWidth, kWidth, kHeight,
                                     hipMemcpyHostToDevice, stream));
@@ -111,9 +111,9 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected) 
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpy2DFromArrayAsync(
       dst.data(), kWidth, array, 0, 0, kWidth, kHeight, static_cast<hipMemcpyKind>(-1), stream);

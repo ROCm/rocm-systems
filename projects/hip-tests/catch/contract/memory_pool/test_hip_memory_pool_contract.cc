@@ -89,7 +89,7 @@ HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, 128, stream));
   // Register the free immediately so a failing REQUIRE or a throwing hipFreeAsync
   // below cannot leak the allocation. The guard frees only if the explicit free
@@ -111,9 +111,15 @@ HIP_TEST_CASE(Contract_MemoryPool_MallocAsync_MemoryUsableAfterStreamSynchronize
   uint8_t value = 0;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMallocAsync(&ptr, sizeof(value), stream));
-  cleanup.Add([&] { (void)hipFreeAsync(ptr, stream); });
+  // Free-and-drain on teardown: enqueue the async free, then synchronize the
+  // stream so the free completes before the stream-destroy action (registered
+  // earlier, so it runs after this one) tears the stream down.
+  cleanup.Add([ptr, stream] {
+    (void)hipFreeAsync(ptr, stream);
+    (void)hipStreamSynchronize(stream);
+  });
   HIP_CHECK(hipMemsetAsync(ptr, 0x5a, sizeof(value), stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy(&value, ptr, sizeof(value), hipMemcpyDeviceToHost));

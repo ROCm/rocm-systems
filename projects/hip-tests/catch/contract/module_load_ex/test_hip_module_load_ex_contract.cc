@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
   // non-null module handle and unload again without error.
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr));
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 }
 
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
     HIP_SKIP_TEST("This runtime path does not support the requested JIT option.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   // A symbol that exists in the loaded module must resolve to a non-null
@@ -160,7 +160,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModuleEx(module);
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Launch the resolved function through the driver-style module launch entry

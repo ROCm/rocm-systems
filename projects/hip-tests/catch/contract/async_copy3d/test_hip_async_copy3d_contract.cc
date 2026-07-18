@@ -73,9 +73,9 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_Visi
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   HIP_CHECK(hipMemset3D(device, pattern, extent));
 
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpy3DAsync(nullptr, stream);
 
@@ -142,9 +142,9 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_RoundTripsBytes_VisibleAfter
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyWithStream(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyWithStream(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
@@ -161,9 +161,9 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_InvalidKind_IsRejected) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpyWithStream(device_ptr, src.data(), src.size(),
                                                 static_cast<hipMemcpyKind>(-1), stream);

@@ -63,9 +63,9 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
   int* device_src = nullptr;
   int* device_dst = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_src); });
+  cleanup.Add([device_src] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_dst); });
+  cleanup.Add([device_dst] { (void)hipFree(device_dst); });
   HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
 
   HIP_CHECK(hipMemcpyPeer(device_dst, device, device_src, device, kByteCount));
@@ -84,11 +84,11 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
   int* device_dst = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_src); });
+  cleanup.Add([device_src] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_dst); });
+  cleanup.Add([device_dst] { (void)hipFree(device_dst); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
 
   // The async self-peer copy must complete and be visible after the stream is
@@ -114,11 +114,11 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   if (!TryMalloc3D(&device_src, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_src.ptr); });
+  cleanup.Add([p0 = device_src.ptr] { (void)hipFree(p0); });
   if (!TryMalloc3D(&device_dst, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_dst.ptr); });
+  cleanup.Add([p0 = device_dst.ptr] { (void)hipFree(p0); });
 
   // Seed the source pitched allocation via a host->device 3D copy.
   hipMemcpy3DParms up{};
@@ -160,13 +160,13 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
   if (!TryMalloc3D(&device_src, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_src.ptr); });
+  cleanup.Add([p0 = device_src.ptr] { (void)hipFree(p0); });
   if (!TryMalloc3D(&device_dst, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_dst.ptr); });
+  cleanup.Add([p0 = device_dst.ptr] { (void)hipFree(p0); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms up{};
   up.srcPtr = make_hipPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kWidth, kHeight);
@@ -206,9 +206,9 @@ HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
   int* device_src = nullptr;
   int* device_dst = nullptr;
   HIP_CHECK(hipMalloc(&device_src, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_src); });
+  cleanup.Add([device_src] { (void)hipFree(device_src); });
   HIP_CHECK(hipMalloc(&device_dst, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_dst); });
+  cleanup.Add([device_dst] { (void)hipFree(device_dst); });
 
   HIP_CHECK(hipGetLastError());
   const hipError_t status =

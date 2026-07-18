@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
 
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
 
   hipStreamBatchMemOpParams op =
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // A batch-mem-op node containing a single write-value-32 operation must, when
   // the graph is launched, write the value to the target device address.
@@ -84,9 +84,9 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
+  cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
 
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   hipStreamBatchMemOpParams op =
       WriteValueOp(reinterpret_cast<hipDeviceptr_t>(device_ptr), kWriteValue);
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status = hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &node_params);
   if (add_status == hipErrorNotSupported) {
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstanti
 
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
 
   hipStreamBatchMemOpParams initial_op =
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstanti
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status =
       hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &initial_params);
@@ -161,9 +161,9 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstanti
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
+  cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -178,7 +178,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInsta
 
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
 
   hipStreamBatchMemOpParams initial_op =
@@ -188,7 +188,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInsta
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status =
       hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &initial_params);
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInsta
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
+  cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
 
   // Re-parameterize the instantiated node with a new write value through the
   // executable setter. The next launch must write the updated value without a
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInsta
   HIP_CHECK(hipGraphExecBatchMemOpNodeSetParams(exec, node, &updated_params));
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 

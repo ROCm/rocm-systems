@@ -75,7 +75,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth) 
   if (!TryMemAllocPitch(&device_ptr, &pitch, width_bytes, kHeight, kElementBytes)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
+  cleanup.Add([device_ptr] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
 
   REQUIRE(device_ptr != 0);
   REQUIRE(pitch >= width_bytes);
@@ -93,7 +93,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   if (!TryMemAllocPitch(&device_ptr, &pitch, width_bytes, kHeight, kElementBytes)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
+  cleanup.Add([device_ptr] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
 
   HIP_CHECK(hipMemcpy2D(reinterpret_cast<void*>(device_ptr), pitch, src.data(), width_bytes,
                         width_bytes, kHeight, hipMemcpyHostToDevice));
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
   if (!TryMemAllocPitch(&device_ptr, &pitch, width_bytes, kHeight, kElementBytes)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
+  cleanup.Add([device_ptr] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
 
   HIP_CHECK(hipMemsetD2D32(device_ptr, pitch, static_cast<int>(pattern), kWidth, kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), width_bytes, reinterpret_cast<void*>(device_ptr), pitch,
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundT
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto h2d = HostToDeviceUnaligned(reinterpret_cast<hipDeviceptr_t>(device_ptr), src.data(),
                                    kUnalignedWidthBytes, kUnalignedHeight);
@@ -166,7 +166,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejecte
   std::array<uint8_t, kUnalignedWidthBytes * kUnalignedHeight> host{};
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipGetLastError());
   auto null_src = HostToDeviceUnaligned(reinterpret_cast<hipDeviceptr_t>(device_ptr), nullptr,

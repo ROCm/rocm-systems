@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const auto returned_mask = QueryCuMask(stream, default_mask.size());
   REQUIRE(returned_mask == default_mask);
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(stream != nullptr);
 }
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_GetRejectsInvalidArgs) {
   if (!CreateStreamWithMaskOrSkip(&stream, default_mask)) {
     HIP_SKIP_TEST("hipExtStreamCreateWithCUMask is not supported by this runtime path.");
   }
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t null_mask_status =
       hipExtStreamGetCUMask(stream, static_cast<uint32_t>(mask.size()), nullptr);

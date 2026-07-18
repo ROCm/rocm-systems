@@ -87,13 +87,13 @@ bool ExportToFdOrSkip(hipMemPool_t pool, int* fd) {
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   int fd = -1;
   if (!ExportToFdOrSkip(pool, &fd)) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
-  cleanup.Add([&] { CloseFd(fd); });
+  cleanup.Add([fd] { CloseFd(fd); });
 
   // A successful POSIX-fd export must yield a valid, non-negative descriptor.
   REQUIRE(fd >= 0);
@@ -104,37 +104,43 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
   HIP_CHECK(hipMemPoolImportFromShareableHandle(
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor, 0));
-  cleanup.Add([&] { (void)hipMemPoolDestroy(imported); });
+  cleanup.Add([imported] { (void)hipMemPoolDestroy(imported); });
   REQUIRE(imported != nullptr);
 }
 
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   int fd = -1;
   if (!ExportToFdOrSkip(pool, &fd)) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
-  cleanup.Add([&] { CloseFd(fd); });
+  cleanup.Add([fd] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 
   hipMemPool_t imported = nullptr;
   HIP_CHECK(hipMemPoolImportFromShareableHandle(
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor, 0));
-  cleanup.Add([&] { (void)hipMemPoolDestroy(imported); });
+  cleanup.Add([imported] { (void)hipMemPoolDestroy(imported); });
   REQUIRE(imported != nullptr);
 
   // Allocations for pointer export must come from the original (exportable) pool
   // via a stream-ordered allocation; imported pools cannot create allocations.
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* dev_ptr = nullptr;
   HIP_CHECK(hipMallocFromPoolAsync(&dev_ptr, kAllocSize, pool, stream));
-  cleanup.Add([&] { (void)hipFreeAsync(dev_ptr, stream); });
+  // Free-and-drain on teardown: enqueue the async free, then synchronize the
+  // stream so the free completes before the pool-destroy actions (registered
+  // earlier, so they run after this one) tear down the pools it belongs to.
+  cleanup.Add([dev_ptr, stream] {
+    (void)hipFreeAsync(dev_ptr, stream);
+    (void)hipStreamSynchronize(stream);
+  });
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(dev_ptr != nullptr);
 
@@ -151,7 +157,7 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
 HIP_TEST_CASE(Contract_MemPoolShareableHandle_NullArgs_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   // A null output handle is invalid input. The export API documents
   // hipErrorInvalidValue for this, and must reject the call with a non-success

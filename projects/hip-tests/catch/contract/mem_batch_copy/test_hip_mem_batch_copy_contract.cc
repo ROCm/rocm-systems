@@ -51,15 +51,15 @@ HIP_TEST_CASE(Contract_MemBatchCopy_TwoOps_RoundTripBytes) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&dev_src_a, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_src_a); });
+  cleanup.Add([dev_src_a] { (void)hipFree(dev_src_a); });
   HIP_CHECK(hipMalloc(&dev_src_b, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_src_b); });
+  cleanup.Add([dev_src_b] { (void)hipFree(dev_src_b); });
   HIP_CHECK(hipMalloc(&dev_dst_a, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_dst_a); });
+  cleanup.Add([dev_dst_a] { (void)hipFree(dev_dst_a); });
   HIP_CHECK(hipMalloc(&dev_dst_b, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_dst_b); });
+  cleanup.Add([dev_dst_b] { (void)hipFree(dev_dst_b); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice));
@@ -107,11 +107,11 @@ HIP_TEST_CASE(Contract_MemBatchCopy_WithAttributes_RoundTripBytes) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&dev_src, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_src); });
+  cleanup.Add([dev_src] { (void)hipFree(dev_src); });
   HIP_CHECK(hipMalloc(&dev_dst, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_dst); });
+  cleanup.Add([dev_dst] { (void)hipFree(dev_dst); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice));
 
   // A per-copy attribute selecting stream access ordering and device location
@@ -148,9 +148,9 @@ HIP_TEST_CASE(Contract_MemBatchCopy_NullDestination_IsRejected) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&dev_src, kBytes));
-  cleanup.Add([&] { (void)hipFree(dev_src); });
+  cleanup.Add([dev_src] { (void)hipFree(dev_src); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice));
 
   // A batch containing a null destination must not silently succeed. The exact

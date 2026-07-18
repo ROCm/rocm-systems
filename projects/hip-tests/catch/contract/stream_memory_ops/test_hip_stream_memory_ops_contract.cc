@@ -48,9 +48,9 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder)
   hipStream_t stream = nullptr;
   uint32_t* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint32_t initial = 0u;
@@ -76,9 +76,9 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder)
   hipStream_t stream = nullptr;
   uint64_t* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint64_t)));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint64_t initial = 0ull;
@@ -104,11 +104,11 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   uint32_t* gate_ptr = nullptr;
   uint32_t* done_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(gate_ptr); });
+  cleanup.Add([gate_ptr] { (void)hipFree(gate_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(done_ptr); });
+  cleanup.Add([done_ptr] { (void)hipFree(done_ptr); });
 
   const uint32_t initial = 0u;
   HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice));
@@ -144,11 +144,11 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
   uint64_t* gate_ptr = nullptr;
   uint64_t* done_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint64_t)));
-  cleanup.Add([&] { (void)hipFree(gate_ptr); });
+  cleanup.Add([gate_ptr] { (void)hipFree(gate_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint64_t)));
-  cleanup.Add([&] { (void)hipFree(done_ptr); });
+  cleanup.Add([done_ptr] { (void)hipFree(done_ptr); });
 
   const uint64_t initial = 0ull;
   HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
@@ -185,11 +185,11 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   uint32_t* value32_ptr = nullptr;
   uint64_t* value64_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value32_ptr), sizeof(uint32_t)));
-  cleanup.Add([&] { (void)hipFree(value32_ptr); });
+  cleanup.Add([value32_ptr] { (void)hipFree(value32_ptr); });
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value64_ptr), sizeof(uint64_t)));
-  cleanup.Add([&] { (void)hipFree(value64_ptr); });
+  cleanup.Add([value64_ptr] { (void)hipFree(value64_ptr); });
 
   const uint32_t initial32 = 0u;
   const uint64_t initial64 = 0ull;
@@ -241,7 +241,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A null address is a caller error. When the write API is supported it must be
   // rejected with hipErrorInvalidValue rather than silently succeeding; when the

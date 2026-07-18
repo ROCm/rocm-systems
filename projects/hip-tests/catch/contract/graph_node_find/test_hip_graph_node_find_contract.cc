@@ -24,10 +24,10 @@ HIP_TEST_CASE(Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct) {
   hipGraphNode_t found = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&original_node, graph, nullptr, 0));
   HIP_CHECK(hipGraphClone(&clone, graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(clone); });
+  cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
   HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone));
 
@@ -46,13 +46,13 @@ HIP_TEST_CASE(Contract_GraphNodeFind_FoundNodeMatchesType) {
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&original_node, graph, nullptr, 0, device_ptr, host.data(),
                                     host.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphClone(&clone, graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(clone); });
+  cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
   HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone));
   REQUIRE(found != nullptr);
@@ -70,10 +70,10 @@ HIP_TEST_CASE(Contract_GraphNodeFind_NodeOnlyInOriginal_ReturnsInvalidValue) {
   hipGraphNode_t found = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&first_node, graph, nullptr, 0));
   HIP_CHECK(hipGraphClone(&clone, graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(clone); });
+  cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
   // The second node is added only to the original graph after cloning, so it
   // has no counterpart in the clone and the lookup must report a portable

@@ -103,6 +103,6 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable) {
   hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 64));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
   REQUIRE(ptr != nullptr);
 }

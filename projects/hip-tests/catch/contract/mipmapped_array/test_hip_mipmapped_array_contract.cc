@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_MallocAndGetLevel_ReturnsLevelArray) {
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipFreeMipmappedArray(mipmap); });
+  cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipArray_t level0 = nullptr;
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_DriverCreateGetLevelDestroy) {
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipMipmappedArrayDestroy(mipmap); });
+  cleanup.Add([mipmap] { (void)hipMipmappedArrayDestroy(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipArray_t level0 = nullptr;
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_GetLevel_OutOfRange_IsRejected) {
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipFreeMipmappedArray(mipmap); });
+  cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipArray_t level = nullptr;
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_GetMemoryRequirements_IsQueryable) {
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipFreeMipmappedArray(mipmap); });
+  cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipDevice_t device = 0;

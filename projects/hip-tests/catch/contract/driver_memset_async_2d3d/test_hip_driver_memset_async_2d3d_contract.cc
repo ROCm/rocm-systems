@@ -61,9 +61,9 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAft
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint16_t), kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                 kWidth * sizeof(uint16_t), kHeight, stream));
@@ -85,9 +85,9 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAf
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(int), kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                 kWidth * sizeof(int), kHeight, stream));
@@ -109,9 +109,9 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAf
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemset2DAsync(device_ptr, pitch, pattern, kWidth, kHeight, stream));
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight,
@@ -132,9 +132,9 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAf
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemset3DAsync(device, pattern, extent, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_NullDestination_IsRejected) {
   constexpr size_t pitch = kWidth * sizeof(uint32_t);
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t d2d16_status = hipMemsetD2D16Async(
       hipDeviceptr_t(nullptr), pitch, 0x1357, kWidth * sizeof(uint16_t), kHeight, stream);

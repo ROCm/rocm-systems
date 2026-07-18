@@ -41,7 +41,7 @@ HIP_TEST_CASE(Contract_Array3D_Malloc3DArray_ReturnsUsableArray) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   REQUIRE(array != nullptr);
 }
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   hipMemcpy3DParms h2a{};
   h2a.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()));

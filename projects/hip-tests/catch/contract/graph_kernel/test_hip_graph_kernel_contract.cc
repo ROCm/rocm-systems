@@ -48,18 +48,18 @@ HIP_TEST_CASE(Contract_GraphKernel_AddKernelNode_WritesExpectedValue) {
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
   HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -74,9 +74,9 @@ HIP_TEST_CASE(Contract_GraphKernel_KernelNodeGetParams_ReturnsConfiguredParams) 
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -102,18 +102,18 @@ HIP_TEST_CASE(Contract_GraphKernel_ExecKernelNodeSetParams_UpdatesLaunchValue) {
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* initial_args[] = {&device_value, &initial_value};
   auto initial_params = KernelNodeParams(initial_args);
   HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &initial_params));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   void* updated_args[] = {&device_value, &updated_value};
   auto updated_params = KernelNodeParams(updated_args);

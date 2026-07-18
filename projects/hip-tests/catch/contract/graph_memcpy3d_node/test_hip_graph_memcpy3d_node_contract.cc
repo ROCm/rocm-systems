@@ -84,14 +84,14 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph) {
   }
 
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   const auto src = MakePattern(0x40);
   std::array<uint8_t, kElems> dst{};
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // A 3D memcpy node added to the graph must, when the graph is launched,
   // deliver the full extent to the device buffer exactly like a direct
@@ -111,13 +111,13 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
   }
 
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   const auto src = MakePattern(0x50);
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   hipMemcpy3DParms params = MakeH2DParams(src.data(), device);
   HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
 
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
   }
 
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   const auto first = MakePattern(0x11);
   const auto second = MakePattern(0x88);
   std::array<uint8_t, kElems> dst{};
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // Create the node reading from the first host buffer, then re-point it at the
   // second buffer before instantiation. The launched graph must copy the second
@@ -171,7 +171,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   }
 
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   const auto first = MakePattern(0x22);
   const auto second = MakePattern(0x99);
   std::array<uint8_t, kElems> dst{};
@@ -179,14 +179,14 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   hipMemcpy3DParms initial = MakeH2DParams(first.data(), device);
   HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &initial));
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(exec); });
+  cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
 
   // Re-point the instantiated node at the second buffer through the executable
   // setter.
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   HIP_CHECK(update_status);
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -225,7 +225,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   (void)hipGetLastError();
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphLaunch(exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 

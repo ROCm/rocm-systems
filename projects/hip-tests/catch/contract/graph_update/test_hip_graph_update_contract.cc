@@ -56,17 +56,17 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopySource) 
   hipGraphNode_t d2h_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, original.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d_node, graph, nullptr, 0, device_ptr, original.data(),
                                     original.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h_node, graph, &h2d_node, 1, dst.data(), device_ptr,
                                     dst.size(), hipMemcpyDeviceToHost));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(graph_exec, h2d_node, device_ptr, updated.data(),
                                               updated.size(), hipMemcpyHostToDevice));
@@ -89,11 +89,11 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemsetNodeSetParams_UpdatesFillValue) {
   hipGraphNode_t memset_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   params.dst = device_ptr;
   params.value = original_pattern;
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemsetNodeSetParams_UpdatesFillValue) {
 
   HIP_CHECK(hipGraphAddMemsetNode(&memset_node, graph, nullptr, 0, &params));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   params.value = updated_pattern;
   HIP_CHECK(hipGraphExecMemsetNodeSetParams(graph_exec, memset_node, &params));
@@ -133,22 +133,22 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_AppliesChangedMemsetValue) {
   hipGraphExecUpdateResult update_result = hipGraphExecUpdateError;
 
   HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipGraphCreate(&graph_a, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph_a); });
+  cleanup.Add([graph_a] { (void)hipGraphDestroy(graph_a); });
   hipMemsetParams params_a = MakeMemsetParams(device_ptr, dst.size(), original_pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&memset_a, graph_a, nullptr, 0, &params_a));
 
   HIP_CHECK(hipGraphCreate(&graph_b, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph_b); });
+  cleanup.Add([graph_b] { (void)hipGraphDestroy(graph_b); });
   hipMemsetParams params_b = MakeMemsetParams(device_ptr, dst.size(), updated_pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&memset_b, graph_b, nullptr, 0, &params_b));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph_a, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   HIP_CHECK(hipGraphExecUpdate(graph_exec, graph_b, &error_node, &update_result));
   REQUIRE(update_result == hipGraphExecUpdateSuccess);
@@ -176,21 +176,21 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_ReportsTopologyChanged) {
   hipGraphExecUpdateResult update_result = hipGraphExecUpdateSuccess;
 
   HIP_CHECK(hipMalloc(&device_ptr, kSmallElementCount));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipGraphCreate(&single_node_graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(single_node_graph); });
+  cleanup.Add([single_node_graph] { (void)hipGraphDestroy(single_node_graph); });
   hipMemsetParams single_params = MakeMemsetParams(device_ptr, kSmallElementCount, pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&single_memset, single_node_graph, nullptr, 0, &single_params));
 
   HIP_CHECK(hipGraphCreate(&two_node_graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(two_node_graph); });
+  cleanup.Add([two_node_graph] { (void)hipGraphDestroy(two_node_graph); });
   hipMemsetParams two_params = MakeMemsetParams(device_ptr, kSmallElementCount, pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&first_memset, two_node_graph, nullptr, 0, &two_params));
   HIP_CHECK(hipGraphAddMemsetNode(&second_memset, two_node_graph, &first_memset, 1, &two_params));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, single_node_graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   // The runtime may signal a topology mismatch either through a non-success
   // return code or through a non-success result enum. Accept both to remain
@@ -217,12 +217,12 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecHostNodeSetParams_UpdatesCallbackUserData
   params.userData = &counter_a;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   params.userData = &counter_b;
   HIP_CHECK(hipGraphExecHostNodeSetParams(graph_exec, host_node, &params));
@@ -250,26 +250,26 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecChildGraphNodeSetParams_UpdatesEmbeddedMe
   hipGraphNode_t child_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipGraphCreate(&child_original, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(child_original); });
+  cleanup.Add([child_original] { (void)hipGraphDestroy(child_original); });
   hipMemsetParams original_params = MakeMemsetParams(device_ptr, dst.size(), original_pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&child_memset, child_original, nullptr, 0, &original_params));
 
   HIP_CHECK(hipGraphCreate(&child_updated, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(child_updated); });
+  cleanup.Add([child_updated] { (void)hipGraphDestroy(child_updated); });
   hipMemsetParams updated_params = MakeMemsetParams(device_ptr, dst.size(), updated_pattern);
   HIP_CHECK(hipGraphAddMemsetNode(&updated_memset, child_updated, nullptr, 0, &updated_params));
 
   HIP_CHECK(hipGraphCreate(&parent, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(parent); });
+  cleanup.Add([parent] { (void)hipGraphDestroy(parent); });
   HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent, nullptr, 0, child_original));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, parent, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   HIP_CHECK(hipGraphExecChildGraphNodeSetParams(graph_exec, child_node, child_updated));
 
@@ -292,16 +292,16 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecEventRecordNodeSetEvent_UpdatesRecordedEv
   hipGraphNode_t record_node = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&event_one));
-  cleanup.Add([&] { (void)hipEventDestroy(event_one); });
+  cleanup.Add([event_one] { (void)hipEventDestroy(event_one); });
   HIP_CHECK(hipEventCreate(&event_two));
-  cleanup.Add([&] { (void)hipEventDestroy(event_two); });
+  cleanup.Add([event_two] { (void)hipEventDestroy(event_two); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEventRecordNode(&record_node, graph, nullptr, 0, event_one));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   HIP_CHECK(hipGraphExecEventRecordNodeSetEvent(graph_exec, record_node, event_two));
 
@@ -321,16 +321,16 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecEventWaitNodeSetEvent_AcceptsSwappedEvent
   hipGraphNode_t wait_node = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&event_one));
-  cleanup.Add([&] { (void)hipEventDestroy(event_one); });
+  cleanup.Add([event_one] { (void)hipEventDestroy(event_one); });
   HIP_CHECK(hipEventCreate(&event_two));
-  cleanup.Add([&] { (void)hipEventDestroy(event_two); });
+  cleanup.Add([event_two] { (void)hipEventDestroy(event_two); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEventWaitNode(&wait_node, graph, nullptr, 0, event_one));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   // Ensure the swapped-in event is already recorded and complete so the wait
   // node has nothing outstanding to block on when the graph launches.
@@ -356,17 +356,17 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopyDestinat
   hipGraphNode_t d2h_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d_node, graph, nullptr, 0, device_ptr, src.data(), src.size(),
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h_node, graph, &h2d_node, 1, first_dst.data(), device_ptr,
                                     first_dst.size(), hipMemcpyDeviceToHost));
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(graph_exec, d2h_node, second_dst.data(), device_ptr,
                                               second_dst.size(), hipMemcpyDeviceToHost));

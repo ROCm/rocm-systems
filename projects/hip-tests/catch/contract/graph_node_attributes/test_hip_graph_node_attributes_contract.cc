@@ -40,9 +40,9 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -95,11 +95,11 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
   hipGraphNode_t kernel_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMalloc(&device_buffer, kBufferSize));
-  cleanup.Add([&] { (void)hipFree(device_buffer); });
+  cleanup.Add([device_buffer] { (void)hipFree(device_buffer); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
@@ -147,9 +147,9 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
   hipGraphNode_t empty_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);

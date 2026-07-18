@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_GetSetReleaseThreshold_RoundTripsValu
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
   HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &readback));
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_TrimTo_SucceedsOnEmptyPool) {
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   HIP_CHECK(hipMemPoolTrimTo(pool, 0));
 }
@@ -104,15 +104,22 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_MallocFromCreatedPoolAsync_SucceedsWh
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   const hipError_t status = hipMallocFromPoolAsync(&ptr, 128, pool, stream);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMallocFromPoolAsync is not supported by this device/runtime path.");
   }
   HIP_CHECK(status);
-  cleanup.Add([&] { (void)hipFreeAsync(ptr, stream); });
+  // Free-and-drain on teardown: enqueue the async free, then synchronize the
+  // stream so the free completes before the stream-destroy and pool-destroy
+  // actions (registered earlier, so they run after this one) tear down the stream
+  // and pool the allocation depends on.
+  cleanup.Add([ptr, stream] {
+    (void)hipFreeAsync(ptr, stream);
+    (void)hipStreamSynchronize(stream);
+  });
   REQUIRE(ptr != nullptr);
 }

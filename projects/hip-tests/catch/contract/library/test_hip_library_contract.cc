@@ -129,7 +129,7 @@ HIP_TEST_CASE(Contract_Library_LoadData_FromRtc_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipLibrary_t library = nullptr;
   HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
 }
 
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Contract_Library_LoadData_ValidImage_CanResolveKernel) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // A HIPRTC-produced code object must load and resolve a known kernel symbol.
   hipKernel_t kernel = nullptr;
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_ResolvesKnownSymbol) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // A symbol that exists in the loaded library must resolve to a non-null
   // kernel handle.
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_UnknownSymbol_IsRejected) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // Resolving a symbol that the library does not define must fail rather than
   // return a bogus handle. The exact error code is backend-specific, so only a
@@ -190,7 +190,7 @@ HIP_TEST_CASE(Contract_Library_GetKernelCount_MatchesLowerBound) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // The source defines two kernels, so the reported count must be at least two.
   // The exact value is not pinned because the runtime may inject helper kernels
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // Enumerating with a maximum of zero must not write into the caller's buffer.
   // A sentinel guard slot is used to detect an out-of-contract write.
@@ -220,7 +220,7 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_HandlesResolveToFunctions) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   unsigned int count = 0;
   HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_RepeatedLookupIsStable) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // Repeated lookups of the same symbol against the same library must return the
   // same stable kernel handle.
@@ -260,7 +260,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetName_ReturnsRequestedSymbol) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
@@ -279,7 +279,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
@@ -292,7 +292,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
 
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Launch the resolved function through the driver-style module launch entry
@@ -312,7 +312,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_ReturnsAddressAndSize) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   // A device global defined in the library must resolve to a non-null device
   // address with a size that covers the declared type. The exact address is not
@@ -343,7 +343,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   HIP_CHECK(hipFree(0));
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   hipDeviceptr_t module_address = 0;
@@ -353,7 +353,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
 
   hipLibrary_t library = nullptr;
   HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
 
   void* library_address = nullptr;
@@ -369,7 +369,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetLibrary_RoundTrips) {
   hipLibrary_t library = nullptr;
   LoadContractLibrary(code, library);
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipLibraryUnload(library); });
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
   HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));

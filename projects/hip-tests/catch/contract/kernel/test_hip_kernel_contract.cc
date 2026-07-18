@@ -31,7 +31,7 @@ HIP_TEST_CASE(Contract_Kernel_LaunchGGL_WritesExpectedValue) {
   int* device_value = nullptr;
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   hipLaunchKernelGGL(WriteValueKernel, dim3(1), dim3(1), 0, 0, device_value, kExpectedValue);
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_Kernel_LaunchKernel_WritesExpectedValue) {
   void* kernel_args[] = {&device_value, const_cast<int*>(&kExpectedValue)};
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   HIP_CHECK(hipLaunchKernel(reinterpret_cast<const void*>(WriteValueKernel), dim3(1), dim3(1),
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Contract_Kernel_GetLastErrorAfterValidLaunch_ReturnsSuccess) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
 
   hipLaunchKernelGGL(WriteValueKernel, dim3(1), dim3(1), 0, 0, device_value, kExpectedValue);
   HIP_CHECK(hipGetLastError());
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_Kernel_InvalidConfiguration_RecordsReturnedError) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
 
   hipLaunchKernelGGL(WriteValueKernel, dim3(1), dim3(0), 0, 0, device_value, kExpectedValue);
   const hipError_t error = hipGetLastError();

@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
   auto desc = Array2DDesc();
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
-  cleanup.Add([&] { (void)hipArrayDestroy(array); });
+  cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
 }
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
-  cleanup.Add([&] { (void)hipArrayDestroy(array); });
+  cleanup.Add([array] { (void)hipArrayDestroy(array); });
   HIP_CHECK(hipArrayGetDescriptor(&returned_desc, array));
 
   REQUIRE(returned_desc.Width == desc.Width);
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArrayCreate(&array, &desc));
-  cleanup.Add([&] { (void)hipArrayDestroy(array); });
+  cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(hipArrayGetDescriptor(nullptr, array) != hipSuccess);
   REQUIRE(hipArrayGetDescriptor(&returned_desc, nullptr) != hipSuccess);
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
   auto desc = Array3DDesc();
 
   HIP_CHECK(hipArray3DCreate(&array, &desc));
-  cleanup.Add([&] { (void)hipArrayDestroy(array); });
+  cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
 }
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags)
   HIP_ARRAY3D_DESCRIPTOR returned_desc{};
 
   HIP_CHECK(hipArray3DCreate(&array, &desc));
-  cleanup.Add([&] { (void)hipArrayDestroy(array); });
+  cleanup.Add([array] { (void)hipArrayDestroy(array); });
   HIP_CHECK(hipArray3DGetDescriptor(&returned_desc, array));
 
   REQUIRE(returned_desc.Width == desc.Width);

@@ -136,7 +136,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindUnbindLinearMemory_Succeeds) {
   constexpr size_t kBytes = 4096;
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipChannelFormatDesc channel = FloatChannel();
   size_t offset = 0;
@@ -164,7 +164,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTexture2D_Succeeds) {
   void* device_ptr = nullptr;
   size_t pitch = 0;
   HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipChannelFormatDesc channel = FloatChannel();
   size_t offset = 0;
@@ -191,7 +191,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTextureToArray_Succeeds) {
     HIP_SKIP_TEST("hipMallocArray is not supported by this runtime path.");
   }
   HIP_CHECK(alloc_status);
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const hipError_t status = hipBindTextureToArray(&g_tex_ref_symbol_2d, array, &channel);
   if (IsUnsupported(status)) {
@@ -224,7 +224,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundT
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   REQUIRE(module != nullptr);
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   textureReference* reference = nullptr;
   const hipError_t ref_status = hipModuleGetTexRef(&reference, module, "tex");
@@ -240,7 +240,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundT
   constexpr size_t kBytes = 4096;
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, kBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipTexRefSetAddress(nullptr, reference, reinterpret_cast<hipDeviceptr_t>(device_ptr),
                                 kBytes));
@@ -254,7 +254,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundT
   const hipChannelFormatDesc channel = FloatChannel();
   hipArray_t array = nullptr;
   HIP_CHECK(hipMallocArray(&array, &channel, 64, 64, hipArrayDefault));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   HIP_CHECK(hipTexRefSetArray(reference, array, HIP_TRSA_OVERRIDE_FORMAT));
   hipArray_t bound_array = nullptr;

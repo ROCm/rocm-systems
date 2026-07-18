@@ -39,11 +39,11 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph) {
   int* device_value = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // Capturing into a caller-provided graph must end capture producing that same
@@ -71,11 +71,11 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpected
   int* device_value = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   HIP_CHECK(hipStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 0,
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpected
   // The graph captured into the caller graph must instantiate, launch, and
   // produce the kernel's write.
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -105,11 +105,11 @@ HIP_TEST_CASE(Contract_CaptureToGraph_UpdateCaptureDependencies_AddsToDependency
   int* device_value = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   HIP_CHECK(hipStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 0,

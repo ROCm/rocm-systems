@@ -73,14 +73,20 @@ HIP_TEST_CASE(Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation
   hipStream_t stream = nullptr;
   void* pooled = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t alloc_status = hipMallocAsync(&pooled, 256, stream);
   if (alloc_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Stream-ordered allocation is not supported by this device/runtime path.");
   }
   HIP_CHECK(alloc_status);
-  cleanup.Add([&] { (void)hipFreeAsync(pooled, stream); });
+  // Free-and-drain on teardown: the async free is enqueued on the stream, then
+  // the stream is synchronized so the free completes before the stream-destroy
+  // action (registered earlier, so it runs after this one) tears the stream down.
+  cleanup.Add([pooled, stream] {
+    (void)hipFreeAsync(pooled, stream);
+    (void)hipStreamSynchronize(stream);
+  });
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(pooled != nullptr);
 

@@ -29,7 +29,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
   void* host_ptr = nullptr;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, hipHostMallocDefault));
-  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
 
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
   void* device_visible_ptr = nullptr;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, src.size(), hipHostMallocMapped));
-  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
   HIP_CHECK(hipHostGetDevicePointer(&device_visible_ptr, host_ptr, 0));
 
   REQUIRE(device_visible_ptr != nullptr);
@@ -83,7 +83,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostGetFlags_IncludesRequestedFlags) {
   constexpr unsigned int requested_flags = hipHostMallocMapped;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, requested_flags));
-  cleanup.Add([&] { (void)hipHostFree(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
   HIP_CHECK(hipHostGetFlags(&flags, host_ptr));
 
   REQUIRE((flags & requested_flags) == requested_flags);

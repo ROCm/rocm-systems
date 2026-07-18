@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // A cooperative launch of the host-function pointer with a single-thread grid
@@ -170,7 +170,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // A minimal extended-launch configuration (single-thread grid, no dynamic
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
   void* kernel_args[] = {&device_value, &value};
 
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // The AMD extended launch entry point (no start/stop events, no flags) must

@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // The location-based advise must either accept the read-mostly hint or report
   // that the path is unsupported on this runtime. Any other status is a contract
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsu
 
   void* ptr = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   const hipMemLocation location = CurrentDeviceLocation();
 
@@ -99,9 +99,9 @@ HIP_TEST_CASE(Contract_MemAdviseV2_PrefetchAsync_IsAcceptedOrUnsupported) {
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // The location-based prefetch must either succeed (and complete after the
   // stream is synchronized) or report that prefetch is unsupported.

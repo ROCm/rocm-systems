@@ -35,7 +35,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_MallocArray_ReturnsUsableArray) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   REQUIRE(array != nullptr);
 }
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_Memcpy2DToArrayAndBack_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpy2DToArray(array, 0, 0, src.data(), kWidth, kWidth, kHeight,
                                hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy2DFromArray(dst.data(), kWidth, array, 0, 0, kWidth, kHeight,
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_ArrayGetInfo_ReturnsDescriptorIfAvailable) {
   unsigned int returned_flags = 0;
 
   HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipArrayGetInfo(&returned_desc, &returned_extent, &returned_flags, array));
 
   REQUIRE(returned_extent.width == kWidth);

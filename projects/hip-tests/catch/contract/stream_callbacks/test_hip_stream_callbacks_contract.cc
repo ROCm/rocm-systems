@@ -84,9 +84,9 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_InvokesExactlyOnce) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(&device_ptr, kMemsetBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetAsync(device_ptr, 0, kMemsetBytes, stream));
   HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0));
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_RunsAfterPriorWork) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Enqueue a prior callback that flips a host-visible flag, then a second
   // callback that records whether it observed that flag already set. Stream
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_ReceivesSuccessStatus) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_LaunchHostFunc_InvokesExactlyOnce) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t launch_result = hipLaunchHostFunc(stream, IncrementSequence, &counter);
   if (launch_result == hipErrorNotSupported) {
@@ -153,7 +153,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_LaunchHostFunc_OrdersBeforeLaterWork) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Two host functions enqueued in stream order. Each records the sequence
   // value it observes; stream ordering guarantees the first observes 1 and the

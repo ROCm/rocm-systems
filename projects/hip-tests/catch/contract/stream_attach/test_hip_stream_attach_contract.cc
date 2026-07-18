@@ -50,9 +50,9 @@ HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), 0, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   HIP_CHECK(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachGlobal));
   HIP_CHECK(hipStreamSynchronize(nullptr));
@@ -79,9 +79,9 @@ HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), kAttachBytes, hipMemAttachSingle));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(hipStreamAttachMemAsync(stream, nullptr, kAttachBytes, hipMemAttachSingle) != hipSuccess);
 }
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStreamAttachSingle_IsRejected) {
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   REQUIRE(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachSingle) != hipSuccess);
 }

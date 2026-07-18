@@ -223,7 +223,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue) {
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   REQUIRE(module != nullptr);
-  cleanup.Add([&] { (void)hipModuleUnload(module); });
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));

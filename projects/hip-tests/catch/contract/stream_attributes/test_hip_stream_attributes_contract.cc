@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   // back through hipStreamGetAttribute.
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, greatest_priority));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   hipStreamAttrValue get_value{};
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipStreamAttrValue set_value{};
   set_value.syncPolicy = hipSyncPolicyBlockingSync;
@@ -106,9 +106,9 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   hipStream_t stream = nullptr;
   void* device_ptr = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMalloc(&device_ptr, kWindowBytes));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   hipStreamAttrValue set_value{};
   set_value.accessPolicyWindow.base_ptr = device_ptr;
@@ -147,9 +147,9 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
   hipStream_t src_stream = nullptr;
   hipStream_t dst_stream = nullptr;
   HIP_CHECK(hipStreamCreate(&src_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(src_stream); });
+  cleanup.Add([src_stream] { (void)hipStreamDestroy(src_stream); });
   HIP_CHECK(hipStreamCreate(&dst_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(dst_stream); });
+  cleanup.Add([dst_stream] { (void)hipStreamDestroy(dst_stream); });
 
   hipStreamAttrValue set_value{};
   set_value.syncPolicy = hipSyncPolicyBlockingSync;
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A null value-out pointer is a caller error and must be rejected with
   // hipErrorInvalidValue rather than silently succeeding.

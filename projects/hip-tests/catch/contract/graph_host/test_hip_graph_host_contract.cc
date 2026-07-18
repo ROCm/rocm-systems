@@ -34,13 +34,13 @@ HIP_TEST_CASE(Contract_GraphHost_AddHostNode_InvokesCallbackOnLaunch) {
   params.userData = &counter;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_GraphHost_HostNodeGetParams_RoundTripsFnAndUserData) {
   params.userData = &counter;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
 
   hipHostNodeParams retrieved{};
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_GraphHost_NodeType_ReportsHost) {
   params.userData = &counter;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
 
   HIP_CHECK(hipGraphNodeGetType(host_node, &node_type));

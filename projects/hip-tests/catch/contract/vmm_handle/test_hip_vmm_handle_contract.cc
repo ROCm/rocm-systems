@@ -203,7 +203,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   if (status != hipSuccess) {
     HIP_SKIP_TEST("dma-buf handle export is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { CloseFd(fd); });
+  cleanup.Add([fd] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 }
 
@@ -227,7 +227,7 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
     HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
   }
   HIP_CHECK(create_status);
-  cleanup.Add([&] { (void)hipMemRelease(handle); });
+  cleanup.Add([handle] { (void)hipMemRelease(handle); });
 
   // Export the allocation to a POSIX file descriptor. A supported path yields a
   // non-negative descriptor; an unsupported one reports a clean status and skips.
@@ -238,7 +238,7 @@ HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
     HIP_SKIP_TEST("VMM shareable-handle export is not supported by this device/runtime path.");
   }
   HIP_CHECK(export_status);
-  cleanup.Add([&] { CloseFd(fd); });
+  cleanup.Add([fd] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 
   // The exported descriptor must import back into a usable generic allocation

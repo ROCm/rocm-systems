@@ -104,9 +104,9 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // Discarding a batch of managed ranges must either be honored or reported
   // unsupported. When honored, the stream must drain cleanly afterward.
@@ -125,9 +125,9 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsup
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // The combined discard-and-prefetch batch, targeting the current device as the
   // prefetch destination, must be accepted or reported unsupported.
@@ -149,9 +149,9 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) 
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // The driver-style discard batch takes device pointers and must likewise be
   // accepted or reported unsupported.
@@ -170,9 +170,9 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUn
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // The driver-style combined discard-and-prefetch batch mirrors the runtime
   // variant with device pointers.
@@ -194,7 +194,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A batch with a null range must not silently succeed. On a runtime that
   // supports the path the call must reject the null input; on a runtime that
@@ -219,9 +219,9 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // Prefetching a batch of managed ranges to the current device must be accepted
   // or reported unsupported. When honored, the stream must drain cleanly.

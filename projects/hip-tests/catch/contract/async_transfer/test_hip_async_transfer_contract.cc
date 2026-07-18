@@ -32,9 +32,9 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSyn
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
@@ -52,11 +52,11 @@ HIP_TEST_CASE(Contract_AsyncTransfer_DeviceToDevice_CopiesAfterStreamSynchronize
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(src_device_ptr); });
+  cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
   HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
-  cleanup.Add([&] { (void)hipFree(dst_device_ptr); });
+  cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyAsync(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(dst_device_ptr, src_device_ptr, src.size(), hipMemcpyDeviceToDevice,
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_AsyncTransfer_ZeroBytes_Succeeds) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemcpyAsync(&dst, &src, 0, hipMemcpyHostToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -89,9 +89,9 @@ HIP_TEST_CASE(Contract_AsyncTransfer_InvalidDirection_ReturnsConsistentError) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t error =
       hipMemcpyAsync(device_ptr, src.data(), src.size(), static_cast<hipMemcpyKind>(-1), stream);

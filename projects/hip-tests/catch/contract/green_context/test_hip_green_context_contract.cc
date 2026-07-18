@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_GreenContext_GetDevResource_ReportsSmCount) {
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   hipDevResource stream_resource{};
   HIP_CHECK(hipStreamGetDevResource(stream, &stream_resource, hipDevResourceTypeSm));
   REQUIRE(stream_resource.sm.smCount == device_resource.sm.smCount);
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_GreenContext_Create_QueriesDeviceAndResource) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");
   }
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipExecutionCtxDestroy(ctx); });
+  cleanup.Add([ctx] { (void)hipExecutionCtxDestroy(ctx); });
 
   // A green context is bound to the device it was created on and exposes a
   // stable identifier. Its SM resource is a subset of the device's SMs.
@@ -156,18 +156,18 @@ HIP_TEST_CASE(Contract_GreenContext_Stream_LaunchesObservableWork) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");
   }
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipExecutionCtxDestroy(ctx); });
+  cleanup.Add([ctx] { (void)hipExecutionCtxDestroy(ctx); });
 
   // Work submitted to a stream created on the green context must run and
   // complete: a memset on that stream is visible after the context is
   // synchronized.
   hipStream_t stream = nullptr;
   HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, 0, 0));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   void* device_ptr = nullptr;
   HIP_CHECK(hipMalloc(&device_ptr, 64));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipMemsetAsync(device_ptr, 0x5A, 64, stream));
   HIP_CHECK(hipExecutionCtxSynchronize(ctx));
 
@@ -182,13 +182,13 @@ HIP_TEST_CASE(Contract_GreenContext_Event_RecordAndWaitRoundTrips) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");
   }
   hip::contract::ContractCleanup cleanup;
-  cleanup.Add([&] { (void)hipExecutionCtxDestroy(ctx); });
+  cleanup.Add([ctx] { (void)hipExecutionCtxDestroy(ctx); });
 
   // Recording an event on the green context and then waiting on it must be
   // accepted, and the context must synchronize cleanly afterward.
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreate(&event));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
   HIP_CHECK(hipExecutionCtxRecordEvent(ctx, event));
   HIP_CHECK(hipExecutionCtxWaitEvent(ctx, event));
   HIP_CHECK(hipExecutionCtxSynchronize(ctx));

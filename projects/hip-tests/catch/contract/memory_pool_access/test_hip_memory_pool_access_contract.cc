@@ -67,7 +67,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessCurrentDevice_SucceedsWhenSuppo
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t status = hipMemPoolSetAccess(pool, &access, 1);
   if (status == hipErrorNotSupported) {
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFla
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t set_status = hipMemPoolSetAccess(pool, &access, 1);
   if (set_status == hipErrorNotSupported) {
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected) {
   if (!CreatePool(&pool)) {
     HIP_SKIP_TEST("hipMemPoolCreate is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipMemPoolDestroy(pool); });
+  cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
   const hipError_t set_status = hipMemPoolSetAccess(pool, &access, 1);
   if (set_status == hipErrorNotSupported) {

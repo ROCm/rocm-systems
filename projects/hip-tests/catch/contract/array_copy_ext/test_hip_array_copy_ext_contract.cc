@@ -45,9 +45,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
 
   HIP_CHECK(
       hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
@@ -68,9 +68,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoA_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&src_array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(src_array); });
+  cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
   HIP_CHECK(hipMallocArray(&dst_array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(dst_array); });
+  cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   // Seed the source array, copy array-to-array, then read the destination back:
   // hipMemcpyAtoA must preserve the bytes it transfers between two HIP arrays.
@@ -92,9 +92,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes) {
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(src_array); });
+  cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
   HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(dst_array); });
+  cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   HIP_CHECK(hipMemcpy2DToArray(src_array, 0, 0, src.data(), kWidth, kWidth, kHeight,
                                hipMemcpyHostToDevice));
@@ -116,9 +116,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsync_NullSource_IsRejected) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpyHtoAAsync(array, 0, nullptr, kByteCount, stream);
 
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoA_NullArray_IsRejected) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(
       hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
 
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoD_NullArray_IsRejected) {
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipError_t status =
       hipMemcpyAtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), nullptr, 0, kByteCount);
@@ -184,9 +184,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected)
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(src_array); });
+  cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
   HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
-  cleanup.Add([&] { (void)hipFreeArray(dst_array); });
+  cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   const hipError_t status = hipMemcpy2DArrayToArray(
       dst_array, 0, 0, src_array, 0, 0, kWidth, kHeight, static_cast<hipMemcpyKind>(-1));
@@ -208,9 +208,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSyn
   const auto desc = ByteChannelDesc();
 
   HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
-  cleanup.Add([&] { (void)hipFreeArray(array); });
+  cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyHtoAAsync(array, 0, src.data(), src.size(), stream));
   HIP_CHECK(hipMemcpyAtoHAsync(dst.data(), array, 0, dst.size(), stream));

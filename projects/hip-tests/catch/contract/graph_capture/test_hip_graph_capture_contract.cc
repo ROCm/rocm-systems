@@ -30,10 +30,10 @@ HIP_TEST_CASE(Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph) {
   hipGraph_t graph = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   REQUIRE(graph != nullptr);
 }
@@ -48,20 +48,20 @@ HIP_TEST_CASE(Contract_GraphCapture_CapturedMemcpy_RoundTripsBytes) {
   hipGraphExec_t graph_exec = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   REQUIRE(graph != nullptr);
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -75,14 +75,14 @@ HIP_TEST_CASE(Contract_GraphCapture_IsCapturing_ReportsActiveDuringCapture) {
   hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipStreamIsCapturing(stream, &status));
 
   REQUIRE(status == hipStreamCaptureStatusActive);
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 }
 
 HIP_TEST_CASE(Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState) {
@@ -93,7 +93,7 @@ HIP_TEST_CASE(Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState) {
   unsigned long long capture_id = 0;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipStreamGetCaptureInfo(stream, &status, &capture_id));
 
@@ -101,5 +101,5 @@ HIP_TEST_CASE(Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState) {
   REQUIRE(capture_id > 0);
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 }

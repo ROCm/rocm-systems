@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HtoDtoH_RoundTripsRows) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto h2d = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
   HIP_CHECK(hipMemcpyParam2D(&h2d));
@@ -113,11 +113,11 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_DtoD_SingleDevice_CopiesRows) {
   if (!TryMallocPitch(&src_device_ptr, &src_pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(src_device_ptr); });
+  cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
   if (!TryMallocPitch(&dst_device_ptr, &dst_pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(dst_device_ptr); });
+  cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
   auto h2d = HostToDeviceCopy(src_device_ptr, src_pitch, src.data(), kWidth, kWidth, kHeight);
   HIP_CHECK(hipMemcpyParam2D(&h2d));
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_ZeroExtent_Succeeds) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto initialize = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
   HIP_CHECK(hipMemcpyParam2D(&initialize));
@@ -166,9 +166,9 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_Async_OnStream_HostToDeviceVisibleAfterSyn
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   auto h2d = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
   HIP_CHECK(hipMemcpyParam2DAsync(&h2d, stream));
@@ -190,9 +190,9 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_NullPointersInStruct_AreRejected) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   auto null_src = HostToDeviceCopy(device_ptr, pitch, nullptr, kWidth, kWidth, kHeight);
   const hipError_t sync_null_src_status = hipMemcpyParam2D(&null_src);

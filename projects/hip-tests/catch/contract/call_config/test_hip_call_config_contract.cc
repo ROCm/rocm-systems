@@ -37,7 +37,7 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
-  cleanup.Add([&] { (void)hipFree(device_value); });
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
   HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
 
   // The legacy call-configuration path stages a launch in three steps: configure
@@ -61,9 +61,9 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndepend
   int* first = nullptr;
   int* second = nullptr;
   HIP_CHECK(hipMalloc(&first, sizeof(*first)));
-  cleanup.Add([&] { (void)hipFree(first); });
+  cleanup.Add([first] { (void)hipFree(first); });
   HIP_CHECK(hipMalloc(&second, sizeof(*second)));
-  cleanup.Add([&] { (void)hipFree(second); });
+  cleanup.Add([second] { (void)hipFree(second); });
   HIP_CHECK(hipMemset(first, 0, sizeof(*first)));
   HIP_CHECK(hipMemset(second, 0, sizeof(*second)));
 

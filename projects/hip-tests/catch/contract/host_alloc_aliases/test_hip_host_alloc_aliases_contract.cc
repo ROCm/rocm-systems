@@ -40,7 +40,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HostAlloc_ReturnsUsablePinnedPointer) {
   const auto pattern = MakePattern(0x12);
 
   HIP_CHECK(hipHostAlloc(&host_ptr, kElementCount, hipHostAllocDefault));
-  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_MallocHost_ReturnsUsablePointer) {
   const auto pattern = MakePattern(0x34);
 
   HIP_CHECK(hipMallocHost(&host_ptr, kElementCount));
-  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer) {
   // runtime-API siblings above auto-initialize, so only this variant needs it.
   HIP_CHECK(hipFree(0));
   HIP_CHECK(hipMemAllocHost(&host_ptr, kElementCount));
-  cleanup.Add([&] { (void)hipFreeHost(host_ptr); });
+  cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
   WriteAndVerifyHostBytes(host_ptr, pattern);

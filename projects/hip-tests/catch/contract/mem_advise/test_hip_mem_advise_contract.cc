@@ -66,7 +66,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetReadMostly, device)) {
     HIP_SKIP_TEST("hipMemAdviseSetReadMostly is not supported by this runtime path.");
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevic
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetPreferredLocation, device)) {
     HIP_SKIP_TEST("hipMemAdviseSetPreferredLocation is not supported by this runtime path.");
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetAccessedBy_RangeAttributeReflectsDevice) {
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetAccessedBy, device)) {
     HIP_SKIP_TEST("hipMemAdviseSetAccessedBy is not supported by this runtime path.");
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) 
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   const bool read_mostly_set =
       ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetReadMostly, device);
@@ -230,7 +230,7 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected) {
 
   int* data = nullptr;
   HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   const hipError_t status = hipMemRangeGetAttribute(
       nullptr, sizeof(int), hipMemRangeAttributeReadMostly, data, sizeof(int));

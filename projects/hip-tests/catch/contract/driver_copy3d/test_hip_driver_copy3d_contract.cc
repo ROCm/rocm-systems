@@ -98,7 +98,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_HostToDevice_RoundTripsExtent) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   auto h2d = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&h2d));
@@ -118,11 +118,11 @@ HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
   if (!TryMalloc3D(&src_device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(src_device.ptr); });
+  cleanup.Add([p0 = src_device.ptr] { (void)hipFree(p0); });
   if (!TryMalloc3D(&dst_device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(dst_device.ptr); });
+  cleanup.Add([p0 = dst_device.ptr] { (void)hipFree(p0); });
 
   auto h2d = HostToDeviceCopy(src_device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&h2d));
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   auto initialize = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3D(&initialize));
@@ -165,9 +165,9 @@ HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   auto h2d = HostToDeviceCopy(device, const_cast<uint8_t*>(src.data()), extent);
   HIP_CHECK(hipDrvMemcpy3DAsync(&h2d, stream));
@@ -187,9 +187,9 @@ HIP_TEST_CASE(Contract_DriverCopy3D_NullInnerPointer_IsRejected) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // The contract is that each driver-style 3D copy rejects a null inner
   // pointer through its returned status. Whether the rejection also latches into

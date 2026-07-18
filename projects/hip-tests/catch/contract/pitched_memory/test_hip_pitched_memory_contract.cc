@@ -49,7 +49,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   REQUIRE(device_ptr != nullptr);
   REQUIRE(pitch >= kWidth);
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemcpy2D(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight,
                         hipMemcpyHostToDevice));
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, 1)) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemcpy2D(device_ptr, pitch, src.data(), kWidth, kWidth, 1,
                         hipMemcpyHostToDevice));

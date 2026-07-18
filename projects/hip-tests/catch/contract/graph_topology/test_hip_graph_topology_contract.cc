@@ -35,7 +35,7 @@ TwoNodeGraph CreateTwoNodeGraph() {
 HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
-  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t node_count = 0;
 
   HIP_CHECK(hipGraphGetNodes(graph.graph, nullptr, &node_count));
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
 HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
-  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t root_count = 0;
 
   HIP_CHECK(hipGraphGetRootNodes(graph.graph, nullptr, &root_count));
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
 HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
-  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t edge_count = 0;
 
   HIP_CHECK(hipGraphGetEdges(graph.graph, nullptr, nullptr, &edge_count));
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependency) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
-  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t dependency_count = 0;
 
   HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, nullptr, &dependency_count));
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependenc
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
-  cleanup.Add([&] { (void)hipGraphDestroy(graph.graph); });
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t dependent_count = 0;
 
   HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, nullptr, &dependent_count));

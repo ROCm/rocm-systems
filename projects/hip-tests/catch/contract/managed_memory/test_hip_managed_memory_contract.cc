@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
   int* data = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
 
   REQUIRE(data != nullptr);
 }
@@ -60,9 +60,9 @@ HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchron
   int* observed = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
   HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
-  cleanup.Add([&] { (void)hipFree(observed); });
+  cleanup.Add([observed] { (void)hipFree(observed); });
   *data = kHostValue;
   HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
 
@@ -83,9 +83,9 @@ HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchron
   int* observed = nullptr;
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
   HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
-  cleanup.Add([&] { (void)hipFree(observed); });
+  cleanup.Add([observed] { (void)hipFree(observed); });
   *data = kHostValue;
   HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
 
@@ -121,9 +121,9 @@ HIP_TEST_CASE(Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported) {
   }
 
   HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
-  cleanup.Add([&] { (void)hipFree(data); });
+  cleanup.Add([data] { (void)hipFree(data); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipMemPrefetchAsync(data, sizeof(*data), device, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 }

@@ -135,7 +135,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStre
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A stream-ordered write followed by a stream-ordered read on the same stream
   // must round-trip the value once the stream is synchronized.

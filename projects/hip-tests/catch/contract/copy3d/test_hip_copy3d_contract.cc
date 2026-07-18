@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_Copy3D_Malloc3D_ReturnsPitchedPtr) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   REQUIRE(device.ptr != nullptr);
   REQUIRE(device.pitch >= kWidth);
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
   if (!TryMalloc3D(&device, extent)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipFree(device.ptr); });
+  cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
   hipMemcpy3DParms h2d{};
   h2d.srcPtr = HostPitchedPtr(const_cast<uint8_t*>(src.data()), kWidth, kHeight);

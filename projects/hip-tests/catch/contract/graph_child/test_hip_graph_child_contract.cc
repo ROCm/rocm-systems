@@ -38,23 +38,23 @@ HIP_TEST_CASE(Contract_GraphChild_AddChildGraphNode_ExecutesEmbeddedMemcpy) {
   hipGraphNode_t child_node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipGraphCreate(&child, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(child); });
+  cleanup.Add([child] { (void)hipGraphDestroy(child); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d_node, child, nullptr, 0, device_ptr, src.data(), src.size(),
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h_node, child, &h2d_node, 1, dst.data(), device_ptr,
                                     dst.size(), hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphCreate(&parent, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(parent); });
+  cleanup.Add([parent] { (void)hipGraphDestroy(parent); });
   HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent, nullptr, 0, child));
 
   HIP_CHECK(hipGraphInstantiate(&graph_exec, parent, nullptr, nullptr, 0));
-  cleanup.Add([&] { (void)hipGraphExecDestroy(graph_exec); });
+  cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
   HIP_CHECK(hipGraphLaunch(graph_exec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -71,11 +71,11 @@ HIP_TEST_CASE(Contract_GraphChild_ChildGraphNodeGetGraph_ReturnsHandle) {
   size_t node_count = 0;
 
   HIP_CHECK(hipGraphCreate(&child, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(child); });
+  cleanup.Add([child] { (void)hipGraphDestroy(child); });
   HIP_CHECK(hipGraphAddEmptyNode(&empty_node, child, nullptr, 0));
 
   HIP_CHECK(hipGraphCreate(&parent, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(parent); });
+  cleanup.Add([parent] { (void)hipGraphDestroy(parent); });
   HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent, nullptr, 0, child));
 
   HIP_CHECK(hipGraphChildGraphNodeGetGraph(child_node, &embedded));
@@ -93,10 +93,10 @@ HIP_TEST_CASE(Contract_GraphChild_NodeType_ReportsGraph) {
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipGraphCreate(&child, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(child); });
+  cleanup.Add([child] { (void)hipGraphDestroy(child); });
 
   HIP_CHECK(hipGraphCreate(&parent, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(parent); });
+  cleanup.Add([parent] { (void)hipGraphDestroy(parent); });
   HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent, nullptr, 0, child));
 
   HIP_CHECK(hipGraphNodeGetType(child_node, &node_type));

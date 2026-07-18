@@ -29,7 +29,7 @@ HIP_TEST_CASE(Contract_Stream_CreateDestroy_Succeeds) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(stream != nullptr);
 }
@@ -39,7 +39,7 @@ HIP_TEST_CASE(Contract_Stream_SynchronizeEmptyStream_Succeeds) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_Stream_QueryEmptyStream_ReturnsSuccess) {
   hipStream_t stream = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipStreamQuery(stream));
 }
 
@@ -57,7 +57,7 @@ HIP_TEST_CASE(Contract_Event_CreateDestroy_Succeeds) {
   hipEvent_t event = nullptr;
 
   HIP_CHECK(hipEventCreate(&event));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   REQUIRE(event != nullptr);
 }
@@ -68,9 +68,9 @@ HIP_TEST_CASE(Contract_Event_RecordThenSynchronize_Succeeds) {
   hipEvent_t event = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&event));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   HIP_CHECK(hipEventRecord(event, stream));
   HIP_CHECK(hipEventSynchronize(event));
@@ -83,9 +83,9 @@ HIP_TEST_CASE(Contract_Event_QueryBeforeCompletion_ReturnsNotReadyOrSuccess) {
   hipEvent_t event = nullptr;
 
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   HIP_CHECK(hipEventCreate(&event));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
   HIP_CHECK(hipEventRecord(event, stream));
 
   const hipError_t query_result = hipEventQuery(event);
@@ -104,13 +104,13 @@ HIP_TEST_CASE(Contract_Stream_WaitEvent_OrdersDependentWork) {
   hipEvent_t copy_ready = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, src.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&producer_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(producer_stream); });
+  cleanup.Add([producer_stream] { (void)hipStreamDestroy(producer_stream); });
   HIP_CHECK(hipStreamCreate(&consumer_stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(consumer_stream); });
+  cleanup.Add([consumer_stream] { (void)hipStreamDestroy(consumer_stream); });
   HIP_CHECK(hipEventCreate(&copy_ready));
-  cleanup.Add([&] { (void)hipEventDestroy(copy_ready); });
+  cleanup.Add([copy_ready] { (void)hipEventDestroy(copy_ready); });
 
   HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice,
                            producer_stream));

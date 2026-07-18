@@ -23,7 +23,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty) {
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   HIP_CHECK(hipGraphNodeGetType(node, &node_type));
@@ -39,9 +39,9 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemcpyNodeReportsMemcpy) {
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipMalloc(&device_ptr, host.size()));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, device_ptr, host.data(), host.size(),
                                     hipMemcpyHostToDevice));
 
@@ -58,9 +58,9 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemsetNodeReportsMemset) {
   hipGraphNodeType node_type{};
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   params.dst = device_ptr;
   params.value = 0x1f;
@@ -84,7 +84,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_AddDependencies_CreatesEdge) {
   size_t dependency_count = 0;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
   HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
 
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_RemoveDependencies_ClearsEdge) {
   size_t edge_count = 0;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
   HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
 

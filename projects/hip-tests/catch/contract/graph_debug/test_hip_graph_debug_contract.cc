@@ -53,9 +53,9 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x5A);
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted) {
   hipGraphNode_t node = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   const std::string path = UniqueDotPath();

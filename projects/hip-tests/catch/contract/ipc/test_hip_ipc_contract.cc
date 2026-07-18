@@ -97,7 +97,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
   const hipError_t status = hipIpcGetMemHandle(&handle, ptr);
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
   const hipError_t get_status = hipIpcGetMemHandle(&handle, ptr);
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
         "Opening an IPC memory handle in the same process is not supported by this "
         "device/runtime path.");
   }
-  cleanup.Add([&] { (void)hipIpcCloseMemHandle(mapped); });
+  cleanup.Add([mapped] { (void)hipIpcCloseMemHandle(mapped); });
 
   // A successfully opened handle must yield a usable mapping. The mapped pointer
   // is not required to alias the original allocation, so the contract only
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, kAllocSize));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // A null output handle is invalid input and must be rejected with a public
   // invalid-argument error rather than treated as an unsupported-capability
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
   // exact error code, so the contract only requires a non-success result.
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
   const hipError_t status = hipIpcGetEventHandle(&handle, event);
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
 
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
-  cleanup.Add([&] { (void)hipEventDestroy(event); });
+  cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
   const hipError_t get_status = hipIpcGetEventHandle(&handle, event);
@@ -237,7 +237,7 @@ HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
   }
   // An opened IPC event is owned by the caller and released with hipEventDestroy,
   // mirroring the lifetime used by the HIP IPC event unit tests.
-  cleanup.Add([&] { (void)hipEventDestroy(opened); });
+  cleanup.Add([opened] { (void)hipEventDestroy(opened); });
 
   // When the same-process open does succeed, it must hand back a usable event.
   REQUIRE(opened != nullptr);

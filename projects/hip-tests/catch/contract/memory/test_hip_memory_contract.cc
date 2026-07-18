@@ -20,7 +20,7 @@ HIP_TEST_CASE(Contract_Memory_MallocBasic_ReturnsAlignedPointer) {
   void* ptr = nullptr;
 
   HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize));
-  cleanup.Add([&] { (void)hipFree(ptr); });
+  cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   REQUIRE(ptr != nullptr);
   REQUIRE(reinterpret_cast<uintptr_t>(ptr) % kDevicePointerAlignment == 0);

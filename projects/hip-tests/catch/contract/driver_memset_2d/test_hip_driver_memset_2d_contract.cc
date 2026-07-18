@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint8_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D8(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                           kWidth * sizeof(uint8_t), kHeight));
@@ -67,7 +67,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint16_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                            kWidth * sizeof(uint16_t), kHeight));
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(int), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                            kWidth * sizeof(int), kHeight));
@@ -108,9 +108,9 @@ HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth * sizeof(uint8_t), kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([&] { (void)hipStreamDestroy(stream); });
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                kWidth * sizeof(uint8_t), kHeight, stream));
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
   if (!TryMallocPitch(&device_ptr, &pitch, kWidth, kHeight)) {
     SkipPitchedAllocationUnsupported();
   }
-  cleanup.Add([&] { (void)hipFree(device_ptr); });
+  cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipMemset2D(device_ptr, pitch, pattern, kWidth, kHeight));
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight,

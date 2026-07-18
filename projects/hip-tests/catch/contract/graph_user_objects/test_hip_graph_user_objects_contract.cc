@@ -104,7 +104,7 @@ HIP_TEST_CASE(Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime) 
 
   hip::contract::ContractCleanup cleanup;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // The graph takes its own reference on the object, and then releases it. This
   // reference is independent of the standalone initial reference, so releasing

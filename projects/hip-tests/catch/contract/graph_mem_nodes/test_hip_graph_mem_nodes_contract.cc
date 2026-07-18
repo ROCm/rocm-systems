@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
   // when the guard unwinds.
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
@@ -254,7 +254,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  cleanup.Add([&] { (void)hipGraphDestroy(graph); });
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
