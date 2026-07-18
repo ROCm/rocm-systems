@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
+#include <vector>
 
 namespace hipFile {
 class IBuffer;
@@ -323,13 +324,15 @@ private:
     template <class Next> void transitionTo(Next next);
 };
 
+using BatchOperations = std::vector<std::shared_ptr<BatchOperation>>;
+
 class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
 
-    virtual ~IBatchContext()                                                                = default;
-    virtual unsigned getCapacity() const noexcept                                           = 0;
-    virtual void     submitOperations(const hipFileIOParams_t *params, unsigned num_params) = 0;
+    virtual ~IBatchContext()                               = default;
+    virtual unsigned getCapacity() const noexcept          = 0;
+    virtual void     submitOperations(BatchOperations ops) = 0;
 };
 
 class BatchContext : public IBatchContext {
@@ -351,13 +354,11 @@ public:
 
     ///
     /// @brief Submit one or more operations to this Context.
-    /// @param [in] params     Pointer to the operations to enqueue.
-    /// @param [in] num_params Number of operations to enqueue.
+    /// @param [in] ops Operations to enqueue.
     ///
-    /// @note This is an All or None operation. If one submitted operation is not valid, no operations
-    ///       will be submitted.
+    /// @note This is an All or None operation.
     ///
-    void submitOperations(const hipFileIOParams_t *params, const unsigned num_params) override;
+    void submitOperations(BatchOperations ops) override;
 
 private:
     const unsigned capacity;

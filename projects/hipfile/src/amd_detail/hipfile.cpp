@@ -430,9 +430,30 @@ try {
     }
 
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
-    batch_context->submitOperations(iocbp, nr);
+    BatchOperations                pending_ops{};
+    pending_ops.reserve(nr);
+
+    for (unsigned i = 0; i < nr; i++) {
+        // Make a copy so another thread cannot modify an accepted operation.
+        auto param_copy = std::make_unique<const hipFileIOParams_t>(iocbp[i]);
+        auto [file, buffer] =
+            Context<DriverState>::get()->getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
+        pending_ops.push_back(
+            std::make_shared<BatchOperation>(std::move(param_copy), std::move(buffer), std::move(file)));
+    }
+
+    batch_context->submitOperations(std::move(pending_ops));
 
     return {hipFileSuccess, hipSuccess};
+}
+catch (const DriverNotInitialized &) {
+    return {hipFileDriverNotInitialized, hipSuccess};
+}
+catch (const InvalidMemoryType &) {
+    return {hipFileHipMemoryTypeInvalid, hipSuccess};
+}
+catch (const FileNotRegistered &) {
+    return {hipFileHandleNotRegistered, hipSuccess};
 }
 catch (const std::invalid_argument &) {
     return {hipFileInvalidValue, hipSuccess};

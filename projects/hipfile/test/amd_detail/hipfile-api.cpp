@@ -19,6 +19,7 @@
 #include "hipfile-private.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
+#include "invalid-enum.h"
 #include "io.h"
 #include "mbackend.h"
 #include "mbatch.h"
@@ -54,9 +55,47 @@ using namespace testing;
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
 struct HipFileUnit : public HipFileUnopened {
-    StrictMock<MDriverState> mock_state;
-    void                     SetUp() override
+    StrictMock<MDriverState>             mock_state;
+    std::shared_ptr<StrictMock<MBuffer>> batch_buffer;
+    std::shared_ptr<StrictMock<MFile>>   batch_file;
+    int                                  batch_cookie{};
+
+    void SetUp() override
     {
+        setUpBatchMocks();
+    }
+
+    /// @brief Create the registered buffer and file that batch parameters refer to.
+    ///
+    /// The buffer is one byte long, so any non-zero offset or size greater
+    /// than one is out of range.
+    void setUpBatchMocks()
+    {
+        batch_buffer = std::make_shared<StrictMock<MBuffer>>();
+        EXPECT_CALL(*batch_buffer, getBuffer).WillRepeatedly(Return(reinterpret_cast<void *>(0x123)));
+        EXPECT_CALL(*batch_buffer, getLength).WillRepeatedly(Return(1));
+
+        batch_file = std::make_shared<StrictMock<MFile>>();
+        EXPECT_CALL(*batch_file, handle).WillRepeatedly(Return(batch_file.get()));
+    }
+
+    /// @brief Build a valid batch parameter referring to the fixture mocks.
+    hipFileIOParams_t makeBatchParam()
+    {
+        hipFileIOParams_t param{};
+        param.u.batch.devPtr_base = batch_buffer->getBuffer();
+        param.u.batch.size        = 1;
+        param.fh                  = batch_file->handle();
+        param.mode                = hipFileBatch;
+        param.opcode              = hipFileBatchRead;
+        param.cookie              = &batch_cookie;
+        return param;
+    }
+
+    void expectBatchLookup(const hipFileIOParams_t &param)
+    {
+        EXPECT_CALL(mock_state, getFileAndBuffer(param.fh, param.u.batch.devPtr_base))
+            .WillOnce(Return(file_buffer_pair{batch_file, batch_buffer}));
     }
 };
 
@@ -92,11 +131,16 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSetupNullptrHandle)
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitSuccess)
 {
     hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
-    hipFileIOParams_t                          io_param;
+    hipFileIOParams_t                          io_param = makeBatchParam();
     std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
-    EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
-    EXPECT_CALL(*mock_b_context, submitOperations);
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).WillOnce([this](BatchOperations ops) {
+        ASSERT_EQ(ops.size(), 1);
+        EXPECT_EQ(ops[0]->event().cookie, &batch_cookie);
+        EXPECT_EQ(ops[0]->event().status, hipFileWaiting);
+    });
 
     auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
     ASSERT_EQ(result, HIPFILE_SUCCESS);
@@ -108,8 +152,8 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadHandle)
     hipFileIOParams_t                          io_param;
     std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
-    EXPECT_CALL(mock_state, getBatchContext).WillOnce(Throw(InvalidBatchHandle()));
-    EXPECT_CALL(*mock_b_context, submitOperations).Times(0);
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Throw(InvalidBatchHandle()));
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
 
     auto           result          = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
     hipFileError_t expected_result = {hipFileInvalidValue, hipSuccess};
@@ -119,14 +163,170 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadHandle)
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadArgument)
 {
     hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
-    hipFileIOParams_t                          io_param;
+    hipFileIOParams_t                          io_param = makeBatchParam();
     std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
-    EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
-    EXPECT_CALL(*mock_b_context, submitOperations).WillOnce(Throw(std::invalid_argument("")));
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).WillOnce(Throw(std::invalid_argument("")));
 
     auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
     ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidOperation)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    io_param.u.batch.file_offset                              = -1;
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNegativeBufferOffset)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    io_param.u.batch.devPtr_offset                            = -1;
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBufferOffsetTooLarge)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    // The mocked buffer is one byte long, so any offset is past its end.
+    io_param.u.batch.devPtr_offset = 1;
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitIOSizeTooLarge)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    // The mocked buffer is one byte long.
+    io_param.u.batch.size = 2;
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidOpcode)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    io_param.opcode = invalidEnum<hipFileOpcode_t>(maxEnum<hipFileOpcode_t>());
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidMode)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    io_param.mode = invalidEnum<hipFileBatchMode_t>(maxEnum<hipFileBatchMode_t>());
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidSecondOperationDoesNotSubmit)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::array<hipFileIOParams_t, 2>           io_params{io_param, io_param};
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+    io_params[1].u.batch.file_offset                          = -1;
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    EXPECT_CALL(mock_state, getFileAndBuffer(io_param.fh, io_param.u.batch.devPtr_base))
+        .Times(2)
+        .WillRepeatedly(Return(file_buffer_pair{batch_file, batch_buffer}));
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, io_params.size(), io_params.data(), 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitFileNotRegistered)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    EXPECT_CALL(mock_state, getFileAndBuffer(io_param.fh, io_param.u.batch.devPtr_base))
+        .WillOnce(Throw(FileNotRegistered()));
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HipFileOpError(hipFileHandleNotRegistered));
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitDriverNotInitialized)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    EXPECT_CALL(mock_state, getFileAndBuffer(io_param.fh, io_param.u.batch.devPtr_base))
+        .WillOnce(Throw(DriverNotInitialized()));
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HipFileOpError(hipFileDriverNotInitialized));
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidMemoryType)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    EXPECT_CALL(mock_state, getFileAndBuffer(io_param.fh, io_param.u.batch.devPtr_base))
+        .WillOnce(Throw(InvalidMemoryType()));
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HipFileOpError(hipFileHipMemoryTypeInvalid));
 }
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNullptrParams)
