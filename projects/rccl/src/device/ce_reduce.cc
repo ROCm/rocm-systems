@@ -257,7 +257,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
 
   (void)hipGetLastError();
     switch (redOp) {
-      case 0: {
+      case ncclSum: {
         auto kernelFn = ncclCeLocalReduceKernelVec<T, 0, U>;
         hipLaunchKernelGGL(
           kernelFn,
@@ -266,7 +266,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
           baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
           signalBuffer, totalSteps, d_barrierSync);
         break;
-        } /*case 1: {
+        } case ncclProd: {
         auto kernelFn = ncclCeLocalReduceKernelVec<T, 1, U>;
         hipLaunchKernelGGL(
           kernelFn,
@@ -275,7 +275,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
           baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
           signalBuffer, totalSteps, d_barrierSync);
         break;
-      } case 2: {
+      } case ncclMin: {
         auto kernelFn = ncclCeLocalReduceKernelVec<T, 2, U>;
         hipLaunchKernelGGL(
           kernelFn,
@@ -284,7 +284,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
           baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
           signalBuffer, totalSteps, d_barrierSync);
         break;
-      } case 3: {
+      } case ncclMax: {
         auto kernelFn = ncclCeLocalReduceKernelVec<T, 3, U>;
         hipLaunchKernelGGL(
           kernelFn,
@@ -293,7 +293,7 @@ static ncclResult_t ncclCeLaunchReduceTyped(
           baseChunkElems, tailChunkElems, chunksPerShard, slotChunkElems,
           signalBuffer, totalSteps, d_barrierSync);
         break;
-      }*/
+      }
     }
     hipError_t e = hipGetLastError();
     if (e != hipSuccess) return ncclUnhandledCudaError;
