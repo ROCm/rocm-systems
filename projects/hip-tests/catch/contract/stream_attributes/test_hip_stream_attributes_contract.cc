@@ -183,13 +183,14 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
 HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
   RequireDevice();
 
-  // The invalid-input rejection contracts for hipStreamGetAttribute are only
-  // exercised on AMD. On NVIDIA hipStreamGetAttribute maps to
+  // BACKEND-DIFF: The invalid-input rejection contracts for hipStreamGetAttribute
+  // are only exercised on AMD. On NVIDIA hipStreamGetAttribute maps to
   // cudaStreamGetAttribute, which does not validate the value-out pointer and
   // dereferences it - a null pointer faults instead of returning a defined
   // error - so the rejection contract cannot be evaluated safely there. The
   // unknown-attribute sub-check additionally uses hipLaunchAttributeMax, a
-  // sentinel defined only on AMD.
+  // sentinel defined only on AMD. Parity would require matching null-argument
+  // validation and a portable unknown-attribute sentinel.
 #ifdef __HIP_PLATFORM_AMD__
   hip::contract::ContractCleanup cleanup;
 

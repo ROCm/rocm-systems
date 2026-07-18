@@ -9,12 +9,13 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
-// The whole hipOccupancyMaxPotentialBlockSize* family this file exercises is
-// unavailable on the NVIDIA backend: hipOccupancyMaxPotentialBlockSizeVariableSMem
-// and its with-flags sibling have no NVIDIA equivalent, and the plain/with-flags
-// templated wrappers resolve to cudaOccupancyMaxPotentialBlockSize with a
-// mismatched parameter list under CUDA 13.1, so the whole translation unit builds
-// only on AMD.
+// BACKEND-DIFF: The whole hipOccupancyMaxPotentialBlockSize* family this file
+// exercises is unavailable on the NVIDIA backend:
+// hipOccupancyMaxPotentialBlockSizeVariableSMem and its with-flags sibling have
+// no NVIDIA equivalent, and the plain/with-flags templated wrappers resolve to
+// cudaOccupancyMaxPotentialBlockSize with a mismatched parameter list under CUDA
+// 13.1, so the whole translation unit builds only on AMD. Parity would require
+// the NVIDIA-backend occupancy wrappers to match the CUDA template signatures.
 #if HT_AMD
 
 namespace {

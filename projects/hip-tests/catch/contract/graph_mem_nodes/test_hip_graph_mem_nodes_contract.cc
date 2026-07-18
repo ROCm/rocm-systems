@@ -235,6 +235,11 @@ HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_CurrentAttribute_IsRej
   REQUIRE(status != hipSuccess);
 }
 
+// BACKEND-DIFF: the driver-style graph memory free node entry point
+// (hipDrvGraphAddMemFreeNode) is AMD-only; the NVIDIA backend does not expose a
+// driver-style mem-free node constructor, so this contract builds only on AMD.
+// The runtime-style graph mem alloc/free contracts above are portable. Parity
+// would require a NVIDIA-side driver graph mem-free node API.
 #if HT_AMD
 HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
   if (!TryTrimGraphMemory()) {

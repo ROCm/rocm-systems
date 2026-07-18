@@ -10,6 +10,9 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// BACKEND-DIFF: hip/hip_ext.h and hipExtLaunchKernel (used by the ExtLaunchKernel
+// contract below) are AMD extensions with no NVIDIA equivalent; the header and
+// its test are gated to AMD. Parity would require a NVIDIA-side ext-launch entry.
 #if HT_AMD
 #include <hip/hip_ext.h>
 #endif
@@ -187,6 +190,8 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
 
+// BACKEND-DIFF: hipExtLaunchKernel is an AMD extension with no NVIDIA equivalent,
+// so this contract builds only on AMD (see the gated hip_ext.h include above).
 #if HT_AMD
 HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;

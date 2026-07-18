@@ -10,9 +10,10 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
-// hipKernelNameRef and hipKernelNameRefByPtr are AMD-only name-reflection entry
-// points with no NVIDIA-backend equivalent, so this whole translation unit
-// builds only on AMD.
+// BACKEND-DIFF: hipKernelNameRef and hipKernelNameRefByPtr are AMD-only
+// name-reflection entry points with no NVIDIA-backend equivalent, so this whole
+// translation unit builds only on AMD. Parity would require a NVIDIA-side
+// kernel-name reflection API.
 #if HT_AMD
 
 // Kernel-name reflection contracts for the AMD name-lookup entry points

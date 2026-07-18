@@ -188,6 +188,10 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([&] { (void)hipStreamDestroy(stream); });
 
+  // BACKEND-DIFF: the executable memcpy-node setter diverges on whether an
+  // instantiated node's memory operands may be re-pointed to a different
+  // allocation. AMD accepts it; NVIDIA rejects it (see the #else branch). This is
+  // a behavioral delta that could be reconciled if CUDA relaxes the restriction.
 #if HT_AMD
   // On AMD the executable setter accepts re-pointing the copy at a different host
   // source allocation after instantiation, and the next launch copies the second

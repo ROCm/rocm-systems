@@ -26,12 +26,13 @@
 // are intentionally not covered here. Each test also treats hipErrorNotSupported
 // at its key call as a graceful skip.
 
-// The deprecated hipTexRef* texture-reference API is AMD-only on this HIP
-// release. On the NVIDIA backend these map to the CUDA driver texref entry
-// points, which the CUDA 12+ headers removed or retyped (e.g. hipTexRefGetFilterMode
-// is undefined and the address/filter-mode getters expect CUaddress_mode/
-// CUfilter_mode rather than the cuda* runtime enums), so this whole translation
-// unit builds only on AMD.
+// BACKEND-DIFF: The deprecated hipTexRef* texture-reference API is AMD-only on
+// this HIP release. On the NVIDIA backend these map to the CUDA driver texref
+// entry points, which the CUDA 12+ headers removed or retyped (e.g.
+// hipTexRefGetFilterMode is undefined and the address/filter-mode getters expect
+// CUaddress_mode/CUfilter_mode rather than the cuda* runtime enums), so this
+// whole translation unit builds only on AMD. Parity is unlikely while CUDA keeps
+// the texref API removed; matching would mean retargeting onto texture objects.
 #if HT_AMD
 
 namespace {

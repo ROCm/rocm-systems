@@ -10,10 +10,12 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
-// hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA backend it only
-// wraps cuStreamGetCaptureInfo_v2, which CUDA provides in 11.3-12.x and removed
-// in CUDA 13 (superseded by v3). Gate the test that calls it so it compiles on
-// AMD and on pre-13 CUDA, and is absent on CUDA 13+ where the entry point is gone.
+// BACKEND-DIFF: hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA
+// backend it only wraps cuStreamGetCaptureInfo_v2, which CUDA provides in
+// 11.3-12.x and removed in CUDA 13 (superseded by v3). Gate the test that calls
+// it so it compiles on AMD and on pre-13 CUDA, and is absent on CUDA 13+ where
+// the entry point is gone. Parity on CUDA 13+ would mean re-expressing the test
+// on hipStreamGetCaptureInfo (v3), which reports status+id only, not deps/graph.
 #if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
 #define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 1
 #else

@@ -193,6 +193,10 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInsta
   hipMemcpy3DParms updated = MakeH2DParams(second.data(), device);
   const hipError_t update_status = hipGraphExecMemcpyNodeSetParams(exec, node, &updated);
 
+  // BACKEND-DIFF: the executable memcpy-node setter diverges on whether an
+  // instantiated node's memory operands may be re-pointed to a different
+  // allocation. AMD accepts it; NVIDIA rejects it with hipErrorInvalidValue (see
+  // the #else branch). Behavioral delta, reconcilable if CUDA relaxes it.
 #if HT_AMD
   // On AMD the executable setter accepts re-pointing the copy at a different host
   // source allocation after instantiation, and the next launch copies the second

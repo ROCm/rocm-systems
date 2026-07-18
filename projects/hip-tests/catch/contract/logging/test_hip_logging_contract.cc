@@ -7,9 +7,10 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
-// The extended logging controls (hipExtEnableLogging, hipExtDisableLogging,
-// hipExtSetLoggingParams) are AMD extension APIs, so the whole domain is gated
-// like the other AMD extension contracts.
+// BACKEND-DIFF: The extended logging controls (hipExtEnableLogging,
+// hipExtDisableLogging, hipExtSetLoggingParams) are AMD extension APIs, so the
+// whole domain is gated like the other AMD extension contracts. Parity would
+// require a NVIDIA-side logging-control API.
 #if HT_AMD
 
 namespace {

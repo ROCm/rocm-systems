@@ -11,10 +11,12 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
-// hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA backend it only
-// wraps cuStreamGetCaptureInfo_v2, which CUDA provides in 11.3-12.x and removed
-// in CUDA 13 (superseded by v3). Gate the tests that call it so they compile on
-// AMD and on pre-13 CUDA, and skip on CUDA 13+ where the entry point is absent.
+// BACKEND-DIFF: hipStreamGetCaptureInfo_v2 exists on AMD, but on the NVIDIA
+// backend it only wraps cuStreamGetCaptureInfo_v2, which CUDA provides in
+// 11.3-12.x and removed in CUDA 13 (superseded by v3). Gate the tests that call
+// it so they compile on AMD and on pre-13 CUDA, and skip on CUDA 13+ where the
+// entry point is absent. Parity on CUDA 13+ would mean re-expressing on the v3
+// capture-info API.
 #if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
 #define HIP_CONTRACT_HAS_CAPTURE_INFO_V2 1
 #else
@@ -45,6 +47,10 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_RoundTripsPreviousMode) {
   REQUIRE(observed_previous_mode == hipStreamCaptureModeThreadLocal);
 }
 
+// BACKEND-DIFF: the null-mode rejection contract runs only on AMD. On NVIDIA
+// hipThreadExchangeStreamCaptureMode forwards to cuThreadExchangeStreamCaptureMode,
+// which does not reject a null mode pointer the same way, so the negative check
+// is not portable. Parity would require matching null-argument validation.
 #if HT_AMD
 HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_NullMode_IsRejected) {
   REQUIRE(hipThreadExchangeStreamCaptureMode(nullptr) != hipSuccess);

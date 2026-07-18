@@ -78,12 +78,14 @@ HIP_TEST_CASE(Contract_ExternalResource_DestroySemaphore_NullHandle_IsRejected) 
 }
 
 HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
-  // The null-handle rejection contract is only exercised on AMD. On NVIDIA
-  // hipSignalExternalSemaphoresAsync maps to cudaSignalExternalSemaphoresAsync,
-  // which does not validate the semaphore handle and dereferences it - a null
-  // handle faults (SIGSEGV) instead of returning a defined error - so the
-  // rejection contract cannot be evaluated safely there. (The matching wait API
-  // does validate its handle, so WaitSemaphore_NullHandle stays cross-backend.)
+  // BACKEND-DIFF: The null-handle rejection contract is only exercised on AMD. On
+  // NVIDIA hipSignalExternalSemaphoresAsync maps to
+  // cudaSignalExternalSemaphoresAsync, which does not validate the semaphore
+  // handle and dereferences it - a null handle faults (SIGSEGV) instead of
+  // returning a defined error - so the rejection contract cannot be evaluated
+  // safely there. (The matching wait API does validate its handle, so
+  // WaitSemaphore_NullHandle stays cross-backend.) Parity would require matching
+  // null-handle validation on the signal path.
 #ifdef __HIP_PLATFORM_AMD__
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;

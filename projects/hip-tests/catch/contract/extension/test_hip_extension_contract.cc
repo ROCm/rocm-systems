@@ -68,6 +68,12 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
   // directly. static_cast bridges both (an identity conversion on AMD).
   hipDriverProcAddressQueryResult symbol_status =
       static_cast<hipDriverProcAddressQueryResult>(HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND);
+  // BACKEND-DIFF: hipGetProcAddress resolves different symbol namespaces per
+  // backend. On AMD it resolves runtime-level hip* symbols by name; on NVIDIA it
+  // forwards to cuGetProcAddress, which resolves driver-level cu* symbols (a hip*
+  // name returns a null pfn), so the two branches query different symbols and the
+  // NVIDIA branch cannot call the result through a hip* prototype. Parity would
+  // require the NVIDIA HIP layer to resolve hip*/cuda* runtime symbols by name.
 #if HT_AMD
   // On AMD hipGetProcAddress resolves runtime-level hip* symbols by name.
   HIP_CHECK(hipGetProcAddress("hipGetDevice", &pfn, hip_version,
@@ -143,11 +149,12 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
 
   const int hip_version = RuntimeQueryVersion();
 
-  // The null-argument rejection contract is only exercised on AMD. On the NVIDIA
-  // backend hipGetProcAddress forwards to cuGetProcAddress, which does not
-  // validate its arguments and dereferences a null symbol name / output pointer,
-  // faulting (SIGSEGV) instead of returning hipErrorInvalidValue, so the
-  // rejection cannot be evaluated safely there.
+  // BACKEND-DIFF: The null-argument rejection contract is only exercised on AMD.
+  // On the NVIDIA backend hipGetProcAddress forwards to cuGetProcAddress, which
+  // does not validate its arguments and dereferences a null symbol name / output
+  // pointer, faulting (SIGSEGV) instead of returning hipErrorInvalidValue, so the
+  // rejection cannot be evaluated safely there. Parity would require matching
+  // null-argument validation before the dereference.
 #if HT_AMD
   // A null symbol name is invalid input.
   void* pfn = nullptr;
@@ -166,6 +173,10 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
 #endif
 }
 
+// BACKEND-DIFF: the following AMD extension APIs (hipApiName,
+// hipGetStreamDeviceId, hipExtGetLastError) have no NVIDIA-backend equivalent, so
+// these contracts build only on AMD. The portable hipGetProcAddress contracts
+// above run on both backends. Parity would require NVIDIA-side equivalents.
 #if HT_AMD
 HIP_TEST_CASE(Contract_Extension_ApiName_ReturnsNonEmptyString) {
   RequireDevice();

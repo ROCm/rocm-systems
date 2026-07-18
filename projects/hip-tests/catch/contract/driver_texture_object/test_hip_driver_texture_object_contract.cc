@@ -155,11 +155,13 @@ HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
   REQUIRE(returned.res.array.hArray == array);
 }
 
-// The resource-view path is exercised only on AMD. It requires the driver-style
-// resource-view format enumerator HIP_RES_VIEW_FORMAT_FLOAT_1X32, which the
-// NVIDIA backend does not define (its hipResViewFormat* aliases map to the
-// runtime-style cudaResViewFormat* enum instead, used by the higher-level
+// BACKEND-DIFF: The resource-view path is exercised only on AMD. It requires the
+// driver-style resource-view format enumerator HIP_RES_VIEW_FORMAT_FLOAT_1X32,
+// which the NVIDIA backend does not define (its hipResViewFormat* aliases map to
+// the runtime-style cudaResViewFormat* enum instead, used by the higher-level
 // texture object API rather than hipTexObjectCreate's HIP_RESOURCE_VIEW_DESC).
+// Parity would require NVIDIA to define the driver-style resource-view format
+// enumerators.
 #if HT_AMD
 HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupported) {
   CHECK_IMAGE_SUPPORT;

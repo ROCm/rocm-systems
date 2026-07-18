@@ -17,6 +17,8 @@ bool IsDeviceMemoryType(unsigned int type) {
   return type == hipMemoryTypeDevice || type == hipMemoryTypeUnified;
 }
 
+// BACKEND-DIFF: helper for the AMD-only hipPointerSetAttribute tests below; see
+// the marked gate before Contract_PointerQuery_MemPtrGetInfo.
 #if HT_AMD
 bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute, hipDeviceptr_t ptr) {
   const hipError_t status = hipPointerSetAttribute(value, attribute, ptr);
@@ -89,9 +91,10 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
                                      reinterpret_cast<hipDeviceptr_t>(data)) != hipSuccess);
 }
 
-// hipMemPtrGetInfo and hipPointerSetAttribute are AMD-only entry points with no
-// NVIDIA-backend equivalent, so these three contracts build only on AMD. The
-// hipDrvPointerGetAttributes contracts above are portable.
+// BACKEND-DIFF: hipMemPtrGetInfo and hipPointerSetAttribute are AMD-only entry
+// points with no NVIDIA-backend equivalent, so these three contracts build only
+// on AMD. The hipDrvPointerGetAttributes contracts above are portable. Parity
+// would require NVIDIA to expose these pointer query/set entry points.
 #if HT_AMD
 HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;

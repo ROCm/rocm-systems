@@ -140,6 +140,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_GetMemoryRequirements_IsQueryable) {
   hipArrayMemoryRequirements req{};
   const hipError_t req_status =
       hipMipmappedArrayGetMemoryRequirements(&req, mipmap, device);
+  // BACKEND-DIFF: hipMipmappedArrayGetMemoryRequirements reports "not queryable"
+  // differently per backend. AMD returns hipErrorNotSupported; NVIDIA
+  // (cuMipmappedArrayGetMemoryRequirements) rejects a query against a
+  // runtime-created mipmapped array with hipErrorInvalidValue. The two branches
+  // accept the backend's respective not-queryable status. Parity would require a
+  // common not-supported status for this query path.
 #if HT_AMD
   // Some runtime paths do not implement this query; accept unsupported.
   if (req_status != hipErrorNotSupported) {

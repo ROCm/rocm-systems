@@ -16,11 +16,13 @@ void RequireDevice() {
   }
 }
 
-// hipGetDriverEntryPoint resolves names in the driver-symbol namespace of the
-// active backend: HIP runtime names on AMD, but the underlying CUDA driver names
-// on NVIDIA (where it maps to cudaGetDriverEntryPoint). Query a name each backend
-// can actually resolve. cuDeviceGetCount is the driver-API equivalent of the
-// hipGetDeviceCount entry point resolved on AMD, and has the same int* signature.
+// BACKEND-DIFF: hipGetDriverEntryPoint resolves names in the driver-symbol
+// namespace of the active backend: HIP runtime names on AMD, but the underlying
+// CUDA driver names on NVIDIA (where it maps to cudaGetDriverEntryPoint). Query a
+// name each backend can actually resolve. cuDeviceGetCount is the driver-API
+// equivalent of the hipGetDeviceCount entry point resolved on AMD, and has the
+// same int* signature. Parity would require the NVIDIA HIP layer to resolve hip*
+// runtime names rather than cu* driver names.
 #ifdef __HIP_PLATFORM_AMD__
 constexpr char const kKnownSymbol[] = "hipGetDeviceCount";
 #else
@@ -93,11 +95,12 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_EmptySymbol_IsRejected) {
 HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
   RequireDevice();
 
-  // A null output pointer is a caller error that must be rejected with
-  // hipErrorInvalidValue. This is only exercised on AMD: the NVIDIA path
+  // BACKEND-DIFF: A null output pointer is a caller error that must be rejected
+  // with hipErrorInvalidValue. This is only exercised on AMD: the NVIDIA path
   // (cudaGetDriverEntryPoint) does not null-check the output pointer and
   // dereferences it, faulting instead of returning a defined error, so the
-  // contract cannot be safely evaluated there.
+  // contract cannot be safely evaluated there. Parity would require matching
+  // null-output validation.
 #ifdef __HIP_PLATFORM_AMD__
   hipDriverEntryPointQueryResult query_status = hipDriverEntryPointSuccess;
   HIP_CHECK_ERROR(hipGetDriverEntryPoint(kKnownSymbol, nullptr, hipEnableDefault, &query_status),

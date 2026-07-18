@@ -98,13 +98,14 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvali
     (void)value;
   }
 
-  // hipLimitRange is the terminating range marker of hipLimit_t (one past
-  // hipExtLimitScratchCurrent), not a real queryable limit, so querying it
-  // exercises an out-of-range limit that must not succeed. Backends may report
+  // BACKEND-DIFF: hipLimitRange is the terminating range marker of hipLimit_t
+  // (one past hipExtLimitScratchCurrent), not a real queryable limit, so querying
+  // it exercises an out-of-range limit that must not succeed. Backends may report
   // the specific hipErrorUnsupportedLimit or another non-success error; the
   // contract only requires that the query does not silently succeed. This marker
   // is AMD-specific: the NVIDIA backend's hipLimit_t (mapped to cudaLimit) has
   // no hipLimitRange enumerator, so the out-of-range probe runs only on AMD.
+  // Parity would need a stable out-of-range hipLimit_t value on NVIDIA.
 #if HT_AMD
   size_t invalid_value = 0;
   const hipError_t invalid_status =

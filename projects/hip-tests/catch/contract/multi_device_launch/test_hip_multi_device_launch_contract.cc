@@ -15,11 +15,12 @@
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
 
-// The cooperative multi-device launch family exercised here is AMD-only on the
-// NVIDIA backend: hipExtLaunchMultiKernelMultiDevice has no NVIDIA entry point,
-// and hipLaunchParams maps to CUDA's cudaLaunchParams, which the NVIDIA-backend
-// headers leave incomplete. These contracts also require two or more cooperative
-// GPUs, so they build only on AMD.
+// BACKEND-DIFF: The cooperative multi-device launch family exercised here is
+// AMD-only on the NVIDIA backend: hipExtLaunchMultiKernelMultiDevice has no
+// NVIDIA entry point, and hipLaunchParams maps to CUDA's cudaLaunchParams, which
+// the NVIDIA-backend headers leave incomplete. These contracts also require two
+// or more cooperative GPUs, so they build only on AMD. Parity would require the
+// NVIDIA headers to complete cudaLaunchParams and provide the ext launch entry.
 #if HT_AMD
 
 // In-source kernel used by the host-symbol multi-device launches. It publishes a

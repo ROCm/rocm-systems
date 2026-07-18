@@ -51,6 +51,9 @@ HIP_TEST_CASE(Contract_PeerQuery_GetP2PAttribute_InvalidArgs_AreRejected) {
   REQUIRE(hipDeviceGetP2PAttribute(&value, kP2PAttribute, device, device_count) != hipSuccess);
 }
 
+// BACKEND-DIFF: hipExtGetLinkTypeAndHopCount is an AMD extension (link-type and
+// hop-count query) with no NVIDIA equivalent, so this contract builds only on
+// AMD. Parity would require a NVIDIA-side link-topology query API.
 #if HT_AMD
 HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_SameDevice_IsRejected) {
   int device_count = 0;

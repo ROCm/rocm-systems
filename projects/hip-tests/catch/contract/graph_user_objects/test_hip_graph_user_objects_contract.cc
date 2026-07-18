@@ -72,6 +72,10 @@ HIP_TEST_CASE(Contract_GraphUserObjects_RetainRelease_BalancesRefcount) {
   // Releasing the final initial reference drops the refcount to zero.
   HIP_CHECK(hipUserObjectRelease(object, 1));
   HIP_CHECK(hipDeviceSynchronize());
+  // BACKEND-DIFF: user-object destructor semantics after a retain diverge. AMD
+  // fires the destructor once on release-to-zero; NVIDIA (cudaUserObject*) never
+  // fires it on this retain/release path. Behavioral delta; the #else branch is
+  // where the expectation changes back if the semantics are reconciled.
 #if HT_AMD
   // On AMD the destructor runs exactly once when the refcount reaches zero.
   REQUIRE(counter == 1);

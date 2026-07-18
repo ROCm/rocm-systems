@@ -214,6 +214,11 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDes
   hipKernelNodeAttrValue dest_attr{};
   HIP_CHECK(hipGraphKernelNodeGetAttribute(dest_node, hipKernelNodeAttributeCooperative,
                                            &dest_attr));
+  // BACKEND-DIFF: kernel-node attribute copy diverges on the cooperative flag.
+  // AMD propagates it to the destination node; NVIDIA
+  // (cudaGraphKernelNodeCopyAttributes) copies the access-policy-window attribute
+  // but not the cooperative flag (see the #else branch). Behavioral delta,
+  // reconcilable if the CUDA copy is made to carry cooperative.
 #if HT_AMD
   // On AMD the copy propagates the cooperative attribute to the destination node.
   REQUIRE(dest_attr.cooperative == source_attr.cooperative);

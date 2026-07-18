@@ -10,6 +10,11 @@
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 
+// BACKEND-DIFF: The JIT linker lifecycle (hipLinkCreate/hipLinkAddData/
+// hipLinkAddFile/hipLinkComplete/hipLinkDestroy) and the hipJitInputSpirv input
+// type are AMD-only in this tree; the NVIDIA backend does not expose them, so
+// this whole translation unit builds only on AMD. Parity would require NVIDIA to
+// surface an equivalent JIT-link API (CUDA's cuLink* family) through HIP.
 #if HT_AMD
 namespace {
 constexpr uint32_t kDummyInput = 0x12345678;

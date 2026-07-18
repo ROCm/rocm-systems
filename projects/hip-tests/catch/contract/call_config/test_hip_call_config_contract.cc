@@ -10,9 +10,11 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
-// The legacy call-configuration launch path (hipConfigureCall, hipSetupArgument,
-// hipLaunchByPtr) is AMD-only; the NVIDIA backend does not expose these entry
-// points, so this whole translation unit builds only on AMD.
+// BACKEND-DIFF: The legacy call-configuration launch path (hipConfigureCall,
+// hipSetupArgument, hipLaunchByPtr) is AMD-only; the NVIDIA backend does not
+// expose these entry points, so this whole translation unit builds only on AMD.
+// Parity would require NVIDIA to provide these legacy launch entry points (or
+// the tests to be re-expressed on the portable launch APIs).
 #if HT_AMD
 
 namespace {

@@ -71,11 +71,12 @@ HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_Re
                   hipErrorInvalidValue);
 }
 
-// The cluster-occupancy queries (hipOccupancyMaxPotentialClusterSize,
+// BACKEND-DIFF: The cluster-occupancy queries (hipOccupancyMaxPotentialClusterSize,
 // hipOccupancyMaxActiveClusters) and the hipLaunchAttributeClusterDimension
 // attribute are AMD-only in this HIP release; the NVIDIA backend headers do not
 // define them, so this contract builds only on AMD. The per-multiprocessor
-// occupancy contracts above are portable.
+// occupancy contracts above are portable. Parity would require NVIDIA to expose
+// the cluster-occupancy query wrappers (CUDA has the underlying cluster APIs).
 #if HT_AMD
 HIP_TEST_CASE(Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange) {
   int current_device = 0;

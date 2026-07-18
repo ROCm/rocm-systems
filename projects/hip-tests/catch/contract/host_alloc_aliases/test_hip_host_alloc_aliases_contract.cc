@@ -91,9 +91,10 @@ HIP_TEST_CASE(Contract_HostAllocAliases_InvalidArgs_AreRejected) {
   REQUIRE(hipHostAlloc(&host_ptr, kElementCount, 0x7fffffff) != hipSuccess);
 }
 
-// hipExtMallocWithFlags and the hipDeviceMallocDefault flag are AMD extensions
-// with no NVIDIA-backend equivalent, so these two contracts build only on AMD.
-// The pinned-host-allocation aliases above are portable.
+// BACKEND-DIFF: hipExtMallocWithFlags and the hipDeviceMallocDefault flag are
+// AMD extensions with no NVIDIA-backend equivalent, so these two contracts build
+// only on AMD. The pinned-host-allocation aliases above are portable. Parity
+// would require NVIDIA to expose the ext malloc entry point and flag.
 #if HT_AMD
 HIP_TEST_CASE(Contract_HostAllocAliases_ExtMallocWithFlags_DefaultAllocatesAndZeroSizeIsNull) {
   void* device_ptr = nullptr;

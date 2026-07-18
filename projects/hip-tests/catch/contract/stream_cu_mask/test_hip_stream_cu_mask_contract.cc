@@ -11,6 +11,10 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+// BACKEND-DIFF: The stream CU-mask API (hipExtStreamCreateWithCUMask,
+// hipExtStreamGetCUMask) is an AMD extension with no NVIDIA equivalent (CUDA has
+// no compute-unit masking on streams), so this whole translation unit builds
+// only on AMD. Parity is unlikely without a NVIDIA-side CU/SM-mask concept.
 #if HT_AMD
 namespace {
 constexpr uint32_t kMaskWordBits = 32;

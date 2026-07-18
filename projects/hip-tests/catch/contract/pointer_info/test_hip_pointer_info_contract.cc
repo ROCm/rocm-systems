@@ -164,11 +164,12 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
 }
 
 HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_NullOutput_IsRejected) {
-  // The null-output rejection contract is only exercised on AMD. On NVIDIA
-  // hipPointerGetAttributes maps to cudaPointerGetAttributes, which does not
-  // validate the output-attributes pointer and dereferences it - a null output
-  // faults (SIGSEGV) instead of returning a defined error - so the rejection
-  // cannot be evaluated safely there.
+  // BACKEND-DIFF: The null-output rejection contract is only exercised on AMD. On
+  // NVIDIA hipPointerGetAttributes maps to cudaPointerGetAttributes, which does
+  // not validate the output-attributes pointer and dereferences it - a null
+  // output faults (SIGSEGV) instead of returning a defined error - so the
+  // rejection cannot be evaluated safely there. Parity would require matching
+  // null-output validation.
 #if HT_AMD
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;

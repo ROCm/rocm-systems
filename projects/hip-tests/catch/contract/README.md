@@ -139,6 +139,25 @@ backends. Domains that exercise AMD-only or CUDA-removed entry points are gated
 with `#if HT_AMD`, so on NVIDIA they compile to an empty binary (no registered
 test cases) rather than failing to build.
 
+### Finding backend divergences (`BACKEND-DIFF`)
+
+Every place a test accommodates a real behavioral or API-availability difference
+between the AMD and NVIDIA backends is tagged with a `BACKEND-DIFF:` comment
+marker. Grep for it to review or revisit these sites:
+
+```bash
+grep -rn "BACKEND-DIFF" projects/hip-tests/catch/contract
+```
+
+Each marked comment explains the difference and notes what parity would require,
+so the markers double as a worklist for reconciling behavior if a backend closes
+the gap. The marker covers whole-file and per-test `#if HT_AMD` gates, divergent
+`#if HT_AMD ... #else ... #endif` assertions, and CUDA-version availability
+gates. Purely mechanical portability shims are intentionally not marked (they
+carry ordinary explanatory comments instead): the `hipFree(0)` primary-context
+primes, the HIPRTC `--offload-arch` vs `--fmad=false` compile-option branches,
+and the `hipDeviceptr_t` pointer/integer type-conversion helpers.
+
 | | AMD (gfx908, ROCm 7.15) | NVIDIA (H100, CUDA 13.1) |
 |---|---|---|
 | Domains | 115 | 115 |

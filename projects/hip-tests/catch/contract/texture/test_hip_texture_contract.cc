@@ -97,10 +97,11 @@ HIP_TEST_CASE(Contract_Texture_GetResourceDesc_RoundTripsLinearResource) {
   REQUIRE(returned.res.linear.sizeInBytes == kLinearBytes);
 }
 
-// hipGetTextureObjectTextureDesc has no wrapper in the NVIDIA backend headers
-// (only hipGetTextureObjectResourceDesc is provided), even though CUDA itself
-// exposes cudaGetTextureObjectTextureDesc. Exercise the texture-desc round-trip
-// only on AMD, where the entry point exists.
+// BACKEND-DIFF: hipGetTextureObjectTextureDesc has no wrapper in the NVIDIA
+// backend headers (only hipGetTextureObjectResourceDesc is provided), even
+// though CUDA itself exposes cudaGetTextureObjectTextureDesc. Exercise the
+// texture-desc round-trip only on AMD, where the entry point exists. Parity is a
+// straightforward NVIDIA-header addition (wrap cudaGetTextureObjectTextureDesc).
 #if HT_AMD
 HIP_TEST_CASE(Contract_Texture_GetTextureDesc_RoundTripsReadMode) {
   CHECK_IMAGE_SUPPORT;
@@ -224,8 +225,9 @@ HIP_TEST_CASE(Contract_Surface_GetChannelDesc_RoundTripsArrayResource) {
   REQUIRE(returned.f == channel.f);
 }
 
-// hipGetTextureObjectResourceViewDesc likewise has no NVIDIA-backend wrapper,
-// so the resource-view round-trip runs only on AMD.
+// BACKEND-DIFF: hipGetTextureObjectResourceViewDesc likewise has no NVIDIA-backend
+// wrapper (CUDA exposes cudaGetTextureObjectResourceViewDesc), so the
+// resource-view round-trip runs only on AMD. Parity is a NVIDIA-header addition.
 #if HT_AMD
 HIP_TEST_CASE(Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource) {
   CHECK_IMAGE_SUPPORT;
