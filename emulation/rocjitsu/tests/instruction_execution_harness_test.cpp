@@ -416,6 +416,51 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   EXPECT_EQ(wf->exec_raw(), kRawExec);
   EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
 }
+
+TEST(Rdna4VccMaskTest, Wave32VectorComparePreservesVccHiScalarScratch) {
+  amdgpu::GpuMemory gpu_mem("rdna4_vcc_hi_mem");
+  amdgpu::L2Cache l2("rdna4_vcc_hi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_vcc_hi", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  // v_cmp_gt_u64_e32 vcc_lo, s[20:21], v[32:33]
+  constexpr uint32_t kWords[] = {0x7CB84014u, 0u};
+  std::unique_ptr<Instruction> inst(decoder->decode(kWords));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_gt_u64_e32");
+
+  constexpr uint64_t kScalarValue = 16;
+  cu->write_sgpr(wf->sgpr_alloc().base + 20, static_cast<uint32_t>(kScalarValue));
+  cu->write_sgpr(wf->sgpr_alloc().base + 21, static_cast<uint32_t>(kScalarValue >> 32));
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t lane_value = lane;
+    cu->write_vgpr(wf->vgpr_alloc().base + 32, lane, static_cast<uint32_t>(lane_value));
+    cu->write_vgpr(wf->vgpr_alloc().base + 33, lane, static_cast<uint32_t>(lane_value >> 32));
+  }
+
+  wf->set_exec(0xffffffffu);
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    wf->set_vcc_raw(0xffffffff'00000000ULL);
+    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_EQ(wf->vcc(), 0xffffffff'0000ffffULL);
+  }
+}
 TEST(InstructionExecutionHarness, Gfx1250) {
   RUN_HARNESS(gfx1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
 }

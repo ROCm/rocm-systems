@@ -887,11 +887,11 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev == 106) {
-    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
+    wf.set_vcc_raw((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (ev == 107) {
-    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    wf.set_vcc_raw((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
   if (ev >= 108 && ev <= 123) {
@@ -928,7 +928,7 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev == 106) {
-    wf.set_vcc(val);
+    wf.set_vcc_raw(val);
     return;
   }
   if (ev >= 108 && ev <= 122) {

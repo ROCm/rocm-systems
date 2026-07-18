@@ -853,7 +853,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   std::filesystem::remove(path);
 }
 
-TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+TEST(CheckpointTest, SaveAndRestoreWave32SpecialRegisterScratch) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"rdna4"},
     "topology":{
@@ -890,8 +890,9 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
+  wf->set_vcc_raw(0xCAFEF00D000000F0ULL);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint_wave32_exec.bin";
+  const char *path = "/tmp/rocjitsu_test_checkpoint_wave32_special_registers.bin";
   config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(path));
 
@@ -902,6 +903,7 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_wf->vcc(), 0xCAFEF00D000000F0ULL);
 
   std::filesystem::remove(path);
 }

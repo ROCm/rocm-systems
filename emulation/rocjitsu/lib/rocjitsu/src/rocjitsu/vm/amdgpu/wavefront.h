@@ -229,13 +229,19 @@ public:
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
-  /// @brief Return the VCC scalar register pair.
+  /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the VCC scalar register pair.
-  /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val; }
+  /// @brief Set the active-lane portion of the VCC register pair.
+  /// @param val New VCC mask value.
+  ///
+  /// Wave32 leaves VCC_HI available as scalar scratch. Vector instructions
+  /// that update the condition mask must therefore preserve the non-lane bits.
+  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+
+  /// @brief Set the raw architectural VCC register pair.
+  void set_vcc_raw(uint64_t val) { vcc_ = val; }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.

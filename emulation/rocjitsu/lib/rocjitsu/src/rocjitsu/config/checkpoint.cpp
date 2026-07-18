@@ -238,7 +238,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             throw std::runtime_error("Failed to dispatch wavefront during checkpoint restoration");
 
           wf->set_exec_raw(wf_state->exec());
-          wf->set_vcc(wf_state->vcc());
+          wf->set_vcc_raw(wf_state->vcc());
           wf->set_m0(wf_state->m0());
           // Halted wavefronts are never saved (see save_checkpoint skip above),
           // so halted() is always false here. Keep the branch for future-proofing.

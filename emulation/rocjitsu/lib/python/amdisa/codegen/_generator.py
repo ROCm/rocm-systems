@@ -8883,14 +8883,17 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
-        # In wave32, EXEC_HI remains addressable as scalar scratch even though
-        # it is not part of the active-lane mask. Wave64-only ISAs can keep the
-        # conventional EXEC accessors in their generated operand code.
+        # In wave32, EXEC_HI and VCC_HI remain addressable as scalar scratch
+        # even though they are not part of the active-lane masks. Wave64-only
+        # ISAs can keep the conventional mask accessors in generated operands.
         exec_register = (
             'exec_raw()' if self.isa_spec.profile.wave_size == 32 else 'exec()'
         )
         set_exec_register = (
             'set_exec_raw' if self.isa_spec.profile.wave_size == 32 else 'set_exec'
+        )
+        set_vcc_register = (
+            'set_vcc_raw' if self.isa_spec.profile.wave_size == 32 else 'set_vcc'
         )
 
         switch_cases = []
@@ -9654,11 +9657,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev == 106) {\n'
-            '    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);\n'
+            f'    wf.{set_vcc_register}((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);\n'
             '    return;\n'
             '  }\n'
             '  if (ev == 107) {\n'
-            '    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
+            f'    wf.{set_vcc_register}((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 123) {\n'
@@ -9700,7 +9703,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return;\n'
             '  }\n'
             '  if (ev == 106) {\n'
-            '    wf.set_vcc(val);\n'
+            f'    wf.{set_vcc_register}(val);\n'
             '    return;\n'
             '  }\n'
             '  if (ev >= 108 && ev <= 122) {\n'

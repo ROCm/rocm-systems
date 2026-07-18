@@ -109,6 +109,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     [
         ('cdna3', CdnaProfile(), False),
         ('rdna4', Rdna4Profile(), True),
+        ('gfx1250', Gfx1250Profile(), True),
     ],
 )
 def test_operand_exec_register_access_is_wave32_gated(
@@ -132,9 +133,12 @@ def test_operand_exec_register_access_is_wave32_gated(
     if raw_exec:
         assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
         assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
+        assert 'wf.set_vcc_raw((wf.vcc() & 0x00000000FFFFFFFFULL)' in operand_cpp
+        assert 'wf.set_vcc_raw(val);' in operand_cpp
     else:
         assert 'exec_raw' not in operand_cpp
         assert 'set_exec_raw' not in operand_cpp
+        assert 'set_vcc_raw' not in operand_cpp
 
 
 class TestCdnaProfile:
