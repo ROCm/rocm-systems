@@ -91,9 +91,11 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 
   std::vector<uint8_t> strtab{'\0'};
   std::vector<uint32_t> kd_symbol_names;
+  std::vector<uint32_t> function_symbol_names;
   for (const auto &[name, words] : kernels) {
     (void)words;
     kd_symbol_names.push_back(add_elf_name(strtab, name + ".kd"));
+    function_symbol_names.push_back(add_elf_name(strtab, name));
   }
 
   const uint64_t rodata_offset = text_offset + text_size;
@@ -101,7 +103,7 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   const uint64_t rodata_size = kernels.size() * kernel_descriptor_size;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
-  const size_t sym_count = kernels.size() + 1;
+  const size_t sym_count = 2 * kernels.size() + 1;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -171,11 +173,19 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 
   std::vector<Elf64_Sym> syms(sym_count);
   for (size_t i = 0; i < kernels.size(); ++i) {
-    syms[i + 1].st_name = kd_symbol_names[i];
-    syms[i + 1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-    syms[i + 1].st_shndx = 2;
-    syms[i + 1].st_value = rodata_vaddr + i * kernel_descriptor_size;
-    syms[i + 1].st_size = kernel_descriptor_size;
+    Elf64_Sym &descriptor_symbol = syms[2 * i + 1];
+    descriptor_symbol.st_name = kd_symbol_names[i];
+    descriptor_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+    descriptor_symbol.st_shndx = 2;
+    descriptor_symbol.st_value = rodata_vaddr + i * kernel_descriptor_size;
+    descriptor_symbol.st_size = kernel_descriptor_size;
+
+    Elf64_Sym &function_symbol = syms[2 * i + 2];
+    function_symbol.st_name = function_symbol_names[i];
+    function_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    function_symbol.st_shndx = 1;
+    function_symbol.st_value = text_vaddr + entry_offsets[i];
+    function_symbol.st_size = kernels[i].second.size() * sizeof(uint32_t);
   }
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -308,15 +318,19 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
   auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
   auto *syms = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
-  constexpr uint64_t text_vaddr = 0x1100;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
-  syms[1].st_shndx = 1;
-  syms[1].st_value = text_vaddr;
-  syms[1].st_size = 2 * sizeof(uint32_t);
-  syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
-  syms[2].st_shndx = 1;
-  syms[2].st_value = text_vaddr + first.size() * sizeof(uint32_t);
-  syms[2].st_size = second.size() * sizeof(uint32_t);
+  syms[1] = {};
+  syms[3] = {};
+  syms[2].st_size = 2 * sizeof(uint32_t);
+  syms[4].st_size = second.size() * sizeof(uint32_t);
+  return image;
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1250_unterminated_stub_code_object() {
+  auto image = make_gfx1250_code_object({0xB9800641U, 0x00000001U, 0x00000000U});
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  auto *syms = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+  syms[2].st_size = 2 * sizeof(uint32_t);
   return image;
 }
 

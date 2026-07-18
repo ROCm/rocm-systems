@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "../tools/waitcheck_fixture.h"
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
@@ -276,14 +277,40 @@ void append_v_div_scale_f32_v5_s2_s8_s9_s8(std::vector<uint32_t> &program) {
   program.push_back(0x00201208u);
 }
 
-void append_v_cmp_gt_u32_s2_s5_v12(std::vector<uint32_t> &program) {
-  program.push_back(0xD44C0002u);
+void append_v_cmp_gt_u32_sdst_s5_v12(std::vector<uint32_t> &program, uint32_t sdst) {
+  program.push_back(0xD44C0000u | sdst);
   program.push_back(0x02021805u);
+}
+
+void append_v_cmp_gt_u32_s2_s5_v12(std::vector<uint32_t> &program) {
+  append_v_cmp_gt_u32_sdst_s5_v12(program, 2);
 }
 
 void append_v_dual_cndmask_b32_v2_v1_v2_dual_mov_b32_v1_0(std::vector<uint32_t> &program) {
   program.push_back(0xCA500501u);
   program.push_back(0x02000080u);
+}
+
+void append_v_dual_add_nc_u32_v11_1_v10_cndmask_v8_v8_v12_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xCF409081u);
+  program.push_back(0x000A0108u);
+  program.push_back(0x08000C0Bu);
+}
+
+void append_v_cndmask_b32_v8_v8_v12_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xD5010008u);
+  program.push_back(0x00021908u);
+}
+
+void append_v_cndmask_b16_v1_v1_v14_s2(std::vector<uint32_t> &program) {
+  program.push_back(0xD65D0001u);
+  program.push_back(0x000A1D01u);
+}
+
+void append_v_and_b16_v134_ff_v134(std::vector<uint32_t> &program) {
+  program.push_back(0xD7620086u);
+  program.push_back(0x02030CFFu);
+  program.push_back(0x000000FFu);
 }
 
 void append_v_dual_lshlrev_b32_v17_2_v9_dual_mov_b32_v9_s11(std::vector<uint32_t> &program) {
@@ -318,6 +345,12 @@ void append_global_load_b128_v2_v7_s0(std::vector<uint32_t> &program) {
   program.push_back(0xEE05C080u);
   program.push_back(0x00000002u);
   program.push_back(0x00000007u);
+}
+
+void append_global_load_b128_v6_v137_s2(std::vector<uint32_t> &program) {
+  program.push_back(0xEE05C002u);
+  program.push_back(0x00000006u);
+  program.push_back(0x00000089u);
 }
 
 void append_global_loads(std::vector<uint32_t> &program, uint32_t count, uint32_t first_vdst) {
@@ -390,6 +423,13 @@ void append_ds_loads(std::vector<uint32_t> &program, uint32_t count, uint32_t ad
   auto inst = std::bit_cast<rdna4::VdsMachineInst>(std::array<uint32_t, 2>{0xD8340000U, 0});
   inst.addr = addr;
   inst.data0 = data0;
+  return inst;
+}
+
+[[nodiscard]] rdna4::VdsMachineInst ds_swizzle_b32(uint32_t vdst, uint32_t addr) {
+  auto inst = std::bit_cast<rdna4::VdsMachineInst>(std::array<uint32_t, 2>{0xD8D40000U, 0});
+  inst.vdst = vdst;
+  inst.addr = addr;
   return inst;
 }
 
@@ -793,14 +833,15 @@ void append_s_loads(std::vector<uint32_t> &program, uint32_t count, uint32_t fir
 
 void expect_single_overflow_diagnostic(const WaitcheckReport &report, WaitCounterKind counter,
                                        WaitcheckAccessKind access, RegClass reg_class,
-                                       uint32_t reg_index) {
+                                       uint32_t reg_index,
+                                       uint32_t required_count = kOverflowRequiredCount) {
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
   EXPECT_EQ(report.diagnostics[0].counter, counter);
   EXPECT_EQ(report.diagnostics[0].access, access);
   EXPECT_EQ(report.diagnostics[0].reg.cls, reg_class);
   EXPECT_EQ(report.diagnostics[0].reg.index, reg_index);
-  EXPECT_EQ(report.diagnostics[0].required_count, kOverflowRequiredCount);
+  EXPECT_EQ(report.diagnostics[0].required_count, required_count);
 }
 
 TEST(WaitcheckTest, ReportsUnsupportedArchitectures) {
@@ -2275,6 +2316,20 @@ TEST(WaitcheckTest, AcceptsDscntZeroBeforeDsLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, DscntPartialWaitCountsYoungerDsSwizzles) {
+  std::vector<uint32_t> program;
+  append_inst(program, ds_load_b32(29, 4));
+  append_inst(program, ds_swizzle_b32(28, 4));
+  append_inst(program, ds_swizzle_b32(5, 19));
+  append_inst(program, sopp(70, 2)); // s_wait_dscnt 2 retires the oldest result.
+  append_inst(program, v_mov_b32(29, 4));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, ReportsDscntMaxCountForOverflowSizedQueue) {
   std::vector<uint32_t> program;
   append_ds_loads(program, 40, 99);
@@ -2427,13 +2482,13 @@ TEST(WaitcheckTest, ReportsBvhcntMaxCountForOverflowSizedQueue) {
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
   expect_single_overflow_diagnostic(report, WaitCounterKind::Bvh, WaitcheckAccessKind::Use,
-                                    RegClass::VGPR, kOverflowBaseVgpr);
+                                    RegClass::VGPR, kOverflowBaseVgpr, 6);
 }
 
 TEST(WaitcheckTest, AcceptsBvhcntMaxCountForOldestOverflowSizedQueue) {
   std::vector<uint32_t> program;
   append_image_bvhs(program, kOverflowQueueSize, kOverflowBaseVgpr);
-  append_inst(program, sopp(67, kOverflowRequiredCount)); // s_wait_bvhcnt 39
+  append_inst(program, sopp(67, 6)); // Largest non-sentinel 3-bit wait value.
   append_inst(program, v_mov_b32(kOverflowConsumerVgpr, kOverflowBaseVgpr));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
@@ -2450,13 +2505,13 @@ TEST(WaitcheckTest, ReportsExpcntMaxCountForOverflowSizedQueue) {
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
   expect_single_overflow_diagnostic(report, WaitCounterKind::Exp, WaitcheckAccessKind::Use,
-                                    RegClass::VGPR, kOverflowBaseVgpr);
+                                    RegClass::VGPR, kOverflowBaseVgpr, 6);
 }
 
 TEST(WaitcheckTest, AcceptsExpcntMaxCountForOldestOverflowSizedQueue) {
   std::vector<uint32_t> program;
   append_ds_direct_loads(program, kOverflowQueueSize, kOverflowBaseVgpr);
-  append_inst(program, sopp(68, kOverflowRequiredCount)); // s_wait_expcnt 39
+  append_inst(program, sopp(68, 6)); // Largest non-sentinel 3-bit wait value.
   append_inst(program, v_mov_b32(kOverflowConsumerVgpr, kOverflowBaseVgpr));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
@@ -2703,6 +2758,141 @@ TEST(WaitcheckTest, Gfx1201Wave64DivScaleDefinesBothMaskSgprs) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 3, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250Wave32VopCompareDoesNotDefineAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 16));
+  append_v_cmp_gt_u32_sdst_s5_v12(program, 1);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250Wave64VopCompareDefinesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(2, 16));
+  append_v_cmp_gt_u32_sdst_s5_v12(program, 1);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250Wave32VopdCndmaskDoesNotUseAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(1, 16));
+  append_v_dual_add_nc_u32_v11_1_v10_cndmask_v8_v8_v12_s0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250Wave64VopdCndmaskUsesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(1, 16));
+  append_v_dual_add_nc_u32_v11_1_v10_cndmask_v8_v8_v12_s0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 1, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250Wave32Vop3CndmaskDoesNotUseAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(1, 16));
+  append_v_cndmask_b32_v8_v8_v12_s0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250Wave64Vop3CndmaskUsesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(1, 16));
+  append_v_cndmask_b32_v8_v8_v12_s0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 1, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250Wave32Vop3CndmaskB16DoesNotUseAdjacentMaskSgpr) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_cndmask_b16_v1_v1_v14_s2(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250Wave64Vop3CndmaskB16UsesBothMaskSgprs) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_cndmask_b16_v1_v1_v14_s2(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::SGPR, 3, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250Vop3True16DestinationUsesFullEightBitVgprIndex) {
+  std::vector<uint32_t> program;
+  append_global_load_b128_v6_v137_s2(program);
+  append_v_and_b16_v134_ff_v134(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
 TEST(WaitcheckTest, Gfx1201Vop3CarryInDoesNotReadAdjacentSgpr) {
@@ -3366,6 +3556,35 @@ TEST(WaitcheckTest, AcceptsAdjustedLoadcntThresholdWithGlobalInv) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, Gfx1250LoadcntAgeSaturatesAcrossCounterOnlyEvents) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  for (size_t i = 0; i < 80; ++i)
+    append_inst(program, global_inv());
+  append_inst(program, v_mov_b32(1, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].required_count, 62u);
+}
+
+TEST(WaitcheckTest, Gfx1250MaximumLoadcntRetiresSaturatedEvent) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  for (size_t i = 0; i < 80; ++i)
+    append_inst(program, global_inv());
+  append_inst(program, sopp(64, 62));
+  append_inst(program, v_mov_b32(1, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, AcceptsEndpgmAfterPendingVmemStore) {
   std::vector<uint32_t> program;
   append_inst(program, global_store_b32(0));
@@ -3687,7 +3906,7 @@ TEST(WaitcheckTest, CombinedLoadcntDscntLeavesNewestLoadPending) {
   append_inst(program, global_load_b32(0));
   append_inst(program, global_load_b32(1));
   append_inst(program, ds_load_b32(2, 4));
-  append_inst(program, sopp(72, 0x10)); // loadcnt(1), dscnt(0)
+  append_inst(program, sopp(72, 0x100)); // loadcnt(1), dscnt(0)
   append_inst(program, v_mov_b32(3, 1));
   append_inst(program, v_mov_b32(4, 2));
 
@@ -3718,7 +3937,7 @@ TEST(WaitcheckTest, CombinedStorecntDscntLeavesStorePending) {
   std::vector<uint32_t> program;
   append_inst(program, global_store_b32(10));
   append_inst(program, ds_load_b32(0, 4));
-  append_inst(program, sopp(73, 0x10)); // storecnt(1), dscnt(0)
+  append_inst(program, sopp(73, 0x100)); // storecnt(1), dscnt(0)
   append_inst(program, v_mov_b32(2, 0));
   append_inst(program, s_endpgm());
 
@@ -3743,6 +3962,24 @@ TEST(WaitcheckTest, CombinedStorecntDscntLeavesDsPending) {
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, CombinedLoadcntDscntDecodesSixBitFields) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, ds_load_b32(1, 4));
+  append_inst(program, sopp(72, 0x3F01)); // loadcnt(63), dscnt(1)
+  append_inst(program, v_mov_b32(2, 0));
+  append_inst(program, v_mov_b32(3, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].reg.index, 1u);
 }
 
 TEST(WaitcheckTest, ReportsOverwriteBeforeLoadCompletes) {
@@ -3988,6 +4225,21 @@ TEST(WaitcheckTest, DescriptorEntryAnalysisIgnoresPaddingAfterEndpgm) {
   EXPECT_EQ(report.instructions_analyzed, 2u);
 }
 
+TEST(WaitcheckTest, DescriptorEntryAnalysisStopsAtUnterminatedFunctionEnd) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx1250_unterminated_stub_code_object();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  const auto kernels = waitcheck_kernels(code_object);
+
+  ASSERT_EQ(kernels.size(), 1u);
+  EXPECT_EQ(kernels[0].code_size, 2 * sizeof(uint32_t));
+
+  auto report = analyze_waitcnts_for_kernel(code_object, ROCJITSU_CODE_ARCH_GFX1250, kernels[0]);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_EQ(report.instructions_analyzed, 1u);
+}
+
 TEST(WaitcheckTest, FunctionEntryAnalysisIgnoresInterFunctionPadding) {
   const auto image = rocjitsu::waitcheck_test::make_gfx1200_function_only_padded_code_object();
   AmdGpuCodeObject code_object(image.data(), image.size());
@@ -4135,6 +4387,63 @@ TEST(WaitcheckTest, Gfx1201ResolvedSwappcPreservesCanonicalizedPcHighHalf) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinuation) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));                                      // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x0c.
+  program.push_back(0xA988FE08u); // 0x10: s_add_nc_u64 s[8:9], s[8:9], literal64.
+  program.push_back(24);          // getpc next 0x10 + 24 -> helper 0x28.
+  program.push_back(0);
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x1c.
+  append_inst(program, v_mov_b32(1, 0));                                         // 0x20.
+  append_inst(program, s_endpgm());                                              // 0x24.
+  append_inst(program, sopp(64, 0)); // 0x28 helper: s_wait_loadcnt 0.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, 0x48, 0,
+                                        kReturnSreg)); // 0x2c return.
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  std::unique_ptr<Instruction> add_inst(decoder->decode(&program[4], 0x10));
+  ASSERT_NE(add_inst, nullptr);
+  EXPECT_EQ(add_inst->mnemonic(), "s_add_nc_u64");
+  ASSERT_EQ(add_inst->num_dst_operands(), 1);
+  ASSERT_EQ(add_inst->num_src_operands(), 2);
+  EXPECT_EQ(add_inst->dst_operand(0)->to_register_ref(),
+            (RegisterRef{RegClass::SGPR, kTargetSreg, 2}));
+  EXPECT_EQ(add_inst->src_operand(0)->to_register_ref(),
+            (RegisterRef{RegClass::SGPR, kTargetSreg, 2}));
+  EXPECT_EQ(add_inst->src_operand(1)->literal64_value(), 24u);
+
+  std::vector<std::unique_ptr<Instruction>> decoded;
+  std::vector<const Instruction *> decoded_ptrs;
+  for (uint64_t offset = 0; offset < program.size() * sizeof(uint32_t);) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&program[offset / sizeof(uint32_t)], offset));
+    ASSERT_NE(inst, nullptr);
+    offset += static_cast<uint64_t>(inst->size());
+    decoded_ptrs.push_back(inst.get());
+    decoded.push_back(std::move(inst));
+  }
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(program.data()),
+                                             program.size() * sizeof(uint32_t));
+  const auto fixups =
+      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_EQ(fixups[0].source_target_offset, 0x28u);
+  EXPECT_TRUE(fixups[0].source_is_call);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_GE(report.instructions_analyzed, 8u);
 }
 
 TEST(WaitcheckTest, Gfx950ResolvedSwappcPropagatesHelperLoadToContinuation) {

@@ -398,8 +398,8 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -818,6 +818,47 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
+[[nodiscard]] bool apply_pair_literal64_update(const Instruction &inst, uint16_t pair_lo,
+                                               PcValue &value) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic != "s_add_nc_u64" && mnemonic != "s_sub_nc_u64")
+    return false;
+
+  const Operand *dst = inst.dst_operand(0);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  if (dst == nullptr || src0 == nullptr || src1 == nullptr)
+    return false;
+
+  const auto is_tracked_pair = [pair_lo](const Operand &operand) {
+    const auto ref = operand.to_register_ref();
+    return ref && ref->cls == RegClass::SGPR && ref->index == pair_lo && ref->width == 2;
+  };
+  if (!is_tracked_pair(*dst))
+    return false;
+
+  std::optional<uint64_t> literal;
+  bool subtract = false;
+  if (is_tracked_pair(*src0)) {
+    literal = src1->literal64_value();
+    subtract = mnemonic == "s_sub_nc_u64";
+  } else if (mnemonic == "s_add_nc_u64" && is_tracked_pair(*src1)) {
+    literal = src0->literal64_value();
+  }
+  if (!literal)
+    return false;
+
+  // Scalar pair arithmetic wraps modulo 2^64. Perform the update on the bit
+  // representation so extreme literals cannot trigger signed-overflow UB.
+  uint64_t offset_bits = 0;
+  static_assert(sizeof(offset_bits) == sizeof(value.offset));
+  std::memcpy(&offset_bits, &value.offset, sizeof(offset_bits));
+  offset_bits = subtract ? offset_bits - *literal : offset_bits + *literal;
+  std::memcpy(&value.offset, &offset_bits, sizeof(value.offset));
+  value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  return true;
+}
+
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
@@ -1172,6 +1213,7 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
     if (!apply_high_pc_canonicalization(inst, word, pair_lo, updated) &&
+        !apply_pair_literal64_update(inst, pair_lo, updated) &&
         !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;

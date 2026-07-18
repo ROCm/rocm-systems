@@ -134,7 +134,8 @@ public:
   /// scanning the rest of a large library code object.
   static std::vector<std::unique_ptr<BasicBlock>>
   build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> entry_offsets);
+                  std::span<const uint64_t> entry_offsets,
+                  std::span<const uint64_t> entry_sizes = {});
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
