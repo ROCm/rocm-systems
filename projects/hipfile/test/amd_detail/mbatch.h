@@ -18,8 +18,7 @@ namespace hipFile {
 class MBatchContext : public IBatchContext {
 public:
     MOCK_METHOD(unsigned, getCapacity, (), (const, noexcept, override));
-    MOCK_METHOD(void, submitOperations, (const hipFileIOParams_t *params, const unsigned num_params),
-                (override));
+    MOCK_METHOD(void, submitOperations, (BatchOperations ops), (override));
 };
 
 }

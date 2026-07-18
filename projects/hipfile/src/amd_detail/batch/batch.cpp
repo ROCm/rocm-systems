@@ -5,10 +5,8 @@
 
 #include "batch.h"
 #include "buffer.h"
-#include "context.h"
 #include "file.h"
 #include "hipfile.h"
-#include "state.h"
 
 #include <bit>
 #include <cstddef>
@@ -254,36 +252,18 @@ BatchContext::getCapacity() const noexcept
 }
 
 void
-BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_params)
+BatchContext::submitOperations(BatchOperations pending_ops)
 {
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 
-    // Check num_params first before doing anything else
-    if (num_params > capacity - outstanding_ops.size()) {
+    if (pending_ops.size() > capacity - outstanding_ops.size()) {
         std::stringstream msg;
         msg << "Submission exceeds the capacity of this context. Number of ops submitted: ";
-        msg << num_params << ". Context capacity: " << capacity << ". Current outstanding ops: ";
+        msg << pending_ops.size() << ". Context capacity: " << capacity << ". Current outstanding ops: ";
         msg << outstanding_ops.size();
         throw std::invalid_argument(msg.str());
     }
 
-    std::vector<std::shared_ptr<BatchOperation>> pending_ops{};
-
-    // It would be more performant to be able to perform multiple lookups
-    // rather than waiting to lock the DriverState lock for each lookup.
-    for (unsigned i = 0; i < num_params; i++) {
-        // Make a copy of the params so another thread cannot modify the operation.
-        auto param_copy = std::make_unique<const hipFileIOParams_t>(params[i]);
-        // flags currently unused. Ambiguous if flags in hipFileBatchIOSubmit is for buffer or
-        // file flags.
-        auto [_file, _buffer] =
-            Context<DriverState>::get()->getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
-        auto op = std::make_shared<BatchOperation>(std::move(param_copy), _buffer, _file);
-
-        pending_ops.push_back(std::move(op));
-    }
-
-    // All submitted operations look valid at this point. Accept them.
     outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
 }
 

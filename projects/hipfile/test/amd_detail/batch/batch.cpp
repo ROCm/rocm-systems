@@ -12,22 +12,17 @@
 #include "invalid-enum.h"
 #include "mbuffer.h"
 #include "mfile.h"
-#include "mstate.h"
-#include "state.h"
 
-#include <cstdio>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
-using ::testing::_;
-using ::testing::DoDefault;
 using ::testing::Return;
 using ::testing::StrictMock;
-using ::testing::Throw;
 
 using namespace hipFile;
 
@@ -300,26 +295,22 @@ TEST_F(HipFileBatch, GetDestroyedContext)
 }
 
 struct HipFileBatchContext : public HipFileUnopened {
-    BatchContextMap                           batch_map = BatchContextMap{};
-    std::shared_ptr<IBatchContext>            _context;
-    unsigned                                  _context_capacity = 2;
-    std::unique_ptr<StrictMock<MDriverState>> mock_driver_state;
+    BatchContextMap                batch_map = BatchContextMap{};
+    std::shared_ptr<IBatchContext> _context;
+    unsigned                       _context_capacity = 2;
 
     hipFileIOParams_t                    io_params{};
     std::shared_ptr<StrictMock<MBuffer>> default_mock_buffer;
-    int                                  default_mock_buffer_length = 1;
     std::shared_ptr<StrictMock<MFile>>   default_mock_file;
 
     void SetUp() override
     {
         default_mock_buffer = std::make_shared<StrictMock<MBuffer>>();
         EXPECT_CALL(*default_mock_buffer, getBuffer).WillRepeatedly(Return(reinterpret_cast<void *>(0x123)));
-        EXPECT_CALL(*default_mock_buffer, getLength).WillRepeatedly(Return(default_mock_buffer_length));
+        EXPECT_CALL(*default_mock_buffer, getLength).WillRepeatedly(Return(1));
 
         default_mock_file = std::make_shared<StrictMock<MFile>>();
         EXPECT_CALL(*default_mock_file, handle).WillRepeatedly(Return(default_mock_file.get()));
-
-        file_buffer_pair default_fb_pair = {default_mock_file, default_mock_buffer};
 
         io_params.u.batch.devPtr_base = default_mock_buffer->getBuffer();
         io_params.u.batch.size        = 1;
@@ -327,94 +318,43 @@ struct HipFileBatchContext : public HipFileUnopened {
         io_params.mode                = hipFileBatch;
         io_params.opcode              = hipFileBatchRead;
 
-        mock_driver_state = std::make_unique<StrictMock<MDriverState>>();
-        _context          = batch_map.get(batch_map.createContext(_context_capacity));
-        // May be overridden with EXPECT_CALL in the test.
-        EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillRepeatedly(Return(std::move(default_fb_pair)));
+        _context = batch_map.get(batch_map.createContext(_context_capacity));
+    }
+
+    std::shared_ptr<BatchOperation> makeOperation()
+    {
+        return std::make_shared<BatchOperation>(std::make_unique<const hipFileIOParams_t>(io_params),
+                                                default_mock_buffer, default_mock_file);
     }
 };
 
 TEST_F(HipFileBatchContext, SubmitSingleGoodOp)
 {
-    _context->submitOperations(&io_params, 1);
+    _context->submitOperations(BatchOperations{makeOperation()});
 }
 
 TEST_F(HipFileBatchContext, SubmitZeroOperations)
 {
-    _context->submitOperations(nullptr, 0);
+    _context->submitOperations({});
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacity)
 {
-    // We should fail before we ever try touching the nullptr.
-    ASSERT_THROW(_context->submitOperations(nullptr, _context_capacity + 1), std::invalid_argument);
+    BatchOperations ops;
+    for (unsigned i = 0; i <= _context_capacity; i++) {
+        ops.push_back(makeOperation());
+    }
+
+    ASSERT_THROW(_context->submitOperations(std::move(ops)), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
 {
-    // Submit one at a time up to the capacity.
-    // In the future we might care that we are submitting the same operation.
     for (unsigned i = 0; i < _context_capacity; i++) {
-        printf("i: %u\n", i);
-        _context->submitOperations(&io_params, 1);
+        _context->submitOperations(BatchOperations{makeOperation()});
     }
 
-    ASSERT_THROW(_context->submitOperations(nullptr, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadBuffer)
-{
-    EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillOnce(Throw(BufferNotRegistered()));
-    ASSERT_THROW(_context->submitOperations(&io_params, 1), BufferNotRegistered);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadFileHandle)
-{
-    EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillOnce(Throw(FileNotRegistered()));
-    ASSERT_THROW(_context->submitOperations(&io_params, 1), FileNotRegistered);
-}
-
-// BatchOperation is not mocked.
-TEST_F(HipFileBatchContext, SubmitSingleBadParamBufferOffsetNegative)
-{
-    hipFileIOParams_t bad_io_params     = io_params;
-    bad_io_params.u.batch.devPtr_offset = -1;
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadParamBufferOffsetTooLarge)
-{
-    hipFileIOParams_t bad_io_params     = io_params;
-    bad_io_params.u.batch.devPtr_offset = default_mock_buffer_length;
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadParamIOSizeTooLarge)
-{
-    hipFileIOParams_t bad_io_params = io_params;
-    bad_io_params.u.batch.size      = static_cast<size_t>(default_mock_buffer_length + 1);
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadParamFileOffsetNegative)
-{
-    hipFileIOParams_t bad_io_params   = io_params;
-    bad_io_params.u.batch.file_offset = -1;
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadParamOpcodeInvalid)
-{
-    hipFileIOParams_t bad_io_params = io_params;
-    bad_io_params.opcode            = invalidEnum<hipFileOpcode_t>(maxEnum<hipFileOpcode_t>());
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
-}
-
-TEST_F(HipFileBatchContext, SubmitSingleBadParamModeInvalid)
-{
-    hipFileIOParams_t bad_io_params = io_params;
-    bad_io_params.mode              = invalidEnum<hipFileBatchMode_t>(maxEnum<hipFileBatchMode_t>());
-    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(BatchOperations{makeOperation()}), std::invalid_argument);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
