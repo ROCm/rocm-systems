@@ -391,14 +391,19 @@ void step_until_xcd_halted(Gfx1250Sim &sim, uint32_t max_steps = 10000) {
 }
 
 // Runs a one-wave kernel to s_endpgm and returns the wave's final-state snapshot
-// (captured at halt, before its registers are freed), or nullptr if no wave halted.
+// (captured at halt, before its registers are freed), or nullptr if THIS dispatch
+// produced no new halt. Snapshots accumulate across calls in the fixture plugin, so
+// compare the count before/after and only return a pointer when this dispatch
+// appended one — otherwise a regression that fails to run/halt would silently return
+// a stale snapshot from a previous dispatch.
 const test::WavefrontSnapshot *dispatch_one_wave(Gfx1250Sim &sim, const uint32_t *code,
                                                  size_t num_words, uint32_t vgprs = 32) {
+  const size_t before = sim.snapshot->snapshots().size();
   uint64_t kernel_object = sim.write_kernel(0x10000, code, num_words, 104, vgprs);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
   step_until_halted(*sim.engine, *sim.cu());
-  if (sim.snapshot->snapshots().empty())
+  if (sim.snapshot->snapshots().size() == before)
     return nullptr;
   return &sim.snapshot->snapshots().back();
 }
@@ -3969,9 +3974,9 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
 
 TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
 
@@ -4015,9 +4020,9 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
 
 TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
 
@@ -4056,9 +4061,9 @@ TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
 
 TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kSrc = 7;
@@ -4098,9 +4103,9 @@ TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
 
 TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kSrc0 = 2;
@@ -4147,9 +4152,9 @@ TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
 
 TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kSrc = 7;
@@ -4199,9 +4204,9 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
 
 TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kSrc0 = 2;
@@ -4246,9 +4251,9 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
 
 TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kSrc = 7;
@@ -4307,9 +4312,9 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
 
 TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4344,9 +4349,9 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
 
 TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
 
   constexpr uint32_t kAddr = 1;
@@ -4384,9 +4389,9 @@ TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
 
 TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4434,9 +4439,9 @@ TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
 
 TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4461,9 +4466,9 @@ TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
 
 TEST(Gfx1250SimulationTest, Vop2FmamkUsesSrc2HighBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4524,9 +4529,9 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
 
 TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4557,9 +4562,9 @@ TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
 
 TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
@@ -4595,9 +4600,9 @@ TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
 
 TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   Gfx1250Sim sim;
-  const uint32_t code[] = {S_ENDPGM_GFX12};
-  amdgpu::Wavefront *wf =
-      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  // Resident wave: these tests inject instructions directly (execute_impl) and read
+  // live register state, so they need a live wavefront, not a run-to-halt snapshot.
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
