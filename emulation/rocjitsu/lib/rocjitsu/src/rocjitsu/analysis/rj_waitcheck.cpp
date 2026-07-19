@@ -8,16 +8,13 @@
 
 #include <exception>
 #include <new>
+#include <optional>
 
 namespace {
 
 using namespace rocjitsu;
 
-[[nodiscard]] rj_waitcheck_options_t default_options() {
-  rj_waitcheck_options_t options{};
-  options.kernel_entry_offset = ROCJITSU_WAITCHECK_ALL_KERNELS;
-  return options;
-}
+[[nodiscard]] rj_waitcheck_options_t default_options() { return {}; }
 
 void report_error(const rj_waitcheck_options_t &options, const char *message) noexcept {
   if (!options.error_callback)
@@ -145,9 +142,12 @@ void rj_waitcheck_options_init(rj_waitcheck_options_t *options) {
     *options = default_options();
 }
 
-rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_size,
-                                 const rj_waitcheck_options_t *options,
-                                 rj_waitcheck_result_t *result) {
+namespace {
+
+[[nodiscard]] rj_status_t analyze(const void *code_object, size_t code_object_size,
+                                  std::optional<uint64_t> kernel_entry_offset,
+                                  const rj_waitcheck_options_t *options,
+                                  rj_waitcheck_result_t *result) {
   const rj_waitcheck_options_t local_options = options ? *options : default_options();
   if (!code_object || code_object_size == 0 || !result) {
     report_error(local_options, "code object bytes, a nonzero size, and a result are required");
@@ -179,10 +179,9 @@ rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_siz
     }
 
     WaitcheckReport report =
-        local_options.kernel_entry_offset == ROCJITSU_WAITCHECK_ALL_KERNELS
-            ? analyze_waitcnts(parsed, arch, internal_options)
-            : analyze_waitcnts_for_kernel(parsed, arch, local_options.kernel_entry_offset,
-                                          internal_options);
+        kernel_entry_offset
+            ? analyze_waitcnts_for_kernel(parsed, arch, *kernel_entry_offset, internal_options)
+            : analyze_waitcnts(parsed, arch, internal_options);
     if (!report.supported) {
       const char *message = report.analysis_error.empty() ? "waitcheck analysis failed"
                                                           : report.analysis_error.c_str();
@@ -212,4 +211,19 @@ rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_siz
     report_error(local_options, "unexpected waitcheck analysis error");
     return ROCJITSU_STATUS_ERROR;
   }
+}
+
+} // namespace
+
+rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_size,
+                                 const rj_waitcheck_options_t *options,
+                                 rj_waitcheck_result_t *result) {
+  return analyze(code_object, code_object_size, std::nullopt, options, result);
+}
+
+rj_status_t rj_waitcheck_analyze_kernel(const void *code_object, size_t code_object_size,
+                                        uint64_t kernel_entry_offset,
+                                        const rj_waitcheck_options_t *options,
+                                        rj_waitcheck_result_t *result) {
+  return analyze(code_object, code_object_size, kernel_entry_offset, options, result);
 }

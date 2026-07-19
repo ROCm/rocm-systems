@@ -166,10 +166,9 @@ static void report(const rj_waitcheck_diagnostic_t *diagnostic, void *unused) {
   fprintf(stderr, "%s\n", diagnostic->message);
 }
 
-int validate_code_object(const void *bytes, size_t size, uint64_t kernel_entry) {
+int validate_code_object(const void *bytes, size_t size) {
   rj_waitcheck_options_t options;
   rj_waitcheck_options_init(&options);
-  options.kernel_entry_offset = kernel_entry; /* .text byte offset; zero is valid. */
   options.diagnostic_callback = report;
 
   rj_waitcheck_result_t result;
@@ -180,10 +179,12 @@ int validate_code_object(const void *bytes, size_t size, uint64_t kernel_entry) 
 }
 ```
 
-Use `ROCJITSU_WAITCHECK_ALL_KERNELS` instead of an entry offset to check every
-kernel in the code object. The input buffer only needs to remain valid until
-the call returns. A hazard is not an API failure: the call returns
-`ROCJITSU_STATUS_SUCCESS`, sets `result.passed` to zero, and reports structured
+`rj_waitcheck_analyze()` always checks every kernel in the code object; no
+environment variable or sentinel value is involved. To check one kernel, call
+`rj_waitcheck_analyze_kernel()` with its `.text` byte offset. The input buffer
+only needs to remain valid until the call returns. A hazard is not an API
+failure: the call returns `ROCJITSU_STATUS_SUCCESS`, sets `result.passed` to
+zero, and reports structured
 producer/consumer diagnostics through the callback. `result.diagnostics_observed`
 is complete with the default unlimited callback delivery. If no callback is
 installed, `max_diagnostics` limits delivery, or checking stops early,

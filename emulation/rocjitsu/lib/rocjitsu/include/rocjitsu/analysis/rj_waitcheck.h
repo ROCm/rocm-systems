@@ -20,9 +20,6 @@ extern "C" {
 /// @addtogroup analysis
 /// @{
 
-/// @brief Analyze every kernel in the supplied code object.
-#define ROCJITSU_WAITCHECK_ALL_KERNELS UINT64_MAX
-
 /// @brief Hardware wait counter associated with a diagnostic.
 typedef enum rj_waitcheck_counter_e {
   ROCJITSU_WAITCHECK_COUNTER_LOAD = 0,
@@ -104,9 +101,6 @@ typedef void (*rj_waitcheck_error_callback_t)(const char *message, void *user_da
 
 /// @brief Options for one synchronous waitcheck analysis.
 typedef struct rj_waitcheck_options_s {
-  /// @brief `.text` byte offset of one kernel entry, or
-  /// ROCJITSU_WAITCHECK_ALL_KERNELS to analyze the entire code object.
-  uint64_t kernel_entry_offset;
   /// @brief Maximum diagnostic callbacks. Zero means unlimited.
   size_t max_diagnostics;
   /// @brief Reachability-cache budget in bytes. Zero selects the library default.
@@ -141,12 +135,11 @@ typedef struct rj_waitcheck_result_s {
 
 /// @brief Initialize waitcheck options to their defaults.
 ///
-/// @details The defaults analyze every kernel, retain an implementation-defined
-/// reachability cache, report every diagnostic, and do not stop early. Passing
-/// NULL is a no-op.
+/// @details The defaults retain an implementation-defined reachability cache,
+/// report every diagnostic, and do not stop early. Passing NULL is a no-op.
 RJ_API_EXPORT void rj_waitcheck_options_init(rj_waitcheck_options_t *options);
 
-/// @brief Synchronously analyze an in-memory AMDGPU HSA code object.
+/// @brief Synchronously analyze every kernel in an in-memory AMDGPU HSA code object.
 ///
 /// @details The target is inferred from the ELF header. The function copies any
 /// bytes it needs before returning, invokes callbacks on the calling thread, and
@@ -159,8 +152,7 @@ RJ_API_EXPORT void rj_waitcheck_options_init(rj_waitcheck_options_t *options);
 /// @param[in] options Analysis options, or NULL for defaults.
 /// @param[out] result Aggregate analysis result. Its contents are unspecified on error.
 /// @retval ROCJITSU_STATUS_SUCCESS Analysis completed, with or without hazards.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the
-/// selected kernel entry offset is not present.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The buffer is malformed, is not a
 /// final AMDGPU HSA code object, targets an unsupported architecture, or cannot
 /// be decoded completely.
@@ -169,6 +161,32 @@ RJ_API_EXPORT void rj_waitcheck_options_init(rj_waitcheck_options_t *options);
 RJ_API_EXPORT rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_size,
                                                const rj_waitcheck_options_t *options,
                                                rj_waitcheck_result_t *result);
+
+/// @brief Synchronously analyze one kernel in an in-memory AMDGPU HSA code object.
+///
+/// @details This has the same ownership, callback, target-inference, result, and
+/// status semantics as rj_waitcheck_analyze(), but restricts analysis to the
+/// kernel whose entry point has the supplied `.text` byte offset.
+///
+/// @param[in] code_object AMDGPU HSA ELF image in memory.
+/// @param[in] code_object_size Size of @p code_object in bytes.
+/// @param[in] kernel_entry_offset Kernel entry-point byte offset in `.text`.
+/// Offset zero is valid.
+/// @param[in] options Analysis options, or NULL for defaults.
+/// @param[out] result Aggregate analysis result. Its contents are unspecified on error.
+/// @retval ROCJITSU_STATUS_SUCCESS Analysis completed, with or without hazards.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or
+/// @p kernel_entry_offset is not present.
+/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The buffer is malformed, is not a
+/// final AMDGPU HSA code object, targets an unsupported architecture, or cannot
+/// be decoded completely.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Analysis allocation failed.
+/// @retval ROCJITSU_STATUS_ERROR An unexpected analysis error occurred.
+RJ_API_EXPORT rj_status_t rj_waitcheck_analyze_kernel(const void *code_object,
+                                                      size_t code_object_size,
+                                                      uint64_t kernel_entry_offset,
+                                                      const rj_waitcheck_options_t *options,
+                                                      rj_waitcheck_result_t *result);
 
 /// @}
 
