@@ -3647,8 +3647,15 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAllReduceFits = true;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+      // During capture the CE runtime cannot be lazily initialized: device
+      // allocation is forbidden mid-capture and the init trigger above is gated
+      // on !ceCapturing. So only take a CE path under capture if a prior eager
+      // collective already initialized it (baseUCSymReadyPtr != NULL); otherwise
+      // fall back to the kernel path. This decision is identical across ranks
+      // (SPMD call sequence), so it cannot cause rank divergence.
+      bool ceUsableNow = !ceCapturing || comm->ceColl.baseUCSymReadyPtr != NULL;
       // AR alone is blocked during/after capture via the latch (ceArGraphAllowed).
-      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      bool ceAvailable = ceUsableNow && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
         if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
@@ -3663,8 +3670,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Append CE collective task if CE is supported and requested by user
-      // Scratch/DDA path is data-movement only (AR excluded below), so it is safe under capture.
-      bool CeScratchAvailable = ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      // Scratch/DDA path is data-movement only (AR excluded below) but still
+      // uses the CE sync runtime, so honor ceUsableNow under capture.
+      bool CeScratchAvailable = ceUsableNow && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
       if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);      
