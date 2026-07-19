@@ -254,26 +254,26 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
 
 bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
   auto p = find_process(local_process_id_);
-  if (!p)
+  if (!p || !addr || length == 0)
     return false;
-  // Snapshot the doorbell page/size under alloc_mutex_ so a concurrent
-  // dispatch_mmap/dispatch_munmap (which mutate these under the same lock) cannot
-  // tear the pointer/size read.
-  void *doorbell_page;
-  size_t doorbell_page_size;
-  {
-    std::lock_guard<std::mutex> lock(p->alloc_mutex_);
-    auto &gs = p->gpu(0);
-    doorbell_page = gs.doorbell_page;
-    doorbell_page_size = gs.doorbell_page_size;
+  // Check every GPU ordinal's doorbell page: dispatch_mmap/dispatch_munmap install
+  // and tear down a doorbell page per ordinal, so a multi-GPU process has more than
+  // one to guard (checking only ordinal 0 would leave a higher ordinal's page
+  // unprotected against a client mprotect). Snapshot each page/size under
+  // alloc_mutex_ so a concurrent dispatch_mmap/dispatch_munmap (which mutate these
+  // under the same lock) cannot tear the pointer/size read.
+  const auto query_base = reinterpret_cast<uintptr_t>(addr);
+  const auto query_end = query_base + length;
+  std::lock_guard<std::mutex> lock(p->alloc_mutex_);
+  for (const auto &gs : p->gpu_state_) {
+    if (!gs.doorbell_page || gs.doorbell_page_size == 0)
+      continue;
+    const auto base = reinterpret_cast<uintptr_t>(gs.doorbell_page);
+    const auto end = base + gs.doorbell_page_size;
+    if (query_base < end && query_end > base)
+      return true;
   }
-  if (!doorbell_page || doorbell_page_size == 0 || !addr || length == 0)
-    return false;
-  auto base = reinterpret_cast<uintptr_t>(doorbell_page);
-  auto end = base + doorbell_page_size;
-  auto query_base = reinterpret_cast<uintptr_t>(addr);
-  auto query_end = query_base + length;
-  return query_base < end && query_end > base;
+  return false;
 }
 
 bool SimulatedKfd::ensure_fd_created() {
@@ -796,8 +796,10 @@ void *SimulatedKfd::mmap(void *addr, size_t length, int prot, int flags, off_t o
 void *SimulatedKfd::mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags,
                          off_t offset) {
   auto p = find_process(process_id);
-  if (!p)
+  if (!p) {
+    errno = ESRCH;
     return MAP_FAILED;
+  }
   if (daemon_mode_)
     return dispatch_mmap(*p, nullptr, length, prot, flags & ~MAP_FIXED, offset);
   return dispatch_mmap(*p, addr, length, prot, flags, offset);
@@ -918,12 +920,14 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         owned_fds_.insert(proc.event_state_.memfd);
       }
       if (ftruncate(proc.event_state_.memfd, static_cast<off_t>(length)) != 0) {
+        const int ftruncate_errno = errno; // preserve across close() below
         {
           std::lock_guard<std::mutex> lk(owned_fds_mutex_);
           owned_fds_.erase(proc.event_state_.memfd);
         }
         libc_passthrough().close(proc.event_state_.memfd);
         proc.event_state_.memfd = -1;
+        errno = ftruncate_errno;
         return MAP_FAILED;
       }
       fallocate(proc.event_state_.memfd, 0, 0, static_cast<off_t>(length));

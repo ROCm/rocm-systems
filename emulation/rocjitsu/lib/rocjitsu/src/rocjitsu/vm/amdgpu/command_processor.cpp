@@ -372,8 +372,8 @@ void CommandProcessor::startup() {
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");
-  doorbell_event_.set_handler(
-      [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  // doorbell_event_'s handler is bound in the constructor (see there) so it is live
+  // before register_queue() can start the poll thread; nothing to (re)bind here.
   completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
   completion_->set_plugin_group(plugin_group_);
   completion_->set_dispatch_retired_callback(
@@ -790,17 +790,27 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // "completed" wave. free_wavefront_resources() frees the SGPR/VGPR blocks and
     // resets the slot without the hook or a CP completion notify — and since
     // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
-    // unwind either. Also reclaim the placement's LDS bump: the SPI already advanced
-    // the CU's next_lds_alloc_ (allocate_lds) before this call, and normally only a
-    // WG completing via release_wf() resets it; on this failure path
-    // maybe_reset_lds_alloc() rolls it back iff the CU is now idle (freeing these
-    // waves left no active waves) and unpinned, so a leaked bump cannot starve later
-    // placements. It correctly no-ops when peers of the same dispatch are resident.
+    // unwind either. Also reclaim the placement's LDS/WGP reservation symmetrically
+    // with how it was reserved:
+    //   - CU / cluster mode: the SPI (or the direct CU path) advanced the CU's
+    //     next_lds_alloc_ via allocate_lds(); maybe_reset_lds_alloc() rolls it back
+    //     iff the CU is now idle (freeing these waves left no active waves) and
+    //     unpinned. It correctly no-ops when peers of the same dispatch are resident.
+    //   - WGP mode: allocate_workgroup() reserved SPI-side state (wgp.next_lds_alloc,
+    //     wgp.active_workgroups, resident_wgp_workgroups_) that is NOT CU-local, so
+    //     maybe_reset_lds_alloc() cannot reach it; release_wgp_workgroup() is the
+    //     matching release (the same call notify_wg_complete uses on the normal path).
+    // Without the WGP release a failed WGP dispatch would permanently pin that WGP.
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
-    const auto free_reserved = [&wg_wavefronts, cu]() {
+    const auto free_reserved = [&]() {
       for (auto *claimed : wg_wavefronts)
         cu->free_wavefront_resources(*claimed);
+      if (entry.wgp_mode) {
+        for (auto *spi : spis_)
+          if (spi->release_wgp_workgroup(entry.dispatch_id, global_wg_id))
+            break;
+      }
       cu->maybe_reset_lds_alloc();
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {

@@ -269,7 +269,11 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
 
   if (process_id != 0)
     rj_vm_device_close(vm, process_id);
-  ::close(client_fd);
+  // NOTE: the client fd is intentionally NOT closed here. The spawning thread closes
+  // it under client_threads_mutex together with erasing it from active_fds, so the
+  // close and the active_fds removal are atomic w.r.t. the shutdown path — otherwise
+  // a window exists where this thread has closed the fd but not yet removed it, and
+  // teardown could shutdown() the (closed, possibly recycled) descriptor.
 }
 
 volatile sig_atomic_t g_listen_fd = -1;
@@ -281,33 +285,59 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
     return 1;
   }
 
-  std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
+  // Set up the listening socket BEFORE spawning the engine thread. rj_vm_run() blocks
+  // in engine->run() (daemon mode runs indefinitely) and the jthread destructor joins
+  // it, so if the engine thread existed during socket setup an early error return
+  // would deadlock in ~jthread. Doing all fallible socket setup first means the error
+  // paths simply destroy the VM and return with no engine thread to join.
+  auto socket_setup_failed = [&](int rc) {
+    rj_vm_destroy(vm);
+    return rc;
+  };
 
   auto sock_path = socket_path.empty() ? rpc_default_socket_path() : socket_path;
-  std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path());
+  std::error_code mkdir_ec;
+  std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path(), mkdir_ec);
+  if (mkdir_ec) {
+    std::cerr << std::format("rocjitsu: cannot create runtime dir for {}: {}\n", sock_path,
+                             mkdir_ec.message());
+    return socket_setup_failed(1);
+  }
   unlink(sock_path.c_str());
 
   int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (listen_fd < 0)
-    return 1;
-  g_listen_fd = listen_fd;
+    return socket_setup_failed(1);
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
+  // Reject an over-long socket path rather than silently binding a truncated one.
+  if (sock_path.size() >= sizeof(addr.sun_path)) {
+    std::cerr << std::format("rocjitsu: daemon socket path too long ({} bytes): {}\n",
+                             sock_path.size(), sock_path);
+    ::close(listen_fd);
+    return socket_setup_failed(1);
+  }
   sock_path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
 
   if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
       listen(listen_fd, 16) != 0) {
     ::close(listen_fd);
-    return 1;
+    return socket_setup_failed(1);
   }
+
+  // Socket is ready; now start the engine. From here, error/normal exit must request
+  // exit and join the engine thread (see the end of this function).
+  std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
+  g_listen_fd = listen_fd;
 
   std::stop_source stop_source;
   // Per-connection threads keyed by a monotonic id (never a recyclable fd number).
-  // active_fds tracks each live connection's fd for shutdown-on-teardown; a finished
-  // client removes its own fd here (its handle_client already ::close'd it) so we
-  // never shutdown() a closed-and-possibly-recycled fd. finished_ids lets the accept
-  // loop reap completed threads instead of accumulating them until server shutdown.
+  // active_fds tracks each live connection's fd for shutdown-on-teardown; a finishing
+  // client closes its fd and removes it from active_fds atomically under
+  // client_threads_mutex, so teardown never shutdown()s a closed-and-possibly-recycled
+  // fd. finished_ids lets the accept loop reap completed threads instead of
+  // accumulating them until server shutdown.
   std::unordered_map<uint64_t, std::jthread> client_threads;
   std::unordered_map<uint64_t, int> active_fds;
   std::vector<uint64_t> finished_ids;
@@ -353,9 +383,13 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
         std::jthread([&client_threads_mutex, &active_fds, &finished_ids, conn_id, client, vm,
                       peer_pid, token = stop_source.get_token()]() {
           handle_client(client, vm, peer_pid, token);
-          // Record completion: drop our (now-closed) fd from the active set and mark
+          // Close the fd and drop it from the active set ATOMICALLY under the lock, so
+          // the teardown path (which shutdown()s every active_fds entry under the same
+          // lock) can never observe this fd after it is closed — closing it here rather
+          // than in handle_client() is what makes close+erase indivisible. Then mark
           // ourselves for reaping by the accept loop / teardown.
           std::lock_guard<std::mutex> done_lock(client_threads_mutex);
+          ::close(client);
           active_fds.erase(conn_id);
           finished_ids.push_back(conn_id);
         });

@@ -261,9 +261,11 @@ public:
     // parent's connection. pthread_atfork's child handler runs inside libc fork,
     // covering every fork that goes through glibc. (vfork/posix_spawn children run
     // no atfork handlers by design, but they may only exec/_exit, so there is no
-    // interposer state for them to corrupt.) reset_after_fork() is idempotent and
-    // async-signal-safe (store/clear/placement-new only), as an atfork child
-    // handler requires.
+    // interposer state for them to corrupt.) reset_after_fork() is idempotent. It is
+    // NOT strictly async-signal-safe — container clear()/destructors call free() and it
+    // closes the child's dmabuf-dup fds — so it relies on the standard fork-then-exec /
+    // single-threaded-fork assumption (the same one the remote_ handling documents
+    // below); a multithreaded fork from a signal handler is out of scope.
     pthread_atfork(nullptr, nullptr, &InterposerContext::atfork_child);
     real().resolve();
   }
@@ -316,6 +318,17 @@ public:
     // must not touch them. The child re-initializes a fresh driver; any GEM mappings
     // it needs are re-created via EXPORT/PRIME/GEM_VA. (Deliberate, like the remote_
     // and mutex handling above — not an oversight.)
+    //
+    // DO close each entry's private dmabuf dup though: it was created with
+    // F_DUPFD_CLOEXEC (closes on exec, NOT on fork), so a fork-without-exec child
+    // inherits these descriptors and clearing the map without closing them leaks a
+    // child-local fd per live GEM handle. The fd is the child's own copy — closing it
+    // touches no parent state. (real().close() is not async-signal-safe, but this runs
+    // under the same fork-then-exec / single-threaded-fork assumption as the remote_
+    // handling above.)
+    for (auto &[handle, gem] : gem_entries_)
+      if (gem.owns_dmabuf_fd && gem.dmabuf_fd >= 0)
+        real().close(gem.dmabuf_fd);
     gem_entries_.clear();
     // Also drop the transient EXPORT_DMABUF fd->flags handoffs: they key on the
     // parent's dmabuf fd numbers, so a child that reuses one of those fd numbers
@@ -1343,6 +1356,10 @@ private:
   ///   ioctl reports EINVAL.
   /// @retval true nothing overlapped (allow_missing) or all overlaps were evicted.
   /// @retval false nothing overlapped (only when !allow_missing) or an unmap failed.
+  /// @note Not rolled back on a mid-loop unmap failure: already-evicted ranges stay
+  ///   evicted. This is safe because gem_va_unmap() only fails when the local process
+  ///   has already vanished (SimulatedKfd::gem_va_unmap), i.e. its page table is being
+  ///   torn down anyway, so a partially-evicted state is never observed by a live GPU.
   [[nodiscard]] bool evict_range_locked(SimulatedKfd *drv, const GemMapping &range,
                                         bool allow_missing) {
     bool evicted_any = false;
@@ -1353,7 +1370,7 @@ private:
           continue;
         }
         if (!drv->gem_va_unmap(vit->va_address, vit->map_size))
-          return false;
+          return false; // process gone; page table already being destroyed (see @note)
         vit = gem.installed_vas.erase(vit);
         evicted_any = true;
       }
@@ -1984,7 +2001,13 @@ namespace {
 // Then the replacement is recorded on the reserved source backend.
 void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend> reserved) {
   InterposerContext::ctx.untrack_sysfs(newfd);
-  InterposerContext::ctx.untrack_drm(newfd);
+  // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook. If
+  // newfd was a DRM render fd still owning live GEM handles, reap them here just as
+  // close() does (untrack_drm + reap_gem_for_drm_fd) — otherwise those GemEntry
+  // objects (keyed by drm_fd == newfd) leak their PTEs, host mmap, and dup'd dmabuf
+  // fd, and a later commit_dup could re-tag the same number as a KFD dup.
+  if (InterposerContext::ctx.untrack_drm(newfd))
+    InterposerContext::ctx.reap_gem_for_drm_fd(newfd);
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
   if (reserved)
     InterposerContext::ctx.commit_dup(newfd, *reserved);

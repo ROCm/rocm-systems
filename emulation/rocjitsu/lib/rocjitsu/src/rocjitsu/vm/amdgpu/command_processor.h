@@ -92,7 +92,15 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
+  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
+    // Bind the doorbell handler at construction, not in startup(): register_queue()
+    // may start the doorbell poll thread (which fires doorbell_event_ via
+    // schedule_event_now) as soon as a host-accessible queue is registered, which can
+    // happen before startup() runs. Binding here removes that ordering hazard — a
+    // handlerless doorbell_event_ would be silently dropped by the engine.
+    doorbell_event_.set_handler(
+        [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  }
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
