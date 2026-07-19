@@ -5077,6 +5077,61 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
   EXPECT_GE(report.instructions_analyzed, 8u);
 }
 
+TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
+  constexpr uint16_t kTargetSreg = 4;
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));                                      // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x0c.
+  program.push_back(0xA984FE04u); // 0x10: s_add_nc_u64 s[4:5], s[4:5], literal64.
+  program.push_back(32);          // getpc next 0x10 + 32 -> helper 0x30.
+  program.push_back(0);
+  program.push_back(0xD4410003u); // 0x1c: v_cmp_lt_i32_e64 s3, v20, v101.
+  program.push_back(0x0202CB14u);
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x24.
+  append_inst(program, v_mov_b32(1, 0));                                         // 0x28.
+  append_inst(program, s_endpgm());                                              // 0x2c.
+  append_inst(program, sopp(72, 0)); // 0x30 helper: s_wait_loadcnt_dscnt 0.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, 0x48, 0,
+                                        kReturnSreg)); // 0x34 return.
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  std::unique_ptr<Instruction> cmp_inst(decoder->decode(&program[7], 0x1c));
+  ASSERT_NE(cmp_inst, nullptr);
+  EXPECT_EQ(cmp_inst->mnemonic(), "v_cmp_lt_i32");
+  ASSERT_EQ(cmp_inst->num_dst_operands(), 1);
+  EXPECT_EQ(cmp_inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 3, 1}));
+
+  std::vector<std::unique_ptr<Instruction>> decoded;
+  std::vector<const Instruction *> decoded_ptrs;
+  for (uint64_t offset = 0; offset < program.size() * sizeof(uint32_t);) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&program[offset / sizeof(uint32_t)], offset));
+    ASSERT_NE(inst, nullptr);
+    offset += static_cast<uint64_t>(inst->size());
+    decoded_ptrs.push_back(inst.get());
+    decoded.push_back(std::move(inst));
+  }
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(program.data()),
+                                             program.size() * sizeof(uint32_t));
+  const auto fixups =
+      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250, {}, 32);
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_EQ(fixups[0].source_target_offset, 0x30u);
+  EXPECT_TRUE(fixups[0].source_is_call);
+  EXPECT_TRUE(discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250, {}, 64)
+                  .empty());
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, Gfx950ResolvedSwappcPropagatesHelperLoadToContinuation) {
   constexpr uint16_t kTargetSreg = 8;
   constexpr uint16_t kReturnSreg = 30;

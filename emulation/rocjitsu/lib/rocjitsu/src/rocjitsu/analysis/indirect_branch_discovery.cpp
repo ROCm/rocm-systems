@@ -204,6 +204,7 @@ struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
+  uint32_t wavefront_size = 0;
   std::vector<InstructionFacts> facts;
 };
 
@@ -530,7 +531,8 @@ void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
   facts.written_sgprs.expand(ref);
 }
 
-void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
+void record_written_sgprs(const Instruction &inst, InstructionFacts &facts,
+                          uint32_t wavefront_size) {
   // This analysis only needs SGPR defs. Avoid the heavier def-use helper here:
   // computing use sets and vector metadata for every instruction was a major
   // cost on large generated kernels, and none of that information participates
@@ -539,8 +541,19 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = op->to_register_ref()) {
+      const std::string_view mnemonic = inst.mnemonic();
+      // LLVM models wave-mask operands using one physical SGPR in Wave32 and
+      // an SGPR pair in Wave64. The generated decoder retains the maximum
+      // encoded width for these operands, so normalize it before deciding
+      // whether a PC-builder pair was clobbered. Without this, a Wave32 VOPC
+      // destination in s3 falsely kills an adjacent builder in s[4:5].
+      if (wavefront_size != 0 && ref->cls == RegClass::SGPR &&
+          ((i == 0 && mnemonic.starts_with("v_cmp")) ||
+           (i == 1 && mnemonic.starts_with("v_div_scale_"))))
+        ref->width = wavefront_size == 32 ? 1 : 2;
       record_written_sgpr_ref(facts, *ref);
+    }
   }
 
   RegisterSet implicit_defs;
@@ -555,7 +568,7 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
 void ensure_written_sgprs(AnalysisContext &ctx, size_t index) {
   InstructionFacts &facts = ctx.facts[index];
   if (!facts.written_sgprs_computed)
-    record_written_sgprs(*ctx.insts[index], facts);
+    record_written_sgprs(*ctx.insts[index], facts, ctx.wavefront_size);
 }
 
 void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &state,
@@ -925,7 +938,8 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
 }
 
 [[nodiscard]] AnalysisContext build_context(std::span<const Instruction *const> insts,
-                                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+                                            std::span<const uint8_t> text, rj_code_arch_t arch,
+                                            uint32_t wavefront_size) {
   // Phase 1a: collect cheap facts that are independent of CFG. We do not build
   // full def-use information here. Generic writes are intentionally lazy because
   // many instructions never interact with a PC-builder pair, and decoding all
@@ -934,6 +948,7 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
   ctx.insts = insts;
   ctx.text = text;
   ctx.arch = arch;
+  ctx.wavefront_size = wavefront_size;
 
   ctx.facts.resize(insts.size());
   for (size_t i = 0; i < insts.size(); ++i) {
@@ -1604,12 +1619,12 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 std::vector<IndirectCallFixup>
 discover_indirect_branch_edges(std::span<const Instruction *const> insts,
                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+                               std::span<const uint64_t> extra_leaders, uint32_t wavefront_size) {
   std::vector<IndirectCallFixup> recovered;
   if (insts.empty())
     return recovered;
 
-  AnalysisContext ctx = build_context(insts, text, arch);
+  AnalysisContext ctx = build_context(insts, text, arch, wavefront_size);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
