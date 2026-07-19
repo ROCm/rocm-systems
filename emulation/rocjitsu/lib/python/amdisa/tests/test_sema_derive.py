@@ -23,7 +23,7 @@ from amdisa.codegen.execute.sema_lower import (
     RegClass,
     lower_sema_block,
 )
-from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_ternary
+from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_cvt_pk,
@@ -43,6 +43,18 @@ class _FakeSem:
         self.operation = operation
         self.data_type = data_type
         self.sets_scc = sets_scc
+
+
+@pytest.mark.parametrize(
+    'sem',
+    [
+        _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32'),
+        _FakeSem('S_MOV_B32', 'scalar_mov', 'mov', 'b32', 'nonzero'),
+    ],
+)
+def test_scc_metadata_must_match_derived_side_effects(sem):
+    with pytest.raises(ValueError, match='disagrees with derived SCC write'):
+        derive_sema_block(sem)
 
 
 def test_gfx1250_bf16_fma_mix_semantics_are_explicit():
@@ -140,6 +152,81 @@ class TestDeriveScalarUnary:
         cpp = lower_sema_block(block)
         assert 'write_scc' not in cpp
 
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_FF0_I32_B32', 'ff0'),
+            ('S_FF0_I32_B64', 'ff0'),
+            ('S_FF1_I32_B32', 'ff1'),
+            ('S_FF1_I32_B64', 'ff1'),
+            ('S_FLBIT_I32_B32', 'flbit'),
+            ('S_FLBIT_I32_B64', 'flbit'),
+            ('S_FLBIT_I32', 'flbit_i32'),
+            ('S_FLBIT_I32_I64', 'flbit_i32_i64'),
+            ('S_CTZ_I32_B32', 'ctz'),
+            ('S_CTZ_I32_B64', 'ctz'),
+            ('S_CLZ_I32_U32', 'clz'),
+            ('S_CLZ_I32_U64', 'clz64'),
+            ('S_CLS_I32', 'flbit_i32'),
+            ('S_CLS_I32_I64', 'flbit_i32_i64'),
+        ],
+    )
+    def test_scalar_scan_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_BREV_B32', 'brev'),
+            ('S_BREV_B64', 'brev'),
+            ('S_CEIL_F16', 'ceil'),
+            ('S_CEIL_F32', 'ceil'),
+            ('S_FLOOR_F16', 'floor'),
+            ('S_FLOOR_F32', 'floor'),
+            ('S_TRUNC_F16', 'trunc'),
+            ('S_TRUNC_F32', 'trunc'),
+            ('S_RNDNE_F16', 'rndne'),
+            ('S_RNDNE_F32', 'rndne'),
+        ],
+    )
+    def test_scalar_misc_unary_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_NOT_B32', 'not'),
+            ('S_BCNT0_I32_B32', 'bcnt0'),
+            ('S_BCNT1_I32_B32', 'bcnt1'),
+        ],
+    )
+    def test_scalar_bit_count_writes_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'nonzero'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' in cpp
+
     @pytest.mark.parametrize('name', ['S_CLZ_I32_U32', 'S_CLZ_I32_U64'])
     def test_clz_zero_returns_all_ones(self, name):
         sem = derive_semantics(name, 'ENC_SOP1')
@@ -210,6 +297,13 @@ class TestDeriveScalarBinop:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    @pytest.mark.parametrize('name,dtype', [('S_MAX_I32', 'i32'), ('S_MAX_U32', 'u32')])
+    def test_max_scc_requires_strict_first_operand_win(self, name, dtype):
+        sem = _FakeSem(name, 'scalar_binop', 'max', dtype, 'compare')
+        cpp = lower_sema_block(derive_sema_block(sem))
+        assert 'wf.write_scc((s0 > s1))' in cpp
+        assert 'wf.write_scc((s0 >= s1))' not in cpp
+
     def test_signed_mul_uses_unsigned_result_slot(self):
         sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
         block = derive_sema_block(sem)
@@ -231,7 +325,7 @@ class TestDeriveScalarBinop:
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
         # SCC overflow is detected by the unsigned helper (simd_glue.h).
-        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
+        assert 'wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
@@ -240,7 +334,7 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result = (s0 - s1)' in cpp
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
-        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
+        assert 'wf.write_scc(::rocjitsu::amdgpu::signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
@@ -350,7 +444,7 @@ class TestDeriveScalarBinop:
 
 class TestDeriveScalarCmp:
     def test_eq(self):
-        sem = _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32')
+        sem = _FakeSem('S_CMP_EQ_U32', 'scalar_cmp', 'eq', 'u32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         assert block.body.kind == SemaNodeKind.ASSIGN
@@ -358,7 +452,9 @@ class TestDeriveScalarCmp:
 
     def test_all_ops(self):
         for op in ['eq', 'ne', 'lt', 'gt', 'le', 'ge']:
-            sem = _FakeSem(f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32')
+            sem = _FakeSem(
+                f'S_CMP_{op.upper()}_U32', 'scalar_cmp', op, 'u32', 'compare'
+            )
             block = derive_sema_block(sem)
             assert block is not None
             cpp = lower_sema_block(block)
@@ -370,6 +466,7 @@ class TestDeriveScalarCmp:
         assert sem.semantic_class == 'scalar_cmp'
         assert sem.operation == 'lt'
         assert sem.data_type == 'f32'
+        assert sem.sets_scc == 'compare'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
@@ -378,7 +475,7 @@ class TestDeriveScalarCmp:
 
 class TestDeriveScalarCmpk:
     def test_eq(self):
-        sem = _FakeSem('S_CMPK_EQ_U32', 'scalar_cmpk', 'eq', 'u32')
+        sem = _FakeSem('S_CMPK_EQ_U32', 'scalar_cmpk', 'eq', 'u32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
@@ -394,7 +491,7 @@ class TestDeriveScalarSopk:
 
 class TestDeriveScalarBitcmp:
     def test_bitcmp0(self):
-        sem = _FakeSem('S_BITCMP0_B32', 'scalar_bitcmp', 'bitcmp0', 'b32')
+        sem = _FakeSem('S_BITCMP0_B32', 'scalar_bitcmp', 'bitcmp0', 'b32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
@@ -402,12 +499,12 @@ class TestDeriveScalarBitcmp:
         assert '& 31' in cpp
 
     def test_bitcmp1(self):
-        sem = _FakeSem('S_BITCMP1_B32', 'scalar_bitcmp', 'bitcmp1', 'b32')
+        sem = _FakeSem('S_BITCMP1_B32', 'scalar_bitcmp', 'bitcmp1', 'b32', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
 
     def test_bitcmp_b64_uses_32_bit_index_operand(self):
-        sem = _FakeSem('S_BITCMP0_B64', 'scalar_bitcmp', 'bitcmp0', 'b64')
+        sem = _FakeSem('S_BITCMP0_B64', 'scalar_bitcmp', 'bitcmp0', 'b64', 'compare')
         block = derive_sema_block(sem)
         assert block is not None
         omap = OperandMap.from_operand_names(
@@ -415,15 +512,15 @@ class TestDeriveScalarBitcmp:
         )
         ctx = LoweringContext(exec_model=block.pragma, operand_map=omap)
         cpp = lower_sema_block(block, ctx)
-        assert 'ssrc0.read_scalar64(wf)' in cpp
-        assert 'ssrc1.read_scalar(wf)' in cpp
-        assert 'ssrc1.read_scalar64(wf)' not in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' not in cpp
         assert '& 63' in cpp
 
 
 class TestDeriveScalarBfe:
     def test_bfe(self):
-        sem = _FakeSem('S_BFE_U32', 'scalar_bfe', data_type='u32')
+        sem = _FakeSem('S_BFE_U32', 'scalar_bfe', data_type='u32', sets_scc='nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         call_names = [
@@ -436,25 +533,26 @@ class TestDeriveScalarBfe:
 
 class TestDeriveScalarSaveexec:
     def test_and(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.AND in all_kinds
 
     def test_writes_exec_and_scc(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'set_exec' in cpp
+        assert 'wf.exec_raw()' in cpp
+        assert 'wf.set_exec_raw(' in cpp
         assert 'write_scc' in cpp
 
     def test_saves_old_exec(self):
-        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and')
+        sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
-        assert 'wf.exec()' in cpp
+        assert 'wf.exec_raw()' in cpp
 
     def test_not1_saveexec_uses_source_and_negated_exec(self):
         sem = _FakeSem(
@@ -462,6 +560,7 @@ class TestDeriveScalarSaveexec:
             'scalar_saveexec',
             'and_not1',
             'b32',
+            'nonzero',
         )
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
@@ -474,11 +573,40 @@ class TestDeriveScalarSaveexec:
             'scalar_saveexec',
             'or_not1',
             'b32',
+            'nonzero',
         )
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'src | (~old_exec)' in cpp
         assert '(~src) | old_exec' not in cpp
+
+    def test_rejects_unsupported_operation(self):
+        sem = derive_semantics('S_UNKNOWN_SAVEEXEC_B64', 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_saveexec'
+        assert sem.operation == 'unknown'
+        with pytest.raises(ValueError, match='Unsupported SAVEEXEC operation'):
+            derive_sema_block(sem)
+
+    def test_rejects_missing_operation(self):
+        sem = _FakeSem(
+            'S_MALFORMED_SAVEEXEC_B64',
+            'scalar_saveexec',
+            data_type='b64',
+            sets_scc='nonzero',
+        )
+        with pytest.raises(ValueError, match='Unsupported SAVEEXEC operation: None'):
+            derive_sema_block(sem)
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_AND_SAVEEXEC_B64_SUFFIX',
+            'S_ANDN1_WREXEC_B64_SUFFIX',
+        ],
+    )
+    def test_rejects_trailing_mnemonic_text(self, name):
+        assert derive_semantics(name, 'ENC_SOP1') is None
 
 
 # =========================================================================
@@ -986,10 +1114,13 @@ class TestDeriveVectorUnary:
         assert encode_helper in cpp
         assert 'util::e8m0_to_f32' in cpp
         assert '((inst_.opsel & 0x3u) * 8u)' in cpp
-        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' not in cpp
+        assert (
+            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
+            not in cpp
+        )
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'wf.cu().write_vgpr' in cpp
+        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1021,7 +1152,10 @@ class TestDeriveVectorUnary:
         )
         assert read_helper in cpp
         assert encode_helper in cpp
-        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' in cpp
+        assert (
+            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
+            in cpp
+        )
         assert 'util::e8m0_to_f32' not in cpp
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
@@ -1072,10 +1206,12 @@ class TestDeriveVectorBinop:
 
                 cpp = lower_sema_block(block)
                 assert (
-                    f'static_cast<{cpp_type}>(inst.src0.read_lane(wf, lane))' not in cpp
+                    f'static_cast<{cpp_type}>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))'
+                    not in cpp
                 )
                 assert (
-                    f'static_cast<{cpp_type}>(inst.src1.read_lane(wf, lane))' not in cpp
+                    f'static_cast<{cpp_type}>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))'
+                    not in cpp
                 )
 
     def test_lshlrev(self):
@@ -1204,7 +1340,8 @@ class TestDeriveVectorTernary:
 
         assert '::rocjitsu::amdgpu::lshl_masked' in cpp
         assert (
-            'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) << amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)'
+            not in cpp
         )
 
     def test_i24_mad_lowers_through_unsigned_helper(self):
@@ -1225,15 +1362,24 @@ class TestDeriveVectorTernary:
             'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>('
             not in cpp
         )
-        assert 'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *' not in cpp
-        assert 'static_cast<uint16_t>(inst.src1.read_lane(wf, lane))' not in cpp
-        assert 'static_cast<uint16_t>(inst.src2.read_lane(wf, lane))' not in cpp
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) *'
+            not in cpp
+        )
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))'
+            not in cpp
+        )
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))'
+            not in cpp
+        )
         compact_cpp = ''.join(cpp.split())
         assert (
             '::rocjitsu::amdgpu::mad_lo_u16('
-            'inst.src0.read_lane(wf,lane),'
-            'inst.src1.read_lane(wf,lane),'
-            'inst.src2.read_lane(wf,lane))' in compact_cpp
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src0,lane),'
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src1,lane),'
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src2,lane))' in compact_cpp
         )
 
     def test_signed_bfe_keeps_braced_one_literal(self):
@@ -1287,11 +1433,20 @@ class TestDeriveVectorCmp:
 
         cpp = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in cpp
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in cpp
+        assert (
+            '((inst_.opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(src0, lane) >> 16)'
+            in cpp
+        )
+        assert (
+            '((inst_.opsel & 0x2u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(src1, lane) >> 16)'
+            in cpp
+        )
         assert 'vcc &= ~(1ULL << lane)' not in cpp
-        assert 'vdst.write_scalar(wf, static_cast<uint32_t>(vcc));' in cpp
-        assert 'vdst.write_scalar64(wf, vcc);' in cpp
+        assert (
+            'amdgpu::RegisterAccess(wf).write_scalar(vdst, static_cast<uint32_t>(vcc));'
+            in cpp
+        )
+        assert 'amdgpu::RegisterAccess(wf).write_scalar64(vdst, vcc);' in cpp
 
 
 class TestDeriveVectorCmpx:
@@ -1980,6 +2135,26 @@ class TestDerivePacked:
         block = derive_sema_block(sem)
         assert block is not None
 
+    def test_pk_mov_b32_generator_uses_op_sel_for_both_outputs(self):
+        cpp = gen_pk_mov_b32(
+            ['inst.vdst'],
+            ['inst.src0', 'inst.src1'],
+            opsel_exprs=('inst.inst_.op_sel', 'inst.inst_.op_sel_hi'),
+        )
+
+        assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
+        assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
+        assert (
+            'uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)'
+            in cpp
+        )
+        assert (
+            'uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)'
+            in cpp
+        )
+        assert 'encoding_value_ >= 256' not in cpp
+
 
 class TestDeriveDot:
     def test_rdna3_dot2acc_vop2_is_functional_dot2c(self):
@@ -2107,17 +2282,125 @@ class TestDeriveSpecialScalar:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.TERNARY in all_kinds
 
-    def test_wrexec(self):
-        sem = _FakeSem('S_OR_SAVEEXEC_B64', 'scalar_wrexec')
+    @pytest.mark.parametrize(
+        'name,operation,dtype',
+        [
+            ('S_ANDN1_WREXEC_B64', 'andn1', 'b64'),
+            ('S_ANDN2_WREXEC_B64', 'andn2', 'b64'),
+            ('S_AND_NOT0_WREXEC_B32', 'and_not0', 'b32'),
+            ('S_AND_NOT1_WREXEC_B32', 'and_not1', 'b32'),
+        ],
+    )
+    def test_wrexec(self, name, operation, dtype):
+        sem = _FakeSem(name, 'scalar_wrexec', operation, dtype, 'nonzero')
         block = derive_sema_block(sem)
         assert block is not None
         cpp = lower_sema_block(block)
-        assert 'set_exec' in cpp
+        assert 'write_scalar' in cpp
+        if dtype == 'b32':
+            assert 'wf.exec()' in cpp
+            assert 'wf.set_exec(' in cpp
+            assert 'exec_raw' not in cpp
+        else:
+            assert 'wf.exec_raw()' in cpp
+            assert 'wf.set_exec_raw(' in cpp
+        assert 'write_scc' in cpp
+
+    @pytest.mark.parametrize(
+        'name, operation, data_type, expected_result',
+        [
+            (
+                'S_ANDN1_WREXEC_B32',
+                'andn1',
+                'b32',
+                '((old_exec & (~src)) & 0xffffffffULL)',
+            ),
+            (
+                'S_ANDN2_WREXEC_B32',
+                'andn2',
+                'b32',
+                '((src & (~old_exec)) & 0xffffffffULL)',
+            ),
+            ('S_ANDN1_WREXEC_B64', 'andn1', 'b64', '(old_exec & (~src))'),
+            ('S_ANDN2_WREXEC_B64', 'andn2', 'b64', '(src & (~old_exec))'),
+            (
+                'S_AND_NOT0_WREXEC_B32',
+                'and_not0',
+                'b32',
+                '((old_exec & (~src)) & 0xffffffffULL)',
+            ),
+            (
+                'S_AND_NOT1_WREXEC_B32',
+                'and_not1',
+                'b32',
+                '((src & (~old_exec)) & 0xffffffffULL)',
+            ),
+            (
+                'S_AND_NOT0_WREXEC_B64',
+                'and_not0',
+                'b64',
+                '(old_exec & (~src))',
+            ),
+            (
+                'S_AND_NOT1_WREXEC_B64',
+                'and_not1',
+                'b64',
+                '(src & (~old_exec))',
+            ),
+        ],
+    )
+    def test_wrexec_operand_orientation(
+        self, name, operation, data_type, expected_result
+    ):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_wrexec'
+        assert sem.operation == operation
+        assert sem.data_type == data_type
+
+        cpp = lower_sema_block(derive_sema_block(sem))
+
+        assert f'uint64_t result = {expected_result};' in cpp
+        assert 'wf.write_scc((result != 0ULL));' in cpp
+
+        if data_type == 'b32':
+            assert (
+                'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
+                'static_cast<uint32_t>(result));'
+            ) in cpp
+            assert 'wf.set_exec(result);' in cpp
+        else:
+            assert (
+                'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
+                'static_cast<uint64_t>(result));'
+            ) in cpp
+            assert 'wf.set_exec_raw(result);' in cpp
+
+    def test_wrexec_rejects_unsupported_operation(self):
+        sem = _FakeSem(
+            'S_UNKNOWN_WREXEC_B64',
+            'scalar_wrexec',
+            'unknown',
+            'b64',
+            'nonzero',
+        )
+        with pytest.raises(ValueError, match='Unsupported WREXEC operation'):
+            derive_sema_block(sem)
 
     def test_movk(self):
         sem = _FakeSem('S_MOVK_I32', 'scalar_movk')
         block = derive_sema_block(sem)
         assert block is not None
+
+    @pytest.mark.parametrize('name', ['S_ADDK_I32', 'S_ADDK_CO_I32'])
+    def test_addk_uses_signed_overflow(self, name):
+        sem = derive_semantics(name, 'ENC_SOPK')
+        assert sem.sets_scc == 'overflow'
+        cpp = lower_sema_block(derive_sema_block(sem))
+        assert 'signed_add_overflows' in cpp
+        assert 'write_scc' in cpp
+        assert '<< 16' in cpp
+        assert '>> 16' in cpp
 
 
 class TestDeriveControlFlow:
@@ -2209,8 +2492,27 @@ class TestDeriveAllClassesLower:
         from amdisa.sema_derive import _DERIVE_REGISTRY
 
         errors = []
+        scc_modes = {
+            'scalar_addk': 'overflow',
+            'scalar_bfe': 'nonzero',
+            'scalar_bitcmp': 'compare',
+            'scalar_cmp': 'compare',
+            'scalar_cmpk': 'compare',
+            'scalar_saveexec': 'nonzero',
+            'scalar_wrexec': 'nonzero',
+        }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
-            sem = _FakeSem(f'TEST_{cls_name.upper()}', cls_name, 'add', 'f32')
+            operation = {
+                'scalar_saveexec': 'and',
+                'scalar_wrexec': 'andn1',
+            }.get(cls_name, 'add')
+            sem = _FakeSem(
+                f'TEST_{cls_name.upper()}',
+                cls_name,
+                operation,
+                'f32',
+                scc_modes.get(cls_name),
+            )
             sem.elem_size = 4
             sem.num_elems = 1
             sem.sign_extend = False

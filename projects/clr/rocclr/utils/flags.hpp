@@ -100,6 +100,8 @@ release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
 release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
         "Kernarg pool size")                                                  \
+release(bool, HSA_ENABLE_DTIF_FAST_COPY, false,                               \
+        "Flag plain device allocations as HostMemoryDirectAccess")            \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
 release(uint, GPU_ENABLE_PAL, 2,                                              \

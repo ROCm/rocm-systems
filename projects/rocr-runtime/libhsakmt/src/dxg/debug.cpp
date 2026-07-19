@@ -142,3 +142,21 @@ hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *args, HSA_QUEUEID *Queues,
   pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreRuntimeInfo(struct kfd_runtime_info *runtime_info) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreDeviceInfo(HSAuint32 gpu_id, struct kfd_dbg_device_info_entry *device_info) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(HSA_QUEUEID QueueId, HSAuint32 *KernelInternalQueueId) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}

@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fragment.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
@@ -483,6 +484,27 @@ TEST(rocrtstFunc, Memory_Atomic_Xchg_Test) {
     RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, Memory_Fragment_Overlap_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentOverlapTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_ZeroInit_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentZeroInitTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentCoherenceTest();
+    RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     DebugBasicTest mt;
     if (!RunCustomTestProlog(&mt)) return;
@@ -597,6 +619,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
     VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {
@@ -917,5 +946,13 @@ int main(int argc, char** argv) {
     }
     DumpMonitorInfo();
   }
-  return RUN_ALL_TESTS();
+
+  int result = RUN_ALL_TESTS();
+
+  // Print skipped test summary (grouped by reason)
+  rocrtst::SkippedTestTracker::getInstance().printSummary(
+      rocrtst::PlatformDetector::platformName(
+          rocrtst::TestFilterManager::getInstance().getPlatform()));
+
+  return result;
 }

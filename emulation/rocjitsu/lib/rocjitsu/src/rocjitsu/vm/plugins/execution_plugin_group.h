@@ -125,11 +125,11 @@ public:
       p->onAmdgpuWavefrontHalted(wf);
   }
 
-  virtual void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                 uint32_t lane_begin, uint32_t lane_end,
-                                 uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+  virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                                     uint64_t lane_mask,
+                                     uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
     for (auto &p : plugins_)
-      p->onAmdgpuReadVgprs(wf, physical_reg, lane_begin, lane_end, byte_mask);
+      p->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {

@@ -1756,6 +1756,8 @@ class Device : public RuntimeObject {
     kHostNumaCurrent = 0x4
   };
 
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
+
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
   static constexpr size_t kP2PStagingSize = 4 * Mi;
@@ -2154,10 +2156,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**
@@ -2251,6 +2254,12 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
+    // graph layer resolves it to the actual stream's vGPU index into queue_index.
+    int segment_id = -1;
+    // vGPU (queue) index resolved at launch from segment_id. Read by
+    // ApplyHwEventPatches to attribute the signal to its execution stream.
+    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }

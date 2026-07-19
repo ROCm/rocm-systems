@@ -238,6 +238,24 @@ hsa_status_t GetKernArgMemoryPool(hsa_amd_memory_pool_t pool, void* data);
 hsa_status_t FindStandardPool(hsa_amd_memory_pool_t pool, void* data);
 hsa_status_t FindAPUStandardPool(hsa_amd_memory_pool_t pool, void* data);
 
+/// Find a "fine-grained" pool. By this, we mean not a kernel args pool that
+/// is fine-grained (coherent). Iterated on a CPU agent this yields the
+/// fine-grain system pool that backs, e.g., hipHostMalloc.
+/// The pool found will have the following properties:
+///     HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: Don't care
+///     HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT: Off
+///     HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED: On
+/// This function is meant to be the call-back function used
+/// with hsa_amd_agent_iterate_memory_pools.
+/// \param[in] pool Pool to evaluate for required properties
+/// \param[in] data If pool meets criteria, this pointer will point
+///  to the pool upon return
+/// \returns hsa_status_t
+///      -HSA_STATUS_INFO_BREAK - we found a pool that meets criteria
+///      -HSA_STATUS_SUCCESS - we did not find a pool that meets the criteria
+///      -else return an appropriate error code for any error encountered
+hsa_status_t FindFineGrainedPool(hsa_amd_memory_pool_t pool, void* data);
+
 /// Find a "kernel arg" pool.
 /// The pool found will have the following properties:
 ///     HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: Don't care
