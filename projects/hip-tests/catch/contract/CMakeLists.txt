@@ -2,7 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-add_custom_target(contract_tests)
+# ALL so the contract executables build with the default target the same way the
+# unit tests do (their build_tests aggregate is also declared ALL). The per-test
+# executables are EXCLUDE_FROM_ALL, so without this they are only compiled by an
+# explicit `--target contract_tests` and CI, which builds the default target,
+# registers them via catch_discover_tests but never compiles them (ctest then
+# reports every case as <Target>_NOT_BUILT).
+add_custom_target(contract_tests ALL)
 
 add_subdirectory(memory)
 add_subdirectory(transfer)
