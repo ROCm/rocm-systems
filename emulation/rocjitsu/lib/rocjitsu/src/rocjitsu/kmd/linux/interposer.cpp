@@ -1174,19 +1174,34 @@ public:
     std::lock_guard lock(init_mutex_);
     if (active_driver_.load(std::memory_order_acquire) == nullptr) {
       in_construction = true;
-      // Config-path discovery mirrors the DBT-guest reader precedence: the
-      // per-invocation directory first (the launcher writes config_path there and
-      // exports $ROCJITSU_INVOCATION_DIR), then the well-known
-      // $ROCJITSU_RUNTIME_DIR/config_path for a bare LD_PRELOAD client that sets no
-      // invocation dir (e.g. a standalone HSA program that writes the handoff to the
-      // documented well-known location). Without the fallback such a client's
-      // config is never found and hsa_init fails with OUT_OF_RESOURCES.
-      std::optional<std::string> cfg_path =
-          child_config_path(invocation_runtime_dir() + "/config_path");
-      if (!cfg_path) {
-        const std::string well_known = rocjitsu::rpc_default_config_file_path();
-        if (well_known != invocation_runtime_dir() + "/config_path")
-          cfg_path = child_config_path(well_known);
+      // Config-path discovery mirrors load_dbt_guest_config_from_runtime_config()'s
+      // reader precedence exactly, probing tiers in order and using the first whose
+      // config_path handoff actually exists:
+      //   1. the per-invocation directory (the launcher writes config_path there and
+      //      exports $ROCJITSU_INVOCATION_DIR); invocation_runtime_dir() already
+      //      collapses to the per-PID default when that env var is unset.
+      //   2. this process's PID-scoped default — reached only when the env var is set
+      //      but its config_path is absent/stale, matching the reader's tier 2 (a
+      //      no-op duplicate of tier 1 when the env var is unset).
+      //   3. the well-known $ROCJITSU_RUNTIME_DIR/config_path for a bare LD_PRELOAD
+      //      client that sets no invocation dir. Without this fallback such a client's
+      //      config is never found and hsa_init fails with OUT_OF_RESOURCES.
+      // Probing tier 2 as well as tier 1 keeps the interposer's view consistent with
+      // the reader's: an env var pointing at a dir without config_path must still find
+      // a valid per-PID handoff instead of skipping straight to the well-known path.
+      std::vector<std::string> cfg_candidates;
+      cfg_candidates.push_back(invocation_runtime_dir() + "/config_path");
+      cfg_candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
+      cfg_candidates.push_back(rocjitsu::rpc_default_config_file_path());
+      std::optional<std::string> cfg_path;
+      std::string tried_last;
+      for (const auto &candidate : cfg_candidates) {
+        if (candidate == tried_last)
+          continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
+        tried_last = candidate;
+        cfg_path = child_config_path(candidate);
+        if (cfg_path)
+          break;
       }
       if (!cfg_path) {
         util::Logger::debug_print("rocjitsu: no child config path");

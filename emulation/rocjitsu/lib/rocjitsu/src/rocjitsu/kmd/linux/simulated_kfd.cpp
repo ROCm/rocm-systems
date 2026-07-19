@@ -494,6 +494,15 @@ void SimulatedKfd::close_all_processes() {
   // unblock such threads so their jthread joins can complete instead of hanging
   // forever. A client that races us to its own rj_vm_device_close() just finds the
   // process already gone and no-ops.
+  //
+  // Drain each pid to a full teardown rather than a single close(): in daemon mode
+  // several client opens of the same client_pid share one KfdProcess and bump
+  // open_ref_count_ (open_process()'s retain path), so close() only reaches
+  // notify_closing() on the LAST reference. A single decrement would leave a
+  // multiply-opened process — exactly the one whose waiters we must wake — parked.
+  // Loop close() while the process is still present, mirroring the destructor. The
+  // find_process() re-check makes a concurrent client close() benign: whoever drops
+  // the last reference tears it down, the other observes it gone and stops.
   std::vector<uint32_t> pids;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
@@ -502,7 +511,8 @@ void SimulatedKfd::close_all_processes() {
       pids.push_back(pid);
   }
   for (uint32_t pid : pids)
-    close(pid);
+    while (find_process(pid))
+      close(pid);
 }
 
 int SimulatedKfd::close(uint32_t process_id) {
