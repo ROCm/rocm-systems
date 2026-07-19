@@ -184,6 +184,48 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x50000), 0u);
 }
 
+TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
+  amdgpu::GpuMemory mem("vmid_range_mem");
+  KfdProcess process(/*process_id=*/123);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x100000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), backing.size());
+
+  auto [host_base, size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
+  EXPECT_EQ(host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(size, backing.size());
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, FindHostRangeStopsAtNonContiguousVmidHostPages) {
+  amdgpu::GpuMemory mem("vmid_noncontiguous_range_mem");
+  KfdProcess process(/*process_id=*/124);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x200000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), amdgpu::GpuMemory::PAGE_SIZE);
+  process.map_pages(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE,
+                    backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE,
+                    amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [first_host_base, first_size] = mem.find_host_range(kGpuVa, process.process_id());
+  EXPECT_EQ(first_host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(first_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [second_host_base, second_size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE, process.process_id());
+  EXPECT_EQ(second_host_base,
+            reinterpret_cast<uint64_t>(backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE));
+  EXPECT_EQ(second_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  mem.unregister_process(process.process_id());
+}
+
 TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
   constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
@@ -1210,19 +1252,22 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   ASSERT_NO_THROW(f.engine->run());
 
   amdgpu::Wavefront *wf = nullptr;
+  amdgpu::ComputeUnitCore *active_cu = nullptr;
   for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
     auto *cu = f.cu(cu_idx);
     for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
       if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+        active_cu = cu;
         wf = cu->wf(wf_idx);
         break;
       }
     }
   }
   ASSERT_NE(wf, nullptr);
+  ASSERT_NE(active_cu, nullptr);
   ASSERT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
   EXPECT_EQ(wf->lds().read32(kAddress), kValue);
-  EXPECT_EQ(wf->cu().read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
+  EXPECT_EQ(active_cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), kValue);
 }
 
 struct ExecFixture {

@@ -491,7 +491,8 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
     static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
         static_cast<uint64_t>(sig_start * ticksToTime_),
-        static_cast<uint64_t>(sig_end * ticksToTime_));
+        static_cast<uint64_t>(sig_end * ticksToTime_),
+        signal->queue_index_);
   }
 
   signal->flags_.done_ = true;
@@ -811,6 +812,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->engine_ = engine_;
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
+  prof_signal->queue_index_ = gpu_.index();
 
   // Release any existing HwEvent before setting new one for the same command
   VirtualGPU::AttachHwEvent(cmd, prof_signal);
@@ -1574,8 +1576,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
-  if (kernelNames != nullptr) {
-    vcmd->setKernelNamesRef(kernelNames);
+  if (kernelNames != nullptr && vcmd->profilingInfo().enabled_) {
+    vcmd->addKernelNames(*kernelNames);
   }
 
   const uint32_t queueSize = gpu_queue_->size;

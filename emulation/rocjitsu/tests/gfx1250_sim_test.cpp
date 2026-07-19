@@ -37,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -409,8 +410,10 @@ constexpr std::array<uint32_t, 2> make_s_load_b32_scaled_imm(uint8_t sdata, uint
 constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
 
 enum class VopdOp : uint16_t {
+  FmamkF32 = 2,
   MulF32 = 3,
   MulDx9ZeroF32 = 7,
+  MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
 };
@@ -3995,13 +3998,329 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   dst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
 
-  EXPECT_EQ(src0.read_lane(*wf, kLane), 0x11111111u);
-  EXPECT_EQ(src1.read_lane(*wf, kLane), 0x22222222u);
-  EXPECT_EQ(src2.read_lane(*wf, kLane), 0x33333333u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src0, kLane), 0x11111111u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src1, kLane), 0x22222222u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(src2, kLane), 0x33333333u);
 
-  dst.write_lane(*wf, kLane, 0x44444444u);
+  amdgpu::RegisterAccess(*wf).write_lane(dst, kLane, 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 2 * 256 + 5, kLane), 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 5, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
+
+  constexpr uint32_t kSrc = 7;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kHighBank = 256;
+  constexpr uint32_t kHighValueBase = 0x42000000u;
+  constexpr uint32_t kLowAliasBase = 0xDEAD0000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  gfx1250::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  for (const uint8_t mode : {uint8_t{0x01}, uint8_t{0x41}}) {
+    SCOPED_TRACE(testing::Message() << "vgpr_msb_mode=" << static_cast<uint32_t>(mode));
+    wf->set_vgpr_msb_mode(mode); // SRC0=bank 1; DST=bank 0 or bank 1.
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu.write_vgpr(vb + kSrc, lane, kLowAliasBase + lane);
+      cu.write_vgpr(vb + kHighBank + kSrc, lane, kHighValueBase + lane);
+      cu.write_vgpr(vb + kDst, lane, 0u);
+      cu.write_vgpr(vb + kHighBank + kDst, lane, 0u);
+    }
+
+    gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+    inst.execute_impl(*wf);
+
+    const uint32_t dst_bank = (mode >> 6) & 0x3u;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      EXPECT_EQ(cu.read_vgpr(vb + dst_bank * kHighBank + kDst, lane), kHighValueBase + (lane ^ 1u))
+          << "lane " << lane;
+    }
+  }
+}
+
+TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
+
+  constexpr uint32_t kSrc = 7;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kHighBank = 256;
+  constexpr uint32_t kHighValueBase = 0x43000000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x01); // SRC0=bank 1; DST=bank 0.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kSrc, lane, 0u);
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, kHighValueBase + lane);
+  }
+
+  gfx1250::Vop1VopDpp8MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP8_FI_1;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.lane_sel_0 = 1;
+  raw.lane_sel_1 = 0;
+  raw.lane_sel_2 = 3;
+  raw.lane_sel_3 = 2;
+  raw.lane_sel_4 = 5;
+  raw.lane_sel_5 = 4;
+  raw.lane_sel_6 = 7;
+  raw.lane_sel_7 = 6;
+
+  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kHighValueBase + (lane ^ 1u)) << "lane " << lane;
+}
+
+TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kSrc = 7;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kHighBank = 256;
+  constexpr uint32_t kSourceBase = 0x44000000u;
+  constexpr uint32_t kOldHighDstBase = 0x55000000u;
+  constexpr uint32_t kLowDstBase = 0x66000000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x41); // SRC0=bank 1; DST=bank 1.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, kSourceBase + lane);
+    cu.write_vgpr(vb + kHighBank + kDst, lane, kOldHighDstBase + lane);
+    cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
+  }
+
+  gfx1250::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0x1; // Only lanes 0-15 may be updated.
+
+  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint32_t expected = lane < 16 ? kSourceBase + (lane ^ 1u) : kOldHighDstBase + lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kHighBank + kDst, lane), expected) << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstBase + lane) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kSrc0 = 2;
+  constexpr uint32_t kSrc1 = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kSrc0Base = 1000;
+  constexpr uint32_t kSrc1Base = 2000;
+  constexpr uint32_t kOldHighDstBase = 3000;
+  constexpr uint32_t kLowDstBase = 4000;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x49); // SRC0=bank 1; SRC1=bank 2; DST=bank 1.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kSrc0, lane, 10u);
+    cu.write_vgpr(vb + kSrc1, lane, 20u);
+    cu.write_vgpr(vb + kBankStride + kSrc0, lane, kSrc0Base + lane);
+    cu.write_vgpr(vb + 2 * kBankStride + kSrc1, lane, kSrc1Base + lane);
+    cu.write_vgpr(vb + kBankStride + kDst, lane, kOldHighDstBase + lane);
+    cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
+  }
+
+  gfx1250::Vop2VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc0;
+  raw.vsrc1 = kSrc1;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0x1;
+
+  gfx1250::VAddNcU32Vop2 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint32_t expected =
+        lane < 16 ? kSrc0Base + (lane ^ 1u) + kSrc1Base + lane : kOldHighDstBase + lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, lane), expected) << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstBase + lane) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kSrc = 7;
+  constexpr uint32_t kDst = 20;
+  constexpr uint32_t kHighBank = 256;
+  constexpr uint32_t kSourceBase = 100;
+  constexpr uint64_t kOldDstBase = 0x5500000066000000ULL;
+  constexpr uint32_t kLowDstLoBase = 0x77000000u;
+  constexpr uint32_t kLowDstHiBase = 0x88000000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x41); // SRC0=bank 1; DST=bank 1.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t old_dst = kOldDstBase + lane;
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, kSourceBase + lane);
+    cu.write_vgpr(vb + kHighBank + kDst, lane, static_cast<uint32_t>(old_dst));
+    cu.write_vgpr(vb + kHighBank + kDst + 1, lane, static_cast<uint32_t>(old_dst >> 32));
+    cu.write_vgpr(vb + kDst, lane, kLowDstLoBase + lane);
+    cu.write_vgpr(vb + kDst + 1, lane, kLowDstHiBase + lane);
+  }
+
+  gfx1250::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0x1;
+
+  gfx1250::VCvtF64I32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t actual =
+        static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst, lane)) |
+        (static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst + 1, lane)) << 32);
+    const uint64_t expected =
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase + (lane ^ 1u)))
+                  : kOldDstBase + lane;
+    EXPECT_EQ(actual, expected) << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstLoBase + lane) << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, lane), kLowDstHiBase + lane) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kSrc0 = 2;
+  constexpr uint32_t kSrc1 = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kOldHighDstBase = 0x55000000u;
+  constexpr uint32_t kLowDstBase = 0x66000000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x49); // SRC0=bank 1; SRC1=bank 2; DST=bank 1.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kBankStride + kSrc0, lane,
+                  std::bit_cast<uint32_t>(static_cast<float>(lane + 1)));
+    cu.write_vgpr(vb + 2 * kBankStride + kSrc1, lane, std::bit_cast<uint32_t>(100.0f));
+    cu.write_vgpr(vb + kBankStride + kDst, lane, kOldHighDstBase + lane);
+    cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
+  }
+
+  gfx1250::Vop3VopDpp16MachineInst raw{};
+  raw.vdst = kDst;
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.src1 = 256 + kSrc1;
+  raw.vsrc0 = kSrc0;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0x1;
+
+  gfx1250::VAddF32Vop3 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint32_t expected = lane < 16
+                                  ? std::bit_cast<uint32_t>(static_cast<float>((lane ^ 1u) + 101))
+                                  : kOldHighDstBase + lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, lane), expected) << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstBase + lane) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kSrc = 7;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kHighBank = 256;
+  constexpr uint32_t kGprIdxOffset = 16;
+  constexpr uint32_t kExpectedBase = 0x77000000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x01); // SRC0=bank 1; DST=bank 0.
+  wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0((1u << 8u) | kGprIdxOffset); // Index SRC0 only.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, 0u);
+    cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, kExpectedBase + lane);
+  }
+
+  gfx1250::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kExpectedBase + (lane ^ 1u)) << "lane " << lane;
 }
 
 TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
@@ -4023,8 +4342,339 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
 
   gfx1250::Operand lo(16, gfx1250::OperandType::OPR_VGPR, 2, true);
   gfx1250::Operand hi(16, gfx1250::OperandType::OPR_VGPR, 128 + 2, true);
-  EXPECT_EQ(lo.read_lane(*wf, kLane), 0x2222u);
-  EXPECT_EQ(hi.read_lane(*wf, kLane), 0xBBBBu);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x2222u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xBBBBu);
+}
+
+TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 3;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kGprIdxOffset = 16;
+  constexpr uint32_t kLowAlias = 0x55556666u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x41); // SRC0=bank 1; DST=bank 1.
+  wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0((0x9u << 8u) | kGprIdxOffset); // Index SRC0 and DST.
+  cu.write_vgpr(vb + kSrc, 0, kLowAlias);
+  cu.write_vgpr(vb + kDst, 0, kLowAlias);
+  cu.write_vgpr(vb + kBankStride + kSrc, 0, kLowAlias);
+  cu.write_vgpr(vb + kBankStride + kDst, 0, kLowAlias);
+  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, 0xABCD1234u);
+  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0, 0xEEEE1111u);
+
+  gfx1250::Vop1MachineInst raw{};
+  raw.src0 = 256 + 128 + kSrc; // High half of the encoded VGPR source.
+  raw.vdst = kDst;
+  gfx1250::VMovB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEEABCDu);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kLowAlias);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, 0), kLowAlias);
+}
+
+TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kDst = 3;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kValueBase = 0x12340000u;
+  constexpr uint32_t kLowAlias = 0xDEADBEEFu;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0xC9); // SRC0=bank 1; SRC1=bank 2; DST=bank 3.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu.write_vgpr(vb + kBankStride + kAddr, lane, lane * 4);
+    cu.write_vgpr(vb + 2 * kBankStride + kData, lane, kValueBase + lane);
+    cu.write_vgpr(vb + 3 * kBankStride + kDst, lane, 0u);
+    cu.write_vgpr(vb + kAddr, lane, kLowAlias);
+    cu.write_vgpr(vb + kData, lane, kLowAlias);
+    cu.write_vgpr(vb + kDst, lane, kLowAlias);
+  }
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kDst;
+  gfx1250::DsPermuteB32Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    EXPECT_EQ(cu.read_vgpr(vb + 3 * kBankStride + kDst, lane), kValueBase + lane)
+        << "lane " << lane;
+    EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowAlias) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData0 = 2;
+  constexpr uint32_t kData1 = 3;
+  constexpr uint32_t kSrc0Bank = 1;
+  constexpr uint32_t kSrc1Bank = 2;
+  constexpr uint32_t kSrc2Bank = 3;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kExpected0 = 0x12345678u;
+  constexpr uint32_t kExpected1 = 0x9ABCDEF0u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(kSrc0Bank | (kSrc1Bank << 2) | (kSrc2Bank << 4));
+  cu.write_vgpr(vb + kSrc0Bank * kBankStride + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kSrc1Bank * kBankStride + kData0, 0, kExpected0);
+  cu.write_vgpr(vb + kSrc2Bank * kBankStride + kData1, 0, kExpected1);
+  cu.write_vgpr(vb + kAddr, 0, 0x100u);
+  cu.write_vgpr(vb + kData0, 0, 0xDEADBEEFu);
+  cu.write_vgpr(vb + kData1, 0, 0xDEADBEEFu);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData0;
+  raw.data1 = kData1;
+  raw.offset0 = 1;
+  raw.offset1 = 2;
+  gfx1250::DsStore2addrB32Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  auto *state = inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->per_lane_addr[0], wf->lds_base() + kAddress + 4);
+  EXPECT_EQ(state->ds2_per_lane_addr[0], wf->lds_base() + kAddress + 8);
+  uint32_t actual0 = 0;
+  uint32_t actual1 = 0;
+  std::memcpy(&actual0, state->store_data.data(), sizeof(actual0));
+  std::memcpy(&actual1, state->ds2_store_data.data(), sizeof(actual1));
+  EXPECT_EQ(actual0, kExpected0);
+  EXPECT_EQ(actual1, kExpected1);
+}
+
+TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kDst = 20;
+  constexpr uint32_t kDstBank = 2;
+  constexpr uint32_t kBankStride = 256;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  sim.cu()->write_vgpr(vb + kAddr, 0, 0u);
+  wf->set_vgpr_msb_mode(kDstBank << 6);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.vdst = kDst;
+  gfx1250::DsLoadTr4B64Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  auto *state = inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->dst_reg_base, vb + kDstBank * kBankStride + kDst);
+}
+
+TEST(Gfx1250SimulationTest, Vop2FmamkUsesSrc2HighBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kAddend = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kSrc2Bank = 2;
+  constexpr uint32_t kBankStride = 256;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(kSrc2Bank << 4);
+  cu.write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
+  cu.write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
+
+  gfx1250::Vop2InstLiteralMachineInst raw{};
+  raw.src0 = 242; // Inline 1.0f.
+  raw.vsrc1 = kAddend;
+  raw.vdst = kDst;
+  raw.simm32 = std::bit_cast<uint32_t>(2.0f);
+  gfx1250::VFmamkF32Vop2 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), std::bit_cast<uint32_t>(6.0f));
+}
+
+TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
+  constexpr uint32_t kSrc0InlineOne = 242;
+  constexpr uint32_t kAddend = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kSrc2Bank = 2;
+  constexpr uint32_t kBankStride = 256;
+  const std::array<uint32_t, 3> words = {
+      (0x32u << 26) | (static_cast<uint32_t>(VopdOp::FmamkF32) << 22) |
+          (static_cast<uint32_t>(VopdOp::MovB32) << 17) | (kAddend << 9) | kSrc0InlineOne,
+      (kDst << 24) | 128u,
+      std::bit_cast<uint32_t>(2.0f),
+  };
+
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_vgpr_msb_mode(kSrc2Bank << 4);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
+  cu->write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_fmamk_f32 :: v_dual_mov_b32");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + kDst, 0), std::bit_cast<uint32_t>(6.0f));
+}
+
+TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kSrc = 1;
+  constexpr uint32_t kDst = 2;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kOldDst = 0x11112222u;
+  constexpr uint32_t kHighSrc = 0x33334444u;
+  constexpr uint32_t kLowSrc = 0x55556666u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_vgpr_msb_mode(0x01); // SRC0=bank 1; DST=bank 0.
+  cu.write_vgpr(vb + kSrc, 0, kLowSrc);
+  cu.write_vgpr(vb + kBankStride + kSrc, 0, kHighSrc);
+  cu.write_vgpr(vb + kDst, 0, kOldDst);
+
+  gfx1250::Vop1MachineInst raw{};
+  raw.src0 = 256 + kSrc;
+  raw.vdst = kDst;
+  gfx1250::VSwapB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kHighSrc);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kSrc, 0), kOldDst);
+  EXPECT_EQ(cu.read_vgpr(vb + kSrc, 0), kLowSrc);
+}
+
+TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kVaddr = 10;
+  constexpr uint32_t kLdsAddr = 20;
+  constexpr uint32_t kSrc0Bank = 1;
+  constexpr uint32_t kDstBank = 2;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint64_t kGlobalAddr = 0x1000;
+  constexpr uint32_t kLdsOffset = 0x40;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(256));
+  wf->set_vgpr_msb_mode((kDstBank << 6) | kSrc0Bank);
+  cu.write_vgpr(vb + kSrc0Bank * kBankStride + kVaddr, 0, static_cast<uint32_t>(kGlobalAddr));
+  cu.write_vgpr(vb + kSrc0Bank * kBankStride + kVaddr + 1, 0,
+                static_cast<uint32_t>(kGlobalAddr >> 32));
+  cu.write_vgpr(vb + kDstBank * kBankStride + kLdsAddr, 0, kLdsOffset);
+  cu.write_vgpr(vb + kLdsAddr, 0, 0x80u);
+
+  gfx1250::VglobalMachineInst raw{};
+  raw.saddr = 124; // null
+  raw.vaddr = kVaddr;
+  raw.vdst = kLdsAddr;
+  gfx1250::GlobalLoadAsyncToLdsB8Vglobal inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  auto *state = inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->per_lane_addr[0], kGlobalAddr);
+  EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + kLdsOffset);
+}
+
+TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kData = 5;
+  constexpr uint32_t kSrc1Bank = 2;
+  constexpr uint32_t kBankStride = 256;
+  constexpr uint32_t kExpected = 0x12345678u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+  wf->set_vgpr_msb_mode(kSrc1Bank << 2);
+  cu.write_vgpr(vb + kData, 0, 0xDEADBEEFu);
+  cu.write_vgpr(vb + kSrc1Bank * kBankStride + kData, 0, kExpected);
+
+  gfx1250::VdsMachineInst ds_raw{};
+  ds_raw.data0 = kData;
+  gfx1250::DsStoreAddtidB32Vds ds_inst(reinterpret_cast<const gfx1250::MachineInst *>(&ds_raw));
+  ds_inst.execute_impl(*wf);
+  auto *ds_state = ds_inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(ds_state, nullptr);
+  uint32_t ds_value = 0;
+  std::memcpy(&ds_value, ds_state->store_data.data(), sizeof(ds_value));
+  EXPECT_EQ(ds_value, kExpected);
+
+  write_wave_sgpr(cu, *wf, 0, 0u);
+  write_wave_sgpr(cu, *wf, 1, 0u);
+  gfx1250::VglobalMachineInst global_raw{};
+  global_raw.saddr = 0;
+  global_raw.vsrc = kData;
+  gfx1250::GlobalStoreAddtidB32Vglobal global_inst(
+      reinterpret_cast<const gfx1250::MachineInst *>(&global_raw));
+  global_inst.execute_impl(*wf);
+  auto *global_state = global_inst.data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(global_state, nullptr);
+  uint32_t global_value = 0;
+  std::memcpy(&global_value, global_state->store_data.data(), sizeof(global_value));
+  EXPECT_EQ(global_value, kExpected);
 }
 
 TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {

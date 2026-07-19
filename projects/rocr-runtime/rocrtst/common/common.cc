@@ -388,6 +388,11 @@ hsa_status_t FindAPUStandardPool(hsa_amd_memory_pool_t pool, void* data) {
                                           POOL_PROP_DONT_CARE, POOL_PROP_DONT_CARE);
 }
 
+hsa_status_t FindFineGrainedPool(hsa_amd_memory_pool_t pool, void* data) {
+  return FindPool(pool, data, HSA_AMD_SEGMENT_GLOBAL, POOL_PROP_DONT_CARE,
+                                          POOL_PROP_OFF, POOL_PROP_ON);
+}
+
 // Populate the vector with handles to all agents and pools
 hsa_status_t
 GetAgentPools(std::vector<std::shared_ptr<agent_pools_t>> *agent_pools) {
