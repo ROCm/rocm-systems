@@ -11,6 +11,8 @@
 #include <resource_guards.hh>
 #include <cmd_options.hh>
 
+#include <cstring>
+
 namespace cg = cooperative_groups;
 
 // Atomic operations for which the tests in this file apply for
@@ -435,6 +437,9 @@ void TestCore(const TestParams& p) {
 
   // Launch Host Threads
   mem_devs.emplace_back(LinearAllocs::hipHostMalloc, mem_alloc_size);
+  // hipHostMalloc does not guarantee zeroed memory. The buffer is only touched by
+  // host threads, so zero it host-side
+  std::memset(mem_devs[p.num_devices].host_ptr(), 0, mem_alloc_size);
   PerformHostAtomicOperation<TestType, operation>(p, mem_devs[p.num_devices].host_ptr(), old_vals.data());
 
   for (auto i = 0; i < p.num_devices; ++i) {
