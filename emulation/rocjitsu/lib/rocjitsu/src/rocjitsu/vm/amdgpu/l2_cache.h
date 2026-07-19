@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_L2_CACHE_H_
 #define ROCJITSU_VM_AMDGPU_L2_CACHE_H_
 
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
@@ -20,13 +21,12 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
-
-class GpuMemory; // Forward declaration for backing store writeback.
 
 /// @brief L2 cache component shared per Accelerator Complex Die (XCD).
 ///
@@ -50,12 +50,13 @@ class GpuMemory; // Forward declaration for backing store writeback.
 ///
 /// @par Thread safety
 /// Public cache operations are thread-safe. Normal line operations take a
-/// per-set mutex so CPU dispatch workers sharing an XCD-local L2 can make
-/// progress on independent cache sets. Whole-cache maintenance takes all set
-/// mutexes in address-set order to exclude concurrent set operations without
-/// adding a global lock to every cache hit. Each line operation is atomic with
-/// respect to other operations on that set; a request spanning multiple lines
-/// is intentionally not an atomic snapshot of the full range.
+/// shared maintenance lock followed by a per-set mutex, so CPU dispatch workers
+/// sharing an XCD-local L2 can make progress on independent cache sets.
+/// Whole-cache maintenance takes the maintenance lock exclusively, avoiding
+/// both concurrent set access and TSan's fixed lock-tracker limit. Each line
+/// operation is atomic with respect to other operations on that set; a request
+/// spanning multiple lines is intentionally not an atomic snapshot of the full
+/// range.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -126,29 +127,34 @@ public:
 
   /// @brief Perform an atomic read-modify-write on a cache line.
   ///
-  /// @details Serializes through a process-wide striped lock shared by all L2
-  /// instances, refetches the line from backing memory, then calls the provided
-  /// function with a pointer to the line data and the byte offset within the
-  /// line. This models device-wide atomic arbitration when multiple XCD-local
-  /// L2s share backing memory.
+  /// @details Invalidates the local line, then delegates the RMW to GpuMemory,
+  /// which serializes by resolved backing address across all L2 instances.
+  /// Port-only configurations use one conservative process-wide lock. This
+  /// models device-wide atomic arbitration when multiple XCD-local L2s or VMID
+  /// aliases share backing memory.
   ///
   /// @param addr The memory address of the atomic target.
   /// @param size Access size in bytes (4 or 8).
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
-    std::lock_guard atomic_lock(global_atomic_mutex(addr));
+    std::shared_lock maintenance_lock(maintenance_mutex_);
     std::lock_guard set_lock(set_mutex(addr));
     flush_line_locked(addr, vmid);
-    ensure_line(addr, vmid);
 
-    uint32_t offset = CacheStore::line_offset(addr);
-    uint8_t *line = cache_.line_data_for_write(addr, vmid);
-    assert(line != nullptr && "ensure_line must guarantee hit");
-
-    fn(line, offset);
-
-    send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE, vmid);
+    if (backing_memory_) {
+      backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
+      backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+      backing_memory_->atomic_rmw(addr, size, [&](uint8_t *target) { fn(target, 0); }, vmid);
+    } else {
+      std::lock_guard atomic_lock(fallback_atomic_mutex());
+      ensure_line(addr, vmid);
+      uint32_t offset = CacheStore::line_offset(addr);
+      uint8_t *line = cache_.line_data_for_write(addr, vmid);
+      assert(line != nullptr && "ensure_line must guarantee hit");
+      fn(line, offset);
+      send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE, vmid);
+    }
 
     simdojo::CacheTag *ctag = nullptr;
     cache_.lookup(addr, &ctag, vmid);
@@ -168,7 +174,7 @@ public:
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
-    auto locks = lock_all_sets();
+    std::unique_lock maintenance_lock(maintenance_mutex_);
     cache_.invalidate_all();
   }
 
@@ -206,44 +212,12 @@ public:
 private:
   std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
 
-  static std::mutex &global_atomic_mutex(uint64_t addr) {
-    // Deliberately process-wide rather than per-L2: separate XCD-local L2s can
-    // target the same backing address, so device-wide atomics must rendezvous
-    // on the same striped lock even when they originate from different L2s.
-    static std::array<std::mutex, NUM_SETS> mutexes;
-    return mutexes[CacheStore::set_index(addr)];
+  static std::mutex &fallback_atomic_mutex() {
+    // Port-only configurations cannot expose a resolved backing identity.
+    // Serialize their atomics conservatively rather than keying by GPU VA.
+    static std::mutex mutex;
+    return mutex;
   }
-
-  class AllSetLocks {
-  public:
-    explicit AllSetLocks(std::array<std::mutex, NUM_SETS> &mutexes) : mutexes_(mutexes) {
-      try {
-        for (auto &mutex : mutexes_) {
-          mutex.lock();
-          ++locked_;
-        }
-      } catch (...) {
-        unlock_all();
-        throw;
-      }
-    }
-
-    AllSetLocks(const AllSetLocks &) = delete;
-    AllSetLocks &operator=(const AllSetLocks &) = delete;
-
-    ~AllSetLocks() { unlock_all(); }
-
-  private:
-    void unlock_all() {
-      while (locked_ > 0) {
-        --locked_;
-        mutexes_[locked_].unlock();
-      }
-    }
-
-    std::array<std::mutex, NUM_SETS> &mutexes_;
-    size_t locked_ = 0;
-  };
 
   class SetRangeLocks {
   public:
@@ -291,7 +265,6 @@ private:
     size_t locked_ = 0;
   };
 
-  AllSetLocks lock_all_sets() const { return AllSetLocks(set_mutexes_); }
   SetRangeLocks lock_sets_for_range(uint64_t line_start, uint64_t line_count) const {
     return SetRangeLocks(set_mutexes_, line_start, line_count);
   }
@@ -302,12 +275,14 @@ private:
                     uint32_t vmid = 0);
 
   CacheStore cache_;
+  mutable std::shared_mutex maintenance_mutex_;
   mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   std::vector<simdojo::Port *> cpl_ports_;
   std::atomic<uint64_t> write_count_ = 0; ///< Debug: total L2 writes (for trace).
-  // Relaxed atomics: striped atomic_rmw() calls can update these concurrently.
+  // Relaxed atomics: backing-address-striped atomic_rmw() calls can update
+  // these concurrently.
   std::atomic<uint64_t> backing_read_transactions_{0};
   std::atomic<uint64_t> backing_write_transactions_{0};
 };

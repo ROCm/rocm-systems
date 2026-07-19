@@ -97,9 +97,9 @@ jobs:
             allow_failure: false
             run_static_asan_launch: true
             # The simulator-wide stress tests exceed TSan's fixed 128-lock
-            # deadlock-tracker capacity; keep the race gate on this change's
-            # concurrent SparseMemory surface.
-            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest)\.'
+            # deadlock-tracker capacity; keep the race gate focused on the
+            # concurrent memory surfaces hardened by this change.
+            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest|L2CacheThreadingTest)\.'
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0

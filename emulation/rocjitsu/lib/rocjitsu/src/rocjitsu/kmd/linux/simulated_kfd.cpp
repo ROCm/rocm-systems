@@ -1769,17 +1769,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
                          "true sharing)");
       }
 
-      {
-        std::unique_lock ptlk(proc.page_table_mutex_);
-        auto *old_base = static_cast<uint8_t *>(alloc.host_ptr);
-        auto *new_base = static_cast<uint8_t *>(new_host_ptr);
-        for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-          uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-          auto pt_it = proc.page_table_.find(page_num);
-          if (pt_it != proc.page_table_.end() && pt_it->second.host_ptr == old_base + off)
-            pt_it->second.host_ptr = new_base + off;
-        }
-      }
+      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
 
       if (alloc.host_ptr_owned)
         libc_passthrough().munmap(alloc.host_ptr, alloc.size);
@@ -1810,15 +1800,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     // the local GPU sees writes from the importing GPU.  On real hardware
     // xGMI snoops handle this; in the simulator CC forces L2 invalidate
     // before every refetch, emulating the cross-GPU coherence protocol.
-    {
-      std::unique_lock ptlk(proc.page_table_mutex_);
-      for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-        uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-        auto pt_it = proc.page_table_.find(page_num);
-        if (pt_it != proc.page_table_.end())
-          pt_it->second.mtype = amdgpu::Mtype::CC;
-      }
-    }
+    proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
 
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;

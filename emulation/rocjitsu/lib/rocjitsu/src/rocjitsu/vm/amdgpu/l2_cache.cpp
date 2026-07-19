@@ -75,6 +75,7 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid) {
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -82,7 +83,8 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
       const uint32_t line_offset = CacheStore::line_offset(ea);
       const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
-      flush_line(ea, vmid);
+      std::lock_guard set_lock(set_mutex(ea));
+      flush_line_locked(ea, vmid);
       send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
       copied += chunk;
     }
@@ -110,6 +112,7 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
 }
 
 void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, uint32_t vmid) {
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -117,7 +120,8 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
       const uint32_t line_offset = CacheStore::line_offset(ea);
       const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
-      flush_line(ea, vmid);
+      std::lock_guard set_lock(set_mutex(ea));
+      flush_line_locked(ea, vmid);
       send_backing(ea, const_cast<uint8_t *>(src + copied), chunk, simdojo::MessageOp::WRITE, vmid);
       copied += chunk;
     }
@@ -154,6 +158,7 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 }
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
   const uint8_t *line = cache_.line_data_for_read(line_addr, vmid);
@@ -177,6 +182,7 @@ void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   std::lock_guard set_lock(set_mutex(line_addr));
   simdojo::CacheTag *tag = nullptr;
   if (cache_.lookup(line_addr, &tag, vmid)) {
@@ -223,13 +229,14 @@ void L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   std::lock_guard set_lock(set_mutex(addr));
   flush_line_locked(addr, vmid);
 }
 
 void L2Cache::flush_all(uint32_t vmid) {
   (void)vmid;
-  auto locks = lock_all_sets();
+  std::unique_lock maintenance_lock(maintenance_mutex_);
   uint32_t dirty_count = 0;
   uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   cache_.for_each_dirty([this, &dirty_count, &min_addr,
@@ -252,6 +259,7 @@ void L2Cache::flush_all(uint32_t vmid) {
 void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
   if (size == 0)
     return;
+  std::shared_lock maintenance_lock(maintenance_mutex_);
   const uint64_t line_start = CacheStore::line_address(addr);
   const uint64_t requested_lines =
       (static_cast<uint64_t>(CacheStore::line_offset(addr)) + size + LINE_SIZE - 1) / LINE_SIZE;

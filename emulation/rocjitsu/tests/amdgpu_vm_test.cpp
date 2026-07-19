@@ -472,6 +472,32 @@ TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
   EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::RW);
 }
 
+TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> old_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+  old_page[kOffset] = 0x11;
+  new_page[kOffset] = 0x22;
+  process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  ASSERT_EQ(memory.read8(kAddr, kPid), old_page[kOffset]);
+  ASSERT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  process.remap_page_host_ptrs(kBaseVa, old_page.data(), new_page.data(), new_page.size());
+  EXPECT_EQ(memory.read8(kAddr, kPid), new_page[kOffset]);
+
+  process.set_page_mtype(kBaseVa, new_page.size(), amdgpu::Mtype::CC);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
 TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;

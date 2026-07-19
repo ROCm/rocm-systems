@@ -315,9 +315,9 @@ uint32_t atomic_source_stride(const VectorMemState &d) {
 
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
-/// Reads old value from L2, applies the atomic operation, writes new value
-/// back. Invalidates the L1 line to prevent stale reads. Old values are
-/// stored in response_data for GLC return.
+/// Reads the old value through L2's backing-memory atomic path, applies the
+/// operation, and writes the new value back. The L1 line is invalidated to
+/// prevent stale reads. Old values are stored in response_data for GLC return.
 void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);

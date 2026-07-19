@@ -13,7 +13,9 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cassert>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -147,6 +149,42 @@ public:
       for (size_t i = 0; i < chunk; ++i)
         simdojo::SparseMemory::write8(ea + i, in[i]);
     });
+  }
+
+  /// @brief Perform an atomic read-modify-write on resolved backing storage.
+  /// @details Mapped aliases rendezvous on a process-wide lock stripe selected
+  /// from the resolved host address. The page-table shared lock remains held
+  /// through the callback, so remapping cannot change or retire the target
+  /// during the operation. Unmapped sparse/client accesses use a stable
+  /// address-space key instead.
+  /// @param addr GPU virtual address of the target.
+  /// @param size Access size in bytes (4 or 8).
+  /// @param fn Callback invoked with a pointer to the target bytes.
+  /// @param vmid Process VMID used for address translation.
+  template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
+    assert((size == 4 || size == 8) && (addr & PAGE_MASK) + size <= PAGE_SIZE);
+
+    const bool mapped = with_host_ptr(addr, vmid, [&](uint8_t *page) {
+      uint8_t *target = page + (addr & PAGE_MASK);
+      std::lock_guard lock(backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+      fn(target);
+    });
+    if (mapped)
+      return;
+
+    const pid_t client_pid = client_pid_for_vmid(vmid);
+    uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
+    if (client_pid > 0) {
+      key ^= static_cast<uintptr_t>(client_pid) * 0x9e3779b97f4a7c15ULL;
+    } else {
+      key ^= reinterpret_cast<uintptr_t>(this);
+    }
+
+    std::lock_guard lock(backing_atomic_mutex(key));
+    std::array<uint8_t, sizeof(uint64_t)> value{};
+    read_block(addr, std::span<uint8_t>(value.data(), size), vmid);
+    fn(value.data());
+    write_block(addr, std::span<const uint8_t>(value.data(), size), vmid);
   }
 
   uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
@@ -292,6 +330,14 @@ public:
   }
 
 private:
+  static std::mutex &backing_atomic_mutex(uintptr_t key) {
+    static std::array<std::mutex, 4096> mutexes;
+    key >>= 3;
+    key ^= key >> 17;
+    key ^= key >> 31;
+    return mutexes[key & (mutexes.size() - 1)];
+  }
+
   template <typename F> static void for_each_page_chunk(uint64_t addr, size_t len, F &&fn) {
     size_t offset = 0;
     while (offset < len) {

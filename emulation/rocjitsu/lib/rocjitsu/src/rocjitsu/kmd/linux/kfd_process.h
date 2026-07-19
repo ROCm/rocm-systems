@@ -202,7 +202,7 @@ public:
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.
-    page_table_generation_.fetch_add(1, std::memory_order_release);
+    publish_page_table_mutation_locked();
   }
 
   /// @brief Unmap pages from this process's GPU page table.
@@ -212,7 +212,43 @@ public:
       page_table_.erase((gpu_va + off) >> kPageShift);
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
-    page_table_generation_.fetch_add(1, std::memory_order_release);
+    publish_page_table_mutation_locked();
+  }
+
+  /// @brief Replace mapped host pages while preserving their other PTE fields.
+  /// @details The mutation and cache-generation publication occur under one
+  /// page-table critical section. Only entries still pointing at the expected
+  /// old page are changed.
+  void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock lock(page_table_mutex_);
+    auto *old_base = static_cast<uint8_t *>(old_host_ptr);
+    auto *new_base = static_cast<uint8_t *>(new_host_ptr);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.host_ptr == old_base + off &&
+          it->second.host_ptr != new_base + off) {
+        it->second.host_ptr = new_base + off;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
+  }
+
+  /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
+  void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock lock(page_table_mutex_);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.mtype != mtype) {
+        it->second.mtype = mtype;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
   }
 
   /// @brief Return the mutation counter used by GpuMemory translation caches.
@@ -266,7 +302,11 @@ public:
   DebugSession debug_session_;
 
 private:
-  /// @brief Page table version counter, bumped (release) on every map/unmap.
+  void publish_page_table_mutation_locked() {
+    page_table_generation_.fetch_add(1, std::memory_order_release);
+  }
+
+  /// @brief Page table version counter, bumped (release) on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
   ///          this generation; a mismatch on load (acquire) invalidates the
   ///          cached entry and forces a fresh page-table walk.

@@ -177,6 +177,62 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwSameAddressIsSerialized) {
   EXPECT_EQ(memory.read32(kTarget), kThreads * kIterations);
 }
 
+TEST(L2CacheThreadingTest, CrossL2AtomicRmwAliasedVasIsSerialized) {
+  GpuMemory memory("memory");
+  L2Cache l2a("l2a");
+  L2Cache l2b("l2b");
+  l2a.set_backing_memory(&memory);
+  l2b.set_backing_memory(&memory);
+
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kVaA = 0x100000;
+  constexpr uint64_t kVaB = 0x201000;
+  constexpr uint64_t kOffset = 64;
+  constexpr uint32_t kThreads = 8;
+  constexpr uint32_t kIterations = 1000;
+
+  rocjitsu::KfdProcess process_a(kVmidA);
+  rocjitsu::KfdProcess process_b(kVmidB);
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
+  process_a.map_pages(kVaA, backing.data(), backing.size());
+  process_b.map_pages(kVaB, backing.data(), backing.size());
+  memory.register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_,
+                          process_a.page_table_generation());
+  memory.register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_,
+                          process_b.page_table_generation());
+
+  std::barrier start(kThreads);
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    workers.emplace_back([&, tid] {
+      L2Cache &l2 = (tid & 1) ? l2b : l2a;
+      const uint64_t addr = ((tid & 1) ? kVaB : kVaA) + kOffset;
+      const uint32_t vmid = (tid & 1) ? kVmidB : kVmidA;
+      start.arrive_and_wait();
+      for (uint32_t i = 0; i < kIterations; ++i) {
+        l2.atomic_rmw(
+            addr, sizeof(uint32_t),
+            [](uint8_t *line, uint32_t offset) {
+              uint32_t value = 0;
+              std::memcpy(&value, line + offset, sizeof(value));
+              ++value;
+              std::memcpy(line + offset, &value, sizeof(value));
+            },
+            vmid);
+      }
+    });
+  }
+
+  for (auto &worker : workers)
+    worker.join();
+
+  uint32_t actual = 0;
+  std::memcpy(&actual, backing.data() + kOffset, sizeof(actual));
+  EXPECT_EQ(actual, kThreads * kIterations);
+}
+
 TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
   GpuMemory memory("memory");
   L2Cache l2("l2");
@@ -263,6 +319,41 @@ TEST(L2CacheTest, InvalidateRangeClampsAtAddressSpaceEnd) {
   l2.read(kLineAddr, actual.data(), actual.size());
 
   EXPECT_EQ(actual, replacement);
+}
+
+TEST(L2CacheTest, InvalidateRangeRefreshesOnlyCoveredSetsAndZeroSizeIsNoOp) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+
+  constexpr uint64_t kBase = 0x400000;
+  constexpr uint32_t kLines = 5;
+  std::array<std::array<uint8_t, L2Cache::LINE_SIZE>, kLines> initial{};
+  std::array<std::array<uint8_t, L2Cache::LINE_SIZE>, kLines> replacement{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+
+  for (uint32_t line = 0; line < kLines; ++line) {
+    initial[line].fill(static_cast<uint8_t>(0x10 + line));
+    replacement[line].fill(static_cast<uint8_t>(0x80 + line));
+    const uint64_t addr = kBase + static_cast<uint64_t>(line) * L2Cache::LINE_SIZE;
+    memory.write_block(addr, std::span<const uint8_t>(initial[line]));
+    l2.read(addr, actual.data(), actual.size());
+    ASSERT_EQ(actual, initial[line]);
+    memory.write_block(addr, std::span<const uint8_t>(replacement[line]));
+  }
+
+  l2.invalidate_range(kBase + L2Cache::LINE_SIZE + 32, 2 * L2Cache::LINE_SIZE);
+
+  for (uint32_t line = 0; line < kLines; ++line) {
+    const uint64_t addr = kBase + static_cast<uint64_t>(line) * L2Cache::LINE_SIZE;
+    l2.read(addr, actual.data(), actual.size());
+    const auto &expected = (line >= 1 && line <= 3) ? replacement[line] : initial[line];
+    EXPECT_EQ(actual, expected) << "line=" << line;
+  }
+
+  l2.invalidate_range(kBase, 0);
+  l2.read(kBase, actual.data(), actual.size());
+  EXPECT_EQ(actual, initial[0]);
 }
 
 
