@@ -4553,8 +4553,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           syncInfo->mgs = nullptr;
         }
         if (multiGridSync || singleGridSync) {
-          // Update sync data address.
-          syncInfo->sgs = {0};
+          // Give the single-grid counter its own cache line so its device-scope
+          // atomic traffic does not evict the read-only fields in MGSyncInfo.
+          // Reserve the whole line so the next kernarg allocation cannot share it.
+          auto* sgs = reinterpret_cast<Device::MGSyncData*>(
+              allocKernArg(Device::kSGSyncLineSize, Device::kSGSyncLineSize));
+          *sgs = {0};
+          syncInfo->sgs = sgs;
           // Fill rest of sync info fields
           syncInfo->grid_id = vcmd->gridId();
           syncInfo->num_grids = vcmd->numGrids();
