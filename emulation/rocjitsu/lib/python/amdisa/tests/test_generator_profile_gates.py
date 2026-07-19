@@ -2057,6 +2057,8 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
     assert 'wf.set_wave_sched_mode_raw' in hwreg
     assert '[[maybe_unused]] bool read_hwreg' in hwreg
     assert '[[maybe_unused]] bool write_hwreg' in hwreg
+    assert 'HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21' in hwreg
+    assert 'wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK' in hwreg
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())

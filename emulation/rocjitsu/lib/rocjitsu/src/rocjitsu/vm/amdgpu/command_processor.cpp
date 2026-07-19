@@ -44,6 +44,17 @@ namespace {
 constexpr uint32_t kMaxClusterWorkgroups = kClusterMulticastMaskBits;
 static_assert(kMaxClusterWorkgroups <= kClusterMulticastMaskBits);
 
+// GFX12 launch-state scalar selectors used by compiler-generated workgroup
+// and cluster identity sequences.
+constexpr uint32_t kGfx12Ttmp6 = 114;
+constexpr uint32_t kGfx12Ttmp7 = 115;
+constexpr uint32_t kGfx12Ttmp9 = 117;
+
+constexpr uint32_t kGfx12Ttmp6ClusterLocalXShift = 0;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalYShift = 4;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalZShift = 8;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxFlatIdShift = 24;
+
 struct PlannedWorkgroup {
   uint32_t local_wg_id = 0;
   uint32_t global_wg_id = 0;
@@ -285,16 +296,30 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   }
 
   if (cu->arch() == ROCJITSU_CODE_ARCH_GFX1250 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA4) {
-    constexpr uint32_t ttmp7 = 115;
-    constexpr uint32_t ttmp9 = 117;
     // The simulator aliases TTMP scalar selectors into the wavefront SGPR
     // block, so the block must include slots through TTMP9.
-    if (cu->config().sgprs_per_wf <= ttmp9) {
+    if (cu->config().sgprs_per_wf <= kGfx12Ttmp9) {
       throw std::runtime_error("RDNA4/gfx1250 TTMP launch payload requires at least 118 SGPR "
                                "slots per wavefront");
     }
-    cu->write_sgpr(sbase + ttmp7, ((wg_id_z & 0xFFFFu) << 16) | (wg_id_y & 0xFFFFu));
-    cu->write_sgpr(sbase + ttmp9, grid_wg_id_x);
+
+    const uint32_t cluster_size_x = nonzero_or_one(pkt.cluster_size_x);
+    const uint32_t cluster_size_y = nonzero_or_one(pkt.cluster_size_y);
+    const uint32_t cluster_size_z = nonzero_or_one(pkt.cluster_size_z);
+    const uint32_t cluster_local_x = grid_wg_id_x % cluster_size_x;
+    const uint32_t cluster_local_y = wg_id_y % cluster_size_y;
+    const uint32_t cluster_local_z = wg_id_z % cluster_size_z;
+    const uint32_t cluster_max_flat_id = cluster_size_x * cluster_size_y * cluster_size_z - 1;
+
+    const uint32_t ttmp6 = (cluster_local_x << kGfx12Ttmp6ClusterLocalXShift) |
+                           (cluster_local_y << kGfx12Ttmp6ClusterLocalYShift) |
+                           (cluster_local_z << kGfx12Ttmp6ClusterLocalZShift) |
+                           (cluster_max_flat_id << kGfx12Ttmp6ClusterMaxFlatIdShift);
+    const uint32_t ttmp7 = ((wg_id_z / cluster_size_z) << 16) | (wg_id_y / cluster_size_y);
+    const uint32_t ttmp9 = grid_wg_id_x / cluster_size_x;
+    cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
+    cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
+    cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
   }
 
   // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index

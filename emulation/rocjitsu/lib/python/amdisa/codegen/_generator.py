@@ -2772,6 +2772,12 @@ class CodeGenerator:
             )
         if ib_sts2_id is not None:
             constexprs.append(f'constexpr uint32_t HW_REG_IB_STS2 = {ib_sts2_id};')
+            constexprs.extend(
+                [
+                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;',
+                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;',
+                ]
+            )
 
         read_cases = []
         if mode_id is not None:
@@ -2807,7 +2813,10 @@ class CodeGenerator:
             )
         if ib_sts2_id is not None:
             read_cases.append(
-                '  case HW_REG_IB_STS2:\n' '    reg_val = 0;\n' '    return true;'
+                '  case HW_REG_IB_STS2:\n'
+                '    reg_val = (wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)\n'
+                '              << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT;\n'
+                '    return true;'
             )
 
         write_cases = []
