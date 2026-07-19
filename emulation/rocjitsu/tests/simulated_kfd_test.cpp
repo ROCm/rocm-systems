@@ -6,6 +6,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -28,9 +29,12 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
+#include <sys/mman.h>
 #include <thread>
 #include <vector>
 
@@ -92,6 +96,68 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, ReusedDoorbellSlotIsRearmedForFirstPacket) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  constexpr size_t kPageSize = 4096;
+  const uint64_t doorbell_mmap_offset =
+      rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(driver->gpu_id());
+  void *doorbell_page = driver->mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                     static_cast<off_t>(doorbell_mmap_offset));
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+
+  alignas(kPageSize) std::array<uint8_t, 3 * kPageSize> queue_storage{};
+  auto make_queue = [&]() {
+    kfd_ioctl_create_queue_args args{};
+    args.ring_base_address = reinterpret_cast<uint64_t>(queue_storage.data());
+    args.read_pointer_address = reinterpret_cast<uint64_t>(queue_storage.data() + kPageSize);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(queue_storage.data() + 2 * kPageSize);
+    args.ring_size = kPageSize;
+    args.gpu_id = driver->gpu_id();
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.queue_percentage = KFD_MAX_QUEUE_PERCENTAGE;
+    return args;
+  };
+
+  auto first = make_queue();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &first), 0);
+  constexpr uint64_t kDoorbellOffsetMask = (uint64_t(1) << rocjitsu::KFD_MMAP_GPU_ID_SHIFT) - 1;
+  const uint64_t slot_offset = first.doorbell_offset & kDoorbellOffsetMask;
+  ASSERT_LE(slot_offset, kPageSize - sizeof(uint64_t));
+  auto *slot_bytes = static_cast<uint8_t *>(doorbell_page) + slot_offset;
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(slot_bytes) % std::atomic_ref<uint64_t>::required_alignment,
+            0u);
+  auto *slot = reinterpret_cast<uint64_t *>(slot_bytes);
+
+  // Fresh slots are armed by the doorbell-page mmap initialization.
+  EXPECT_EQ(std::atomic_ref<uint64_t>(*slot).load(std::memory_order_acquire),
+            std::numeric_limits<uint64_t>::max());
+
+  // Model the first queue's write-index-0 ring, then destroy it so the next
+  // queue receives the same per-process doorbell offset.
+  std::atomic_ref<uint64_t>(*slot).store(0, std::memory_order_release);
+  kfd_ioctl_destroy_queue_args destroy_first{};
+  destroy_first.queue_id = first.queue_id;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy_first), 0);
+
+  auto second = make_queue();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &second), 0);
+  EXPECT_EQ(second.doorbell_offset, first.doorbell_offset);
+
+  // This post-recycle assertion is the regression guard: create_queue must
+  // replace the previous queue's 0 before publishing the reused offset.
+  EXPECT_EQ(std::atomic_ref<uint64_t>(*slot).load(std::memory_order_acquire),
+            std::numeric_limits<uint64_t>::max());
+
+  kfd_ioctl_destroy_queue_args destroy_second{};
+  destroy_second.queue_id = second.queue_id;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy_second), 0);
+  EXPECT_EQ(driver->close(), 0);
 }
 
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {

@@ -16,6 +16,8 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cassert>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -1401,6 +1403,28 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         return -ENOSPC;
       db_offset = static_cast<uint32_t>(gs.next_doorbell_offset);
       gs.next_doorbell_offset += sizeof(uint64_t);
+    }
+
+    // Fresh slots already contain ~0 from doorbell-page initialization, while
+    // recycled slots retain the previous queue's final value (normally 0 for
+    // a one-packet queue). Store the sentinel unconditionally so every queue
+    // is armed before publication and the CP cannot consume a stale ~0 -> 0
+    // transition before the host's first write-index-0 submission.
+    // create_queue is serialized with the process, and ROCr cannot access this
+    // offset until the ioctl returns.
+    // If the doorbell page is not mapped yet, the CP retains a null base;
+    // dispatch_mmap arms the whole page before publishing that base to the CP.
+    if (gs.doorbell_page) {
+      assert(gs.doorbell_page_size >= sizeof(uint64_t) &&
+             db_offset <= gs.doorbell_page_size - sizeof(uint64_t) &&
+             "doorbell slot must fit within the mapped page");
+      auto *slot_bytes = static_cast<uint8_t *>(gs.doorbell_page) + db_offset;
+      assert(reinterpret_cast<uintptr_t>(slot_bytes) %
+                     std::atomic_ref<uint64_t>::required_alignment ==
+                 0 &&
+             "doorbell slot must satisfy atomic_ref alignment");
+      auto *slot = reinterpret_cast<uint64_t *>(slot_bytes);
+      std::atomic_ref<uint64_t>(*slot).store(~uint64_t(0), std::memory_order_release);
     }
 
     hw.process_id = proc.process_id();
