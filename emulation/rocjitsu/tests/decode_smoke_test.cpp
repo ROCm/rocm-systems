@@ -24,6 +24,7 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
@@ -213,6 +214,31 @@ TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOper
   EXPECT_EQ(src1->size_bits(), 32);
   EXPECT_FALSE(src1->literal64_value().has_value());
   EXPECT_EQ(static_cast<uint32_t>(src1->encoding_value()), literal);
+}
+
+TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
+  rdna3::FlatMachineInst encoding{};
+  // Flat's primary decode ID includes three lower opcode/padding bits;
+  // the machine encoding field holds the upper six bits.
+  encoding.encoding = rdna3::encoding::kFlat >> 3;
+  encoding.op = rdna3::kFlatLoadB64Flat;
+  encoding.seg = 2;
+  encoding.addr = 1;
+  encoding.saddr = 0x7F;
+  encoding.vdst = 2;
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(encoding);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "global_load_b64");
+  EXPECT_EQ(inst->num_src_operands(), 1);
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 1}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 2}));
 }
 
 struct VopdDecodeCase {
@@ -953,7 +979,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   };
   // The same instruction with SADDR disabled uses a 64-bit vector address.
   const uint32_t vector_only_words[] = {
-      0xEC05407Fu,
+      0xEC05407Cu,
       0x00000002u,
       0x00000001u,
   };
@@ -965,15 +991,20 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "flat_load_b64 v[2:3], v1, s[6:7]");
+  EXPECT_EQ(saddr_inst->num_src_operands(), 2);
   InstDefUse saddr_def_use(*saddr_inst);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
 
   std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 1);
   InstDefUse vector_only_def_use(*vector_only_inst);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
 }
 
 TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
@@ -985,7 +1016,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   };
   // The same instruction with SADDR disabled uses a 64-bit vector address.
   const uint32_t vector_only_words[] = {
-      0xEE05407Fu,
+      0xEE05407Cu,
       0x00000002u,
       0x0000000Au,
   };
@@ -997,15 +1028,20 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "global_load_b64 v[2:3], v10, s[6:7]");
+  EXPECT_EQ(saddr_inst->num_src_operands(), 2);
   InstDefUse saddr_def_use(*saddr_inst);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
 
   std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 1);
   InstDefUse vector_only_def_use(*vector_only_inst);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
 }
 
 TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
@@ -1025,6 +1061,94 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
+}
+
+TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
+  const uint32_t words[] = {
+      0xD44C0002u, // v_cmp_gt_u32 s2, s5, v12
+      0x02021805u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_cmp_gt_u32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
+  EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
+  EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
+}
+
+TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
+  const uint32_t words[] = {
+      0xD3AD0024u,
+      0x0492F572u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 36, 4}));
+}
+
+TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
+  struct FormatCase {
+    uint32_t format;
+    uint8_t register_count;
+  };
+  constexpr std::array cases = {
+      FormatCase{0, 8}, // FP8
+      FormatCase{2, 6}, // FP6
+      FormatCase{4, 4}, // FP4
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &[format, register_count] : cases) {
+    const uint32_t words[] = {
+        0xD3AD0024u | (format << 8),
+        0x00024100u | (format << 29),
+    };
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+
+    InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 0, register_count}));
+    EXPECT_FALSE(
+        def_use.uses.contains({RegClass::VGPR, 0, static_cast<uint8_t>(register_count + 1)}));
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 32, register_count}));
+    EXPECT_FALSE(
+        def_use.uses.contains({RegClass::VGPR, 32, static_cast<uint8_t>(register_count + 1)}));
+  }
+}
+
+TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
+  const uint32_t words[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AD0000u,
+      0x04020100u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
 }
 
 } // namespace
