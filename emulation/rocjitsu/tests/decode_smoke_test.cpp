@@ -1061,6 +1061,8 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
+}
+
 TEST(Rdna4DecodeTest, VopdXyConsumesThreeDwords) {
   const uint32_t words[] = {
       0xCA240080u, // v_dual_mov_b32 v5, 0 :: v_dual_and_b32 v4, 0x3ff, v31
