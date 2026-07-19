@@ -334,7 +334,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNullptrParams)
     hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
     std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
-    // With nr > 0 and a nullptr iocbp, the API must reject the call before
+    // With a nullptr iocbp, the API must reject the call before
     // ever reaching the batch context (avoids dereferencing the nullptr).
     EXPECT_CALL(mock_state, getBatchContext).Times(0);
     EXPECT_CALL(*mock_b_context, submitOperations).Times(0);
@@ -342,6 +342,17 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNullptrParams)
     auto           result          = hipFileBatchIOSubmit(b_handle, 1, nullptr, 0);
     hipFileError_t expected_result = {hipFileInvalidValue, hipSuccess};
     ASSERT_EQ(result, expected_result);
+}
+
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitZeroRequests)
+{
+    hipFileBatchHandle_t b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t    io_param;
+
+    EXPECT_CALL(mock_state, getBatchContext).Times(0);
+
+    auto result = hipFileBatchIOSubmit(b_handle, 0, &io_param, 0);
+    ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
 }
 
 /// @brief Test hipFileIO function
