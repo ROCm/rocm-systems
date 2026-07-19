@@ -894,4 +894,137 @@ TEST(Cdna2DecodeTest, MemoryAccBitSelectsAccumulatorDestination) {
   }
 }
 
+TEST(Gfx1250DecodeTest, FmamkF64ConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x46040504u, // v_fmamk_f64 v[2:3], v[4:5], 0xc1f0000000000000, v[2:3]
+      0x00000000u,
+      0xC1F00000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_fmamk_f64_e32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("0xc1f0000000000000"), std::string::npos) << disasm;
+}
+
+TEST(Gfx1250DecodeTest, FmaakF64ConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x48040504u, // v_fmaak_f64 v[2:3], v[4:5], v[2:3], 0xc1f0000000000000
+      0x00000000u,
+      0xC1F00000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_fmaak_f64_e32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(), "v_fmaak_f64_e32 v[2:3], v[4:5], v[2:3], 0xc1f0000000000000");
+}
+
+TEST(Gfx1250DecodeTest, Vop3True16DestinationUsesFullEightBitVgprIndex) {
+  const uint32_t words[] = {
+      0xD7620086u,
+      0x02030CFFu,
+      0x000000FFu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_and_b16");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(), "v_and_b16 v134, 0xff, v134");
+}
+
+TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
+  // LLVM disassembles these words as flat_load_b64 v[2:3], v1, s[6:7].
+  const uint32_t saddr_words[] = {
+      0xEC054006u,
+      0x00000002u,
+      0x00000001u,
+  };
+  // The same instruction with SADDR disabled uses a 64-bit vector address.
+  const uint32_t vector_only_words[] = {
+      0xEC05407Fu,
+      0x00000002u,
+      0x00000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  ASSERT_NE(saddr_inst, nullptr);
+  EXPECT_EQ(saddr_inst->mnemonic(), "flat_load_b64");
+  EXPECT_EQ(saddr_inst->disassemble(), "flat_load_b64 v[2:3], v1, s[6:7]");
+  InstDefUse saddr_def_use(*saddr_inst);
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+
+  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  ASSERT_NE(vector_only_inst, nullptr);
+  EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
+  InstDefUse vector_only_def_use(*vector_only_inst);
+  EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+}
+
+TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
+  // LLVM disassembles these words as global_load_b64 v[2:3], v10, s[6:7].
+  const uint32_t saddr_words[] = {
+      0xEE054006u,
+      0x00000002u,
+      0x0000000Au,
+  };
+  // The same instruction with SADDR disabled uses a 64-bit vector address.
+  const uint32_t vector_only_words[] = {
+      0xEE05407Fu,
+      0x00000002u,
+      0x0000000Au,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  ASSERT_NE(saddr_inst, nullptr);
+  EXPECT_EQ(saddr_inst->mnemonic(), "global_load_b64");
+  EXPECT_EQ(saddr_inst->disassemble(), "global_load_b64 v[2:3], v10, s[6:7]");
+  InstDefUse saddr_def_use(*saddr_inst);
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
+  EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+
+  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  ASSERT_NE(vector_only_inst, nullptr);
+  EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
+  InstDefUse vector_only_def_use(*vector_only_inst);
+  EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+}
+
+TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
+  // LLVM disassembles these words as global_store_b64 v10, v[2:3], s[6:7].
+  const uint32_t words[] = {
+      0xEE06C006u,
+      0x01000000u,
+      0x0000000Au,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "global_store_b64");
+  EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
+}
+
 } // namespace

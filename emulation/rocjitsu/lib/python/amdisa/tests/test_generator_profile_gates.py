@@ -1202,6 +1202,9 @@ def test_packed_16bit_source_gate_is_limited_to_e32_16bit_sources():
     assert not codegen._operand_uses_packed_16bit_source('ENC_VOP1', wide_src)
     assert not codegen._operand_uses_packed_16bit_source('ENC_VOP1', dst)
     assert codegen._operand_uses_packed_16bit_source('ENC_VOP2', dst, reads_dst=True)
+    assert codegen._operand_uses_packed_16bit_dst('ENC_VOP1', dst)
+    assert codegen._operand_uses_packed_16bit_dst('ENC_VOP2', dst)
+    assert not codegen._operand_uses_packed_16bit_dst('ENC_VOP3', dst)
 
 
 def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
@@ -1211,10 +1214,12 @@ def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
     operand_h = (gfx1250_generated_root / 'operand.h').read_text()
 
     assert 'if (ev >= 0 && ev <= 127)' in operand_cpp
+    assert 'packed_16bit_vgpr_dst(packed_16bit_dst_' in operand_cpp
     assert 'packed->shift ? 0x0000ffffu : 0xffff0000u' in operand_cpp
     assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_cpp
     assert 'void Operand::write_lane_chunk' in operand_cpp
     assert 'void write_lane_chunk(amdgpu::Wavefront &wf' in operand_h
+    assert 'bool packed_16bit_dst = false' in operand_h
 
 
 def test_gfx1250_generated_vop2_uses_packed_16bit_vsrc1(
@@ -1226,6 +1231,21 @@ def test_gfx1250_generated_vop2_uses_packed_16bit_vsrc1(
     assert (
         'static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true)'
         in vop2_cpp
+    )
+
+
+def test_gfx1250_generated_vop1_selects_packed_destination_overload(
+    gfx1250_generated_root: Path,
+):
+    vop1_cpp = (gfx1250_generated_root / 'vop1.cpp').read_text()
+
+    start = vop1_cpp.index('VCvtF16F32Vop1::VCvtF16F32Vop1')
+    end = vop1_cpp.index('void VCvtF16F32Vop1::execute_impl', start)
+    compact_ctor = ''.join(vop1_cpp[start:end].split())
+
+    assert (
+        'vdst(16,OperandType::OPR_VGPR,static_cast<unsignedshort>('
+        'reinterpret_cast<constOpEncoding*>(inst)->vdst),false,true)' in compact_ctor
     )
 
 
@@ -1242,7 +1262,7 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
     compact_ctor = ''.join(ctor.split())
     assert (
         'vdst(16,OperandType::OPR_VGPR,static_cast<unsignedshort>('
-        'reinterpret_cast<constOpEncoding*>(inst)->vdst),true)' in compact_ctor
+        'reinterpret_cast<constOpEncoding*>(inst)->vdst),true,true)' in compact_ctor
     )
 
 
