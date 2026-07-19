@@ -1772,6 +1772,17 @@ private:
       du.has_exec_masked_vector_def = true;
   }
 
+  [[nodiscard]] static bool is_vop3_carry_out(std::string_view mnemonic) {
+    return mnemonic == "v_add_co_u32" || mnemonic == "v_add_co_ci_u32" ||
+           mnemonic == "v_sub_co_u32" || mnemonic == "v_sub_co_ci_u32" ||
+           mnemonic == "v_subrev_co_u32" || mnemonic == "v_subrev_co_ci_u32";
+  }
+
+  [[nodiscard]] static bool is_vop3_carry_in(std::string_view mnemonic) {
+    return mnemonic == "v_add_co_ci_u32" || mnemonic == "v_sub_co_ci_u32" ||
+           mnemonic == "v_subrev_co_ci_u32";
+  }
+
   [[nodiscard]] static bool add_adjusted_destination_def(InstDefUse &du, const Instruction &inst,
                                                          const Operand &op, int operand_index,
                                                          const VgprMsbState &state,
@@ -1782,6 +1793,17 @@ private:
     // Generated operands may retain either a fixed target width or the maximum
     // encoding width, so normalize the physical def to the kernel's wave mode.
     if (operand_index == 0 && starts_with(inst.mnemonic(), "v_cmp")) {
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
+        ref->width = wavefront_size == 32 ? 1 : 2;
+        add_def(du, *ref, op, state, arch);
+        return true;
+      }
+    }
+
+    // VOP3 integer carry instructions use LLVM's wave-sized BoolRC for their
+    // scalar carry-out. Generated operands retain the maximum two-SGPR width,
+    // which would spuriously clobber the adjacent SGPR in Wave32 kernels.
+    if (operand_index == 1 && is_vop3_carry_out(inst.mnemonic())) {
       if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
         ref->width = wavefront_size == 32 ? 1 : 2;
         add_def(du, *ref, op, state, arch);
@@ -1826,7 +1848,8 @@ private:
         operand_index == 2;
     const bool is_vopd_mask = mnemonic.find("v_dual_cndmask_b32") != std::string_view::npos &&
                               op.vgpr_msb_role() == amdgpu::VgprMsbRole::Src2;
-    if (is_vop3_mask || is_vopd_mask) {
+    const bool is_vop3_carry_mask = operand_index == 2 && is_vop3_carry_in(mnemonic);
+    if (is_vop3_mask || is_vopd_mask || is_vop3_carry_mask) {
       if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
         // LLVM's BoolRC predicate is one physical SGPR in Wave32 and a pair in
         // Wave64. VOP3/VOPD keep the maximum-width encoded operand in the

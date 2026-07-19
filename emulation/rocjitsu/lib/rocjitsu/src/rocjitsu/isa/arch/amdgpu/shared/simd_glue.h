@@ -240,10 +240,12 @@ inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
 }
 
 /// @brief Read a wave-sized mask from an explicit scalar-register operand.
-/// @details Reads one SGPR for a Wave32 wavefront and an SGPR pair for Wave64.
+/// @details Reads one SGPR for Wave32 or an explicitly 32-bit operand, and an
+/// SGPR pair otherwise.
 template <typename Op> inline uint64_t read_wave_mask_scalar(const Op &op, Wavefront &wf) {
   RegisterAccess regs(wf);
-  return wf.wf_size() <= 32 ? static_cast<uint64_t>(regs.read_scalar(op)) : regs.read_scalar64(op);
+  return wf.wf_size() <= 32 || op.size_bits() <= 32 ? static_cast<uint64_t>(regs.read_scalar(op))
+                                                    : regs.read_scalar64(op);
 }
 
 template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {
