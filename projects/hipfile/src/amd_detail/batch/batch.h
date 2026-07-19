@@ -309,10 +309,10 @@ private:
     const std::unique_ptr<const hipFileIOParams_t> io_params;
 
     /// @brief A reference to the specified Buffer.
-    std::shared_ptr<const IBuffer> buffer;
+    std::shared_ptr<IBuffer> buffer;
 
     /// @brief A reference to the specified registered File.
-    std::shared_ptr<const IFile> file;
+    std::shared_ptr<IFile> file;
 
     /// @brief Protects operation state.
     mutable std::mutex state_mutex;
