@@ -383,7 +383,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 std::vector<std::unique_ptr<BasicBlock>>
 BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                             std::span<const uint64_t> entry_offsets,
-                            std::span<const uint64_t> entry_sizes) {
+                            std::span<const uint64_t> entry_sizes, uint32_t wavefront_size) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   if (entry_offsets.empty())
     return blocks;
@@ -507,7 +507,7 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
 
       const auto newly_recovered = discover_indirect_branch_edges(
           std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
-          arch, discovery_leaders);
+          arch, discovery_leaders, wavefront_size);
       for (const IndirectCallFixup &fixup : newly_recovered) {
         const auto duplicate = std::ranges::find_if(
             recovered_indirect_targets, [&](const IndirectCallFixup &existing) {

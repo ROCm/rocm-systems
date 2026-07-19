@@ -132,10 +132,12 @@ public:
   /// executable sections of library code objects. Statically recoverable call
   /// targets are decoded on demand so callers can model helper waits without
   /// scanning the rest of a large library code object.
+  /// @param[in] wavefront_size Kernel wave size when known, or zero to retain
+  /// decoded maximum-width wave-mask operands during indirect-edge discovery.
   static std::vector<std::unique_ptr<BasicBlock>>
   build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                   std::span<const uint64_t> entry_offsets,
-                  std::span<const uint64_t> entry_sizes = {});
+                  std::span<const uint64_t> entry_sizes = {}, uint32_t wavefront_size = 0);
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);

@@ -3772,11 +3772,11 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       }
       const std::array<uint64_t, 1> entry{*selected_kernel_entry};
       const std::array<uint64_t, 1> entry_size{is_kernel ? kernel_it->code_size : 0};
-      const auto start = std::chrono::steady_clock::now();
-      std::vector<std::unique_ptr<BasicBlock>> blocks =
-          BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
       const uint32_t wavefront_size =
           is_kernel ? kernel_it->wavefront_size : default_wavefront_size(arch);
+      const auto start = std::chrono::steady_clock::now();
+      std::vector<std::unique_ptr<BasicBlock>> blocks = BasicBlock::build_reachable(
+          code_object, *decoder, arch, entry, entry_size, wavefront_size);
       analyzer.set_kernel_context(is_kernel ? &*kernel_it : nullptr);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
       if (is_kernel && report.supported && !report.stopped_early) {
@@ -3802,8 +3802,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         const std::array<uint64_t, 1> entry{entry_offset};
         const std::array<uint64_t, 1> entry_size{kernel ? kernel->code_size : 0};
         const auto start = std::chrono::steady_clock::now();
-        std::vector<std::unique_ptr<BasicBlock>> blocks =
-            BasicBlock::build_reachable(code_object, *decoder, arch, entry, entry_size);
+        std::vector<std::unique_ptr<BasicBlock>> blocks = BasicBlock::build_reachable(
+            code_object, *decoder, arch, entry, entry_size, wavefront_size);
         analyzer.set_kernel_context(kernel);
         analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
         if (kernel && report.supported && !report.stopped_early) {

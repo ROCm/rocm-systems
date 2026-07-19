@@ -2,10 +2,10 @@
 
 ## Summary
 
-We investigated 15 distinct gfx1250 kernel entries sampled from 18,772 XCNT
-diagnostics in the PyTorch `2.11.0+rocm7.15.0a20260717` wheel. Exact source
-rebuilds, physical-MIR controls, and LLVM pass dumps reduce the confirmed
-reports to four root-cause patterns:
+We investigated 25 distinct gfx1250 kernel entries sampled from the PyTorch
+`2.11.0+rocm7.15.0a20260717` wheel. Exact source rebuilds, physical-MIR
+controls, LLVM pass dumps, and final-ISA checks reduce the confirmed reports
+to four root-cause patterns:
 
 1. `SIInsertWaitcnts` relies on a branch to drain XCNT, then
    `SIPreEmitPeephole` removes the branch without preserving the drain. This
@@ -21,10 +21,23 @@ reports to four root-cause patterns:
 
 All four are real wait hazards according to LLVM's own gfx1250 XCNT model. The
 reduced testcases make the final ISA issues reproducible, but we have not
-demonstrated runtime corruption. One additional true16 case, `bd-3ay6.34`,
-also agrees with LLVM's regunit model, but its first unsafe pass is not yet
-pinned down; it remains a minimization task rather than a separately
+demonstrated runtime corruption. They cannot be dismissed as irrelevant to an
+XNACK-disabled execution mode: gfx1250 has XNACK always enabled and does not
+support selecting an XNACK-off mode. The second ten-entry sample did not expose
+a new hazard class: eight are compiler-generated variants of the existing
+XCNT dependencies, and two are additional instances of the rocPRIM
+inline-assembly bug. One additional true16 case in `torch.117.co`, entry
+`0x33c000`, also agrees with LLVM's regunit model, but its first unsafe pass is
+not yet pinned down; it remains a minimization task rather than a separately
 attributed bug report.
+
+The post-correction exhaustive checkpoint completed all 232 code objects and
+41,124 kernels with zero analysis errors. It analyzed 137,101,030
+instructions and 11,846,488 memory events in 11 minutes 51 seconds at `-j12`,
+emitting 19,396 diagnostics across 1,163 kernels in 72 objects. Compared with
+the earlier 18,772-diagnostic checkpoint, the VGPR and SGPR results are
+identical; the exact increase of 624 is the newly covered explicit-EXEC
+overwrites described below. The Wave32 indirect-call false positives are gone.
 
 The attached files are compiler-only reproducers. Their generated kernels and
 code objects must not be executed:
@@ -53,6 +66,35 @@ AMDCLANG=/path/to/amdclang++
 LLC=/path/to/llc
 WAITCHECK=/path/to/rj_waitcheck
 ```
+
+## Why XNACK does not make these reports harmless
+
+XCNT tracks the lifetime of memory-instruction register operands until their
+XNACK response has been received. On a target where XNACK can genuinely be
+disabled, reusing those operands without an XCNT wait would not create this
+particular replay hazard. That qualification does not suppress any of the
+gfx1250 results in this report.
+
+LLVM defines gfx1250 through `FeatureISAVersion12_50_Common`, which includes
+both `FeatureXNACK` and `FeatureWaitXcnt`. It deliberately does not include
+`FeatureXNACKOnOffModes`. The regression
+`llvm/test/CodeGen/AMDGPU/target-id-xnack-always-on.ll` states the consequence
+directly: gfx1250, gfx1251, and the gfx12.5 generic target have XNACK always on,
+and their target IDs therefore omit `xnack+`/`xnack-` modifiers. Even an
+explicit `-mattr=-xnack` does not create a gfx1250 XNACK-off target ID.
+
+The absence of `xnack+` in a gfx1250 code-object target string must therefore
+not be read as XNACK being disabled. All 232 PyTorch objects in this sweep have
+ELF flags `0x549`, decoded by LLVM as gfx1250 with
+`EF_AMDGPU_FEATURE_XNACK_ANY_V4` and `EF_AMDGPU_FEATURE_SRAMECC_ANY_V4`.
+For a target without XNACK on/off modes, LLVM's `TargetID::isXnackOnOrAny()`
+treats that `ANY` state as enabled. It is not an opt-out and there is no
+per-kernel switch that would make these XCNT dependencies inert.
+
+Consequently, an XNACK-based filter in waitcheck would be useful only for a
+future XCNT-capable target or execution mode where XNACK can actually be off.
+Applying such a filter to these gfx1250 objects would incorrectly hide the
+reported hazards.
 
 ## Reproducer 1: an XCNT-draining branch is removed
 
@@ -166,6 +208,38 @@ We observed the same `SIInsertWaitcnts` then `SIPreEmitPeephole` transition in
 These are ordinary HIP/CUDA or rocPRIM template instantiations compiled by
 clang, not handwritten memory instructions. The common failure is in late
 machine-code transformation, not in the source operation.
+
+### Ten-entry follow-up sample
+
+A fresh exhaustive sweep selected ten kernel entries disjoint from the first
+15. Each reported producer reaches its consumer by ordinary fallthrough with
+no intervening XCNT drain. LLVM's physical-register model agrees with all ten
+dependencies: XCNT scores the VMEM/SMEM address, payload, and EXEC uses, and a
+later definition of an overlapping regunit requires the indicated threshold.
+The partial-register and packed-dual cases were also checked against LLVM's
+decoded physical operands rather than inferred from disassembly spelling.
+
+| PyTorch object and kernel | Source provenance | Representative final hazard | Classification |
+| --- | --- | --- | --- |
+| `torch.117.co`, `addr<signed char>`, entry `0xdbc00` | `aten/src/ATen/native/cuda/LinearAlgebra.cu:18` | `global_load_u8 v18, v[32:33]` at `0xe5bc0`, then address definition `v_add_nc_u64 v[32:33]` at `0xe5bd8` | True positive; compiler-generated VMEM address XCNT dependency |
+| `torch.119.co`, rocPRIM scan for `logcumsumexp<double>`, entry `0x44a00` | Launched by `aten/src/ATen/native/cuda/LogcumsumexpKernel.cu:104` | `global_store_b128 v[10:11], v[6:9]` at `0x4d5dc`, then payload definition `v_add_nc_u32 v8` at `0x4d600` | True positive; rocPRIM uint128 inline assembly omits the XCNT wait |
+| `torch.131.co`, rocPRIM partition for `nonzero`, entry `0x64700` | `aten/src/ATen/native/cuda/Nonzero.cu:170-283` | `global_store_b128 v[18:19], v[14:17]` at `0x65010`, then `s_or_b32 EXEC_LO` at `0x65020` | True positive; the same rocPRIM inline assembly also releases its implicit EXEC source too early |
+| `torch.161.co`, `heaviside<BFloat16>`, entry `0x527100` | `aten/src/ATen/native/cuda/StepKernel.cu:22` | `global_load_u16 v6, v[4:5]` at `0x52ef70`, then EXEC definition at `0x52efac` | True positive; compiler-generated implicit-EXEC XCNT dependency |
+| `torch.165.co`, rocPRIM `reduce_by_key<signed char,long>`, entry `0x118600` | Triggered by `aten/src/ATen/native/cuda/TensorModeKernel.cu` | `s_load_b64 s[34:35], s[0:1]` at `0x1188c0`, then address-base definition `s_mov_b32 s0` at `0x1188cc` | True positive; compiler-generated SMEM base XCNT dependency |
+| `torch.170.co`, `angle<double>`, entry `0xcc00` | `aten/src/ATen/native/cuda/UnaryComplexKernels.cu:32` | `global_store_b8 v[16:17], v0` at `0x15b2c`, then payload definition `v_cndmask_b32 v0` at `0x15b60` | True positive; compiler-generated VMEM payload XCNT dependency |
+| `torch.184.co`, `log2<double>`, entry `0x1d0400` | `aten/src/ATen/native/cuda/UnaryLogKernels.cu:88` | `global_store_b8 v[12:13], v0` at `0x1d8878`, then `v_frexp_mant_f64 v[0:1]` at `0x1d8884` | True positive; LLVM's 64-bit destination overlaps the locked payload `v0` |
+| `torch.185.co`, `exp<BFloat16>`, entry `0x104b00` | `aten/src/ATen/native/cuda/UnaryOpsKernel.cu:38-65` | `global_store_b8 v[6:7], v1` at `0x10eb08`, then `v_mov_b16 v1.l` at `0x10eb14` | True positive; LLVM regunits make the low-half definition overlap the store payload |
+| `torch.219.co`, `_fake_quant_per_channel_cachemask<float>`, entry `0x52ee00` | `aten/src/ATen/native/quantized/cuda/FakeQuantizeCore.cu:169-214` | `global_store_b8 v[6:7], v3` at `0x540040`, then `v_div_scale_f32` defines `v3` at `0x54004c` | True positive; LLVM and waitcheck agree on the multi-result instruction's `v3` definition |
+| `torch.36.co`, `hardsigmoid_backward<float>`, entry `0xd4700` | `aten/src/ATen/native/cuda/ActivationHardsigmoidKernel.cu:44` | `global_store_b8 v[2:3], v1` at `0xdfb58`, then the Y slot of a VOPD instruction defines `v1` at `0xdfb88` | True positive; exact-source pass dumps pin this instance to `SIPreEmitPeephole::optimizeVccBranch()` |
+
+The exact `hardsigmoid_backward` source rebuild reproduces four diagnostics at
+the same entry and instruction offsets. Immediately after
+`SIInsertWaitcnts`, a constant-false `S_CBRANCH_VCCNZ` drains XCNT between the
+store and these definitions. `SIPreEmitPeephole::optimizeVccBranch()` removes
+that branch, yielding the unwaited final sequence. This is the same
+pass-to-pass failure isolated by Reproducer 1. The other compiler-generated
+rows have the same final physical dependency, regardless of whether their
+first unsafe transformation is minimized separately.
 
 ## Reproducer 2: spill-pseudo implicit operands corrupt XCNT scoring
 
@@ -315,9 +389,9 @@ a pending store at lines 1537-1543. Because the producer is hidden inside an
 the library's incomplete assembly contract.
 
 The original reports were the rocPRIM scan kernels in `torch.29.co`, entry
-`0x35700` (payload reuse, `bd-3ay6.29`), and `torch.189.co`, entry `0x1ca00`
-(address and EXEC reuse, `bd-3ay6.30`). PyTorch reaches the operation through
-its normal scan use; the handwritten ISA belongs to rocPRIM.
+`0x35700` (payload reuse), and `torch.189.co`, entry `0x1ca00` (address and EXEC
+reuse). PyTorch reaches the operation through its normal scan use; the
+handwritten ISA belongs to rocPRIM.
 
 ## Reproducer 4: `removeExeczBranch` deletes an XCNT drain
 
@@ -407,6 +481,23 @@ and `torch.73.co` replays now report the earlier consumers. This was a
 waitcheck false negative in diagnostic coverage, not a false positive in the
 underlying LLVM hazards.
 
+The follow-up exhaustive run found a second, unrelated waitcheck false-positive
+class in `torch.62.co`. Wave32 VOPC instructions define one physical SGPR, but
+the indirect-branch discovery pass retained the decoder's maximum-width SGPR
+pair. A compare defining `s3` was therefore treated as defining `s[3:4]`,
+which falsely killed an adjacent `s[4:5]` PC builder. Waitcheck then failed to
+recover an `s_swap_pc_i64` helper call and bypassed the helper's entry
+`s_wait_loadcnt_dscnt 0` in its CFG.
+
+The correction passes the known kernel wave size into reachable CFG recovery
+and normalizes VOPC and `v_div_scale` wave-mask definitions before SGPR-clobber
+analysis. The exact 56,806-instruction kernel at entry `0x343400` changed from
+a large false-positive stream to zero diagnostics in 1.03 seconds. Exhaustive
+analysis of all 440 kernels in `torch.62.co` now completes in 14.7 seconds and
+reports four diagnostics instead of 1,314,600 false producer/consumer pairs.
+A focused Wave32 `s3`/`s[4:5]` regression and all 305 waitcheck/C API tests
+pass. This CFG bug did not affect any of the ten entries in the table above.
+
 ## Unattributed true16 follow-up
 
 `torch.117.co`, entry `0x33c000` (`addr<BFloat16>`), contains
@@ -415,8 +506,8 @@ wait. Equivalent physical MIR makes `SIInsertWaitcnts` insert
 `S_WAIT_XCNT 0` before both low- and high-half definitions: the full `v1`
 store source and its subregister definitions share LLVM regunits. This rules
 out a waitcheck true16 false positive, but the exact first unsafe pass in the
-source-derived build is not yet stable enough to name. Keep `bd-3ay6.34` open
-for minimization rather than attributing it speculatively.
+source-derived build is not yet stable enough to name. It remains a
+minimization follow-up rather than a speculatively attributed compiler bug.
 
 ## Confidence and remaining question
 
@@ -434,11 +525,12 @@ The evidence is stronger than a final-ISA pattern match alone:
   assumption; the spill case contradicts the neighboring code's explicit
   warning about spill-pseudo implicit super-register operands.
 
-What remains to confirm is the gfx1250 hardware contract: do the producer
-operands remain locked until the indicated XCNT threshold, as modeled by
-LLVM's XCNT implementation? If yes, the compiler cases can become LLVM
-regression tests after fixes are chosen, and the rocPRIM assembly must include
-the missing XCNT wait.
+XNACK applicability is not an open question here: it is always enabled on
+gfx1250. What remains to confirm is the narrower hardware contract: do the
+producer operands remain locked until the indicated XCNT threshold, exactly as
+modeled by LLVM's XCNT implementation? If yes, the compiler cases can become
+LLVM regression tests after fixes are chosen, and the rocPRIM assembly must
+include the missing XCNT wait.
 
 Relevant implementation history includes Christudasan Devadasan's initial
 gfx1250 `S_WAIT_XCNT` insertion change (`08b8d467d425`) and Prasoon Mishra's
