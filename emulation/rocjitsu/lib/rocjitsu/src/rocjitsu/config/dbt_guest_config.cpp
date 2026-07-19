@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 namespace rocjitsu {
 namespace config {
@@ -136,27 +137,30 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
-  // The launcher writes the config-path handoff file into its per-invocation
-  // directory and exports that directory via $ROCJITSU_INVOCATION_DIR before
-  // execvp. Prefer that env var: every descendant (including grandchildren
-  // spawned through wrappers like ctest, whose PID differs from the launcher's)
-  // inherits the exact directory holding config_path. Fall back to this process's
-  // PID-scoped path (execvp preserves the launcher's PID for the direct child),
-  // then to the well-known location for attach / daemon-only scenarios.
-  std::string handoff;
-  // Treat an empty $ROCJITSU_INVOCATION_DIR as unset (dir && *dir), matching the
-  // interposer's init() so the two config readers resolve the handoff identically;
-  // an empty value would otherwise build "/config_path".
+  // Try the handoff tiers in priority order, opening the first that exists:
+  //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
+  //      execvp so every descendant (incl. grandchildren via ctest, whose PID differs)
+  //      finds it. Treat an empty value as unset (dir && *dir), matching interposer
+  //      init(); an empty value would otherwise build "/config_path".
+  //   2. this process's PID-scoped path (execvp preserves the launcher's PID for the
+  //      direct child) — also the fallback if the env var is set but stale/misdirected.
+  //   3. the well-known location for attach / daemon-only scenarios.
+  // Falling straight from tier 1 to tier 3 (skipping tier 2) would miss a valid
+  // per-PID handoff when the env var is set but its config_path is absent.
+  std::vector<std::string> candidates;
   if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv); dir && *dir)
-    handoff = std::string(dir) + "/config_path";
-  else
-    handoff = rocjitsu::rpc_invocation_config_file_path(getpid());
-  std::ifstream file(handoff);
-  if (!file.is_open()) {
-    file.open(rocjitsu::rpc_default_config_file_path());
-    if (!file.is_open())
-      return std::nullopt;
+    candidates.push_back(std::string(dir) + "/config_path");
+  candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  candidates.push_back(rocjitsu::rpc_default_config_file_path());
+
+  std::ifstream file;
+  for (const auto &candidate : candidates) {
+    file.open(candidate);
+    if (file.is_open())
+      break;
   }
+  if (!file.is_open())
+    return std::nullopt;
 
   std::string path;
   std::getline(file, path);

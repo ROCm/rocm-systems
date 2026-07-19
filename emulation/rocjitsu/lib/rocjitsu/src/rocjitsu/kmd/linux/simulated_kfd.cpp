@@ -17,6 +17,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
@@ -1513,15 +1514,34 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     uint32_t ord = gpu_ordinal(args->gpu_id);
     auto &gs = proc.gpu(ord);
     uint32_t db_offset;
+    bool recycled_offset = false;
     if (!gs.free_doorbell_offsets.empty()) {
       db_offset = gs.free_doorbell_offsets.back();
       gs.free_doorbell_offsets.pop_back();
+      recycled_offset = true;
     } else {
       if (gs.doorbell_page_size > 0 &&
           gs.next_doorbell_offset + sizeof(uint64_t) > gs.doorbell_page_size)
         return -ENOSPC;
       db_offset = static_cast<uint32_t>(gs.next_doorbell_offset);
       gs.next_doorbell_offset += sizeof(uint64_t);
+    }
+
+    // Reset a recycled doorbell slot to the ~0 sentinel. The mmap-time 0xFF fill
+    // only primes freshly-mapped pages; a slot freed by destroy_queue() still
+    // holds the prior queue's last-rung write index (typically a small value like
+    // 0). The CP starts every queue with last_doorbell==~0, so if the poll thread
+    // scans this slot in the window between register_queue() and the host's first
+    // ring, it latches that stale value as last_doorbell. When the host then rings
+    // the new queue with the same value (write_index 0 for a one-packet queue),
+    // val==last_doorbell, no edge is detected, and the submission is never fetched
+    // — a lost doorbell that hangs the waiter in hsa_signal_wait. Restoring the
+    // sentinel keeps the "first real ring is always an edge" invariant.
+    if (recycled_offset && gs.doorbell_page &&
+        db_offset + sizeof(uint64_t) <= gs.doorbell_page_size) {
+      std::atomic_ref<uint64_t>(
+          *reinterpret_cast<uint64_t *>(static_cast<char *>(gs.doorbell_page) + db_offset))
+          .store(~uint64_t(0), std::memory_order_release);
     }
 
     hw.process_id = proc.process_id();
