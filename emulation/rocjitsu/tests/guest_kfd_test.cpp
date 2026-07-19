@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -54,18 +55,21 @@ constexpr uint64_t kAllocSize = 4096;
 //   3. <$ROCJITSU_RUNTIME_DIR>/ (the well-known location for the no-launcher case).
 // Return the first tier whose config_path handoff exists, else the highest-priority
 // writable tier so install_inline_dbt_config() writes where the reader will look.
+// This must mirror load_dbt_guest_config_from_runtime_config()'s resolution order
+// exactly: $ROCJITSU_INVOCATION_DIR, then the per-PID default runtime dir, then the
+// base default runtime dir. rpc_default_runtime_dir() already treats an unset OR
+// empty $ROCJITSU_RUNTIME_DIR as "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-
+// <uid>", so this never returns nullopt on that account — otherwise the test would
+// write nowhere while the runtime hook still reads the default location.
 std::optional<std::filesystem::path> config_handoff_dir() {
   if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
     return std::filesystem::path(inv);
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  if (!runtime_dir || !*runtime_dir)
-    return std::nullopt;
-  const std::filesystem::path per_pid =
-      std::filesystem::path(runtime_dir) / std::to_string(getpid());
+  const std::filesystem::path base(rocjitsu::rpc_default_runtime_dir());
+  const std::filesystem::path per_pid = base / std::to_string(getpid());
   std::error_code ec;
   if (std::filesystem::exists(per_pid / "config_path", ec))
     return per_pid;
-  return std::filesystem::path(runtime_dir);
+  return base;
 }
 
 std::optional<std::string> read_active_config_json() {

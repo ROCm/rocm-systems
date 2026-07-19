@@ -777,21 +777,25 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // fallible work up front: a dispatch_wf() null (placement gating makes this
     // unreachable, but the assert is compiled out in release), and a throw from
     // init_wavefront_regs() (malformed kernarg-preload / undersized TTMP SGPR block).
-    // On either, halt the reserved-but-uncommitted waves — release_wf() is a no-op
-    // for a WG with no active_wgs_ entry — and fail/rethrow without having touched
-    // the WG refcount or cluster pin.
+    // On either, release the reserved-but-uncommitted waves. Use
+    // free_wavefront_resources() rather than halt(): these waves never executed, so
+    // firing halt()'s onAmdgpuWavefrontHalted hook would feed observers a spurious
+    // "completed" wave. free_wavefront_resources() frees the SGPR/VGPR blocks and
+    // resets the slot without the hook or a CP completion notify — and since
+    // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
+    // unwind either.
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
-    const auto halt_reserved = [&wg_wavefronts]() {
+    const auto free_reserved = [&wg_wavefronts, cu]() {
       for (auto *claimed : wg_wavefronts)
-        claimed->halt();
+        cu->free_wavefront_resources(*claimed);
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
                                       entry.vgprs_per_wf);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
-        halt_reserved();
+        free_reserved();
         return false;
       }
       wg_wavefronts.push_back(wf);
@@ -807,7 +811,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       try {
         init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       } catch (...) {
-        halt_reserved();
+        free_reserved();
         throw;
       }
     }

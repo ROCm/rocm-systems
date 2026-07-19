@@ -611,3 +611,110 @@ TEST(InterposerGemTest, ReplaceEvictsOverlappingDifferentSizeRange) {
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }
+
+// After B REPLACEs A's range, closing A must NOT tear down B's PTEs: the REPLACE
+// transferred ownership of the VA to B, so A's teardown has nothing to unmap there
+// and B's mapping stays live (its own UNMAP still succeeds afterward).
+TEST(InterposerGemTest, ReplaceTransfersOwnershipAcrossOldOwnerClose) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf_a = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_a, 0);
+  int dmabuf_b = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_b, 0);
+  uint32_t handle_a = 0, handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va;
+  map_a.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  drm_amdgpu_gem_va replace_b = map_a;
+  replace_b.handle = handle_b;
+  replace_b.operation = AMDGPU_VA_OP_REPLACE;
+  ASSERT_EQ(ioctl(drm, gem_va, &replace_b), 0);
+
+  // Close A entirely. Its GEM_CLOSE reap must not unmap va — B owns it now.
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  EXPECT_EQ(close(dmabuf_a), 0);
+
+  // B's mapping is still live: its UNMAP through its own handle succeeds.
+  drm_amdgpu_gem_va unmap_b{};
+  unmap_b.handle = handle_b;
+  unmap_b.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_b.va_address = va;
+  unmap_b.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_b), 0)
+      << "B's mapping must survive A's close after REPLACE transferred ownership";
+
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(dmabuf_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// AMDGPU_VA_OP_CLEAR tears down a range's PTEs and updates the owning handle's
+// bookkeeping, so a later GEM_CLOSE of that handle does not double-unmap the range.
+// A UNMAP of the cleared range must fail (it is gone), and GEM_CLOSE must still
+// succeed cleanly.
+TEST(InterposerGemTest, ClearUpdatesOwnerBookkeeping) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &handle));
+
+  drm_amdgpu_gem_va map{};
+  map.handle = handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = va;
+  map.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map), 0);
+
+  // CLEAR is handle-agnostic; it uses handle 0 and tears down whatever owns the VA.
+  drm_amdgpu_gem_va clear{};
+  clear.handle = 0;
+  clear.operation = AMDGPU_VA_OP_CLEAR;
+  clear.va_address = va;
+  clear.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &clear), 0) << "CLEAR of a mapped range must succeed";
+
+  // The range is gone from the owner's bookkeeping: an UNMAP now fails.
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = va;
+  unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), -1) << "CLEAR must have removed the range record";
+
+  // GEM_CLOSE must not double-unmap the already-cleared range.
+  EXPECT_EQ(gem_close(drm, handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}

@@ -874,6 +874,8 @@ foreach(
         UnmapWithWrongHandleFails
         MapSucceedsAfterExportFdClosed
         ReplaceEvictsOverlappingDifferentSizeRange
+        ReplaceTransfersOwnershipAcrossOldOwnerClose
+        ClearUpdatesOwnerBookkeeping
 )
     rj_add_test(
         NAME "InterposerGemTest.${_interposer_gem_test}"
