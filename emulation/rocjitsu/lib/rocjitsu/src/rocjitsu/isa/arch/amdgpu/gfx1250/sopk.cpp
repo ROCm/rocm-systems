@@ -29,6 +29,8 @@ constexpr uint32_t HW_REG_GPR_ALLOC = 6;
 constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
 constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
 constexpr uint32_t HW_REG_IB_STS2 = 28;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;
+constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;
 constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;
 constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
 
@@ -61,8 +63,10 @@ constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
     reg_val = wf.wave_sched_mode_raw();
     return true;
   case HW_REG_IB_STS2:
-    reg_val = (wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
-              << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT;
+    reg_val = (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)
+               << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |
+              ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
+               << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);
     return true;
   default:
     return false;

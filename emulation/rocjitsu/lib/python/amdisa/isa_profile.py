@@ -834,6 +834,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        """Whether dispatch workgroup IDs are carried in TTMP registers."""
+        return False
+
+    @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
+        return False
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         """Maximum VGPR index space addressable by one wavefront."""
         return 256
@@ -1484,6 +1494,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx12'
 
@@ -1630,6 +1644,10 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def supports_wgp_mode(self) -> bool:
         return False
+
+    @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        return True
 
     @property
     def max_addressable_vgprs_per_wf(self) -> int:
