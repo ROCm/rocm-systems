@@ -137,6 +137,7 @@ bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAlloc
 }
 }  // namespace
 
+// @asserts: hipMemRetainAllocationHandle - retaining the handle for a mapped address yields a usable handle releasable independently of the original
 HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
@@ -157,6 +158,7 @@ HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
   HIP_CHECK(hipMemRelease(retained));
 }
 
+// @asserts: hipMemGetAllocationPropertiesFromHandle - properties queried from the handle reflect the pinned type and device location it was created with
 HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
@@ -179,6 +181,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
   REQUIRE(prop.location.id == CurrentDevice());
 }
 
+// @asserts: hipMemGetHandleForAddressRange - a dma-buf fd export yields a non-negative descriptor when supported, else reports non-success and skips
 HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
@@ -207,6 +210,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   REQUIRE(fd >= 0);
 }
 
+// @asserts: hipMemExportToShareableHandle - an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process
 HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
   SkipIfShareableHandleUnavailable();
   hip::contract::ContractCleanup cleanup;

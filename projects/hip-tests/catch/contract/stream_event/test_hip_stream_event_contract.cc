@@ -24,6 +24,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 }
 
+// @asserts: hipStreamCreate - creating a stream yields a non-null handle that destroys cleanly
 HIP_TEST_CASE(Contract_Stream_CreateDestroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -34,6 +35,7 @@ HIP_TEST_CASE(Contract_Stream_CreateDestroy_Succeeds) {
   REQUIRE(stream != nullptr);
 }
 
+// @asserts: hipStreamSynchronize - synchronizing an empty stream succeeds
 HIP_TEST_CASE(Contract_Stream_SynchronizeEmptyStream_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -43,6 +45,7 @@ HIP_TEST_CASE(Contract_Stream_SynchronizeEmptyStream_Succeeds) {
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
+// @asserts: hipStreamQuery - querying an empty stream reports completion with hipSuccess
 HIP_TEST_CASE(Contract_Stream_QueryEmptyStream_ReturnsSuccess) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -52,6 +55,7 @@ HIP_TEST_CASE(Contract_Stream_QueryEmptyStream_ReturnsSuccess) {
   HIP_CHECK(hipStreamQuery(stream));
 }
 
+// @asserts: hipEventCreate - creating an event yields a non-null handle that destroys cleanly
 HIP_TEST_CASE(Contract_Event_CreateDestroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipEvent_t event = nullptr;
@@ -62,6 +66,7 @@ HIP_TEST_CASE(Contract_Event_CreateDestroy_Succeeds) {
   REQUIRE(event != nullptr);
 }
 
+// @asserts: hipEventRecord - a recorded event synchronizes and then queries as completed
 HIP_TEST_CASE(Contract_Event_RecordThenSynchronize_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -77,6 +82,7 @@ HIP_TEST_CASE(Contract_Event_RecordThenSynchronize_Succeeds) {
   HIP_CHECK(hipEventQuery(event));
 }
 
+// @asserts: hipEventQuery - querying a just-recorded event returns either hipSuccess or hipErrorNotReady
 HIP_TEST_CASE(Contract_Event_QueryBeforeCompletion_ReturnsNotReadyOrSuccess) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -94,6 +100,7 @@ HIP_TEST_CASE(Contract_Event_QueryBeforeCompletion_ReturnsNotReadyOrSuccess) {
   HIP_CHECK(hipEventSynchronize(event));
 }
 
+// @asserts: hipStreamWaitEvent - a cross-stream event dependency orders dependent work so the consumer observes the producer's copy
 HIP_TEST_CASE(Contract_Stream_WaitEvent_OrdersDependentWork) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x42);

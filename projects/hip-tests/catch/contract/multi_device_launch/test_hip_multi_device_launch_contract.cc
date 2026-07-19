@@ -264,6 +264,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 // hipLaunchCooperativeKernelMultiDevice submits one host-symbol kernel per device
 // through a hipLaunchParams array; each participating device must observe its own
 // written value after synchronization.
+// @asserts: hipLaunchCooperativeKernelMultiDevice - each device runs its per-device kernel and observes its own written value
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
@@ -294,6 +295,7 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue)
 // hipExtLaunchMultiKernelMultiDevice is the AMD extended multi-device launch entry
 // point over the same hipLaunchParams array; it must produce the same per-device
 // observable writes.
+// @asserts: hipExtLaunchMultiKernelMultiDevice - extended multi-device launch produces the same per-device observable writes
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
@@ -324,6 +326,7 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
 // hipModuleLaunchCooperativeKernelMultiDevice submits a module-resolved function per
 // device through a hipFunctionLaunchParams array. Each device loads its own module
 // instance (module handles are context-bound) and must observe its written value.
+// @asserts: hipModuleLaunchCooperativeKernelMultiDevice - each device runs its module-resolved function and observes its own written value
 HIP_TEST_CASE(Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 

@@ -33,6 +33,7 @@ hipMemLocation CurrentDeviceLocation() {
 }
 }  // namespace
 
+// @asserts: hipMemGetMemPool - a location-based pool query returns a non-null pool for a valid device location
 HIP_TEST_CASE(Contract_MemLocationPool_GetMemPool_ReturnsPoolForDeviceLocation) {
   SkipIfMemoryPoolsUnsupported();
 
@@ -45,6 +46,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_GetMemPool_ReturnsPoolForDeviceLocation) 
   REQUIRE(pool != nullptr);
 }
 
+// @asserts: hipMemSetMemPool - a pool set for a location round-trips through a subsequent hipMemGetMemPool query
 HIP_TEST_CASE(Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool) {
   SkipIfMemoryPoolsUnsupported();
 
@@ -65,6 +67,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool) {
   REQUIRE(readback == default_pool);
 }
 
+// @asserts: hipMemGetAccess - querying access for a pooled allocation's location returns a defined protection flag
 HIP_TEST_CASE(Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;

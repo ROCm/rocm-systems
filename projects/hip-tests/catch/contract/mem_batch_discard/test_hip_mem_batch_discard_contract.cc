@@ -98,6 +98,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 }  // namespace
 
 #if HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
+// @asserts: hipMemDiscardBatchAsync - discarding a batch of managed ranges is accepted (stream drains cleanly) or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -119,6 +120,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
   }
 }
 
+// @asserts: hipMemDiscardAndPrefetchBatchAsync - combined discard-and-prefetch batch to the current device is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -143,6 +145,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsup
   }
 }
 
+// @asserts: hipDrvMemDiscardBatchAsync - driver-style discard batch over device pointers is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -164,6 +167,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) 
   }
 }
 
+// @asserts: hipDrvMemDiscardAndPrefetchBatchAsync - driver-style combined discard-and-prefetch batch over device pointers is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -188,6 +192,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUn
   }
 }
 
+// @asserts: hipMemDiscardBatchAsync - a batch with a null range never returns hipSuccess (rejected, or reported unsupported)
 HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -210,6 +215,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
 }
 #endif  // HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
 
+// @asserts: hipMemPrefetchBatchAsync - prefetching a batch of managed ranges to the current device is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   if (!IsDiscreteDevice()) {

@@ -28,20 +28,24 @@ hipLinkState_t CreateLinkState() {
 }
 }  // namespace
 
+// @asserts: hipLinkCreate - rejects a null output state pointer
 HIP_TEST_CASE(Contract_JitLink_Create_NullState_IsRejected) {
   REQUIRE(hipLinkCreate(0, nullptr, nullptr, nullptr) != hipSuccess);
 }
 
+// @asserts: hipLinkCreate - a created link state round-trips through hipLinkDestroy without error
 HIP_TEST_CASE(Contract_JitLink_CreateDestroy_RoundTrips) {
   hipLinkState_t state = CreateLinkState();
 
   HIP_CHECK(hipLinkDestroy(state));
 }
 
+// @asserts: hipLinkDestroy - rejects a null link state handle
 HIP_TEST_CASE(Contract_JitLink_Destroy_InvalidHandle_IsRejected) {
   REQUIRE(hipLinkDestroy(nullptr) != hipSuccess);
 }
 
+// @asserts: hipLinkComplete - rejects null output image and size pointers
 HIP_TEST_CASE(Contract_JitLink_Complete_NullOutputs_AreRejected) {
   hipLinkState_t state = CreateLinkState();
 
@@ -50,6 +54,7 @@ HIP_TEST_CASE(Contract_JitLink_Complete_NullOutputs_AreRejected) {
   HIP_CHECK(hipLinkDestroy(state));
 }
 
+// @asserts: hipLinkAddData - rejects a null/invalid image and a malformed input of a valid type
 HIP_TEST_CASE(Contract_JitLink_AddData_InvalidImage_IsRejected) {
   hipLinkState_t state = CreateLinkState();
 
@@ -61,6 +66,7 @@ HIP_TEST_CASE(Contract_JitLink_AddData_InvalidImage_IsRejected) {
   HIP_CHECK(hipLinkDestroy(state));
 }
 
+// @asserts: hipLinkAddFile - rejects adding a file with an unsupported input type / missing file
 HIP_TEST_CASE(Contract_JitLink_AddFile_InvalidInputType_IsRejected) {
   hipLinkState_t state = CreateLinkState();
 

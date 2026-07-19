@@ -16,6 +16,7 @@ void DeviceCount(int* count) {
 }
 }  // namespace
 
+// @asserts: hipDeviceEnablePeerAccess - rejects an out-of-range peer device ordinal (negative or >= device count)
 HIP_TEST_CASE(Contract_PeerAccess_Enable_InvalidPeerId_IsRejected) {
   int device_count = 0;
   DeviceCount(&device_count);
@@ -24,6 +25,7 @@ HIP_TEST_CASE(Contract_PeerAccess_Enable_InvalidPeerId_IsRejected) {
   REQUIRE(hipDeviceEnablePeerAccess(device_count, 0) != hipSuccess);
 }
 
+// @asserts: hipDeviceEnablePeerAccess - rejects a non-zero (reserved) flags value
 HIP_TEST_CASE(Contract_PeerAccess_Enable_InvalidFlag_IsRejected) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -31,6 +33,7 @@ HIP_TEST_CASE(Contract_PeerAccess_Enable_InvalidFlag_IsRejected) {
   REQUIRE(hipDeviceEnablePeerAccess(current_device, ~0u) != hipSuccess);
 }
 
+// @asserts: hipDeviceDisablePeerAccess - rejects an out-of-range peer device ordinal (negative or >= device count)
 HIP_TEST_CASE(Contract_PeerAccess_Disable_InvalidPeerId_IsRejected) {
   int device_count = 0;
   DeviceCount(&device_count);
@@ -39,6 +42,7 @@ HIP_TEST_CASE(Contract_PeerAccess_Disable_InvalidPeerId_IsRejected) {
   REQUIRE(hipDeviceDisablePeerAccess(device_count) != hipSuccess);
 }
 
+// @asserts: hipDeviceDisablePeerAccess - rejects disabling peer access that was never enabled
 HIP_TEST_CASE(Contract_PeerAccess_Disable_NotEnabled_IsRejected) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -46,6 +50,7 @@ HIP_TEST_CASE(Contract_PeerAccess_Disable_NotEnabled_IsRejected) {
   REQUIRE(hipDeviceDisablePeerAccess(current_device) != hipSuccess);
 }
 
+// @asserts: hipDeviceEnablePeerAccess - rejects enabling peer access from a device to itself
 HIP_TEST_CASE(Contract_PeerAccess_EnableSelf_IsRejected) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -53,6 +58,7 @@ HIP_TEST_CASE(Contract_PeerAccess_EnableSelf_IsRejected) {
   REQUIRE(hipDeviceEnablePeerAccess(current_device, 0) != hipSuccess);
 }
 
+// @asserts: hipDeviceEnablePeerAccess - a redundant second enable and a redundant second disable each report a non-success error
 HIP_TEST_CASE(Contract_PeerAccess_EnableTwice_ThenDisable_RoundTripsWhenAvailable) {
   int device_count = 0;
   DeviceCount(&device_count);

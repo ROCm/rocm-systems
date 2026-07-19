@@ -16,6 +16,7 @@ namespace {
 constexpr size_t kByteCount = 64;
 }
 
+// @asserts: hipGraphNodeGetType - an empty node reports node type hipGraphNodeTypeEmpty
 HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -30,6 +31,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty) {
   REQUIRE(node_type == hipGraphNodeTypeEmpty);
 }
 
+// @asserts: hipGraphNodeGetType - a memcpy node reports node type hipGraphNodeTypeMemcpy
 HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemcpyNodeReportsMemcpy) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
@@ -49,6 +51,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemcpyNodeReportsMemcpy) {
   REQUIRE(node_type == hipGraphNodeTypeMemcpy);
 }
 
+// @asserts: hipGraphNodeGetType - a memset node reports node type hipGraphNodeTypeMemset
 HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemsetNodeReportsMemset) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -75,6 +78,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemsetNodeReportsMemset) {
   REQUIRE(node_type == hipGraphNodeTypeMemset);
 }
 
+// @asserts: hipGraphAddDependencies - adding a dependency creates one edge and one dependency on the target node
 HIP_TEST_CASE(Contract_GraphNodeTypes_AddDependencies_CreatesEdge) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -100,6 +104,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_AddDependencies_CreatesEdge) {
   REQUIRE(dependency_count == 1);
 }
 
+// @asserts: hipGraphRemoveDependencies - removing a previously added dependency clears the edge back to zero
 HIP_TEST_CASE(Contract_GraphNodeTypes_RemoveDependencies_ClearsEdge) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;

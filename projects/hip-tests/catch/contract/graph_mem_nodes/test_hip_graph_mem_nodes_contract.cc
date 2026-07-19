@@ -87,6 +87,7 @@ bool TryAddDrvMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
 }
 }  // namespace
 
+// @asserts: hipGraphAddMemAllocNode - adding a mem-alloc node populates params.dptr with a non-null device pointer
 HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
   if (!TryTrimGraphMemory()) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
@@ -111,6 +112,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
   REQUIRE(params.dptr != nullptr);
 }
 
+// @asserts: hipGraphMemAllocNodeGetParams - getter round-trips the bytesize, alloc type, and device location the node was created with
 HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   if (!TryTrimGraphMemory()) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
@@ -138,6 +140,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   REQUIRE(retrieved.poolProps.location.id == CurrentDevice());
 }
 
+// @asserts: hipGraphMemFreeNodeGetParams - free-node getter reports the same device pointer the free node was created with
 HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
   if (!TryTrimGraphMemory()) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
@@ -169,6 +172,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
   REQUIRE(retrieved == params.dptr);
 }
 
+// @asserts: hipDeviceGraphMemTrim - trimming graph memory does not increase reserved graph memory
 HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
   const int device = CurrentDevice();
 
@@ -192,6 +196,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
   REQUIRE(reserved_after <= reserved_before);
 }
 
+// @asserts: hipDeviceSetGraphMemAttribute - writing zero to the used-mem high watermark is accepted and a later query reads zero
 HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_ResetsHighWatermark) {
   const int device = CurrentDevice();
 
@@ -220,6 +225,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_ResetsHighWatermark) {
   REQUIRE(used_high_after == 0);
 }
 
+// @asserts: hipDeviceSetGraphMemAttribute - writing a read-only current-usage attribute is rejected rather than accepted
 HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_CurrentAttribute_IsRejected) {
   const int device = CurrentDevice();
 
@@ -241,6 +247,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_CurrentAttribute_IsRej
 // The runtime-style graph mem alloc/free contracts above are portable. Parity
 // would require a NVIDIA-side driver graph mem-free node API.
 #if HT_AMD
+// @asserts: hipDrvGraphAddMemFreeNode - driver-style free node is added to the graph and reports node type hipGraphNodeTypeMemFree
 HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
   if (!TryTrimGraphMemory()) {
     HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");

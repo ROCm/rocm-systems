@@ -43,6 +43,7 @@ void IncrementCounter(void* userData) {
 }
 }
 
+// @asserts: hipGraphExecMemcpyNodeSetParams1D - updating an instantiated memcpy node's source is reflected in launched output
 HIP_TEST_CASE(Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopySource) {
   hip::contract::ContractCleanup cleanup;
   const auto original = MakePattern(0x10);
@@ -76,6 +77,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopySource) 
   REQUIRE(dst == updated);
 }
 
+// @asserts: hipGraphExecMemsetNodeSetParams - updating an instantiated memset node's fill value changes the launched result
 HIP_TEST_CASE(Contract_GraphUpdate_ExecMemsetNodeSetParams_UpdatesFillValue) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t original_pattern = 0x2a;
@@ -117,6 +119,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecMemsetNodeSetParams_UpdatesFillValue) {
   }
 }
 
+// @asserts: hipGraphExecUpdate - a whole-graph update with a topology-identical graph applies the changed memset value
 HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_AppliesChangedMemsetValue) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t original_pattern = 0x11;
@@ -162,6 +165,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_AppliesChangedMemsetValue) {
   }
 }
 
+// @asserts: hipGraphExecUpdate - updating against a graph with different topology reports failure via return code or result enum
 HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_ReportsTopologyChanged) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
@@ -202,6 +206,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecUpdate_ReportsTopologyChanged) {
   REQUIRE(reported_failure);
 }
 
+// @asserts: hipGraphExecHostNodeSetParams - updating a host node's userData redirects the callback to the new argument
 HIP_TEST_CASE(Contract_GraphUpdate_ExecHostNodeSetParams_UpdatesCallbackUserData) {
   hip::contract::ContractCleanup cleanup;
   constexpr int32_t kInitialValue = 0;
@@ -234,6 +239,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecHostNodeSetParams_UpdatesCallbackUserData
   REQUIRE(counter_b == kInitialValue + 1);
 }
 
+// @asserts: hipGraphExecChildGraphNodeSetParams - swapping a child-graph node's embedded graph updates the launched memset result
 HIP_TEST_CASE(Contract_GraphUpdate_ExecChildGraphNodeSetParams_UpdatesEmbeddedMemset) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t original_pattern = 0x33;
@@ -282,6 +288,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecChildGraphNodeSetParams_UpdatesEmbeddedMe
   }
 }
 
+// @asserts: hipGraphExecEventRecordNodeSetEvent - swapping the event on a record node causes launch to record the new event
 HIP_TEST_CASE(Contract_GraphUpdate_ExecEventRecordNodeSetEvent_UpdatesRecordedEvent) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -311,6 +318,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecEventRecordNodeSetEvent_UpdatesRecordedEv
   HIP_CHECK(hipEventQuery(event_two));
 }
 
+// @asserts: hipGraphExecEventWaitNodeSetEvent - swapping the event on a wait node is accepted and the graph launches successfully
 HIP_TEST_CASE(Contract_GraphUpdate_ExecEventWaitNodeSetEvent_AcceptsSwappedEvent) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -343,6 +351,7 @@ HIP_TEST_CASE(Contract_GraphUpdate_ExecEventWaitNodeSetEvent_AcceptsSwappedEvent
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
+// @asserts: hipGraphExecMemcpyNodeSetParams1D - updating an instantiated memcpy node's destination redirects the copy to the new buffer
 HIP_TEST_CASE(Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopyDestination) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x73);

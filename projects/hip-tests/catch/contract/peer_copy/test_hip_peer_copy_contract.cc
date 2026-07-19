@@ -51,6 +51,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }
 }  // namespace
 
+// @asserts: hipMemcpyPeer - a same-device (degenerate) 1D peer copy transfers bytes like an ordinary device-to-device copy
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
   // A peer copy where the source and destination device are the same device is
   // a valid degenerate case: it must behave like an ordinary device-to-device
@@ -74,6 +75,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyPeerAsync - a same-device async 1D peer copy is complete and visible after the stream is synchronized
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
@@ -100,6 +102,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpy3DPeer - a same-device 3D peer copy round-trips a pitched extent like an ordinary same-device 3D copy
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   // The 3D peer copy with matching source and destination device must round-trip
   // a pitched extent like an ordinary same-device 3D copy.
@@ -147,6 +150,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpy3DPeerAsync - a same-device async 3D peer copy round-trips the extent once the stream is synchronized
 HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
@@ -194,6 +198,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyPeer - rejects an out-of-range device ordinal and leaves a matching sticky last error that clears once consumed
 HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
   // A peer copy naming an out-of-range device ordinal must not silently succeed.
   // The exact error code is backend-specific, so only a non-success status is

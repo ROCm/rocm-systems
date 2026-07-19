@@ -33,6 +33,7 @@ int ReadDeviceInt(int* device_ptr) {
 }
 }  // namespace
 
+// @asserts: hipLaunchByPtr - legacy configure/setup/launch staging path launches a kernel that writes the expected value
 HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
@@ -56,6 +57,7 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
 
+// @asserts: hipLaunchByPtr - repeated configure/setup/launch sequences stage independent argument stacks that do not leak between calls
 HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndependent) {
   hip::contract::ContractCleanup cleanup;
   int* first = nullptr;

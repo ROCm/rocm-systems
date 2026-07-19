@@ -24,6 +24,7 @@ void* AllocateDeviceBytes(size_t bytes) {
 }
 }
 
+// @asserts: hipMemset - fills a device buffer so every byte reads back as the given byte pattern
 HIP_TEST_CASE(Contract_Memset_DeviceBuffer_IsFilledWithBytePattern) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
@@ -39,6 +40,7 @@ HIP_TEST_CASE(Contract_Memset_DeviceBuffer_IsFilledWithBytePattern) {
   }
 }
 
+// @asserts: hipMemset - a zero-length memset is a valid no-op that succeeds
 HIP_TEST_CASE(Contract_Memset_ZeroBytes_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   uint8_t value = 0;
@@ -48,6 +50,7 @@ HIP_TEST_CASE(Contract_Memset_ZeroBytes_Succeeds) {
   HIP_CHECK(hipMemset(device_ptr, 0x7f, 0));
 }
 
+// @asserts: hipMemsetAsync - after the stream synchronizes the buffer holds the requested byte pattern
 HIP_TEST_CASE(Contract_MemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0xa5;
@@ -67,6 +70,7 @@ HIP_TEST_CASE(Contract_MemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize) 
   }
 }
 
+// @asserts: hipMemsetD8 - fills each 8-bit element of the buffer with the given byte pattern
 HIP_TEST_CASE(Contract_MemsetD8_DeviceBuffer_IsFilledWithBytePattern) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x3c;
@@ -82,6 +86,7 @@ HIP_TEST_CASE(Contract_MemsetD8_DeviceBuffer_IsFilledWithBytePattern) {
   }
 }
 
+// @asserts: hipMemsetD16 - fills each 16-bit element of the buffer with the given word pattern
 HIP_TEST_CASE(Contract_MemsetD16_DeviceBuffer_IsFilledWithWordPattern) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
@@ -97,6 +102,7 @@ HIP_TEST_CASE(Contract_MemsetD16_DeviceBuffer_IsFilledWithWordPattern) {
   }
 }
 
+// @asserts: hipMemsetD32 - fills each 32-bit element of the buffer with the given dword pattern
 HIP_TEST_CASE(Contract_MemsetD32_DeviceBuffer_IsFilledWithDwordPattern) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;

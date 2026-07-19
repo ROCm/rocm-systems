@@ -131,6 +131,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 // hipLaunchKernelExC submits a kernel via a driver-style launch configuration.
 // The launched kernel must publish its argument value, observable after a device
 // synchronize.
+// @asserts: hipLaunchKernelExC - a driver-style config launch runs the kernel and publishes its arg value, or skips if unsupported
 HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
   SkipIfIntegratedDevice();
 
@@ -165,6 +166,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
 // hipDevSmResourceSplit partitions the device SM resource into caller-specified
 // groups. Requesting one group must yield a group whose SM count is within
 // (0, device SM count]; the split cannot invent SMs the device lacks.
+// @asserts: hipDevSmResourceSplit - a group-params SM split yields a group whose SM count is within (0, device SM count], or skips if unsupported
 HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
   SkipIfIntegratedDevice();
 
@@ -205,6 +207,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
 // a driver function handle (resolved from an HIPRTC-compiled module) plus a
 // HIP_LAUNCH_CONFIG. The launched kernel must publish its argument value,
 // observable after a device synchronize.
+// @asserts: hipDrvLaunchKernelEx - a driver-API extended launch of a module function publishes its arg value, or skips if unsupported
 HIP_TEST_CASE(Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue) {
   SkipIfIntegratedDevice();
   hip::contract::ContractCleanup cleanup;

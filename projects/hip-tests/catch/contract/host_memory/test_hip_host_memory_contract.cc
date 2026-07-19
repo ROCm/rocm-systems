@@ -24,6 +24,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 }
 
+// @asserts: hipHostMalloc - returns a non-null host pointer whose bytes are readable and writable by the host
 HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
@@ -43,6 +44,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
   }
 }
 
+// @asserts: hipHostFree - frees a pointer previously returned by hipHostMalloc successfully
 HIP_TEST_CASE(Contract_HostMemory_HostFree_Succeeds) {
   void* host_ptr = nullptr;
 
@@ -50,6 +52,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostFree_Succeeds) {
   HIP_CHECK(hipHostFree(host_ptr));
 }
 
+// @asserts: hipHostRegister - registering then unregistering an existing host buffer round-trips successfully
 HIP_TEST_CASE(Contract_HostMemory_HostRegisterUnregister_Succeeds) {
   std::array<uint8_t, kElementCount> host_buffer{};
 
@@ -57,6 +60,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostRegisterUnregister_Succeeds) {
   HIP_CHECK(hipHostUnregister(host_buffer.data()));
 }
 
+// @asserts: hipHostGetDevicePointer - yields a device-visible pointer for mapped host memory that round-trips bytes via hipMemcpy
 HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x41);
@@ -76,6 +80,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipHostGetFlags - reports back at least the allocation flags requested at hipHostMalloc time
 HIP_TEST_CASE(Contract_HostMemory_HostGetFlags_IncludesRequestedFlags) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;

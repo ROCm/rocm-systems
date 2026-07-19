@@ -40,6 +40,7 @@ void RequireRejected(hipError_t status) {
 }
 }  // namespace
 
+// @asserts: hipGraphicsMapResources - a null resource array or null element with positive count is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_MapResources_NullResources_IsRejected) {
   // A positive count with a null resource array is invalid input and must be
   // rejected. count must be > 0 so the null-array check is actually reached: the
@@ -52,6 +53,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_MapResources_NullResources_IsRejected) {
   RequireRejected(hipGraphicsMapResources(1, resources, nullptr));
 }
 
+// @asserts: hipGraphicsUnmapResources - a null resource array or null element with positive count is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected) {
   // A positive count with a null resource array must be rejected (count > 0 so
   // the null-array check is reached rather than short-circuited by count <= 0).
@@ -62,12 +64,14 @@ HIP_TEST_CASE(Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected) 
   RequireRejected(hipGraphicsUnmapResources(1, resources, nullptr));
 }
 
+// @asserts: hipGraphicsUnregisterResource - a null resource handle is rejected with a defined error rather than silently succeeding
 HIP_TEST_CASE(Contract_GraphicsInterop_UnregisterResource_NullHandle_IsRejected) {
   // Unregistering a null resource handle is invalid input and must be rejected
   // rather than silently succeeding.
   RequireRejected(hipGraphicsUnregisterResource(nullptr));
 }
 
+// @asserts: hipGraphicsResourceGetMappedPointer - querying the mapped pointer of a null resource is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_ResourceGetMappedPointer_NullHandle_IsRejected) {
   // Querying the mapped device pointer of a null resource is invalid input and
   // must be rejected rather than returning a pointer.
@@ -76,6 +80,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_ResourceGetMappedPointer_NullHandle_IsRej
   RequireRejected(hipGraphicsResourceGetMappedPointer(&device_ptr, &size, nullptr));
 }
 
+// @asserts: hipGraphicsSubResourceGetMappedArray - querying the mapped array of a null resource is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRejected) {
   // Querying the mapped array of a null resource is invalid input and must be
   // rejected rather than returning an array handle.
@@ -96,6 +101,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRe
 // header include above, because the NVIDIA hip_gl_interop.h pulls in
 // <GL/gl.h> (via <cuda_gl_interop.h>), which a headless CUDA node lacks.
 #if HT_AMD
+// @asserts: hipGLGetDevices - querying HIP devices with no current GL context is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected) {
   // Querying the HIP devices for the current GL context with no GL context bound
   // must be rejected. A positive device-count buffer size is passed so the query
@@ -107,6 +113,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected) {
                                   hipGLDeviceListAll));
 }
 
+// @asserts: hipGraphicsGLRegisterBuffer - registering a GL buffer with no current GL context is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected) {
   // Registering a GL buffer with no current GL context must be rejected. The
   // buffer name is a bogus non-zero GLuint; the no-context check fires before the
@@ -115,6 +122,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected) 
   RequireRejected(hipGraphicsGLRegisterBuffer(&resource, 1u, hipGraphicsRegisterFlagsNone));
 }
 
+// @asserts: hipGraphicsGLRegisterImage - registering a GL image with no current GL context is rejected with a defined error
 HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterImage_NoGLContext_IsRejected) {
   // Registering a GL image with no current GL context must be rejected. As above,
   // the image name and target are bogus but never reach GL because the no-context

@@ -20,6 +20,7 @@ namespace {
 // One or two sentences: which public API this pins and what portable guarantee
 // the case asserts (round-trip / accepted-or-unsupported / invalid-input
 // rejection). Name the case Contract_<Area>_<Behavior>.
+// @asserts: hipSomeApi - one-line portable invariant this case pins
 HIP_TEST_CASE(Contract_Area_Behavior) {
   hip::contract::ContractCleanup cleanup;
 

@@ -41,6 +41,7 @@ hipKernelNodeParams KernelNodeParams(void** args) {
 void HostNoop(void* /*user_data*/) {}
 }  // namespace
 
+// @asserts: hipGraphKernelNodeSetParams - mutating a kernel node's params pre-instantiation makes the launched graph write the updated value
 HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) {
   hip::contract::ContractCleanup cleanup;
   int initial = kInitialValue;
@@ -89,6 +90,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) 
   REQUIRE(ReadDeviceInt(device_value) == kUpdatedValue);
 }
 
+// @asserts: hipGraphMemcpyNodeSetParams1D - retargeting a memcpy node's source before instantiation makes the launched copy observe the new source
 HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource) {
   hip::contract::ContractCleanup cleanup;
   constexpr size_t kBytes = sizeof(int);
@@ -125,6 +127,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource)
   REQUIRE(host_result == kUpdatedValue);
 }
 
+// @asserts: hipGraphHostNodeSetParams - swapping a host node's params makes the getter report the new fn and user-data pair
 HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserData) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -153,6 +156,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserDat
   REQUIRE(read_back.userData == &second_user_data);
 }
 
+// @asserts: hipGraphEventRecordNodeSetEvent - event-record and event-wait nodes accept a swapped event and report it back through their getters
 HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvents) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -183,6 +187,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvent
   REQUIRE(wait_event == second);
 }
 
+// @asserts: hipGraphKernelNodeCopyAttributes - copies kernel-node attributes to the destination node (AMD carries cooperative; NVIDIA does not)
 HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDestination) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;

@@ -50,6 +50,7 @@ hipPitchedPtr HostPitchedPtr(void* ptr, size_t width, size_t height) {
 }
 }  // namespace
 
+// @asserts: hipMemsetD2D16Async - pitched device rows filled with a 16-bit pattern are visible on host after stream sync
 HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
@@ -74,6 +75,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAft
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D32Async - pitched device rows filled with a 32-bit pattern are visible on host after stream sync
 HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
@@ -98,6 +100,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAf
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemset2DAsync - a 2D pitched region filled with a byte pattern is visible on host after stream sync
 HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x7b;
@@ -121,6 +124,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAf
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemset3DAsync - a 3D extent filled with a byte pattern is visible on host after stream sync
 HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5c;
@@ -149,6 +153,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAf
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D16Async - null-destination async 2D/3D memsets all reject with a non-success status
 HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_NullDestination_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;

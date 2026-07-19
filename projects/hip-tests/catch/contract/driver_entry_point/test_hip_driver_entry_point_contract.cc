@@ -30,6 +30,7 @@ constexpr char const kKnownSymbol[] = "cuDeviceGetCount";
 #endif
 }  // namespace
 
+// @asserts: hipGetDriverEntryPoint - resolves a known symbol to a callable pointer whose result matches the direct API
 HIP_TEST_CASE(Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable) {
   RequireDevice();
 
@@ -52,6 +53,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable) {
   REQUIRE(resolved_count == direct_count);
 }
 
+// @asserts: hipGetDriverEntryPoint - an unknown symbol is reported as not-found rather than resolved to a pointer
 HIP_TEST_CASE(Contract_DriverEntryPoint_UnknownSymbol_ReportsNotFound) {
   RequireDevice();
 
@@ -71,6 +73,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_UnknownSymbol_ReportsNotFound) {
   REQUIRE_FALSE(resolved_successfully);
 }
 
+// @asserts: hipGetDriverEntryPoint - an empty symbol name never resolves to a usable non-null entry point
 HIP_TEST_CASE(Contract_DriverEntryPoint_EmptySymbol_IsRejected) {
   RequireDevice();
 
@@ -92,6 +95,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_EmptySymbol_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipGetDriverEntryPoint - rejects a null output function pointer with hipErrorInvalidValue
 HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
   RequireDevice();
 
@@ -111,6 +115,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
 #endif
 }
 
+// @asserts: hipGetDriverEntryPoint - rejects an invalid flags value with a non-success error
 HIP_TEST_CASE(Contract_DriverEntryPoint_InvalidFlag_IsRejected) {
   RequireDevice();
 

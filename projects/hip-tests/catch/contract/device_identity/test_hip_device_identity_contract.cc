@@ -20,6 +20,7 @@ bool GetDeviceByPciBusIdOrSkip(int* device, const char* pci_bus_id) {
 }
 }  // namespace
 
+// @asserts: hipDeviceGetByPCIBusId - the PCI bus id from hipDeviceGetPCIBusId round-trips back to the same device ordinal
 HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_RoundTripsWithGetPCIBusId) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -35,6 +36,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_RoundTripsWithGetPCIBusId) {
   REQUIRE(resolved_device == current_device);
 }
 
+// @asserts: hipDeviceGetByPCIBusId - empty and malformed PCI bus id strings are rejected with a non-success status
 HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_InvalidString_IsRejected) {
   int device = -1;
 
@@ -42,6 +44,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_InvalidString_IsRejected) {
   REQUIRE(hipDeviceGetByPCIBusId(&device, "0000:") != hipSuccess);
 }
 
+// @asserts: hipDeviceGetByPCIBusId - a null device out-pointer or null bus-id string is rejected with a non-success status
 HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_NullArgs_AreRejected) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -54,6 +57,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_GetByPCIBusId_NullArgs_AreRejected) {
   REQUIRE(hipDeviceGetByPCIBusId(&device, nullptr) != hipSuccess);
 }
 
+// @asserts: hipChooseDevice - returns a device ordinal within [0, device_count) for a valid property struct
 HIP_TEST_CASE(Contract_DeviceIdentity_ChooseDevice_ReturnsInRangeOrdinal) {
   int current_device = 0;
   int device_count = 0;
@@ -70,6 +74,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_ChooseDevice_ReturnsInRangeOrdinal) {
   REQUIRE(chosen_device < device_count);
 }
 
+// @asserts: hipChooseDevice - a null device out-pointer or null properties pointer is rejected with a non-success status
 HIP_TEST_CASE(Contract_DeviceIdentity_ChooseDevice_NullArgs_AreRejected) {
   hipDeviceProp_t properties{};
   int device = -1;
@@ -78,6 +83,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_ChooseDevice_NullArgs_AreRejected) {
   REQUIRE(hipChooseDevice(&device, nullptr) != hipSuccess);
 }
 
+// @asserts: hipDeviceCanAccessPeer - a self-peer query returns a boolean-valued (0 or 1) accessibility result
 HIP_TEST_CASE(Contract_DeviceIdentity_CanAccessPeer_SelfQueryReturnsBoolean) {
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -88,6 +94,7 @@ HIP_TEST_CASE(Contract_DeviceIdentity_CanAccessPeer_SelfQueryReturnsBoolean) {
   REQUIRE((can_access_peer == 0 || can_access_peer == 1));
 }
 
+// @asserts: hipDeviceCanAccessPeer - a null out-pointer or out-of-range device ordinal is rejected with a non-success status
 HIP_TEST_CASE(Contract_DeviceIdentity_CanAccessPeer_InvalidArgs_AreRejected) {
   int current_device = 0;
   int device_count = 0;

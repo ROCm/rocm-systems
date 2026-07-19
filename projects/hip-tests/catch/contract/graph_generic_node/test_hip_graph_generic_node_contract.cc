@@ -64,6 +64,7 @@ uint8_t LaunchAndReadFirstByte(hipGraph_t graph, void* device_ptr) {
 }
 }  // namespace
 
+// @asserts: hipGraphAddNode - a memset node added via the generic entry point reports its type and launches the requested byte value
 HIP_TEST_CASE(Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -89,6 +90,7 @@ HIP_TEST_CASE(Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue) {
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x5A);
 }
 
+// @asserts: hipGraphNodeSetParams - re-parameterizing a node before instantiation makes the launched graph reflect the updated value
 HIP_TEST_CASE(Contract_GraphGenericNode_NodeSetParams_UpdatesValueBeforeInstantiate) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -111,6 +113,7 @@ HIP_TEST_CASE(Contract_GraphGenericNode_NodeSetParams_UpdatesValueBeforeInstanti
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x22);
 }
 
+// @asserts: hipGraphExecNodeSetParams - updating an instantiated node's params takes effect on the next launch without re-instantiating
 HIP_TEST_CASE(Contract_GraphGenericNode_ExecNodeSetParams_UpdatesValueAfterInstantiate) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;

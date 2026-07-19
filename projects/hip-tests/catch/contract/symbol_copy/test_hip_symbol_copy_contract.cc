@@ -60,6 +60,7 @@ void TouchAndSyncSymbols() {
 }
 }  // namespace
 
+// @asserts: hipMemcpyToSymbol - a value written to a scalar device global round-trips back through hipMemcpyFromSymbol
 HIP_TEST_CASE(Contract_SymbolCopy_ToSymbol_ThenFromSymbol_RoundTripsScalar) {
   RequireDevice();
   TouchAndSyncSymbols();
@@ -77,6 +78,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbol_ThenFromSymbol_RoundTripsScalar) {
   REQUIRE(read_back == kSentinel);
 }
 
+// @asserts: hipMemcpyToSymbol - a byte-offset write lands at the matching array element and leaves other elements untouched
 HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolWithOffset_WritesAtElementOffset) {
   RequireDevice();
   TouchAndSyncSymbols();
@@ -105,6 +107,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolWithOffset_WritesAtElementOffset) {
   }
 }
 
+// @asserts: hipMemcpyFromSymbol - with the default copy direction reads back bytes seeded at the resolved symbol address
 HIP_TEST_CASE(Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes) {
   RequireDevice();
   TouchAndSyncSymbols();
@@ -128,6 +131,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes) {
   REQUIRE(read_back == kSentinel);
 }
 
+// @asserts: hipMemcpyToSymbolAsync - a stream-ordered write then read on the same stream round-trips after synchronize
 HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder) {
   RequireDevice();
   TouchAndSyncSymbols();
@@ -152,6 +156,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStre
   REQUIRE(read_back == kSentinel);
 }
 
+// @asserts: hipMemcpyToSymbol - copying to or from a null symbol is rejected with a non-success status
 HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {
   RequireDevice();
 
@@ -177,6 +182,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipMemcpyToSymbol - a copy whose offset plus size exceeds the symbol size is rejected with a non-success status
 HIP_TEST_CASE(Contract_SymbolCopy_OutOfBoundsSizePlusOffset_IsRejected) {
   RequireDevice();
   TouchAndSyncSymbols();

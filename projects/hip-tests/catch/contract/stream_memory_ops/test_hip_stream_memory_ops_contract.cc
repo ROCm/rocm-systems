@@ -40,6 +40,7 @@ void RequireStreamWaitValueSupport() {
 }
 }  // namespace
 
+// @asserts: hipStreamWriteValue32 - an enqueued 32-bit write is visible to a later same-stream copy after the stream drains
 HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
@@ -68,6 +69,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder)
   REQUIRE(observed == sentinel);
 }
 
+// @asserts: hipStreamWriteValue64 - an enqueued 64-bit write is visible to a later same-stream copy after the stream drains
 HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
@@ -95,6 +97,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder)
   REQUIRE(observed == sentinel);
 }
 
+// @asserts: hipStreamWaitValue32 - a Gte wait gates later same-stream work until the value condition is satisfied
 HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
@@ -135,6 +138,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   REQUIRE(observed == done);
 }
 
+// @asserts: hipStreamWaitValue64 - a 64-bit Gte wait gates later same-stream work until the value condition is satisfied
 HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
@@ -176,6 +180,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
   REQUIRE(observed == done);
 }
 
+// @asserts: hipStreamBatchMemOp - a batch of write ops applies all writes in stream order, or reports unsupported
 HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
@@ -234,6 +239,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   REQUIRE(observed64 == sentinel64);
 }
 
+// @asserts: hipStreamWriteValue32 - write and wait reject a null address with hipErrorInvalidValue, or report unsupported
 HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
   RequireDevice();
   RequireStreamWaitValueSupport();

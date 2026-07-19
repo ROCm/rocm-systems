@@ -96,6 +96,7 @@ void LoadContractModuleEx(hipModule_t& module) {
 }
 }  // namespace
 
+// @asserts: hipModuleLoadDataEx - loading a code object with zero options yields a non-null module that unloads cleanly
 HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
   hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
@@ -112,6 +113,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
   REQUIRE(module != nullptr);
 }
 
+// @asserts: hipModuleLoadDataEx - supplying benign JIT options still loads the module and lets a known symbol resolve, or reports unsupported
 HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
   hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
@@ -146,6 +148,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
   REQUIRE(function != nullptr);
 }
 
+// @asserts: hipModuleLoadDataEx - rejects a null code-object image with a defined non-success error
 HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
   // Loading a module from a null image through the load-with-options entry point
   // must not silently succeed. Backends may report hipErrorInvalidValue or
@@ -156,6 +159,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipModuleLaunchKernel - a function resolved from an Ex-loaded module launches and writes the expected value to device memory
 HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;

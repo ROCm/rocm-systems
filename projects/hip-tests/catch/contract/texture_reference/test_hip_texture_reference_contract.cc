@@ -47,6 +47,7 @@ bool IsUnsupported(hipError_t status) { return status == hipErrorNotSupported; }
 // round-trips. Each guards its set call against hipErrorNotSupported.
 // ---------------------------------------------------------------------------
 
+// @asserts: hipTexRefSetAddressMode - deprecated texref address mode set then get round-trips per-reference state (or unsupported skip)
 HIP_TEST_CASE(Contract_TextureReference_SetGetAddressMode_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
@@ -70,6 +71,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetAddressMode_RoundTrips) {
   REQUIRE(returned == hipAddressModeMirror);
 }
 
+// @asserts: hipTexRefSetFilterMode - deprecated texref filter mode set then get round-trips per-reference state (or unsupported skip)
 HIP_TEST_CASE(Contract_TextureReference_SetGetFilterMode_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
@@ -93,6 +95,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFilterMode_RoundTrips) {
   REQUIRE(returned == hipFilterModeLinear);
 }
 
+// @asserts: hipTexRefSetFlags - deprecated texref flags set then get round-trips per-reference state (or unsupported skip)
 HIP_TEST_CASE(Contract_TextureReference_SetGetFlags_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
@@ -116,6 +119,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFlags_RoundTrips) {
   REQUIRE(returned == flags);
 }
 
+// @asserts: hipTexRefSetFormat - deprecated texref array format and channel count set then get round-trip (or unsupported skip)
 HIP_TEST_CASE(Contract_TextureReference_SetGetFormat_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
@@ -143,6 +147,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFormat_RoundTrips) {
   REQUIRE(returned_channels == num_channels);
 }
 
+// @asserts: hipTexRefSetMaxAnisotropy - deprecated texref max-anisotropy set then get round-trips per-reference state (or unsupported skip)
 HIP_TEST_CASE(Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 

@@ -33,6 +33,7 @@ void EndCaptureAndDestroyGraph(hipStream_t stream) {
 }
 }  // namespace
 
+// @asserts: hipThreadExchangeStreamCaptureMode - exchanging the capture mode returns the thread's previous mode
 HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_RoundTripsPreviousMode) {
   hipStreamCaptureMode mode = hipStreamCaptureModeThreadLocal;
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode));
@@ -52,12 +53,14 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_RoundTripsPreviousMode) {
 // which does not reject a null mode pointer the same way, so the negative check
 // is not portable. Parity would require matching null-argument validation.
 #if HT_AMD
+// @asserts: hipThreadExchangeStreamCaptureMode - rejects a null mode pointer with a non-success error
 HIP_TEST_CASE(Contract_StreamCaptureMode_Exchange_NullMode_IsRejected) {
   REQUIRE(hipThreadExchangeStreamCaptureMode(nullptr) != hipSuccess);
 }
 #endif
 
 #if HIP_CONTRACT_HAS_CAPTURE_INFO_V2
+// @asserts: hipStreamGetCaptureInfo_v2 - reports Active status with a nonzero capture id and graph during capture
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCapture) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -77,6 +80,7 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCap
   EndCaptureAndDestroyGraph(stream);
 }
 
+// @asserts: hipStreamGetCaptureInfo_v2 - reports None status for a stream that is not capturing
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsNoneOutsideCapture) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -88,6 +92,7 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsNoneOutsideCapt
   REQUIRE(status == hipStreamCaptureStatusNone);
 }
 
+// @asserts: hipStreamGetCaptureInfo_v2 - exposes the captured memset as the single current dependency node
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -115,6 +120,7 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode)
   EndCaptureAndDestroyGraph(stream);
 }
 
+// @asserts: hipStreamGetCaptureInfo_v2 - rejects a null capture-status output pointer with a non-success error
 HIP_TEST_CASE(Contract_StreamCaptureMode_GetCaptureInfoV2_NullStatus_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;

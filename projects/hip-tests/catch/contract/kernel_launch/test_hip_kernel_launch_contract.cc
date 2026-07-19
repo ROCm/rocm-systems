@@ -78,6 +78,7 @@ bool CooperativeLaunchSupported() {
 #define CONTRACT_SYMBOL(expr) HIP_SYMBOL(expr)
 }  // namespace
 
+// @asserts: hipLaunchCooperativeKernel - a cooperative launch executes and publishes the expected value, or skips if unsupported
 HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
@@ -100,6 +101,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
 
+// @asserts: hipLaunchCooperativeKernel - a null function pointer is rejected with a non-success status rather than silently succeeding
 HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
@@ -120,6 +122,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipGetSymbolAddress - a device global resolves to a non-null device pointer usable for host-device copies
 HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer) {
   // Launch a kernel that references the device global so the symbol is emitted
   // and resolvable in the device image on every runtime path.
@@ -140,6 +143,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer)
   REQUIRE(ReadDeviceInt(symbol_ptr) == kExpectedValue);
 }
 
+// @asserts: hipGetSymbolSize - the reported size of a device global array matches its declared byte size
 HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize) {
   // Launch a kernel that references the device global array so the symbol is
   // emitted and resolvable in the device image on every runtime path.
@@ -153,6 +157,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize) {
   REQUIRE(symbol_size == sizeof(g_contract_symbol_array));
 }
 
+// @asserts: hipGetSymbolAddress - a null symbol is rejected with a non-success status rather than silently succeeding
 HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
   // Resolving a null symbol must not silently succeed. The exact error code is
   // backend-specific, so only a non-success status is required. The null is
@@ -166,6 +171,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipLaunchKernelEx - a minimal extended-launch configuration executes the kernel and publishes the expected value
 HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
@@ -193,6 +199,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
 // BACKEND-DIFF: hipExtLaunchKernel is an AMD extension with no NVIDIA equivalent,
 // so this contract builds only on AMD (see the gated hip_ext.h include above).
 #if HT_AMD
+// @asserts: hipExtLaunchKernel - the AMD extended launch entry point executes the kernel and publishes the expected value
 HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;

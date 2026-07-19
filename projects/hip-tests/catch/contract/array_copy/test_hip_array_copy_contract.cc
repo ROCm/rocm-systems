@@ -28,6 +28,7 @@ std::array<uint8_t, kByteCount> MakePattern(uint8_t seed) {
 hipChannelFormatDesc ByteChannelDesc() { return hipCreateChannelDesc<uint8_t>(); }
 }  // namespace
 
+// @asserts: hipMemcpyToArray - a to-array then from-array copy pair round-trips the byte pattern
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
@@ -45,6 +46,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyHtoA - a host-to-array then array-to-host copy pair round-trips the byte pattern
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
@@ -62,6 +64,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpy2DToArrayAsync - an async 2D to-array/from-array round-trip is visible after stream sync
 HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   CHECK_IMAGE_SUPPORT;
 
@@ -86,6 +89,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyToArray - rejects a null destination array and latches it into the last-error
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
@@ -100,6 +104,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
   HIP_CHECK(hipGetLastError());
 }
 
+// @asserts: hipMemcpy2DFromArrayAsync - rejects an invalid hipMemcpyKind and latches it into the last-error
 HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 

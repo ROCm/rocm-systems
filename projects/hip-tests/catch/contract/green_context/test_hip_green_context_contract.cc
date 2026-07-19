@@ -76,6 +76,7 @@ bool TryCreateGreenContext(hipExecutionCtx_t* ctx) {
 }
 }  // namespace
 
+// @asserts: hipDeviceGetDevResource - device SM resource reports a positive SM count that a fresh stream's resource matches (accepted-or-unsupported)
 HIP_TEST_CASE(Contract_GreenContext_GetDevResource_ReportsSmCount) {
   SkipIfDevResourceUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -96,6 +97,7 @@ HIP_TEST_CASE(Contract_GreenContext_GetDevResource_ReportsSmCount) {
   REQUIRE(stream_resource.sm.smCount == device_resource.sm.smCount);
 }
 
+// @asserts: hipDevSmResourceSplitByCount - yields at least one group whose SM count is within (0, device SM count] (accepted-or-unsupported)
 HIP_TEST_CASE(Contract_GreenContext_SplitByCount_ProducesBoundedSubset) {
   SkipIfDevResourceUnsupported();
 
@@ -120,6 +122,7 @@ HIP_TEST_CASE(Contract_GreenContext_SplitByCount_ProducesBoundedSubset) {
   REQUIRE(groups.sm.smCount <= device_resource.sm.smCount);
 }
 
+// @asserts: hipGreenCtxCreate - a green context binds to its creating device and exposes an SM subset and stable id (accepted-or-unsupported)
 HIP_TEST_CASE(Contract_GreenContext_Create_QueriesDeviceAndResource) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {
@@ -150,6 +153,7 @@ HIP_TEST_CASE(Contract_GreenContext_Create_QueriesDeviceAndResource) {
   HIP_CHECK(hipDeviceGetExecutionCtx(&default_ctx, CurrentDevice()));
 }
 
+// @asserts: hipExecutionCtxStreamCreate - work on a green-context stream runs and is observable after context sync (accepted-or-unsupported)
 HIP_TEST_CASE(Contract_GreenContext_Stream_LaunchesObservableWork) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {
@@ -176,6 +180,7 @@ HIP_TEST_CASE(Contract_GreenContext_Stream_LaunchesObservableWork) {
   REQUIRE(host == 0x5A);
 }
 
+// @asserts: hipExecutionCtxRecordEvent - recording then waiting on an event on a green context round-trips and syncs cleanly (accepted-or-unsupported)
 HIP_TEST_CASE(Contract_GreenContext_Event_RecordAndWaitRoundTrips) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {

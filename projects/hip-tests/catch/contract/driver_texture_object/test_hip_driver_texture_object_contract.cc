@@ -55,6 +55,7 @@ bool CreateTextureOrSkip(hipTextureObject_t* texture, const HIP_RESOURCE_DESC* r
 }
 }  // namespace
 
+// @asserts: hipTexObjectCreate - creating a texture object over a linear device buffer succeeds or is cleanly unsupported
 HIP_TEST_CASE(Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -75,6 +76,7 @@ HIP_TEST_CASE(Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds) {
   REQUIRE(texture != 0);
 }
 
+// @asserts: hipTexObjectGetResourceDesc - the linear resource descriptor read back matches the one used to create the object
 HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -102,6 +104,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
   REQUIRE(returned.res.linear.sizeInBytes == resource.res.linear.sizeInBytes);
 }
 
+// @asserts: hipTexObjectGetTextureDesc - the texture descriptor read back (address/filter mode, flags) matches what was set at create
 HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -130,6 +133,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
   REQUIRE(returned.flags == texture_desc.flags);
 }
 
+// @asserts: hipTexObjectGetResourceDesc - an array-backed texture object reports resType ARRAY and the same hipArray handle
 HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -163,6 +167,7 @@ HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
 // Parity would require NVIDIA to define the driver-style resource-view format
 // enumerators.
 #if HT_AMD
+// @asserts: hipTexObjectGetResourceViewDesc - a resource-view descriptor set at create round-trips when the path is supported
 HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupported) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -198,6 +203,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupporte
 }
 #endif  // HT_AMD
 
+// @asserts: hipTexObjectCreate - rejects null out-handle, null resource, or null texture descriptor with a non-success error
 HIP_TEST_CASE(Contract_DriverTexture_Create_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;

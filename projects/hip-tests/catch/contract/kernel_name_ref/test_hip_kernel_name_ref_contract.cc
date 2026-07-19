@@ -42,6 +42,7 @@ void RequireNamesKernel(const char* name) {
 
 // hipKernelNameRefByPtr resolves a host function pointer to its kernel name
 // without any module load; the returned string must name the kernel.
+// @asserts: hipKernelNameRefByPtr - resolves a host kernel function pointer to a non-empty name mentioning the kernel identifier
 HIP_TEST_CASE(Contract_KernelNameRef_ByPtr_NamesHostKernel) {
   const char* name =
       hipKernelNameRefByPtr(reinterpret_cast<const void*>(KernelNameRefProbe), nullptr);
@@ -51,6 +52,7 @@ HIP_TEST_CASE(Contract_KernelNameRef_ByPtr_NamesHostKernel) {
 // hipKernelNameRef resolves a hipFunction_t (obtained from the host symbol via
 // hipGetFuncBySymbol) to its kernel name; the returned string must name the
 // kernel.
+// @asserts: hipKernelNameRef - resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier
 HIP_TEST_CASE(Contract_KernelNameRef_ByFunction_NamesResolvedKernel) {
   hipFunction_t function = nullptr;
   HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(KernelNameRefProbe)));

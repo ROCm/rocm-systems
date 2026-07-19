@@ -118,6 +118,7 @@ void LoadContractLibrary(std::vector<char>& code, hipLibrary_t& library) {
 }
 }  // namespace
 
+// @asserts: hipLibraryLoadData - a HIPRTC-produced code object loads into a non-null library handle and unloads cleanly
 HIP_TEST_CASE(Contract_Library_LoadData_FromRtc_Succeeds) {
   std::vector<char> code;
   if (!CompileLibrarySource(code)) {
@@ -133,6 +134,7 @@ HIP_TEST_CASE(Contract_Library_LoadData_FromRtc_Succeeds) {
   REQUIRE(library != nullptr);
 }
 
+// @asserts: hipLibraryLoadData - rejects a null image with a non-success status rather than silently succeeding
 HIP_TEST_CASE(Contract_Library_LoadData_NullImage_IsRejected) {
   // Loading a library from a null image must not silently succeed. Backends may
   // report hipErrorInvalidValue or hipErrorInvalidImage; the contract only
@@ -143,6 +145,7 @@ HIP_TEST_CASE(Contract_Library_LoadData_NullImage_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipLibraryGetKernel - a loaded valid image resolves a known kernel symbol to a non-null kernel handle
 HIP_TEST_CASE(Contract_Library_LoadData_ValidImage_CanResolveKernel) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -156,6 +159,7 @@ HIP_TEST_CASE(Contract_Library_LoadData_ValidImage_CanResolveKernel) {
   REQUIRE(kernel != nullptr);
 }
 
+// @asserts: hipLibraryGetKernel - an existing symbol resolves to a non-null kernel handle
 HIP_TEST_CASE(Contract_Library_GetKernel_ResolvesKnownSymbol) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -170,6 +174,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_ResolvesKnownSymbol) {
   REQUIRE(kernel != nullptr);
 }
 
+// @asserts: hipLibraryGetKernel - resolving an undefined symbol fails with a non-success status instead of a bogus handle
 HIP_TEST_CASE(Contract_Library_GetKernel_UnknownSymbol_IsRejected) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -185,6 +190,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_UnknownSymbol_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipLibraryGetKernelCount - reported kernel count is at least the number of kernels defined in the source
 HIP_TEST_CASE(Contract_Library_GetKernelCount_MatchesLowerBound) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -200,6 +206,7 @@ HIP_TEST_CASE(Contract_Library_GetKernelCount_MatchesLowerBound) {
   REQUIRE(count >= 2);
 }
 
+// @asserts: hipLibraryEnumerateKernels - enumerating with a max of zero writes nothing into the caller buffer
 HIP_TEST_CASE(Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -215,6 +222,7 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched) {
   REQUIRE(buffer[0] == guard);
 }
 
+// @asserts: hipLibraryEnumerateKernels - every enumerated kernel handle resolves to a non-null launchable function
 HIP_TEST_CASE(Contract_Library_EnumerateKernels_HandlesResolveToFunctions) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -238,6 +246,7 @@ HIP_TEST_CASE(Contract_Library_EnumerateKernels_HandlesResolveToFunctions) {
   }
 }
 
+// @asserts: hipLibraryGetKernel - repeated lookups of the same symbol return the same stable kernel handle
 HIP_TEST_CASE(Contract_Library_GetKernel_RepeatedLookupIsStable) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -255,6 +264,7 @@ HIP_TEST_CASE(Contract_Library_GetKernel_RepeatedLookupIsStable) {
   REQUIRE(first == second);
 }
 
+// @asserts: hipKernelGetName - a resolved kernel reports a non-null name matching the requested symbol
 HIP_TEST_CASE(Contract_Library_KernelGetName_ReturnsRequestedSymbol) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -274,6 +284,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetName_ReturnsRequestedSymbol) {
   REQUIRE(std::strcmp(name, kWriteKernelName) == 0);
 }
 
+// @asserts: hipKernelGetFunction - a kernel's function handle launches via hipModuleLaunchKernel and observably writes its output
 HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -307,6 +318,7 @@ HIP_TEST_CASE(Contract_Library_KernelGetFunction_LaunchesAndWrites) {
   REQUIRE(result == kExpectedValue);
 }
 
+// @asserts: hipLibraryGetGlobal - a library device global resolves to a non-null address and a size covering its type
 HIP_TEST_CASE(Contract_Library_GetGlobal_ReturnsAddressAndSize) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -324,6 +336,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_ReturnsAddressAndSize) {
   REQUIRE(byte_count >= sizeof(int));
 }
 
+// @asserts: hipLibraryGetGlobal - a global resolved via library and module entry points yields matching size and valid addresses
 HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   std::vector<char> code;
   if (!CompileLibrarySource(code)) {
@@ -364,6 +377,7 @@ HIP_TEST_CASE(Contract_Library_GetGlobal_MatchesModuleGetGlobal) {
   REQUIRE(module_bytes == library_bytes);
 }
 
+// @asserts: hipKernelGetLibrary - a kernel round-trips back to the exact library handle it was obtained from
 HIP_TEST_CASE(Contract_Library_KernelGetLibrary_RoundTrips) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;

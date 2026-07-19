@@ -88,6 +88,7 @@ void CopyDeviceToHost(std::array<uint8_t, kWidth * kHeight * kDepth>* dst, hipPi
 }
 }  // namespace
 
+// @asserts: hipDrvMemcpy3D - a host-to-device 3D copy transfers the full extent so bytes read back match the source
 HIP_TEST_CASE(Contract_DriverCopy3D_HostToDevice_RoundTripsExtent) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x23);
@@ -107,6 +108,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_HostToDevice_RoundTripsExtent) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvMemcpy3D - a device-to-device 3D copy preserves all bytes across the two device allocations
 HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x45);
@@ -133,6 +135,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_DeviceToDevice_PreservesBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvMemcpy3D - a zero-extent 3D copy is a no-op that leaves prior device contents unchanged
 HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x67);
@@ -154,6 +157,7 @@ HIP_TEST_CASE(Contract_DriverCopy3D_ZeroExtent_IsNoOp) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvMemcpy3DAsync - an async host-to-device 3D copy is fully visible on the host after stream sync
 HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x89);
@@ -177,6 +181,7 @@ HIP_TEST_CASE(Contract_DriverCopy3DAsync_HostToDevice_VisibleAfterSync) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvMemcpy3D - sync and async 3D copies reject a null inner src/dst pointer via returned status
 HIP_TEST_CASE(Contract_DriverCopy3D_NullInnerPointer_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kWidth * kHeight * kDepth> host{};

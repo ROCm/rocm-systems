@@ -35,6 +35,7 @@ void BuildMemcpyGraph(hipGraph_t* graph, void* device_ptr, const void* src, void
 }
 }  // namespace
 
+// @asserts: hipGraphInstantiateWithFlags - a graph instantiated with flag 0 launches and executes its nodes to completion
 HIP_TEST_CASE(Contract_GraphExecLifecycle_InstantiateWithFlags_ZeroFlag_LaunchSucceeds) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x24);
@@ -60,6 +61,7 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_InstantiateWithFlags_ZeroFlag_LaunchSu
 }
 
 #if HIP_VERSION >= 60400000
+// @asserts: hipGraphExecGetFlags - reports flags 0 for an executable instantiated with no flags
 HIP_TEST_CASE(Contract_GraphExecLifecycle_ExecGetFlags_ReflectsZero) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -77,6 +79,7 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_ExecGetFlags_ReflectsZero) {
   REQUIRE(flags == 0);
 }
 
+// @asserts: hipGraphExecGetFlags - reports back the AutoFreeOnLaunch flag the executable was instantiated with
 HIP_TEST_CASE(Contract_GraphExecLifecycle_ExecGetFlags_ReflectsAutoFreeOnLaunch) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -96,6 +99,7 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_ExecGetFlags_ReflectsAutoFreeOnLaunch)
 }
 #endif
 
+// @asserts: hipGraphUpload - uploading an executable before launch leaves it launchable and produces correct results
 HIP_TEST_CASE(Contract_GraphExecLifecycle_Upload_ThenLaunchSucceeds) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x51);
@@ -121,6 +125,7 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_Upload_ThenLaunchSucceeds) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipGraphInstantiateWithFlags - null exec, null graph, and null-exec upload/get-flags calls are rejected with a defined error
 HIP_TEST_CASE(Contract_GraphExecLifecycle_InvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;

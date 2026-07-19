@@ -31,6 +31,7 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
 #endif  // HT_AMD
 }  // namespace
 
+// @asserts: hipDrvPointerGetAttributes - a device allocation reports device memory type and the owning device ordinal
 HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTypeAndOrdinal) {
   hip::contract::ContractCleanup cleanup;
   int current_device = 0;
@@ -53,6 +54,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTyp
   REQUIRE(device_ordinal == current_device);
 }
 
+// @asserts: hipDrvPointerGetAttributes - batch device-pointer query matches the scalar hipPointerGetAttribute result
 HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
@@ -73,6 +75,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery
   REQUIRE(batch_device_pointer == scalar_device_pointer);
 }
 
+// @asserts: hipDrvPointerGetAttributes - rejects zero count and null attribute/result arrays with a non-success status
 HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
@@ -96,6 +99,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
 // on AMD. The hipDrvPointerGetAttributes contracts above are portable. Parity
 // would require NVIDIA to expose these pointer query/set entry points.
 #if HT_AMD
+// @asserts: hipMemPtrGetInfo - reports an allocation size at least as large as the requested allocation
 HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
@@ -108,6 +112,7 @@ HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
   REQUIRE(size >= kAllocationBytes);
 }
 
+// @asserts: hipPointerSetAttribute - setting SYNC_MEMOPS on a device pointer is accepted-or-unsupported
 HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupported) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
@@ -121,6 +126,7 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupporte
   }
 }
 
+// @asserts: hipPointerSetAttribute - rejects null value, an unknown attribute enum, and a null pointer with a non-success status
 HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;

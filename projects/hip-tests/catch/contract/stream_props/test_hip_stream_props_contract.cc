@@ -25,6 +25,7 @@ void RequireDevice() {
 }
 }  // namespace
 
+// @asserts: hipStreamGetFlags - a default-flag stream reports flags without the hipStreamNonBlocking bit set
 HIP_TEST_CASE(Contract_StreamProps_CreateWithDefaultFlags_ReportsDefaultFlags) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -44,6 +45,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithDefaultFlags_ReportsDefaultFlags) {
   REQUIRE((flags & hipStreamNonBlocking) == 0u);
 }
 
+// @asserts: hipStreamGetFlags - a non-blocking request round-trips as a set hipStreamNonBlocking bit in the reported flags
 HIP_TEST_CASE(Contract_StreamProps_CreateWithNonBlockingFlags_RoundTripsFlags) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -61,6 +63,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithNonBlockingFlags_RoundTripsFlags) {
   REQUIRE((flags & hipStreamNonBlocking) == hipStreamNonBlocking);
 }
 
+// @asserts: hipStreamGetPriority - a requested stream priority is reported clamped within the device's supported priority range
 HIP_TEST_CASE(Contract_StreamProps_CreateWithPriority_ClampsWithinRange) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -84,6 +87,7 @@ HIP_TEST_CASE(Contract_StreamProps_CreateWithPriority_ClampsWithinRange) {
   REQUIRE(priority <= least_priority);
 }
 
+// @asserts: hipStreamGetDevice - a stream reports its owning device as the current device, or reports unsupported
 HIP_TEST_CASE(Contract_StreamProps_GetDevice_MatchesCurrentDevice) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -109,6 +113,7 @@ HIP_TEST_CASE(Contract_StreamProps_GetDevice_MatchesCurrentDevice) {
   REQUIRE(static_cast<int>(stream_device) == current_device);
 }
 
+// @asserts: hipStreamGetId - distinct streams report distinct ids and the null stream id is queryable, or reports unsupported
 HIP_TEST_CASE(Contract_StreamProps_GetId_DistinctStreamsDifferAndNullStreamQueryable) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -141,6 +146,7 @@ HIP_TEST_CASE(Contract_StreamProps_GetId_DistinctStreamsDifferAndNullStreamQuery
   HIP_CHECK(hipStreamGetId(nullptr, &null_stream_id));
 }
 
+// @asserts: hipEventElapsedTime - elapsed time between two ordered events on one stream is non-negative
 HIP_TEST_CASE(Contract_StreamProps_EventElapsedTime_NonNegativeForOrderedEvents) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -173,6 +179,7 @@ HIP_TEST_CASE(Contract_StreamProps_EventElapsedTime_NonNegativeForOrderedEvents)
   REQUIRE(elapsed_ms >= 0.0f);
 }
 
+// @asserts: hipEventRecordWithFlags - events recorded with default record flags yield a non-negative elapsed time, or reports unsupported
 HIP_TEST_CASE(Contract_StreamProps_EventRecordWithFlags_RecordsAndTimes) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;

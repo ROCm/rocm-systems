@@ -58,6 +58,7 @@ hipMemAccessDesc CurrentDeviceAccessDesc(hipMemAccessFlags flags) {
 }
 }
 
+// @asserts: hipMemPoolSetAccess - granting the current device read-write pool access is accepted-or-unsupported
 HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessCurrentDevice_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -76,6 +77,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessCurrentDevice_SucceedsWhenSuppo
   HIP_CHECK(status);
 }
 
+// @asserts: hipMemPoolGetAccess - reads back the read-write flags previously granted to the current device via SetAccess
 HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFlags) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -99,6 +101,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFla
   REQUIRE((flags & hipMemAccessFlagsProtReadWrite) == hipMemAccessFlagsProtReadWrite);
 }
 
+// @asserts: hipMemPoolSetAccess - revoking the current device's own access (ProtNone) rejects with InvalidDevice or InvalidValue
 HIP_TEST_CASE(Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;

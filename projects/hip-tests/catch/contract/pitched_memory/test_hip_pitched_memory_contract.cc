@@ -41,6 +41,7 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
 }
 }  // namespace
 
+// @asserts: hipMallocPitch - returns a non-null pointer and a pitch at least as large as the requested row width
 HIP_TEST_CASE(Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -55,6 +56,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth) {
   REQUIRE(pitch >= kWidth);
 }
 
+// @asserts: hipMemcpy2D - a pitched host->device->host 2D round trip preserves every row's bytes
 HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x24);
@@ -75,6 +77,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpy2D - a single-row pitched 2D round trip preserves all bytes in that row
 HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x63);
@@ -97,6 +100,7 @@ HIP_TEST_CASE(Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes) {
   }
 }
 
+// @asserts: hipFree - frees a hipMallocPitch allocation successfully
 HIP_TEST_CASE(Contract_PitchedMemory_FreePitchedAllocation_Succeeds) {
   void* device_ptr = nullptr;
   size_t pitch = 0;

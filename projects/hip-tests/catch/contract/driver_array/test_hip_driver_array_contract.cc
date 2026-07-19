@@ -42,6 +42,7 @@ HIP_ARRAY3D_DESCRIPTOR Array3DDesc() {
 }
 }  // namespace
 
+// @asserts: hipArrayCreate - creating a 2D array from a valid descriptor yields a non-null array handle
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
@@ -56,6 +57,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
   REQUIRE(array != nullptr);
 }
 
+// @asserts: hipArrayGetDescriptor - reads back the width, height, format, and channel count the array was created with
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
@@ -75,6 +77,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
   REQUIRE(returned_desc.NumChannels == desc.NumChannels);
 }
 
+// @asserts: hipArrayCreate - rejects a null array-out pointer or null descriptor with a non-success error
 HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
@@ -86,6 +89,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
   REQUIRE(hipArrayCreate(&array, nullptr) != hipSuccess);
 }
 
+// @asserts: hipArrayGetDescriptor - rejects a null descriptor-out pointer or null array handle with a non-success error
 HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
@@ -102,6 +106,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
   REQUIRE(hipArrayGetDescriptor(&returned_desc, nullptr) != hipSuccess);
 }
 
+// @asserts: hipArray3DCreate - creating a 3D array from a valid descriptor yields a non-null array handle
 HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
@@ -116,6 +121,7 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
   REQUIRE(array != nullptr);
 }
 
+// @asserts: hipArray3DGetDescriptor - reads back the dims, depth, format, channels, and flags the 3D array was created with
 HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();

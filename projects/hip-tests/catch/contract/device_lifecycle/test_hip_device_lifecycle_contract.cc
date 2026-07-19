@@ -37,6 +37,7 @@ hipDevice_t DeviceForOrdinalZero() {
 }
 }  // namespace
 
+// @asserts: hipSetDeviceFlags - writing back the currently-active device flags is accepted or reported not-settable
 HIP_TEST_CASE(Contract_DeviceLifecycle_SetDeviceFlags_AcceptsCurrentFlags) {
   // Reading the active device flags and setting the very same value back must be
   // accepted (or reported as not-settable on an already-active process). Writing
@@ -47,6 +48,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetDeviceFlags_AcceptsCurrentFlags) {
   RequireAcceptedOrBenign(hipSetDeviceFlags(flags));
 }
 
+// @asserts: hipDeviceSetSharedMemConfig - setting back the currently-reported shared-mem config is accepted or unsupported
 HIP_TEST_CASE(Contract_DeviceLifecycle_SetSharedMemConfig_RoundTripsCurrentConfig) {
   // The shared-memory bank configuration setter (deprecated) must accept the
   // configuration the device currently reports. Setting the current value back
@@ -61,6 +63,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetSharedMemConfig_RoundTripsCurrentConfi
   RequireAcceptedOrBenign(hipDeviceSetSharedMemConfig(config));
 }
 
+// @asserts: hipSetValidDevices - presenting the full set of visible device ordinals is accepted or reported unsupported
 HIP_TEST_CASE(Contract_DeviceLifecycle_SetValidDevices_AcceptsFullDeviceList) {
   int count = 0;
   HIP_CHECK(hipGetDeviceCount(&count));
@@ -77,6 +80,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetValidDevices_AcceptsFullDeviceList) {
   RequireAcceptedOrBenign(hipSetValidDevices(devices.data(), count));
 }
 
+// @asserts: hipDevicePrimaryCtxSetFlags - setting primary-context flags is accepted or reports context-already-in-use
 HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxSetFlags_IsAcceptedOrInUse) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
@@ -87,6 +91,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxSetFlags_IsAcceptedOrInUse) {
   RequireAcceptedOrBenign(hipDevicePrimaryCtxSetFlags(device, hipDeviceScheduleAuto));
 }
 
+// @asserts: hipDevicePrimaryCtxReset - after resetting the primary context the device still serves fresh allocations
 HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable) {
   const hipDevice_t device = DeviceForOrdinalZero();
 

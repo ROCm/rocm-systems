@@ -53,6 +53,7 @@ class ScopedDevice {
 };
 }  // namespace
 
+// @asserts: hipDeviceGet - ordinal zero yields a handle whose hipDeviceGetName is a non-empty NUL-terminated string
 HIP_TEST_CASE(Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero) {
   RequireDeviceCount();
 
@@ -69,6 +70,7 @@ HIP_TEST_CASE(Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero) {
   REQUIRE(name_length < name.size());
 }
 
+// @asserts: hipDeviceComputeCapability - reports non-negative major/minor with a positive major for a usable device
 HIP_TEST_CASE(Contract_Context_DeviceComputeCapability_IsPositive) {
   RequireDeviceCount();
 
@@ -84,6 +86,7 @@ HIP_TEST_CASE(Contract_Context_DeviceComputeCapability_IsPositive) {
   REQUIRE(major > 0);
 }
 
+// @asserts: hipDeviceTotalMem - reports a positive total that matches hipGetDeviceProperties totalGlobalMem
 HIP_TEST_CASE(Contract_Context_DeviceTotalMem_MatchesProperties) {
   RequireDeviceCount();
 
@@ -99,6 +102,7 @@ HIP_TEST_CASE(Contract_Context_DeviceTotalMem_MatchesProperties) {
   REQUIRE(total_bytes == properties.totalGlobalMem);
 }
 
+// @asserts: hipDeviceGetUuid - returns a UUID with at least one non-zero byte and hipDeviceGetPCIBusId a non-empty string
 HIP_TEST_CASE(Contract_Context_DeviceGetUuidAndPciBusId_Succeed) {
   RequireDeviceCount();
 
@@ -129,6 +133,7 @@ HIP_TEST_CASE(Contract_Context_DeviceGetUuidAndPciBusId_Succeed) {
   REQUIRE(pci_length < pci_bus_id.size());
 }
 
+// @asserts: hipDevicePrimaryCtxRetain - retain yields a context and making the device current marks the primary context active
 HIP_TEST_CASE(Contract_Context_PrimaryCtxRetainRelease_RoundTrips) {
   RequireDeviceCount();
 
@@ -156,6 +161,7 @@ HIP_TEST_CASE(Contract_Context_PrimaryCtxRetainRelease_RoundTrips) {
   HIP_CHECK(hipDevicePrimaryCtxRelease(device));
 }
 
+// @asserts: hipCtxGetCurrent - when a current context exists its hipCtxGetDevice matches the runtime current device
 HIP_TEST_CASE(Contract_Context_CtxGetCurrentAndDevice_AreConsistent) {
   RequireDeviceCount();
 

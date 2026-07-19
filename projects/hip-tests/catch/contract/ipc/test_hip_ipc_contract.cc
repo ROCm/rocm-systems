@@ -91,6 +91,7 @@ void SkipIfIpcMemHandleUnsupported() {
 }
 }  // namespace
 
+// @asserts: hipIpcGetMemHandle - produces an IPC mem handle for a valid device allocation, or reports the capability unsupported
 HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -114,6 +115,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
   // asserts that the call succeeded and produced the handle out-parameter.
 }
 
+// @asserts: hipIpcOpenMemHandle - opening a self-produced IPC mem handle either yields a non-null mapping or is skipped as an unsupported same-process operation
 HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -154,6 +156,7 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
   REQUIRE(mapped != nullptr);
 }
 
+// @asserts: hipIpcGetMemHandle - rejects a null handle-out pointer or null device pointer with a documented invalid-argument error (AMD only)
 HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
   RequireDevice();
   SkipIfIpcMemHandleUnsupported();
@@ -189,6 +192,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
 #endif  // HT_AMD
 }
 
+// @asserts: hipIpcGetEventHandle - does not succeed for an event created without the hipEventInterprocess flag
 HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -205,6 +209,7 @@ HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipIpcOpenEventHandle - opening a self-produced interprocess event handle either yields a non-null event or is skipped as an unsupported same-process operation
 HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;

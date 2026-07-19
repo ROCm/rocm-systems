@@ -95,6 +95,7 @@ void LaunchGraph(hipGraph_t graph) {
 }
 }  // namespace
 
+// @asserts: hipDrvGraphAddMemcpyNode - a driver 3D memcpy node delivers the full extent to the device when the graph launches
 HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
@@ -123,6 +124,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvGraphMemcpyNodeGetParams - the getter round-trips the extent and endpoints the memcpy node was created with, and the setter accepts them back
 HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
@@ -155,6 +157,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
   HIP_CHECK(hipDrvGraphMemcpyNodeSetParams(node, &copy));
 }
 
+// @asserts: hipDrvGraphExecMemcpyNodeSetParams - re-pointing an instantiated memcpy node's source is accepted on AMD but rejected with hipErrorInvalidValue on NVIDIA
 HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAfterInstantiate) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
@@ -221,6 +224,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
 #endif
 }
 
+// @asserts: hipDrvGraphAddMemsetNode - a driver memset node writes the requested byte value into the target row when the graph launches
 HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
@@ -257,6 +261,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
   REQUIRE(dst[kWidth - 1] == 0x5A);
 }
 
+// @asserts: hipDrvGraphExecMemsetNodeSetParams - updating an instantiated memset node's value makes the next launch write the new byte
 HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfterInstantiate) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};

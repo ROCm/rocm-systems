@@ -55,6 +55,7 @@ hipBatchMemOpNodeParams MakeNodeParams(hipStreamBatchMemOpParams* op_array, unsi
 }
 }  // namespace
 
+// @asserts: hipGraphAddBatchMemOpNode - launching a graph with a write-value-32 batch-mem-op node writes the value to the target address
 HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -95,6 +96,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
   REQUIRE(host == kWriteValue);
 }
 
+// @asserts: hipGraphBatchMemOpNodeGetParams - reports back the operation count the batch-mem-op node was created with
 HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -124,6 +126,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
   REQUIRE(retrieved.count == 1);
 }
 
+// @asserts: hipGraphBatchMemOpNodeSetParams - re-parameterizing a node before instantiate makes the launch write the updated value
 HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstantiate) {
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -172,6 +175,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstanti
   REQUIRE(host == kWriteValue);
 }
 
+// @asserts: hipGraphExecBatchMemOpNodeSetParams - updating an instantiated node's write value takes effect on the next launch without re-instantiation
 HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInstantiate) {
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;

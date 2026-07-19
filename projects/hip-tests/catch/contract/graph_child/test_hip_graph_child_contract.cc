@@ -24,6 +24,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 }  // namespace
 
+// @asserts: hipGraphAddChildGraphNode - launching a parent graph executes the embedded child graph's memcpy nodes end to end
 HIP_TEST_CASE(Contract_GraphChild_AddChildGraphNode_ExecutesEmbeddedMemcpy) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x37);
@@ -61,6 +62,7 @@ HIP_TEST_CASE(Contract_GraphChild_AddChildGraphNode_ExecutesEmbeddedMemcpy) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipGraphChildGraphNodeGetGraph - returns a non-null embedded graph handle whose node count matches the child graph
 HIP_TEST_CASE(Contract_GraphChild_ChildGraphNodeGetGraph_ReturnsHandle) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t parent = nullptr;
@@ -85,6 +87,7 @@ HIP_TEST_CASE(Contract_GraphChild_ChildGraphNodeGetGraph_ReturnsHandle) {
   REQUIRE(node_count == 1);
 }
 
+// @asserts: hipGraphNodeGetType - a child-graph node reports node type hipGraphNodeTypeGraph
 HIP_TEST_CASE(Contract_GraphChild_NodeType_ReportsGraph) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t parent = nullptr;

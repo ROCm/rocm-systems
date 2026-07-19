@@ -47,6 +47,7 @@ void SkipIfManagedMemoryUnsupported() {
 }
 }  // namespace
 
+// @asserts: hipMemAdvise_v2 - the location-based set-read-mostly hint on managed memory is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -67,6 +68,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported) {
   }
 }
 
+// @asserts: hipMemAdvise_v2 - setting then unsetting the preferred location for a range is each accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -92,6 +94,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsu
   }
 }
 
+// @asserts: hipMemPrefetchAsync_v2 - a location-based prefetch either completes after stream sync or is reported unsupported
 HIP_TEST_CASE(Contract_MemAdviseV2_PrefetchAsync_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -114,6 +117,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_PrefetchAsync_IsAcceptedOrUnsupported) {
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
+// @asserts: hipMemAdvise_v2 - advising a null range does not silently succeed and returns a non-success status
 HIP_TEST_CASE(Contract_MemAdviseV2_NullPointer_IsRejected) {
   SkipIfManagedMemoryUnsupported();
 

@@ -43,6 +43,7 @@ bool TrySetEnabled(hipGraphExec_t graph_exec, hipGraphNode_t node, unsigned int 
 }
 }  // namespace
 
+// @asserts: hipGraphNodeGetEnabled - a freshly instantiated node reports enabled (1) by default
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DefaultEnabled_ReportsOne) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
@@ -72,6 +73,7 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DefaultEnabled_ReportsOne) {
   REQUIRE(enabled == 1);
 }
 
+// @asserts: hipGraphNodeSetEnabled - setting a node's enabled flag round-trips through a subsequent get (0 then back to 1)
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DisableThenQuery_ReportsZero) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
@@ -105,6 +107,7 @@ HIP_TEST_CASE(Contract_GraphNodeEnabled_DisableThenQuery_ReportsZero) {
   REQUIRE(enabled == 1);
 }
 
+// @asserts: hipGraphNodeSetEnabled - a disabled node behaves as an empty node at launch and performs no work
 HIP_TEST_CASE(Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty) {
   std::array<uint8_t, kByteCount> source{};
   std::array<uint8_t, kByteCount> destination{};

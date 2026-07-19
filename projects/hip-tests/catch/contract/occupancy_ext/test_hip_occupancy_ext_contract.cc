@@ -17,6 +17,7 @@ __global__ void OccupancyExtKernel(int* output) {
 }
 }  // namespace
 
+// @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - the default-flags query returns the same block count as the non-flags query
 HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DefaultMatchesPlain) {
   // The default-flags occupancy query must agree with the non-flags query for
   // the same kernel and block size. The runtime documents that the default
@@ -38,6 +39,7 @@ HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_De
   REQUIRE(num_blocks_with_flags == num_blocks_plain);
 }
 
+// @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - the disable-caching-override flag is accepted and yields a non-negative block count
 HIP_TEST_CASE(
     Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DisableCachingOverrideSucceeds) {
   // The disable-caching-override flag must be accepted by the with-flags query
@@ -54,6 +56,7 @@ HIP_TEST_CASE(
   REQUIRE(num_blocks >= 0);
 }
 
+// @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - rejects a null output pointer and an invalid flag value with hipErrorInvalidValue
 HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_RejectsInvalidInputs) {
   // A null output pointer and an invalid flag value must both be rejected with
   // hipErrorInvalidValue.
@@ -78,6 +81,7 @@ HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_Re
 // occupancy contracts above are portable. Parity would require NVIDIA to expose
 // the cluster-occupancy query wrappers (CUDA has the underlying cluster APIs).
 #if HT_AMD
+// @asserts: hipOccupancyMaxPotentialClusterSize - on cluster-capable devices the cluster-occupancy queries report a usable range (size >= 1, active clusters >= 0)
 HIP_TEST_CASE(Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange) {
   int current_device = 0;
   hipDeviceProp_t props{};

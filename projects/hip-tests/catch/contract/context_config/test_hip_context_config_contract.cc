@@ -69,6 +69,7 @@ class ScopedCurrentContext {
 };
 }  // namespace
 
+// @asserts: hipCtxGetCacheConfig - when supported the queried cache preference is one of the documented hipFuncCache_t enumerators, else accepted-or-unsupported
 HIP_TEST_CASE(Contract_ContextConfig_GetCacheConfig_ReturnsEnumOrNotSupported) {
   RequireDevice();
 
@@ -86,6 +87,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetCacheConfig_ReturnsEnumOrNotSupported) {
   REQUIRE(IsKnownCacheConfig(config));
 }
 
+// @asserts: hipCtxSetCacheConfig - a valid cache preference is accepted-or-unsupported while an out-of-range enumerator is rejected with a non-success status
 HIP_TEST_CASE(Contract_ContextConfig_SetCacheConfig_IsAcceptedOrUnsupported_RejectsInvalid) {
   RequireDevice();
 
@@ -119,6 +121,7 @@ HIP_TEST_CASE(Contract_ContextConfig_SetCacheConfig_IsAcceptedOrUnsupported_Reje
   REQUIRE(invalid_status != hipSuccess);
 }
 
+// @asserts: hipCtxGetSharedMemConfig - when supported the reported bank size is one of the documented hipSharedMemConfig enumerators, else accepted-or-unsupported
 HIP_TEST_CASE(Contract_ContextConfig_GetSharedMemConfig_ReturnsEnumOrNotSupported) {
   RequireDevice();
 
@@ -137,6 +140,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetSharedMemConfig_ReturnsEnumOrNotSupporte
   REQUIRE(IsKnownSharedMemConfig(config));
 }
 
+// @asserts: hipCtxSetSharedMemConfig - setting a valid shared-memory bank size is accepted-or-unsupported and the prior config is restored
 HIP_TEST_CASE(Contract_ContextConfig_SetSharedMemConfig_IsAcceptedOrUnsupported) {
   RequireDevice();
 
@@ -163,6 +167,7 @@ HIP_TEST_CASE(Contract_ContextConfig_SetSharedMemConfig_IsAcceptedOrUnsupported)
   }
 }
 
+// @asserts: hipCtxGetFlags - when supported the schedule subfield of the returned flags is one of the documented scheduling modes, else accepted-or-unsupported
 HIP_TEST_CASE(Contract_ContextConfig_GetFlags_ReturnsScheduleOrNotSupported) {
   RequireDevice();
 
@@ -183,6 +188,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetFlags_ReturnsScheduleOrNotSupported) {
            schedule == hipDeviceScheduleYield || schedule == hipDeviceScheduleBlockingSync));
 }
 
+// @asserts: hipCtxEnablePeerAccess - enabling peer access from a context to itself lands in a documented portable outcome set (success, already-enabled, unsupported, or invalid)
 HIP_TEST_CASE(Contract_ContextConfig_PeerAccessSelf_IsRejectedOrUnsupportedOrNoOp) {
   RequireDevice();
 

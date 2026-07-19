@@ -30,6 +30,7 @@ void RequireDevice() {
 }
 }  // namespace
 
+// @asserts: hipFuncGetAttributes - populates a sane attribute struct with positive max-threads and non-negative resource/version fields
 HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_ReturnsSaneStruct) {
   RequireDevice();
 
@@ -56,6 +57,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_ReturnsSaneStruct) {
   (void)attributes.sharedSizeBytes;
 }
 
+// @asserts: hipFuncGetAttributes - a null output struct is rejected with a non-success status
 HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_NullAttr_IsRejected) {
   RequireDevice();
 
@@ -67,6 +69,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_NullAttr_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipFuncGetAttribute - scalar max-threads-per-block query agrees with the struct query for the same function
 HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_MatchesScalarGetAttribute) {
   RequireDevice();
 
@@ -86,6 +89,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_GetAttributes_MatchesScalarGetAttribute) {
   REQUIRE(max_threads_per_block == attributes.maxThreadsPerBlock);
 }
 
+// @asserts: hipGetFuncBySymbol - resolves an in-source kernel symbol to a usable non-null function handle
 HIP_TEST_CASE(Contract_FuncAttributes_GetFuncBySymbol_ResolvesInSourceKernel) {
   RequireDevice();
 
@@ -101,6 +105,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_GetFuncBySymbol_ResolvesInSourceKernel) {
   REQUIRE(max_threads_per_block > 0);
 }
 
+// @asserts: hipFuncSetAttribute - an in-range max-dynamic-shared-memory hint is accepted
 HIP_TEST_CASE(Contract_FuncAttributes_SetAttribute_MaxDynamicSharedMemory_IsAccepted) {
   RequireDevice();
 
@@ -124,6 +129,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_SetAttribute_MaxDynamicSharedMemory_IsAcce
                                 hipFuncAttributeMaxDynamicSharedMemorySize, requested_bytes));
 }
 
+// @asserts: hipFuncSetAttribute - a preferred shared-memory carveout hint is either accepted or reported unsupported
 HIP_TEST_CASE(Contract_FuncAttributes_SetAttribute_PreferredCarveout_IsAccepted) {
   RequireDevice();
 
@@ -139,6 +145,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_SetAttribute_PreferredCarveout_IsAccepted)
   HIP_CHECK(status);
 }
 
+// @asserts: hipFuncSetCacheConfig - the neutral per-function cache preference is accepted
 HIP_TEST_CASE(Contract_FuncAttributes_SetCacheConfig_PreferNone_Succeeds) {
   RequireDevice();
 
@@ -149,6 +156,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_SetCacheConfig_PreferNone_Succeeds) {
                                   hipFuncCachePreferNone));
 }
 
+// @asserts: hipFuncSetSharedMemConfig - the default per-function shared-memory bank size is accepted
 HIP_TEST_CASE(Contract_FuncAttributes_SetSharedMemConfig_Default_Succeeds) {
   RequireDevice();
 

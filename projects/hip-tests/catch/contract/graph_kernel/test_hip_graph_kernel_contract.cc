@@ -38,6 +38,7 @@ hipKernelNodeParams KernelNodeParams(void** args) {
 }
 }
 
+// @asserts: hipGraphAddKernelNode - a kernel node instantiated and launched in a graph runs and writes its configured value
 HIP_TEST_CASE(Contract_GraphKernel_AddKernelNode_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
@@ -66,6 +67,7 @@ HIP_TEST_CASE(Contract_GraphKernel_AddKernelNode_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kInitialValue);
 }
 
+// @asserts: hipGraphKernelNodeGetParams - reading back a kernel node's params returns the func, dims, and shared-mem it was configured with
 HIP_TEST_CASE(Contract_GraphKernel_KernelNodeGetParams_ReturnsConfiguredParams) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
@@ -91,6 +93,7 @@ HIP_TEST_CASE(Contract_GraphKernel_KernelNodeGetParams_ReturnsConfiguredParams) 
   REQUIRE(readback.sharedMemBytes == params.sharedMemBytes);
 }
 
+// @asserts: hipGraphExecKernelNodeSetParams - updating an instantiated graph's kernel-node params changes the launched value without re-instantiation
 HIP_TEST_CASE(Contract_GraphKernel_ExecKernelNodeSetParams_UpdatesLaunchValue) {
   hip::contract::ContractCleanup cleanup;
   int initial_value = kInitialValue;

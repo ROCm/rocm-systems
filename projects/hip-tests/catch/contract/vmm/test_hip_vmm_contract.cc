@@ -72,6 +72,7 @@ bool CreateAllocationHandle(hipMemGenericAllocationHandle_t* handle, size_t size
 }
 }
 
+// @asserts: hipMemGetAllocationGranularity - reports a positive minimum allocation granularity when VMM is supported
 HIP_TEST_CASE(Contract_Vmm_GetAllocationGranularity_ReturnsPositiveValue) {
   SkipIfVmmUnsupported();
   const size_t granularity = AllocationGranularity();
@@ -79,6 +80,7 @@ HIP_TEST_CASE(Contract_Vmm_GetAllocationGranularity_ReturnsPositiveValue) {
   REQUIRE(granularity > 0);
 }
 
+// @asserts: hipMemAddressReserve - reserving a virtual address range yields a non-null address that frees cleanly
 HIP_TEST_CASE(Contract_Vmm_AddressReserveFree_Succeeds) {
   SkipIfVmmUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -91,6 +93,7 @@ HIP_TEST_CASE(Contract_Vmm_AddressReserveFree_Succeeds) {
   REQUIRE(address != nullptr);
 }
 
+// @asserts: hipMemCreate - creating then releasing a physical allocation handle succeeds when supported
 HIP_TEST_CASE(Contract_Vmm_CreateReleaseAllocationHandle_SucceedsWhenSupported) {
   SkipIfVmmUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -103,6 +106,7 @@ HIP_TEST_CASE(Contract_Vmm_CreateReleaseAllocationHandle_SucceedsWhenSupported) 
   cleanup.Add([handle] { (void)hipMemRelease(handle); });
 }
 
+// @asserts: hipMemMap - mapping a handle into a reserved address range succeeds and unmaps cleanly when supported
 HIP_TEST_CASE(Contract_Vmm_MapUnmap_SucceedsWhenSupported) {
   SkipIfVmmUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -126,6 +130,7 @@ HIP_TEST_CASE(Contract_Vmm_MapUnmap_SucceedsWhenSupported) {
   cleanup.Add([address, size] { (void)hipMemUnmap(address, size); });
 }
 
+// @asserts: hipMemSetAccess - granting read-write access to mapped VMM memory allows a host round-trip through it
 HIP_TEST_CASE(Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported) {
   SkipIfVmmUnsupported();
   hip::contract::ContractCleanup cleanup;

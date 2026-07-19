@@ -24,6 +24,7 @@ void RequireDevice() {
 }
 }  // namespace
 
+// @asserts: hipStreamGetAttribute - the priority attribute reads back clamped within the device's reported priority range, or reports unsupported
 HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -58,6 +59,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
   REQUIRE(get_value.priority <= least_priority);
 }
 
+// @asserts: hipStreamSetAttribute - a set synchronization-policy attribute reads back verbatim via hipStreamGetAttribute, or reports unsupported
 HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -87,6 +89,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
   REQUIRE(get_value.syncPolicy == hipSyncPolicyBlockingSync);
 }
 
+// @asserts: hipStreamSetAttribute - a set access-policy-window attribute reads back field-for-field via hipStreamGetAttribute, or reports unsupported
 HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -140,6 +143,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
   REQUIRE(get_value.accessPolicyWindow.missProp == hipAccessPropertyNormal);
 }
 
+// @asserts: hipStreamCopyAttributes - propagates the source stream's synchronization policy to the destination stream verbatim, or reports unsupported
 HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -180,6 +184,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
   REQUIRE(get_value.syncPolicy == hipSyncPolicyBlockingSync);
 }
 
+// @asserts: hipStreamGetAttribute - rejects a null value-out pointer and an unknown attribute id with hipErrorInvalidValue (AMD only)
 HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
   RequireDevice();
 

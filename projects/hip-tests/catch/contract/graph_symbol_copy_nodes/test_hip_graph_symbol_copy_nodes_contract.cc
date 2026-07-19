@@ -48,6 +48,7 @@ int ReadSymbol() {
 }
 }  // namespace
 
+// @asserts: hipGraphAddMemcpyNodeToSymbol - to-symbol then dependent from-symbol graph nodes round-trip a host value through a device global
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue) {
   ResetSymbol();
 
@@ -84,6 +85,7 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue) {
   REQUIRE(ReadSymbol() == kFirstValue);
 }
 
+// @asserts: hipGraphMemcpyNodeSetParamsToSymbol - rewriting symbol-copy node params pre-instantiation makes the launched graph use the new source/destination
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNodes) {
   ResetSymbol();
 
@@ -129,6 +131,7 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNo
   REQUIRE(ReadSymbol() == kSecondValue);
 }
 
+// @asserts: hipGraphExecMemcpyNodeSetParamsToSymbol - rewriting symbol-copy node params on an instantiated exec graph makes the next launch use the new source/destination
 HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExecutable) {
   ResetSymbol();
 

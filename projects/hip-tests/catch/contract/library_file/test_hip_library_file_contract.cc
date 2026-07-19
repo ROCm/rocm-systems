@@ -86,6 +86,7 @@ std::string WriteCodeObjectFile(const char* suffix) {
 }
 }  // namespace
 
+// @asserts: hipLibraryLoadFromFile - loading a code object from a file yields a valid library whose known kernel resolves
 HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel) {
   const std::string path = WriteCodeObjectFile("resolve");
 
@@ -104,6 +105,7 @@ HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel) {
   std::remove(path.c_str());
 }
 
+// @asserts: hipLibraryLoadFromFile - loading from a nonexistent path is rejected with a non-success status
 HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected) {
   // Loading from a path that does not exist must not silently succeed. The exact
   // error code is backend-specific, so only a non-success status is required.
@@ -113,6 +115,7 @@ HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipLibraryGetManaged - requesting a managed symbol the library does not define is rejected, not given a bogus pointer
 HIP_TEST_CASE(Contract_LibraryFile_GetManaged_UnknownSymbol_IsRejected) {
   const std::string path = WriteCodeObjectFile("managed");
 

@@ -26,6 +26,7 @@ int ReadDeviceInt(int* device_ptr) {
 }
 }
 
+// @asserts: hipLaunchKernelGGL - a kernel launched via the triple-chevron macro runs and writes its expected output to device memory
 HIP_TEST_CASE(Contract_Kernel_LaunchGGL_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
@@ -41,6 +42,7 @@ HIP_TEST_CASE(Contract_Kernel_LaunchGGL_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
 
+// @asserts: hipLaunchKernel - a kernel launched via the pointer-and-args entry point runs and writes its expected output to device memory
 HIP_TEST_CASE(Contract_Kernel_LaunchKernel_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
@@ -57,6 +59,7 @@ HIP_TEST_CASE(Contract_Kernel_LaunchKernel_WritesExpectedValue) {
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
 
+// @asserts: hipGetLastError - a valid kernel launch leaves the last-error state clear (returns hipSuccess)
 HIP_TEST_CASE(Contract_Kernel_GetLastErrorAfterValidLaunch_ReturnsSuccess) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
@@ -70,6 +73,7 @@ HIP_TEST_CASE(Contract_Kernel_GetLastErrorAfterValidLaunch_ReturnsSuccess) {
   HIP_CHECK(hipDeviceSynchronize());
 }
 
+// @asserts: hipGetLastError - a launch with an invalid launch configuration records a non-success error retrievable via hipGetLastError
 HIP_TEST_CASE(Contract_Kernel_InvalidConfiguration_RecordsReturnedError) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;

@@ -28,6 +28,7 @@ hipMemsetParams MakeMemsetParams(void* device_ptr, unsigned int value) {
 }
 }  // namespace
 
+// @asserts: hipGraphMemsetNodeSetParams - params set on a memset node round-trip exactly through the matching get call
 HIP_TEST_CASE(Contract_GraphNodeParams_MemsetNode_SetThenGet_RoundTripsParams) {
   hip::contract::ContractCleanup cleanup;
   void* initial_ptr = nullptr;
@@ -58,6 +59,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_MemsetNode_SetThenGet_RoundTripsParams) {
   REQUIRE(returned_params.height == updated_params.height);
 }
 
+// @asserts: hipGraphMemcpyNodeGetParams - get returns the src/dst/extent/kind supplied when the memcpy node was added
 HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNode_GetParams_ReflectsAddedNode) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
@@ -83,6 +85,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNode_GetParams_ReflectsAddedNode) {
   REQUIRE(params.kind == hipMemcpyHostToDevice);
 }
 
+// @asserts: hipGraphMemcpyNodeSetParams - params set on a memcpy node round-trip exactly through the matching get call
 HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNode_SetThenGet_RoundTripsParams) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> initial_host{};
@@ -122,6 +125,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNode_SetThenGet_RoundTripsParams) {
   REQUIRE(returned_params.kind == hipMemcpyHostToDevice);
 }
 
+// @asserts: hipGraphMemsetNodeGetParams - rejects a null node or null output params with a non-success error
 HIP_TEST_CASE(Contract_GraphNodeParams_MemsetNodeGetParams_NullArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -140,6 +144,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_MemsetNodeGetParams_NullArgs_AreRejected)
   REQUIRE(hipGraphMemsetNodeGetParams(node, nullptr) != hipSuccess);
 }
 
+// @asserts: hipGraphMemcpyNodeGetParams - rejects a null node or null output params with a non-success error
 HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNodeGetParams_NullArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
@@ -159,6 +164,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_MemcpyNodeGetParams_NullArgs_AreRejected)
   REQUIRE(hipGraphMemcpyNodeGetParams(node, nullptr) != hipSuccess);
 }
 
+// @asserts: hipGraphEventRecordNodeGetEvent - record and wait node get-event calls return the event bound at node creation
 HIP_TEST_CASE(Contract_GraphNodeParams_EventRecordAndWaitNode_GetEvent_ReturnsBoundEvent) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -182,6 +188,7 @@ HIP_TEST_CASE(Contract_GraphNodeParams_EventRecordAndWaitNode_GetEvent_ReturnsBo
   REQUIRE(returned_wait_event == event);
 }
 
+// @asserts: hipGraphDestroyNode - destroying a node removes exactly that node and decrements the graph's node count
 HIP_TEST_CASE(Contract_GraphNodeParams_DestroyNode_RemovesNodeFromGraph) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;

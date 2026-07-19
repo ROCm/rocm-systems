@@ -24,6 +24,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 }
 
+// @asserts: hipGraphCreate - creating an empty graph yields a non-null handle that can be destroyed
 HIP_TEST_CASE(Contract_Graph_CreateDestroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -34,6 +35,7 @@ HIP_TEST_CASE(Contract_Graph_CreateDestroy_Succeeds) {
   REQUIRE(graph != nullptr);
 }
 
+// @asserts: hipGraphAddEmptyNode - adding an empty node to a graph yields a non-null node handle
 HIP_TEST_CASE(Contract_Graph_AddEmptyNode_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
@@ -46,6 +48,7 @@ HIP_TEST_CASE(Contract_Graph_AddEmptyNode_Succeeds) {
   REQUIRE(node != nullptr);
 }
 
+// @asserts: hipGraphAddMemcpyNode1D - dependent H2D then D2H memcpy nodes in a launched graph round-trip bytes
 HIP_TEST_CASE(Contract_Graph_AddMemcpyNode1D_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x51);
@@ -75,6 +78,7 @@ HIP_TEST_CASE(Contract_Graph_AddMemcpyNode1D_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipGraphAddMemsetNode - a memset node in a launched graph fills the device buffer with the pattern
 HIP_TEST_CASE(Contract_Graph_AddMemsetNode_FillsDeviceBuffer) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x6d;
@@ -112,6 +116,7 @@ HIP_TEST_CASE(Contract_Graph_AddMemsetNode_FillsDeviceBuffer) {
   }
 }
 
+// @asserts: hipGraphInstantiate - an instantiated graph launches and synchronizes on a stream without error
 HIP_TEST_CASE(Contract_Graph_InstantiateLaunchSynchronize_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;

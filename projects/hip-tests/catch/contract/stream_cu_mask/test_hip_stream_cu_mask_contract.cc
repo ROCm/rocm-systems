@@ -64,6 +64,7 @@ bool CreateStreamWithMaskOrSkip(hipStream_t* stream, const std::vector<uint32_t>
 }
 }  // namespace
 
+// @asserts: hipExtStreamGetCUMask - the CU mask read back from a stream equals the all-CUs mask it was created with
 HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
@@ -78,6 +79,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
   REQUIRE(returned_mask == default_mask);
 }
 
+// @asserts: hipExtStreamCreateWithCUMask - creating a stream with a valid all-CUs mask yields a non-null stream
 HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
@@ -91,6 +93,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
   REQUIRE(stream != nullptr);
 }
 
+// @asserts: hipExtStreamCreateWithCUMask - rejects a null stream out-param, zero mask size, or null mask pointer with a non-success error
 HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
@@ -102,6 +105,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
                                        nullptr) != hipSuccess);
 }
 
+// @asserts: hipExtStreamGetCUMask - rejects a null mask pointer or zero mask size with hipErrorInvalidValue
 HIP_TEST_CASE(Contract_StreamCuMask_GetRejectsInvalidArgs) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();

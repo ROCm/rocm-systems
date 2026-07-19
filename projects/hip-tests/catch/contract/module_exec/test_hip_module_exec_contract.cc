@@ -113,6 +113,7 @@ bool CooperativeLaunchSupported() {
 }
 }  // namespace
 
+// @asserts: hipModuleGetFunctionCount - a module defining at least one kernel reports a function count of at least one
 HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -127,6 +128,7 @@ HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
   REQUIRE(count >= 1);
 }
 
+// @asserts: hipModuleGetFunctionCount - a null count out-pointer is rejected with a non-success status
 HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -140,6 +142,7 @@ HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipModuleOccupancyMaxPotentialBlockSize - returns a positive block size and non-negative minimum grid size for a module function
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableValues) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -159,6 +162,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableVa
   REQUIRE(min_grid_size >= 0);
 }
 
+// @asserts: hipModuleOccupancyMaxActiveBlocksPerMultiprocessor - returns non-negative active-blocks occupancy for a concrete block size
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -176,6 +180,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeVal
   REQUIRE(num_blocks >= 0);
 }
 
+// @asserts: hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - default-flags active-blocks query matches the non-flags query
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -201,6 +206,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
   REQUIRE(num_blocks_with_flags == num_blocks_default);
 }
 
+// @asserts: hipModuleOccupancyMaxPotentialBlockSizeWithFlags - default-flags potential-block-size query matches the non-flags grid/block suggestion
 HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDefault) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -237,6 +243,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDe
   REQUIRE(grid_flags == grid_default);
 }
 
+// @asserts: hipModuleLaunchCooperativeKernel - a cooperative launch of a module function executes and deterministically publishes the expected value
 HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
@@ -267,6 +274,7 @@ HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
   REQUIRE(result == kExpectedValue);
 }
 
+// @asserts: hipModuleLaunchCooperativeKernel - a null function handle is rejected with a non-success status
 HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");

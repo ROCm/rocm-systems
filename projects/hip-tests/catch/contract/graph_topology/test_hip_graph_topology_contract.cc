@@ -32,6 +32,7 @@ TwoNodeGraph CreateTwoNodeGraph() {
 }
 }
 
+// @asserts: hipGraphGetNodes - reports the correct node count and returns every node added to the graph
 HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
@@ -49,6 +50,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
   REQUIRE(ContainsNode(nodes.data(), node_count, graph.dependent));
 }
 
+// @asserts: hipGraphGetRootNodes - returns only the dependency-free node(s) as roots
 HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
@@ -65,6 +67,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
   REQUIRE(roots[0] == graph.root);
 }
 
+// @asserts: hipGraphGetEdges - returns each dependency as a from/to edge pair matching the configured direction
 HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
@@ -83,6 +86,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
   REQUIRE(to[0] == graph.dependent);
 }
 
+// @asserts: hipGraphNodeGetDependencies - returns the upstream nodes a given node depends on
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependency) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
@@ -99,6 +103,7 @@ HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependenc
   REQUIRE(dependencies[0] == graph.root);
 }
 
+// @asserts: hipGraphNodeGetDependentNodes - returns the downstream nodes that depend on a given node
 HIP_TEST_CASE(Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();

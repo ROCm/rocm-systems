@@ -97,6 +97,7 @@ void LoadContractModule(hipModule_t& module) {
 }
 }  // namespace
 
+// @asserts: hipModuleLoadData - a HIPRTC-produced code object loads into a non-null module handle and unloads without error
 HIP_TEST_CASE(Contract_Module_LoadData_FromRtc_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
@@ -112,6 +113,7 @@ HIP_TEST_CASE(Contract_Module_LoadData_FromRtc_Succeeds) {
   REQUIRE(module != nullptr);
 }
 
+// @asserts: hipModuleLoadData - loading from a null image is rejected with a non-success status
 HIP_TEST_CASE(Contract_Module_LoadData_NullImage_IsRejected) {
   // Loading a module from a null image must not silently succeed. Backends may
   // report hipErrorInvalidValue or hipErrorInvalidImage; the contract only
@@ -121,6 +123,7 @@ HIP_TEST_CASE(Contract_Module_LoadData_NullImage_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipModuleGetFunction - a symbol present in the module resolves to a non-null function handle
 HIP_TEST_CASE(Contract_Module_GetFunction_ResolvesKnownSymbol) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -134,6 +137,7 @@ HIP_TEST_CASE(Contract_Module_GetFunction_ResolvesKnownSymbol) {
   REQUIRE(function != nullptr);
 }
 
+// @asserts: hipModuleGetFunction - resolving a symbol the module does not define fails rather than returning a bogus handle
 HIP_TEST_CASE(Contract_Module_GetFunction_UnknownSymbol_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -148,6 +152,7 @@ HIP_TEST_CASE(Contract_Module_GetFunction_UnknownSymbol_IsRejected) {
   REQUIRE(status != hipSuccess);
 }
 
+// @asserts: hipModuleLaunchKernel - launching a resolved module function with a single-thread grid deterministically writes the expected value
 HIP_TEST_CASE(Contract_Module_LaunchKernel_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -175,6 +180,7 @@ HIP_TEST_CASE(Contract_Module_LaunchKernel_WritesExpectedValue) {
   REQUIRE(result == kExpectedValue);
 }
 
+// @asserts: hipModuleGetGlobal - a device global resolves to a non-null address with a size covering its declared type
 HIP_TEST_CASE(Contract_Module_GetGlobal_ReturnsAddressAndSize) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
@@ -191,6 +197,7 @@ HIP_TEST_CASE(Contract_Module_GetGlobal_ReturnsAddressAndSize) {
   REQUIRE(byte_count >= sizeof(int));
 }
 
+// @asserts: hipFuncGetAttribute - a module function reports positive max-threads-per-block and a non-negative register count
 HIP_TEST_CASE(Contract_Module_FuncGetAttribute_ReturnsSaneValues) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;

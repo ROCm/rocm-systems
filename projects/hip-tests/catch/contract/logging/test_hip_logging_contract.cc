@@ -24,6 +24,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 }
 }  // namespace
 
+// @asserts: hipExtEnableLogging - enable and disable are each accepted-or-unsupported and report a consistent capability
 HIP_TEST_CASE(Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported) {
   // Enabling then disabling logging must report a consistent capability: if
   // enable is honored, the matching disable must also be honored, and if enable
@@ -39,6 +40,7 @@ HIP_TEST_CASE(Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported) {
   REQUIRE((enable_status == hipSuccess) == (disable_status == hipSuccess));
 }
 
+// @asserts: hipExtSetLoggingParams - configuring benign logging level/buffer/mask is accepted or reported unsupported
 HIP_TEST_CASE(Contract_Logging_SetLoggingParams_IsAcceptedOrUnsupported) {
   // Configuring the logging level, buffer size, and mask must be accepted or
   // reported unsupported. The parameters chosen are benign (a low level with a

@@ -151,6 +151,18 @@ entry. It needs no ROCm/GPU/build — run it locally the same way:
 python3 projects/hip-tests/catch/contract/tools/check_contract_coverage.py
 ```
 
+[`TEST_PLAN.md`](TEST_PLAN.md) is a generated inventory of **what each test case
+asserts** — its API and a one-line invariant from the `// @asserts:` tag above the
+case — grouped by tier and domain. It is produced by `tools/gen_test_plan.py` and
+staleness-checked by the same PR workflow, so it stays current and can be used to
+find redundant coverage as the wider `catch/*` suite is organized into tiers
+(contract, unit, integration, system, performance, stress). Regenerate it after
+adding, renaming, or removing a case:
+
+```bash
+python3 projects/hip-tests/catch/contract/tools/gen_test_plan.py
+```
+
 ## Backend coverage
 
 The contract suite is portable across the AMD (ROCm/HIP) backend and the NVIDIA

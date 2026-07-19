@@ -26,6 +26,7 @@ hipMemsetParams MakeByteMemsetParams(void* device_ptr, unsigned int value) {
 }
 }  // namespace
 
+// @asserts: hipGraphInstantiateWithParams - instantiating a valid graph reports success, clears errNode_out, and yields a launchable exec
 HIP_TEST_CASE(Contract_GraphInstantiateParams_ReportsSuccessAndLaunches) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -63,6 +64,7 @@ HIP_TEST_CASE(Contract_GraphInstantiateParams_ReportsSuccessAndLaunches) {
   REQUIRE(host == 0x5A);
 }
 
+// @asserts: hipGraphInstantiateWithParams - the upload flag plus upload stream is accepted-or-unsupported and still yields a launchable exec
 HIP_TEST_CASE(Contract_GraphInstantiateParams_UploadStream_LaunchesUploadedGraph) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;

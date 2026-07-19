@@ -24,6 +24,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 }
 
+// @asserts: hipStreamEndCapture - begin/end capture over an empty stream produces a non-null graph
 HIP_TEST_CASE(Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -38,6 +39,7 @@ HIP_TEST_CASE(Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph) {
   REQUIRE(graph != nullptr);
 }
 
+// @asserts: hipStreamBeginCapture - a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact
 HIP_TEST_CASE(Contract_GraphCapture_CapturedMemcpy_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x27);
@@ -68,6 +70,7 @@ HIP_TEST_CASE(Contract_GraphCapture_CapturedMemcpy_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipStreamIsCapturing - reports capture status Active on a stream between begin and end capture
 HIP_TEST_CASE(Contract_GraphCapture_IsCapturing_ReportsActiveDuringCapture) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -85,6 +88,7 @@ HIP_TEST_CASE(Contract_GraphCapture_IsCapturing_ReportsActiveDuringCapture) {
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 }
 
+// @asserts: hipStreamGetCaptureInfo - reports Active status and a nonzero capture id while a stream is capturing
 HIP_TEST_CASE(Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;

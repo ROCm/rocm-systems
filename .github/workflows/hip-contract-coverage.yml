@@ -1,13 +1,17 @@
 name: HIP contract-test coverage
 
-# Fails a PR when a newly-added public HIP runtime API (declared in
-# projects/hip/include/hip/hip_runtime_api.h) ships without a corresponding
-# contract test and is not listed in the intentionally-uncovered allowlist
-# (projects/hip-tests/catch/contract/uncovered_apis.txt).
+# Two pure static-analysis gates for the contract-test suite (no ROCm, GPU, or
+# build required, so both run quickly and always-on):
+#   1. Coverage: fails when a newly-added public HIP runtime API (declared in
+#      projects/hip/include/hip/hip_runtime_api.h) ships without a corresponding
+#      contract test and is not on the intentionally-uncovered allowlist
+#      (projects/hip-tests/catch/contract/uncovered_apis.txt).
+#   2. Test plan: fails when catch/contract/TEST_PLAN.md is out of date with the
+#      test sources (a case was added, renamed, or removed, or an @asserts tag
+#      changed, without regenerating the plan).
 #
-# This is a pure static-analysis check (no ROCm, GPU, or build required), so it
-# runs quickly as an always-on gate. See
-# projects/hip-tests/catch/contract/AUTHORING.md for how to add a contract test.
+# See projects/hip-tests/catch/contract/AUTHORING.md for how to add a contract
+# test and keep both current.
 
 on:
   pull_request:
@@ -32,3 +36,7 @@ jobs:
       - name: Check contract-test coverage
         run: |
           python projects/hip-tests/catch/contract/tools/check_contract_coverage.py --check
+
+      - name: Check test plan is up to date
+        run: |
+          python projects/hip-tests/catch/contract/tools/gen_test_plan.py --check

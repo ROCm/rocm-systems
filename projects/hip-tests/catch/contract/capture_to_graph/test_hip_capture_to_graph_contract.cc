@@ -32,6 +32,7 @@ __global__ void WriteValueKernel(int* output, int value) {
 }
 }  // namespace
 
+// @asserts: hipStreamBeginCaptureToGraph - ending capture returns the caller-provided graph handle populated with the captured nodes
 HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -63,6 +64,7 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph) {
   REQUIRE(node_count >= 2);
 }
 
+// @asserts: hipStreamBeginCaptureToGraph - a graph captured into the caller graph instantiates, launches, and produces the captured kernel's write
 HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -98,6 +100,7 @@ HIP_TEST_CASE(Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpected
 }
 
 #if HIP_CONTRACT_HAS_CAPTURE_INFO_V2
+// @asserts: hipStreamUpdateCaptureDependencies - re-adding the queried capture dependency set is accepted while capture stays active
 HIP_TEST_CASE(Contract_CaptureToGraph_UpdateCaptureDependencies_AddsToDependencySet) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;

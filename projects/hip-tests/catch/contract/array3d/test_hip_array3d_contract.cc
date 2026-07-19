@@ -34,6 +34,7 @@ hipPitchedPtr HostPitchedPtr(void* ptr) {
 hipExtent ArrayExtent() { return make_hipExtent(kWidth, kHeight, kDepth); }
 }
 
+// @asserts: hipMalloc3DArray - allocating a 3D array with a valid descriptor and extent yields a non-null handle
 HIP_TEST_CASE(Contract_Array3D_Malloc3DArray_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -46,6 +47,7 @@ HIP_TEST_CASE(Contract_Array3D_Malloc3DArray_ReturnsUsableArray) {
   REQUIRE(array != nullptr);
 }
 
+// @asserts: hipMemcpy3D - copying host bytes into a 3D array and back reproduces the original bytes exactly
 HIP_TEST_CASE(Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -74,6 +76,7 @@ HIP_TEST_CASE(Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipFreeArray - freeing an allocated 3D array succeeds
 HIP_TEST_CASE(Contract_Array3D_FreeArray_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hipArray_t array = nullptr;

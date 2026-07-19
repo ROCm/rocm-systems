@@ -42,6 +42,7 @@ void SkipIfManagedMemoryUnsupported() {
 }
 }
 
+// @asserts: hipMallocManaged - allocating a managed range returns a non-null usable pointer
 HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -53,6 +54,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
   REQUIRE(data != nullptr);
 }
 
+// @asserts: hipMallocManaged - a host-written value in managed memory is visible to a kernel after device synchronize
 HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -76,6 +78,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchron
   REQUIRE(host_observed == 1);
 }
 
+// @asserts: hipMallocManaged - a kernel-written value in managed memory is visible to the host after device synchronize
 HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -97,6 +100,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchron
   REQUIRE(*data == kDeviceValue);
 }
 
+// @asserts: hipFree - freeing a managed pointer allocated by hipMallocManaged succeeds
 HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   int* data = nullptr;
@@ -105,6 +109,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
   HIP_CHECK(hipFree(data));
 }
 
+// @asserts: hipMemPrefetchAsync - prefetching a managed range to the current device succeeds where concurrent managed access is supported
 HIP_TEST_CASE(Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;

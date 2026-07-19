@@ -37,6 +37,7 @@ void SkipPitchedAllocationUnsupported() {
 }
 }  // namespace
 
+// @asserts: hipMemsetD2D8 - fills a pitched 2D region with a byte pattern that is visible after copy-back
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
@@ -57,6 +58,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D16 - fills a pitched 2D region with a 16-bit pattern that is visible after copy-back
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
@@ -77,6 +79,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D32 - fills a pitched 2D region with a 32-bit pattern that is visible after copy-back
 HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
@@ -97,6 +100,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D8Async - stream-ordered 2D byte fill is visible after the stream is synchronized
 HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x3c;
@@ -121,6 +125,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemset2D - runtime 2D memset fills a pitched region with a byte pattern visible after copy-back
 HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x7b;
@@ -140,6 +145,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
   RequireAllEqual(dst, pattern);
 }
 
+// @asserts: hipMemsetD2D8 - all D2D8/D2D16/D2D32 and hipMemset2D variants reject a null destination with a non-success status
 HIP_TEST_CASE(Contract_DriverMemset2D_NullDestination_IsRejected) {
   constexpr size_t pitch = kWidth * sizeof(uint32_t);
 

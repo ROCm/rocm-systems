@@ -45,10 +45,11 @@ per-API notes on why each gap exists.
 
 2. **Write `test_hip_<domain>_contract.cc`.** Use the Catch2 `HIP_TEST_CASE`
    macro and name each case `Contract_<Area>_<Behavior>` so the intent is legible
-   in `ctest` output. Include `hip_test_common.hh` (pulls in Catch2, `HT_AMD`,
-   `CHECK_IMAGE_SUPPORT`, `HIP_CHECK`, `HIP_SKIP_TEST`) and, if you allocate
-   anything, `contract_cleanup.hh`. See the skeleton below or copy
-   `TEMPLATE.cc.txt`.
+   in `ctest` output. Put an `// @asserts:` intent tag on the line directly above
+   each case (see the checklist below — it feeds the generated test plan). Include
+   `hip_test_common.hh` (pulls in Catch2, `HT_AMD`, `CHECK_IMAGE_SUPPORT`,
+   `HIP_CHECK`, `HIP_SKIP_TEST`) and, if you allocate anything,
+   `contract_cleanup.hh`. See the skeleton below or copy `TEMPLATE.cc.txt`.
 
 3. **Add a `CMakeLists.txt`** in the domain dir:
 
@@ -78,13 +79,26 @@ per-API notes on why each gap exists.
    *"too few arguments to function-like macro SECOND_ARG"*. After editing the
    YAML you must re-run CMake configure so the header regenerates.
 
-6. **Update the docs**: bump the counts and the domain line in
+6. **Regenerate the test plan and update the docs**: run
+   `tools/gen_test_plan.py` to refresh `TEST_PLAN.md` (the CI check fails if it is
+   stale), bump the counts and the domain line in
    `projects/hip-tests/CONTRACT_COVERAGE.md`, and add/adjust the domain
    description in `catch/contract/README.md`. Run
    `tools/check_contract_coverage.py` — it prints the numbers to copy and confirms
    the new API is now counted as covered.
 
 ## Conventions checklist
+
+- **Tag each case with `// @asserts:`.** On the line directly above every
+  `HIP_TEST_CASE`, write `// @asserts: <API> - <one-line portable invariant this
+  case pins>` (keyboard-friendly spaced-hyphen separator; the API before it, the
+  invariant after). This is the machine-readable intent that
+  `tools/gen_test_plan.py` compiles into `TEST_PLAN.md`, the cross-tier inventory
+  used to spot redundant coverage between the contract, unit, integration, and
+  other tiers. Write the invariant from what the case *asserts*, not what it
+  allocates. If the case is `#if`-guarded, put the tag directly above the
+  `HIP_TEST_CASE` line (inside the guard), not above the `#if`. Exemplar:
+  `mem_batch_copy_3d/test_hip_mem_batch_copy_3d_contract.cc`.
 
 - **Clean up every resource with `ContractCleanup`.** Declare a
   `hip::contract::ContractCleanup cleanup;` first, then `cleanup.Add(...)` right
@@ -162,6 +176,7 @@ A minimal starting point (also in `TEMPLATE.cc.txt`):
 
 // One or two sentences: which public API this pins and what portable guarantee
 // the case asserts (round-trip / accepted-or-unsupported / rejection).
+// @asserts: hipSomeApi - one-line portable invariant this case pins
 HIP_TEST_CASE(Contract_<Area>_<Behavior>) {
   hip::contract::ContractCleanup cleanup;
 

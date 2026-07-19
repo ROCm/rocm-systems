@@ -54,6 +54,7 @@ class ScopedCurrentContext {
 };
 }  // namespace
 
+// @asserts: hipCtxCreate - creating then destroying a context succeeds and the previously current context is restored afterward
 HIP_TEST_CASE(Contract_ContextMutation_CreateDestroy_Succeeds) {
   RequireDevice();
 
@@ -75,6 +76,7 @@ HIP_TEST_CASE(Contract_ContextMutation_CreateDestroy_Succeeds) {
   REQUIRE(current == scoped_context.previous());
 }
 
+// @asserts: hipCtxSetCurrent - a set context round-trips through hipCtxGetCurrent and its device agrees with the runtime current device
 HIP_TEST_CASE(Contract_ContextMutation_SetCurrent_RoundTripsThroughGetCurrent) {
   RequireDevice();
 
@@ -105,6 +107,7 @@ HIP_TEST_CASE(Contract_ContextMutation_SetCurrent_RoundTripsThroughGetCurrent) {
   HIP_CHECK(hipCtxDestroy(context));
 }
 
+// @asserts: hipCtxPushCurrent - pushing a context makes it current and popping it returns that context and restores the previous current context
 HIP_TEST_CASE(Contract_ContextMutation_PushPop_RestoresPreviousCurrent) {
   RequireDevice();
 
@@ -136,6 +139,7 @@ HIP_TEST_CASE(Contract_ContextMutation_PushPop_RestoresPreviousCurrent) {
   HIP_CHECK(hipCtxDestroy(context));
 }
 
+// @asserts: hipCtxSynchronize - a driver-style context barrier either succeeds or reports accepted-or-unsupported
 HIP_TEST_CASE(Contract_ContextMutation_Synchronize_ReportsSupportedOrNotSupported) {
   RequireDevice();
 
@@ -146,6 +150,7 @@ HIP_TEST_CASE(Contract_ContextMutation_Synchronize_ReportsSupportedOrNotSupporte
   REQUIRE((status == hipSuccess || status == hipErrorNotSupported));
 }
 
+// @asserts: hipCtxGetApiVersion - the query either succeeds with a positive version or reports accepted-or-unsupported
 HIP_TEST_CASE(Contract_ContextMutation_GetApiVersion_ReportsVersionOrNotSupported) {
   RequireDevice();
 

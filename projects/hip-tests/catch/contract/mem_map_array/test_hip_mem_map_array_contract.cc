@@ -27,6 +27,7 @@ void RequireDevice() {
 }
 }  // namespace
 
+// @asserts: hipMemMapArrayAsync - rejects a null map-info list with a non-success status
 HIP_TEST_CASE(Contract_MemMapArray_NullMapList_IsRejected) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
@@ -45,6 +46,7 @@ HIP_TEST_CASE(Contract_MemMapArray_NullMapList_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipMemMapArrayAsync - rejects a zero operation count with a non-success status
 HIP_TEST_CASE(Contract_MemMapArray_ZeroCount_IsRejected) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;

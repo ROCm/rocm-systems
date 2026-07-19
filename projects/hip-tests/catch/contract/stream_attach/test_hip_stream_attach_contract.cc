@@ -42,6 +42,7 @@ hipDeviceptr_t* AttachPtr(void* p) { return reinterpret_cast<hipDeviceptr_t*>(p)
 #endif
 }  // namespace
 
+// @asserts: hipStreamAttachMemAsync - attaching managed memory with hipMemAttachSingle to a created stream succeeds
 HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -58,6 +59,7 @@ HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
+// @asserts: hipStreamAttachMemAsync - attaching managed memory with hipMemAttachGlobal on the null stream succeeds
 HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -71,6 +73,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
   HIP_CHECK(hipStreamSynchronize(nullptr));
 }
 
+// @asserts: hipStreamAttachMemAsync - a non-zero length with hipMemAttachSingle on a created stream succeeds
 HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
@@ -87,6 +90,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
+// @asserts: hipStreamAttachMemAsync - rejects a null device pointer with a non-success error
 HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -96,6 +100,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
   REQUIRE(hipStreamAttachMemAsync(stream, nullptr, kAttachBytes, hipMemAttachSingle) != hipSuccess);
 }
 
+// @asserts: hipStreamAttachMemAsync - rejects hipMemAttachSingle on the null stream with a non-success error
 HIP_TEST_CASE(Contract_StreamAttach_NullStreamAttachSingle_IsRejected) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;

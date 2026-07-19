@@ -33,6 +33,7 @@ struct NoDynamicSmem {
 };
 }  // namespace
 
+// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - returns a non-negative min grid size and positive block size; the reserved flag does not change the contract
 HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues) {
   // The with-flags potential-block-size helper must return a usable grid/block
   // pair for a launchable kernel: a non-negative minimum grid size and a
@@ -48,6 +49,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsab
   REQUIRE(block_size > 0);
 }
 
+// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - under default flags suggests the same block size as the plain hipOccupancyMaxPotentialBlockSize
 HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlainVariant) {
   // Under default flags the with-flags helper must agree with the plain
   // potential-block-size helper for the same kernel: the reserved flag argument
@@ -67,6 +69,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlai
   REQUIRE(flagged_block == plain_block);
 }
 
+// @asserts: hipOccupancyMaxPotentialBlockSizeVariableSMem - accepts a block-size-to-dynamic-smem functor and returns a non-negative min grid size and positive block size
 HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues) {
   // The variable-shared-memory helper must accept a block-size-to-dynamic-smem
   // functor and return a usable grid/block pair. A functor that always requests
@@ -80,6 +83,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues) {
   REQUIRE(block_size > 0);
 }
 
+// @asserts: hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags - accepts the smem functor and returns a non-negative min grid size and positive block size under the reserved default flag
 HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues) {
   // The with-flags variable-shared-memory helper must behave like its non-flags
   // sibling for the reserved default flag: it accepts the functor and returns a

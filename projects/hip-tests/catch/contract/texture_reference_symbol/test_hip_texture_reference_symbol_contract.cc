@@ -132,6 +132,7 @@ bool CompileModuleSource2D(std::vector<char>& code) {
 
 // hipGetTextureReference resolves a registered texture symbol to a usable
 // reference handle.
+// @asserts: hipGetTextureReference - resolves a registered file-scope texture symbol to a non-null reference handle
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_GetTextureReference_ResolvesSymbol) {
   CHECK_IMAGE_SUPPORT;
 
@@ -148,6 +149,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_GetTextureReference_ResolvesSymbol
 // hipBindTexture binds linear device memory to a registered 1D texture symbol and
 // hipUnbindTexture releases it; hipGetTextureAlignmentOffset reports the binding
 // alignment offset. All three reject a stack reference but accept the symbol.
+// @asserts: hipBindTexture - binds/unbinds linear memory to a registered 1D texture symbol with a zero alignment offset
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindUnbindLinearMemory_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -174,6 +176,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindUnbindLinearMemory_Succeeds) {
 }
 
 // hipBindTexture2D binds pitched device memory to a registered 2D texture symbol.
+// @asserts: hipBindTexture2D - binds pitched device memory to a registered 2D texture symbol
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTexture2D_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -198,6 +201,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTexture2D_Succeeds) {
 }
 
 // hipBindTextureToArray binds a HIP array to a registered 2D texture symbol.
+// @asserts: hipBindTextureToArray - binds a HIP array to a registered 2D texture symbol
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTextureToArray_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -231,6 +235,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_BindTextureToArray_Succeeds) {
 // hipModuleGetTexRef resolves a texture declared in a loaded module, and the
 // resulting reference round-trips a device address through hipTexRefSetAddress /
 // hipTexRefGetAddress and a HIP array through hipTexRefSetArray / hipTexRefGetArray.
+// @asserts: hipTexRefSetAddress - module-backed texref round-trips a bound device address and HIP array through set/get
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundTrip) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -295,6 +300,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundT
 
 // The mipmap-parameter getters are stubbed to report hipErrorInvalidValue on this
 // backend regardless of any set value. The contract is this documented rejection.
+// @asserts: hipTexRefGetMipmapFilterMode - mipmap-parameter getters return hipErrorInvalidValue on this backend regardless of set value
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInvalidValue) {
   CHECK_IMAGE_SUPPORT;
 
@@ -328,6 +334,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterGetters_ReturnInval
 // hipErrorInvalidValue sentinel, so the set value round-trips even though the
 // getter's return code is the stub error. A null reference is rejected with
 // hipErrorInvalidValue before the image gate, so that check is backend-neutral.
+// @asserts: hipTexRefSetMipmapFilterMode - mipmap-parameter setters write values observable via getters and reject a null reference
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterSetters_WriteAndReject) {
   // Null-reference rejection is checked first because it does not depend on image
   // support (the runtime null-checks before the device image-capability gate).
@@ -384,6 +391,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_MipmapParameterSetters_WriteAndRej
 // hipTexRefGetMipMappedArray must return the same handle. A stack reference is
 // rejected with hipErrorInvalidSymbol, so the module route (which yields a
 // registered reference) is used, matching the address/array round-trip above.
+// @asserts: hipTexRefSetMipmappedArray - module-backed texref round-trips a bound mipmapped array handle through set/get
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTrip) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -458,6 +466,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTr
 // it records is cross-checked through hipTexRefGetAddress (which returns the
 // bound linear address). A 2D-typed reference is required (a 1D reference is
 // rejected), matching the mipmapped-array round-trip above.
+// @asserts: hipTexRefSetAddress2D - binds a pitched 2D allocation to a module-backed texref and records the base device address
 HIP_TEST_CASE(Contract_TextureReferenceSymbol_ModuleTexRef_SetAddress2D_IsAccepted) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;

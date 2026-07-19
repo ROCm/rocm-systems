@@ -46,6 +46,7 @@ size_t FileSize(const std::string& path) {
 }
 }  // namespace
 
+// @asserts: hipGraphDebugDotPrint - exporting a non-empty graph succeeds (or reports unsupported) and writes a non-empty dot file
 HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
@@ -76,6 +77,7 @@ HIP_TEST_CASE(Contract_GraphDebug_DotPrint_WritesNonEmptyFile) {
   std::remove(path.c_str());
 }
 
+// @asserts: hipGraphDebugDotPrint - the verbose flag is accepted and still exports a valid graph to a non-empty dot file
 HIP_TEST_CASE(Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;

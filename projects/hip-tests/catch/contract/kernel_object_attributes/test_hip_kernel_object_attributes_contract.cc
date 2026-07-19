@@ -90,6 +90,7 @@ void LoadContractKernel(std::vector<char>& code, hipLibrary_t& library, hipKerne
 }
 }  // namespace
 
+// @asserts: hipKernelGetAttribute - reports a positive max-threads-per-block and non-negative static resource usage for a loaded kernel
 HIP_TEST_CASE(Contract_KernelObjectAttributes_GetAttribute_ReturnsSaneValues) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -115,6 +116,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_GetAttribute_ReturnsSaneValues) {
   HIP_CHECK(hipLibraryUnload(library));
 }
 
+// @asserts: hipKernelSetAttribute - setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error
 HIP_TEST_CASE(Contract_KernelObjectAttributes_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
@@ -136,6 +138,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_SetMaxDynamicSharedMemory_IsAccept
   HIP_CHECK(hipLibraryUnload(library));
 }
 
+// @asserts: hipKernelGetParamInfo - reports the first parameter at offset zero with size at least that of a device pointer
 HIP_TEST_CASE(Contract_KernelObjectAttributes_GetParamInfo_ReturnsFirstParamLayout) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;

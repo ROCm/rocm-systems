@@ -77,6 +77,7 @@ void RecordSecond(void* userData) {
 }
 }  // namespace
 
+// @asserts: hipStreamAddCallback - a registered callback runs exactly once after the stream drains
 HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_InvokesExactlyOnce) {
   hip::contract::ContractCleanup cleanup;
   CallbackState state{};
@@ -95,6 +96,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_InvokesExactlyOnce) {
   REQUIRE(state.invocation_count == kExpectedInvocationCount);
 }
 
+// @asserts: hipStreamAddCallback - callbacks run in stream order, so a later callback observes earlier callback effects
 HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_RunsAfterPriorWork) {
   hip::contract::ContractCleanup cleanup;
   OrderingState state{};
@@ -114,6 +116,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_RunsAfterPriorWork) {
   REQUIRE(state.callback_saw_prior_work);
 }
 
+// @asserts: hipStreamAddCallback - the callback is invoked once with hipSuccess as its status argument
 HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_ReceivesSuccessStatus) {
   hip::contract::ContractCleanup cleanup;
   CallbackState state{};
@@ -129,6 +132,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_AddCallback_ReceivesSuccessStatus) {
   REQUIRE(state.observed_status == hipSuccess);
 }
 
+// @asserts: hipLaunchHostFunc - an enqueued host function runs exactly once (or the API reports unsupported)
 HIP_TEST_CASE(Contract_StreamCallbacks_LaunchHostFunc_InvokesExactlyOnce) {
   hip::contract::ContractCleanup cleanup;
   int32_t counter = kInitialValue;
@@ -147,6 +151,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_LaunchHostFunc_InvokesExactlyOnce) {
   REQUIRE(counter == kExpectedInvocationCount);
 }
 
+// @asserts: hipLaunchHostFunc - two host functions execute in stream-enqueue order
 HIP_TEST_CASE(Contract_StreamCallbacks_LaunchHostFunc_OrdersBeforeLaterWork) {
   hip::contract::ContractCleanup cleanup;
   HostFuncOrderingState state{};

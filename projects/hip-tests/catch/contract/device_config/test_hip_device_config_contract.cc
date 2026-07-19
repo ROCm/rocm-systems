@@ -33,6 +33,7 @@ bool IsKnownSharedMemConfig(hipSharedMemConfig config) {
 }
 }  // namespace
 
+// @asserts: hipDeviceGetCacheConfig - the queried cache preference is one of the documented hipFuncCache_t enumerators
 HIP_TEST_CASE(Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue) {
   RequireDevice();
 
@@ -44,6 +45,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue) {
   REQUIRE(IsKnownCacheConfig(config));
 }
 
+// @asserts: hipDeviceSetCacheConfig - setting the cache preference either succeeds or reports NotSupported
 HIP_TEST_CASE(Contract_DeviceConfig_SetCacheConfig_IsAcceptedOrUnsupported) {
   RequireDevice();
 
@@ -65,6 +67,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_SetCacheConfig_IsAcceptedOrUnsupported) {
   HIP_CHECK(hipDeviceSetCacheConfig(saved));
 }
 
+// @asserts: hipDeviceGetSharedMemConfig - when supported, reports one of the documented hipSharedMemConfig enumerators
 HIP_TEST_CASE(Contract_DeviceConfig_GetSharedMemConfig_ReturnsEnumValue) {
   RequireDevice();
 
@@ -81,6 +84,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetSharedMemConfig_ReturnsEnumValue) {
   REQUIRE(IsKnownSharedMemConfig(config));
 }
 
+// @asserts: hipDeviceGetLimit - stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted
 HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvalid) {
   RequireDevice();
 
@@ -114,6 +118,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvali
 #endif
 }
 
+// @asserts: hipDeviceSetLimit - setting the heap limit back to its current value succeeds or reports unsupported
 HIP_TEST_CASE(Contract_DeviceConfig_SetLimit_RoundTripsOrIsUnsupported) {
   RequireDevice();
 
@@ -135,6 +140,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_SetLimit_RoundTripsOrIsUnsupported) {
   HIP_CHECK(set_status);
 }
 
+// @asserts: hipGetDeviceFlags - the schedule subfield is a documented mode and greatest stream priority <= least
 HIP_TEST_CASE(Contract_DeviceConfig_GetDeviceFlagsAndStreamPriorityRange_AreConsistent) {
   RequireDevice();
 

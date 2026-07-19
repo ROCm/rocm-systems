@@ -65,6 +65,7 @@ hip_Memcpy2D HostToDeviceUnaligned(hipDeviceptr_t dst, const void* src, size_t w
 }
 }  // namespace
 
+// @asserts: hipMemAllocPitch - allocates a valid device pointer with pitch no smaller than the requested row width
 HIP_TEST_CASE(Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth) {
   hip::contract::ContractCleanup cleanup;
   EnsureContext();
@@ -81,6 +82,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth) 
   REQUIRE(pitch >= width_bytes);
 }
 
+// @asserts: hipMemcpy2D - host->device->host copy over a pitched allocation round-trips all rows unchanged
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   hip::contract::ContractCleanup cleanup;
   EnsureContext();
@@ -103,6 +105,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemsetD2D32 - fills a pitched allocation so every 32-bit word reads back the written pattern
 HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
   hip::contract::ContractCleanup cleanup;
   EnsureContext();
@@ -126,6 +129,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords) {
   }
 }
 
+// @asserts: hipFree - freeing a pitched allocation obtained from hipMemAllocPitch succeeds
 HIP_TEST_CASE(Contract_DriverPitchedMemory_FreePitchedAllocation_Succeeds) {
   EnsureContext();
   hipDeviceptr_t device_ptr = 0;
@@ -139,6 +143,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_FreePitchedAllocation_Succeeds) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(device_ptr)));
 }
 
+// @asserts: hipDrvMemcpy2DUnaligned - an unaligned host->device 2D copy transfers every byte intact
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   EnsureContext();
@@ -160,6 +165,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundT
   REQUIRE(dst == src);
 }
 
+// @asserts: hipDrvMemcpy2DUnaligned - a null inner source pointer is rejected via a non-success return status
 HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   EnsureContext();
@@ -187,6 +193,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejecte
   REQUIRE(null_src_status != hipSuccess);
 }
 
+// @asserts: hipMemAllocPitch - rejects a null pointer or null pitch out-parameter with a non-success error
 HIP_TEST_CASE(Contract_DriverPitchedMemory_RejectsInvalidArgs) {
   EnsureContext();
   hipDeviceptr_t device_ptr = 0;

@@ -48,6 +48,7 @@ hipTextureDesc MakeTextureDesc() {
 }
 }  // namespace
 
+// @asserts: hipCreateTextureObject - creating then destroying a texture object over a linear buffer succeeds (or is cleanly unsupported)
 HIP_TEST_CASE(Contract_Texture_CreateAndDestroy_LinearResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -70,6 +71,7 @@ HIP_TEST_CASE(Contract_Texture_CreateAndDestroy_LinearResource_Succeeds) {
   REQUIRE(tex_obj != 0);
 }
 
+// @asserts: hipGetTextureObjectResourceDesc - the queried resource desc round-trips the linear devPtr, size, and type used to create the object
 HIP_TEST_CASE(Contract_Texture_GetResourceDesc_RoundTripsLinearResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -103,6 +105,7 @@ HIP_TEST_CASE(Contract_Texture_GetResourceDesc_RoundTripsLinearResource) {
 // texture-desc round-trip only on AMD, where the entry point exists. Parity is a
 // straightforward NVIDIA-header addition (wrap cudaGetTextureObjectTextureDesc).
 #if HT_AMD
+// @asserts: hipGetTextureObjectTextureDesc - the queried texture desc round-trips the readMode and normalizedCoords the object was created with
 HIP_TEST_CASE(Contract_Texture_GetTextureDesc_RoundTripsReadMode) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -130,6 +133,7 @@ HIP_TEST_CASE(Contract_Texture_GetTextureDesc_RoundTripsReadMode) {
 }
 #endif  // HT_AMD
 
+// @asserts: hipCreateTextureObject - creating then destroying a texture object over a HIP array succeeds (or is cleanly unsupported)
 HIP_TEST_CASE(Contract_Texture_CreateAndDestroy_ArrayResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -153,6 +157,7 @@ HIP_TEST_CASE(Contract_Texture_CreateAndDestroy_ArrayResource_Succeeds) {
   REQUIRE(tex_obj != 0);
 }
 
+// @asserts: hipGetChannelDesc - the channel desc queried from an array matches the format the array was allocated with
 HIP_TEST_CASE(Contract_Texture_GetChannelDesc_MatchesArrayFormat) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -172,6 +177,7 @@ HIP_TEST_CASE(Contract_Texture_GetChannelDesc_MatchesArrayFormat) {
   REQUIRE(returned.f == channel.f);
 }
 
+// @asserts: hipCreateSurfaceObject - creating then destroying a surface object over a load/store array succeeds (or is cleanly unsupported)
 HIP_TEST_CASE(Contract_Surface_CreateAndDestroy_ArrayResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -195,6 +201,7 @@ HIP_TEST_CASE(Contract_Surface_CreateAndDestroy_ArrayResource_Succeeds) {
   REQUIRE(surf_obj != 0);
 }
 
+// @asserts: hipGetChannelDesc - the channel desc of a surface-backing array round-trips the format it was allocated with
 HIP_TEST_CASE(Contract_Surface_GetChannelDesc_RoundTripsArrayResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
@@ -229,6 +236,7 @@ HIP_TEST_CASE(Contract_Surface_GetChannelDesc_RoundTripsArrayResource) {
 // wrapper (CUDA exposes cudaGetTextureObjectResourceViewDesc), so the
 // resource-view round-trip runs only on AMD. Parity is a NVIDIA-header addition.
 #if HT_AMD
+// @asserts: hipGetTextureObjectResourceViewDesc - the queried resource-view desc round-trips every field the object was created with (or is cleanly unsupported)
 HIP_TEST_CASE(Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;

@@ -52,6 +52,7 @@ hipMemcpy3DBatchOp PointerCopyOp(void* dst, hipMemLocationType dst_location, voi
 }
 }  // namespace
 
+// @asserts: hipMemcpy3DBatchAsync - a batch of ordered host->device->host pointer copies round-trips bytes after stream sync
 HIP_TEST_CASE(Contract_MemBatchCopy3D_HostDeviceHostRoundTrip_IsVisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x42);
@@ -93,6 +94,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HostDeviceHostRoundTrip_IsVisibleAfterSync
   REQUIRE(host_out == src);
 }
 
+// @asserts: hipMemcpy3DBatchAsync - a batch with zero operations is rejected with a non-success status
 HIP_TEST_CASE(Contract_MemBatchCopy3D_ZeroOps_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -115,6 +117,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_ZeroOps_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipMemcpy3DBatchAsync - a positive op count with a null operation list is rejected with a non-success status
 HIP_TEST_CASE(Contract_MemBatchCopy3D_NullOpList_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
@@ -134,6 +137,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_NullOpList_IsRejected) {
   (void)hipGetLastError();
 }
 
+// @asserts: hipMemcpy3DBatchAsync - a non-zero value in the reserved flags parameter is rejected even with a valid op list
 HIP_TEST_CASE(Contract_MemBatchCopy3D_NonZeroFlags_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x42);

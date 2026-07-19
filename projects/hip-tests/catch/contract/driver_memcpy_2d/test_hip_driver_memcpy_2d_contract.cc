@@ -80,6 +80,7 @@ hip_Memcpy2D DeviceToDeviceCopy(void* dst, size_t dst_pitch, const void* src, si
 }
 }  // namespace
 
+// @asserts: hipMemcpyParam2D - a pitched host-to-device then device-to-host 2D copy round-trips all rows
 HIP_TEST_CASE(Contract_DriverMemcpy2D_HtoDtoH_RoundTripsRows) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x12);
@@ -101,6 +102,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HtoDtoH_RoundTripsRows) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyParam2D - a pitched device-to-device 2D copy on one device preserves all rows
 HIP_TEST_CASE(Contract_DriverMemcpy2D_DtoD_SingleDevice_CopiesRows) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x34);
@@ -131,6 +133,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_DtoD_SingleDevice_CopiesRows) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyParam2D - a zero-width/height 2D copy succeeds and leaves prior device contents intact
 HIP_TEST_CASE(Contract_DriverMemcpy2D_ZeroExtent_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x56);
@@ -155,6 +158,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_ZeroExtent_Succeeds) {
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyParam2DAsync - an async pitched host-to-device 2D copy is visible after stream sync
 HIP_TEST_CASE(Contract_DriverMemcpy2D_Async_OnStream_HostToDeviceVisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x78);
@@ -180,6 +184,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_Async_OnStream_HostToDeviceVisibleAfterSyn
   REQUIRE(dst == src);
 }
 
+// @asserts: hipMemcpyParam2D - null host/device pointers in the copy struct are rejected by sync and async variants
 HIP_TEST_CASE(Contract_DriverMemcpy2D_NullPointersInStruct_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kWidth * kHeight> host{};
