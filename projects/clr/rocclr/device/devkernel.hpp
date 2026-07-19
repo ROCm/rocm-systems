@@ -48,8 +48,9 @@ struct KernelParameterDescriptor {
     HiddenSharedBase = 28,
     HiddenQueuePtr = 29,
     HiddenDynamicLdsSize = 30,
-    HiddenLast = 31,
-    MaxSize = 32,
+    HiddenAssertFaultBuffer = 31,
+    HiddenLast = 32,
+    MaxSize = 33,
   };
   clk_value_type_t type_;  //!< The parameter's type
   size_t offset_;          //!< Its offset in the parameter's stack

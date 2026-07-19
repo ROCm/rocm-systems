@@ -39,7 +39,8 @@ const amd::Kernel::ArgValueKindType amd::Kernel::kArgValueKind[] = {
     {"HiddenDefaultQueue", amd::KernelParameterDescriptor::HiddenDefaultQueue},
     {"HiddenCompletionAction", amd::KernelParameterDescriptor::HiddenCompletionAction},
     {"HiddenMultigridSyncArg", amd::KernelParameterDescriptor::HiddenMultiGridSync},
-    {"HiddenHostcallBuffer", amd::KernelParameterDescriptor::HiddenHostcallBuffer}};
+    {"HiddenHostcallBuffer", amd::KernelParameterDescriptor::HiddenHostcallBuffer},
+    {"HiddenAssertFaultBuffer", amd::KernelParameterDescriptor::HiddenAssertFaultBuffer}};
 
 const amd::Kernel::ArgAccQualType amd::Kernel::kArgAccQual[] = {
     {"Default", CL_KERNEL_ARG_ACCESS_NONE},
@@ -135,7 +136,8 @@ const amd::Kernel::ArgValueKindV3Type amd::Kernel::kArgValueKindV3[] = {
     {"hidden_private_base", amd::KernelParameterDescriptor::HiddenPrivateBase},
     {"hidden_shared_base", amd::KernelParameterDescriptor::HiddenSharedBase},
     {"hidden_queue_ptr", amd::KernelParameterDescriptor::HiddenQueuePtr},
-    {"hidden_dynamic_lds_size", amd::KernelParameterDescriptor::HiddenDynamicLdsSize}};
+    {"hidden_dynamic_lds_size", amd::KernelParameterDescriptor::HiddenDynamicLdsSize},
+    {"hidden_assert_fault_buffer", amd::KernelParameterDescriptor::HiddenAssertFaultBuffer}};
 
 const amd::Kernel::ArgFieldMapV3Type amd::Kernel::kArgFieldMapV3[] = {
     {".name", ArgField::Name},

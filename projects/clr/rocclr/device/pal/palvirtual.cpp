@@ -904,6 +904,7 @@ VirtualGPU::VirtualGPU(Device& device)
 
   // The hostcall buffer for this vqueue is initialized on demand.
   hostcallBuffer_ = nullptr;
+  assertFaultBuffer_ = nullptr;
 }
 
 // ================================================================================================
@@ -1189,6 +1190,12 @@ VirtualGPU::~VirtualGPU() {
             hostcallBuffer_, this);
     amd::disableHostcalls(hostcallBuffer_);
     dev().svmFree(hostcallBuffer_);
+  }
+
+  if (assertFaultBuffer_ != nullptr) {
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "deleting assert fault buffer %p for virtual queue %p",
+            assertFaultBuffer_, this);
+    dev().svmFree(assertFaultBuffer_);
   }
 }
 
@@ -2535,6 +2542,9 @@ void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQ
             break;
           case amd::KernelParameterDescriptor::HiddenPrintfBuffer:
             extraArgName = "PrintfBuf: ";
+            break;
+          case amd::KernelParameterDescriptor::HiddenAssertFaultBuffer:
+            extraArgName = "AssertFaultBuf: ";
             break;
           case amd::KernelParameterDescriptor::HiddenDefaultQueue:
             extraArgName = "VqueuePtr: ";
@@ -4008,6 +4018,29 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
   return hostcallBuffer_;
+}
+
+// ================================================================================================
+void* VirtualGPU::getOrCreateAssertFaultBuffer() {
+  if (assertFaultBuffer_ != nullptr) {
+    return assertFaultBuffer_;
+  }
+
+  constexpr size_t size = 8;  // uint32_t fault flag + uint32_t site id
+  constexpr size_t align = 8;
+
+  assertFaultBuffer_ = dev().svmAlloc(dev().context(), size, align,
+                                      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr);
+  if (!assertFaultBuffer_) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create assert fault buffer");
+    return nullptr;
+  }
+  memset(assertFaultBuffer_, 0, size);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "Created assert fault buffer %p (size == %zu, align == %zu) for virtual queue %p\n",
+          assertFaultBuffer_, size, align, this);
+  return assertFaultBuffer_;
 }
 
 }  // namespace amd::pal

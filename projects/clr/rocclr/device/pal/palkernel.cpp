@@ -339,6 +339,16 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
         WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(ldsAddress - ldsSize()), it.size_,
                       it.offset_);
         break;
+      case amd::KernelParameterDescriptor::HiddenAssertFaultBuffer:
+        if (amd::IS_HIP) {
+          uintptr_t buffer = reinterpret_cast<uintptr_t>(gpu.getOrCreateAssertFaultBuffer());
+          if (!buffer) {
+            LogError("Kernel expects an assert fault buffer, but none found");
+          }
+          assert(it.size_ == sizeof(buffer) && "check the sizes");
+          WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
+        }
+        break;
     }
   }
 

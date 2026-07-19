@@ -2078,7 +2078,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       fence_dirty_(false),
       dedicated_queue_(dedicated_queue),
       schedulerQueueThreadRunning_(false),
-      hostcallBuffer_(nullptr) {
+      hostcallBuffer_(nullptr),
+      assertFaultBuffer_(nullptr) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -2212,6 +2213,12 @@ VirtualGPU::~VirtualGPU() {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hostcall buffer %p", hostcallBuffer_);
     amd::disableHostcalls(hostcallBuffer_);
     roc_device_.hostFree(hostcallBuffer_, hostcallBufferSize_);
+  }
+
+  if (assertFaultBuffer_) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting assert fault buffer %p",
+            assertFaultBuffer_);
+    roc_device_.hostFree(assertFaultBuffer_, assertFaultBufferSize_);
   }
 }
 
@@ -4642,6 +4649,17 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
         WriteAqlArgAt(hidden_arguments, sharedMemBytes, it.size_, it.offset_);
         break;
+      case amd::KernelParameterDescriptor::HiddenAssertFaultBuffer: {
+        if (amd::IS_HIP) {
+          uintptr_t buffer = reinterpret_cast<uintptr_t>(getOrCreateAssertFaultBuffer());
+          if (!buffer) {
+            LogError("Kernel expects an assert fault buffer, but allocation failed");
+            return false;
+          }
+          WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
+        }
+        break;
+      }
     }
   }
   address argBuffer = hidden_arguments;
@@ -5274,6 +5292,30 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
   return hostcallBuffer_;
+}
+
+// ================================================================================================
+void* VirtualGPU::getOrCreateAssertFaultBuffer() {
+  if (assertFaultBuffer_ != nullptr) {
+    return assertFaultBuffer_;
+  }
+
+  constexpr size_t size = 8;  // uint32_t fault flag + uint32_t site id
+  constexpr size_t align = 8;
+
+  assertFaultBuffer_ = dev().hostAlloc(size, align, Device::MemorySegment::kAtomics, nullptr,
+                                       false);
+  if (!assertFaultBuffer_) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create assert fault buffer");
+    return nullptr;
+  }
+  assertFaultBufferSize_ = size;
+  memset(assertFaultBuffer_, 0, size);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "Created assert fault buffer %p (size == %zu, align == %zu) for virtual queue %p\n",
+          assertFaultBuffer_, size, align, this);
+  return assertFaultBuffer_;
 }
 
 // ================================================================================================

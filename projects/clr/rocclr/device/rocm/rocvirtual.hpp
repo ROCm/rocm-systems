@@ -658,6 +658,7 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   void* getOrCreateHostcallBuffer();
+  void* getOrCreateAssertFaultBuffer();
 
  private:
   //! Release pinned memory after previously submitted work on the queue has completed.
@@ -900,6 +901,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   void* hostcallBuffer_;        //!< Hostcall buffer
   size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
+  void* assertFaultBuffer_ = nullptr;        //!< Assert fault buffer (flag + site id)
+  size_t assertFaultBufferSize_ = 0; //!< Byte size of assertFaultBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

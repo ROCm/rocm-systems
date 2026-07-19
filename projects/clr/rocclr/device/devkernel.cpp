@@ -138,6 +138,7 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
         case amd::KernelParameterDescriptor::HiddenCompletionAction:
         case amd::KernelParameterDescriptor::HiddenMultiGridSync:
         case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
+        case amd::KernelParameterDescriptor::HiddenAssertFaultBuffer:
         case amd::KernelParameterDescriptor::HiddenNone:
           lcArg->info_.hidden_ = true;
           break;

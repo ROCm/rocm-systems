@@ -579,6 +579,7 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   void* getOrCreateHostcallBuffer();
+  void* getOrCreateAssertFaultBuffer();
 
   //! Waits on an outstanding kernel.
   void releaseGpuMemoryFence() {
@@ -719,6 +720,7 @@ class VirtualGPU : public device::VirtualDevice {
   MemoryRange sdmaRange_;             //!< SDMA memory range for write access
 
   void* hostcallBuffer_;  //!< Hostcall buffer
+  void* assertFaultBuffer_ = nullptr;  //!< Assert fault buffer (flag + site id)
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
