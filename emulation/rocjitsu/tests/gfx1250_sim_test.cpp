@@ -3676,6 +3676,74 @@ TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   EXPECT_EQ(target->sgpr(115), 1u);
 }
 
+TEST(Gfx1250SimulationTest, ClusterLaunchStateMatchesCompilerAbiForThreeDimensionalGrid) {
+  constexpr uint32_t S_GETREG_CLUSTER_RANK_S2 = 0xB8821D5Cu;
+  const uint32_t code[] = {S_GETREG_CLUSTER_RANK_S2, S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
+
+  amdgpu::AmdExtKernelDispatchPacket pkt{};
+  pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  pkt.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  pkt.setup = 3;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.cluster_count_x = 2;
+  pkt.cluster_count_y = 2;
+  pkt.cluster_count_z = 2;
+  pkt.cluster_size_x = 2;
+  pkt.cluster_size_y = 2;
+  pkt.cluster_size_z = 2;
+  pkt.kernel_object = kernel_object;
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  struct LaunchState {
+    uint32_t workgroup_id;
+    uint32_t ttmp6;
+    uint32_t ttmp7;
+    uint32_t ttmp9;
+    uint32_t cluster_rank;
+  };
+  std::vector<LaunchState> states;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (!wf || wf->sgpr_alloc().count == 0)
+          continue;
+        const uint32_t sbase = wf->sgpr_alloc().base;
+        states.push_back({wf->wg_id(), cu->read_sgpr(sbase + 114), cu->read_sgpr(sbase + 115),
+                          cu->read_sgpr(sbase + 117), cu->read_sgpr(sbase + 2)});
+      }
+    }
+  }
+  std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
+    return lhs.workgroup_id < rhs.workgroup_id;
+  });
+
+  ASSERT_EQ(states.size(), 64u);
+  for (uint32_t workgroup_id = 0; workgroup_id < states.size(); ++workgroup_id) {
+    const uint32_t workgroup_x = workgroup_id % 4;
+    const uint32_t workgroup_y = (workgroup_id / 4) % 4;
+    const uint32_t workgroup_z = workgroup_id / 16;
+    const uint32_t local_x = workgroup_x % 2;
+    const uint32_t local_y = workgroup_y % 2;
+    const uint32_t local_z = workgroup_z % 2;
+    EXPECT_EQ(states[workgroup_id].workgroup_id, workgroup_id);
+    EXPECT_EQ(states[workgroup_id].ttmp6, 0x07000000u | local_x | (local_y << 4) | (local_z << 8));
+    EXPECT_EQ(states[workgroup_id].ttmp7, ((workgroup_z / 2) << 16) | (workgroup_y / 2));
+    EXPECT_EQ(states[workgroup_id].ttmp9, workgroup_x / 2);
+    EXPECT_EQ(states[workgroup_id].cluster_rank, local_x + 2 * (local_y + 2 * local_z));
+  }
+}
+
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   const uint32_t code[] = {

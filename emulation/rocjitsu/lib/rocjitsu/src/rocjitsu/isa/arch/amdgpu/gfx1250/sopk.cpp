@@ -29,6 +29,8 @@ constexpr uint32_t HW_REG_GPR_ALLOC = 6;
 constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
 constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
 constexpr uint32_t HW_REG_IB_STS2 = 28;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;
+constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
 
 [[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset,
                                              uint32_t mask) {
@@ -59,7 +61,8 @@ constexpr uint32_t HW_REG_IB_STS2 = 28;
     reg_val = wf.wave_sched_mode_raw();
     return true;
   case HW_REG_IB_STS2:
-    reg_val = 0;
+    reg_val = (wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
+              << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT;
     return true;
   default:
     return false;
