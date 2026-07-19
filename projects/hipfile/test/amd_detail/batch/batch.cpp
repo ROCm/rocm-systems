@@ -333,9 +333,9 @@ TEST_F(HipFileBatchContext, SubmitSingleGoodOp)
     _context->submitOperations(BatchOperations{makeOperation()});
 }
 
-TEST_F(HipFileBatchContext, SubmitZeroOperations)
+TEST_F(HipFileBatchContext, EmptyOperationsThrows)
 {
-    _context->submitOperations({});
+    ASSERT_THROW(_context->submitOperations({}), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacity)

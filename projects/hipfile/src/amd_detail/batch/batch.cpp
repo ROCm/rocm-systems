@@ -14,6 +14,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -254,6 +255,9 @@ BatchContext::getCapacity() const noexcept
 void
 BatchContext::submitOperations(BatchOperations pending_ops)
 {
+    if (pending_ops.empty()) {
+        throw std::invalid_argument("ops must not be empty");
+    }
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 
     if (pending_ops.size() > capacity - outstanding_ops.size()) {
